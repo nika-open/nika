@@ -67,7 +67,7 @@
 //! }
 //! ```
 //!
-//! [`nika-catalog`]: https://github.com/supernovae-st/nika
+//! [`nika-catalog`]: https://github.com/nika-open/nika
 //!
 //! ## Build-tool lint discipline
 //!

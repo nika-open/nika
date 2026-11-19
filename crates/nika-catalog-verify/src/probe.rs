@@ -54,7 +54,7 @@ pub(crate) fn build_client() -> Result<Client, reqwest::Error> {
         .user_agent(concat!(
             "nika-catalog-verify/",
             env!("CARGO_PKG_VERSION"),
-            " (+https://github.com/supernovae-st/nika)",
+            " (+https://github.com/nika-open/nika)",
         ))
         .build()
 }

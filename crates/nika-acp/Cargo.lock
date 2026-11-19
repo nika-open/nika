@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "dom_smoothie"
 version = "0.18.0"
-source = "git+https://github.com/supernovae-st/dom_smoothie?rev=fd6db004615af3c14d20f90bfb43ca514db4e57d#fd6db004615af3c14d20f90bfb43ca514db4e57d"
+source = "git+https://github.com/nika-open/dom_smoothie?rev=fd6db004615af3c14d20f90bfb43ca514db4e57d#fd6db004615af3c14d20f90bfb43ca514db4e57d"
 dependencies = [
  "dom_query",
  "flagset",

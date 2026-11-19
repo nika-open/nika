@@ -41,7 +41,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             # The one git dependency (`[patch.crates-io]` in Cargo.toml): the
-            # studio fork of dom_smoothie carrying the deterministic
+            # nika-open fork of dom_smoothie carrying the deterministic
             # candidate-order fix until upstream releases it. Nix vendors a git
             # source only against its fixed-output hash (the NAR hash of the
             # checkout at the pinned rev, no .git).

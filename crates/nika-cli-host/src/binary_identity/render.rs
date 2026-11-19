@@ -410,10 +410,11 @@ fn removal(id: &BinaryIdentity, e: &Entry, show: &dyn Fn(&Path) -> String, why: 
 fn remove_hint(e: &Entry, show: &dyn Fn(&Path) -> String) -> Option<String> {
     Some(match e.installer {
         Installer::Homebrew => "brew uninstall nika".to_owned(),
-        Installer::NpmGlobal => "npm uninstall -g @supernovae-st/nika".to_owned(),
+        Installer::NpmGlobal => format!("npm uninstall -g {}", npm_package(e)),
         Installer::NpmPayload => format!(
-            "(cd {} && npm uninstall @supernovae-st/nika)",
-            shell_word(&show(&npm_project(e)?))
+            "(cd {} && npm uninstall {})",
+            shell_word(&show(&npm_project(e)?)),
+            npm_package(e)
         ),
         Installer::Cargo => "cargo uninstall nika-cli".to_owned(),
         Installer::InstallSh | Installer::ReleaseDir => {
@@ -421,6 +422,21 @@ fn remove_hint(e: &Entry, show: &dyn Fn(&Path) -> String) -> Option<String> {
         }
         Installer::Nix | Installer::SourceBuild | Installer::Unknown => return None,
     })
+}
+
+/// The npm package that installed this copy. A copy installed before the
+/// package moved to the `@nika-open` scope stays under `@supernovae-st`
+/// until it is removed, so the scope is read from the copy's own path.
+fn npm_package(e: &Entry) -> &'static str {
+    let legacy = |p: &Path| {
+        p.to_string_lossy()
+            .contains("/node_modules/@supernovae-st/")
+    };
+    if legacy(&e.path) || e.resolved.as_deref().is_some_and(legacy) {
+        "@supernovae-st/nika"
+    } else {
+        "@nika-open/nika"
+    }
 }
 
 /// The project an npm payload belongs to: the directory that holds its

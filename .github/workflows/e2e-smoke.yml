@@ -41,7 +41,7 @@ jobs:
         id: tag
         run: |
           set -euo pipefail
-          tag="$(gh release view --repo supernovae-st/nika --json tagName --jq '.tagName')"
+          tag="$(gh release view --repo nika-open/nika --json tagName --jq '.tagName')"
           version="${tag#v}"
           printf 'tag=%s\n'     "$tag"     >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           mkdir -p dl
           gh release download "$TAG" \
-            --repo supernovae-st/nika \
+            --repo nika-open/nika \
             --pattern "nika-${PLATFORM}-${VERSION}.tar.gz" \
             --pattern SHA256SUMS \
             --dir dl

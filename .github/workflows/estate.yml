@@ -69,7 +69,7 @@ jobs:
       - name: scripts/estate.py is byte-identical to nika-estate at the pinned rev
         run: |
           pin="$(grep -v '^#' ESTATE_PIN | head -1 | tr -d '[:space:]')"
-          url="https://raw.githubusercontent.com/supernovae-st/nika-estate/${pin}/scripts/estate.py"
+          url="https://raw.githubusercontent.com/nika-open/nika-estate/${pin}/scripts/estate.py"
           curl -fsSL "$url" -o /tmp/estate-canonical.py
           if ! cmp -s /tmp/estate-canonical.py scripts/estate.py; then
             echo "::error file=scripts/estate.py::diverges from nika-estate@${pin} — the tool is shared: change it upstream, bump ESTATE_PIN, re-mirror"

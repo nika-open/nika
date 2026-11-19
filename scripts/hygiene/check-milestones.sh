@@ -26,7 +26,7 @@ if ! command -v gh >/dev/null; then
   exit 1
 fi
 
-if ! titles="$(gh api 'repos/supernovae-st/nika/milestones?state=all&per_page=100' \
+if ! titles="$(gh api 'repos/nika-open/nika/milestones?state=all&per_page=100' \
   --jq '.[].title' 2>/dev/null)"; then
   echo "YELLOW: the milestones API could not be reached — this is not a clean bill"
   exit 1

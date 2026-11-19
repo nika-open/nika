@@ -55,7 +55,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/supernovae-st/nika-plugins ../agents
+          git clone --depth 1 https://github.com/nika-open/nika-plugins ../agents
           cp ../agents/clients.yaml crates/nika-cli-host/data/clients.registry.yaml
           git add crates/nika-cli-host/data/clients.registry.yaml
           if git diff --cached --quiet; then

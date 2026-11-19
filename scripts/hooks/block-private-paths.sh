@@ -127,7 +127,7 @@ if ((${#FOUND[@]} > 0)); then
   printf '\n[block-private-paths] BLOCKED — private path reference in staged engine files:\n' >&2
   printf '  %s\n' "${FOUND[@]}" >&2
   printf '\nEngine (%s) is PUBLIC. Private content belongs in the venture poles\n(ventures/<name>/0*-*/) or studio/, never here.\n' \
-    "$(git remote get-url origin 2>/dev/null || echo 'supernovae-st/nika')" >&2
+    "$(git remote get-url origin 2>/dev/null || echo 'nika-open/nika')" >&2
   exit 1
 fi
 

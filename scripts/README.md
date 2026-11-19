@@ -63,7 +63,7 @@ Vectors:
 | 6 | crate-spec-metrics | `docs/crate-specs/nika-X.md` frontmatter vs reality |
 | 7 | linear-issue-states | Linear issue states match `git log` admissions |
 | 8 | gh-milestones | GitHub milestone completion % |
-| 9 | org-profile-repos | `supernovae-st/.github/profile/README.md` mentions all canonical repos |
+| 9 | org-profile-repos | `nika-open/.github/profile/README.md` mentions all canonical repos |
 | 10 | citation-version | CITATION.cff version matches workspace |
 | 11 | unwraps-in-src | Zero `.unwrap()`/`.expect(` outside tests |
 | 12 | file-loc-cap | No src/*.rs file > 2,500 LOC (a warning above 1,500; a LOC-EXEMPT ceiling of 5,000) |

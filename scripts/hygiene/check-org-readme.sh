@@ -6,7 +6,7 @@ if ! command -v gh >/dev/null; then
   exit 1
 fi
 
-content="$(gh api repos/supernovae-st/.github/contents/profile/README.md --jq .content 2>/dev/null | base64 -d 2>/dev/null)"
+content="$(gh api repos/nika-open/.github/contents/profile/README.md --jq .content 2>/dev/null | base64 -d 2>/dev/null)"
 [ -z "$content" ] && {
   echo "cannot read profile README"
   exit 1
@@ -56,7 +56,7 @@ fi
 # the page for weeks while canon said 16/25 · stress-to-ratchet graduation,
 # ≥3 same-class incidents that day). canon.yaml is the SSOT — when a count
 # moves there, this goes RED until the vitrine follows.
-canon="$(curl -fsSL --max-time 15 https://raw.githubusercontent.com/supernovae-st/nika-spec/main/canon.yaml 2>/dev/null)"
+canon="$(curl -fsSL --max-time 15 https://raw.githubusercontent.com/nika-open/nika-spec/main/canon.yaml 2>/dev/null)"
 if [ -n "$canon" ]; then
   verbs="$(echo "$canon" | awk '/^counts:/{f=1} f && /^  verbs:/{print $2; exit}')"
   providers="$(echo "$canon" | awk '/^counts:/{f=1} f && /^  providers:/{print $2; exit}')"

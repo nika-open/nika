@@ -28,8 +28,8 @@ expected_names=(
   "nika-linux-x64-${version}.tar.gz"
   SHA256SUMS
   multiple.intoto.jsonl
-  "supernovae-st-nika-check-wasm-${version}.tgz"
-  "supernovae-st-nika-check-wasm-${version}.tgz.sha256"
+  "nika-open-nika-check-wasm-${version}.tgz"
+  "nika-open-nika-check-wasm-${version}.tgz.sha256"
 )
 
 scratch="$(mktemp -d)"

@@ -17,7 +17,7 @@ assets=(
   "nika-macos-x64-${version}.tar.gz"
   "nika-linux-arm64-${version}.tar.gz"
   "nika-linux-x64-${version}.tar.gz"
-  "supernovae-st-nika-check-wasm-${version}.tgz"
+  "nika-open-nika-check-wasm-${version}.tgz"
 )
 for name in "${assets[@]}"; do
   test -f "$asset_dir/$name"

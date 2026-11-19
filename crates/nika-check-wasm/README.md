@@ -27,13 +27,13 @@ they describe the machine, not the file.
 
 ## Use from JavaScript
 
-The npm package is `@supernovae-st/nika-check-wasm` — the `--target web`
+The npm package is `@nika-open/nika-check-wasm` — the `--target web`
 build, published by the engine's release workflow with npm provenance
 (the same tarball is attached to the GitHub release with its sha256, so
 the registry bytes are verifiable against the release asset).
 
 ```js
-import init, { check, engine_version } from '@supernovae-st/nika-check-wasm'
+import init, { check, engine_version } from '@nika-open/nika-check-wasm'
 
 await init() // browser: fetches the .wasm beside the glue
 const verdict = JSON.parse(check('nika: hello\n'))
@@ -48,7 +48,7 @@ glue (the one recurring integration bug for web-target builds):
 
 ```js
 // vite.config.js
-export default { optimizeDeps: { exclude: ['@supernovae-st/nika-check-wasm'] } }
+export default { optimizeDeps: { exclude: ['@nika-open/nika-check-wasm'] } }
 ```
 
 Node ≥ 18 runs the same artifact — hand it the bytes (Node's `fetch`
@@ -57,9 +57,9 @@ refuses `file://`, so the glue's self-loading path is browser-only):
 ```js
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import init, { check } from '@supernovae-st/nika-check-wasm'
+import init, { check } from '@nika-open/nika-check-wasm'
 
-const wasm = import.meta.resolve('@supernovae-st/nika-check-wasm/nika_check_wasm_bg.wasm')
+const wasm = import.meta.resolve('@nika-open/nika-check-wasm/nika_check_wasm_bg.wasm')
 await init({ module_or_path: readFileSync(fileURLToPath(wasm)) })
 ```
 

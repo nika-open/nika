@@ -21,7 +21,7 @@ cat >"$FAKE_BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
-  api\ repos/supernovae-st/nika/releases/tags/v*)
+  api\ repos/nika-open/nika/releases/tags/v*)
     find "$REMOTE" -type f -maxdepth 1 -exec basename {} \; | sort
     ;;
   "release download")
@@ -53,7 +53,7 @@ chmod +x "$FAKE_BIN/gh"
 printf 'alpha\n' >"$LOCAL/new.tgz"
 PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-  v9.9.9 supernovae-st/nika "$LOCAL/new.tgz" >/dev/null
+  v9.9.9 nika-open/nika "$LOCAL/new.tgz" >/dev/null
 cmp -s "$LOCAL/new.tgz" "$REMOTE/new.tgz" \
   || fail 'a missing asset was not uploaded'
 [ "$(grep -c '^upload new.tgz$' "$LOG")" -eq 1 ] \
@@ -61,14 +61,14 @@ cmp -s "$LOCAL/new.tgz" "$REMOTE/new.tgz" \
 
 PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-  v9.9.9 supernovae-st/nika "$LOCAL/new.tgz" >/dev/null
+  v9.9.9 nika-open/nika "$LOCAL/new.tgz" >/dev/null
 [ "$(grep -c '^upload new.tgz$' "$LOG")" -eq 1 ] \
   || fail 'an identical replay uploaded the asset again'
 
 printf 'different\n' >"$LOCAL/new.tgz"
 if PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-  v9.9.9 supernovae-st/nika "$LOCAL/new.tgz" \
+  v9.9.9 nika-open/nika "$LOCAL/new.tgz" \
   >"$TEST_ROOT/refusal.out" 2>&1; then
   fail 'different bytes replaced an occupied asset name'
 fi
@@ -82,7 +82,7 @@ printf 'different\n' >"$LOCAL/z-existing.tgz"
 printf 'missing\n' >"$LOCAL/a-missing.tgz"
 if PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-  v9.9.9 supernovae-st/nika \
+  v9.9.9 nika-open/nika \
   "$LOCAL/a-missing.tgz" "$LOCAL/z-existing.tgz" \
   >"$TEST_ROOT/two-pass.out" 2>&1; then
   fail 'a divergent occupied set unexpectedly succeeded'
@@ -94,14 +94,14 @@ printf 'prerelease\n' >"$LOCAL/prerelease.tgz"
 for tag in v1.0.0-rc.1 v0.80.0-alpha.1; do
   PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
     bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-    "$tag" supernovae-st/nika "$LOCAL/prerelease.tgz" >/dev/null \
+    "$tag" nika-open/nika "$LOCAL/prerelease.tgz" >/dev/null \
     || fail "canonical prerelease tag $tag was refused"
 done
 
 for tag in latest v1.0.0-rc.01 v1.0.0+build v01.0.0; do
   if PATH="$FAKE_BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
     bash "$ROOT/scripts/release/upload-assets-immutable.sh" \
-    "$tag" supernovae-st/nika "$LOCAL/new.tgz" >/dev/null 2>&1; then
+    "$tag" nika-open/nika "$LOCAL/new.tgz" >/dev/null 2>&1; then
     fail "non-canonical release tag $tag reached the release API"
   fi
 done

@@ -6,7 +6,7 @@ edition     = "2024"
 rust-version = "1.88"
 license     = "AGPL-3.0-or-later"
 description = "The deterministic Compile core: requests and outcomes, exact skeletons, HOT admission, record replay, native record application, assembly, edits and Check preview; a size-cap member of the nika-onboard unit (ADR-137, ADR-138, ADR-140)."
-repository  = "https://github.com/supernovae-st/nika"
+repository  = "https://github.com/nika-open/nika"
 publish     = false  # member of the nika-onboard unit — never on crates.io alone
 
 [dependencies]

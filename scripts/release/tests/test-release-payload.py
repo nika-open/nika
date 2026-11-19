@@ -15,7 +15,7 @@ TAG = "v9.9.9"
 SHA = "2" * 40
 NATIVES = [f"nika-{p}-9.9.9.tar.gz" for p in
            ("macos-arm64", "macos-x64", "linux-arm64", "linux-x64")]
-NPM = "supernovae-st-nika-check-wasm-9.9.9.tgz"
+NPM = "nika-open-nika-check-wasm-9.9.9.tgz"
 NAMES = [*NATIVES, "SHA256SUMS", NPM, NPM + ".sha256"]
 
 

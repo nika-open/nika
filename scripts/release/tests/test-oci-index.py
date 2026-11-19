@@ -14,7 +14,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[3]
-IMAGE = "ghcr.io/supernovae-st/nika"
+IMAGE = "ghcr.io/nika-open/nika"
 SHA = "a" * 40
 DIGEST = "sha256:" + "f" * 64
 MEDIA = "application/vnd.oci.image.manifest.v1+json"
@@ -53,13 +53,13 @@ else:
     with (root / "labels-read").open("a") as log: log.write("read\\n")
     print(json.dumps({"org.opencontainers.image.revision": "a" * 40,
       "org.opencontainers.image.version": "9.9.9",
-      "org.opencontainers.image.source": "https://github.com/supernovae-st/nika",
+      "org.opencontainers.image.source": "https://github.com/nika-open/nika",
       "org.opencontainers.image.licenses": "AGPL-3.0-or-later"}))
 ''')
             fake.chmod(0o755)
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/release/oci-coordinate-immutable.sh"),
-                 "inspect", IMAGE, "9.9.9", DIGEST, SHA, "https://github.com/supernovae-st/nika"],
+                 "inspect", IMAGE, "9.9.9", DIGEST, SHA, "https://github.com/nika-open/nika"],
                 env={**os.environ, "PATH": f"{scratch}:{os.environ['PATH']}",
                      "OCI_TEST_ROOT": str(scratch)},
                 capture_output=True, text=True, timeout=10,
@@ -130,7 +130,7 @@ import json, os, pathlib, sys
 root = pathlib.Path(os.environ["OCI_TEST_ROOT"])
 args = sys.argv[1:]
 with (root / "calls").open("a") as log: log.write(json.dumps(args) + "\\n")
-image = "ghcr.io/supernovae-st/nika@sha256:"
+image = "ghcr.io/nika-open/nika@sha256:"
 if args[:3] == ["buildx", "imagetools", "inspect"]:
     assert args[3:] == [image + "f" * 64, "--raw"]
     print((root / "index.json").read_text())

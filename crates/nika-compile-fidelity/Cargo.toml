@@ -6,7 +6,7 @@ edition     = "2024"
 rust-version = "1.88"
 license     = "AGPL-3.0-or-later"
 description = "The laws a candidate .nika document is judged by, pure over the request, the reader's plan and the projected document, with the constrained sketch a seat proposes and the plan a candidate states by its structure. Layer L4 — a size-cap member of the nika-onboard unit (D-2026-07-09-N1 · ADR-141 · the ADR-137 and ADR-138 precedents), ascended from nika-compile-reader at the 15k prod-LOC wall; nika-compile depends on it and it depends on the reader, never the reverse."
-repository  = "https://github.com/supernovae-st/nika"
+repository  = "https://github.com/nika-open/nika"
 publish     = false  # member of the nika-onboard unit — never on crates.io alone
 
 [dependencies]

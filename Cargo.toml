@@ -20,8 +20,8 @@ edition      = "2024"
 license      = "AGPL-3.0-or-later"
 authors      = ["Thibaut Melen <thibaut@supernovae.studio>"]
 rust-version = "1.91"
-repository   = "https://github.com/supernovae-st/nika"
-homepage     = "https://supernovae.studio"
+repository   = "https://github.com/nika-open/nika"
+homepage     = "https://nika.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Diamond layer assignments — enforced by scripts/ci/check-layering.sh.

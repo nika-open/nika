@@ -9,7 +9,7 @@
 # Used by .github/workflows/release.yml AND runnable by hand against a checked-
 # out tap when the workflow's tap deploy key is absent:
 #
-#   gh release download v0.90.0 --repo supernovae-st/nika --dir /tmp/rel
+#   gh release download v0.90.0 --repo nika-open/nika --dir /tmp/rel
 #   scripts/release/update-formula.sh \
 #     ../homebrew/Formula/nika.rb 0.90.0 /tmp/rel
 #

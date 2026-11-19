@@ -31,7 +31,7 @@ git -C "$COPY" init -q
 # .git/objects/info/packs while rm removes the fixture. Keep real hooks enabled.
 git -C "$COPY" config maintenance.auto false
 # estate.py derives the repo slug from the origin remote; the copy names the real one.
-git -C "$COPY" remote add origin https://github.com/supernovae-st/nika.git
+git -C "$COPY" remote add origin https://github.com/nika-open/nika.git
 git -C "$COPY" -c user.name=t -c user.email=t@t add -A
 git -C "$COPY" -c user.name=t -c user.email=t@t -c commit.gpgsign=false \
   commit -q -m fixture

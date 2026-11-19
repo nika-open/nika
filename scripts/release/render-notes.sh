@@ -19,7 +19,7 @@ set -euo pipefail
 
 tag="${1:?usage: render-notes.sh vX.Y.Z}"
 version="${tag#v}"
-repo="${GITHUB_REPOSITORY:-supernovae-st/nika}"
+repo="${GITHUB_REPOSITORY:-nika-open/nika}"
 
 # ── What: the CHANGELOG section between this version's header and the next `## [`
 what="$(awk -v ver="$version" '
@@ -62,7 +62,7 @@ docker run --rm ghcr.io/${repo}:${version} --version
     ;;
   *)
     install="\`\`\`sh
-brew install supernovae-st/tap/nika          # macOS · Linux
+brew install nika-open/tap/nika              # macOS · Linux
 curl -LsSf https://nika.sh/install.sh | sh   # script install
 docker run --rm ghcr.io/${repo}:${version} --version
 \`\`\`"

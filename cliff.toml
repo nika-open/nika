@@ -18,7 +18,7 @@
 # src: https://github.com/orhun/git-cliff/blob/main/cliff.toml#L4
 # ─────────────────────────────────────────────────────────────────────────────
 [remote.github]
-owner = "supernovae-st"
+owner = "nika-open"
 repo = "nika"
 # token left unset — pulled from GITHUB_TOKEN env at CI time.
 # Optional: native_tls = false  # default; bundled webpki-roots is fine for CI.
@@ -206,7 +206,7 @@ exclude_paths = [
 commit_preprocessors = [
   # Squash-merge titles end with `(#NN)` → rewrite to GitHub PR link inline.
   # Spec contract (CHANGELOG_AUTOMATION.md L104).
-  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/supernovae-st/nika/issues/${2}))" },
+  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/nika-open/nika/issues/${2}))" },
 
   # Strip the mandatory Nika 🦋 co-author trailer from rendered messages
   # (it's git-trailer noise once we already attribute via remote.username).
@@ -288,7 +288,7 @@ commit_parsers = [
 link_parsers = [
   # GitHub issue / PR shorthand `#1234` → issue link (PR redirects work too).
   # src: https://git-cliff.org/docs/configuration/git#link_parsers (canonical example)
-  { pattern = "(?:^|\\s)#(\\d+)",                  href = "https://github.com/supernovae-st/nika/issues/$1" },
+  { pattern = "(?:^|\\s)#(\\d+)",                  href = "https://github.com/nika-open/nika/issues/$1" },
 
   # ADR references → relative repo path (resolved by the rendering Markdown host).
   # Pattern is restricted to 3-digit ADR numbers (ADR-001..ADR-999).

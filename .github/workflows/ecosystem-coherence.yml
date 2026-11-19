@@ -7,7 +7,7 @@ name: ecosystem coherence
 # the lockstep-at-0.97 preview. Read-only · public HTTP · no user input
 # reaches the shell.
 #
-# The durable board is ONE accepted-scope issue — supernovae-st/nika#841,
+# The durable board is ONE accepted-scope issue — nika-open/nika#841,
 # "ecosystem coherence — Project lifecycle, SDK/editor coverage and release
 # pins". Its accepted scope is WIDER than this bot's pin ladder, so
 # publication is identity-keyed (never a title search — a retitle must not
@@ -29,7 +29,7 @@ permissions:
 # which a title search does not (the 2026-09 scope-widening retitle is
 # exactly that case). The publisher below reads these two.
 env:
-  BOARD_REPO: supernovae-st/nika
+  BOARD_REPO: nika-open/nika
   BOARD_ISSUE: '841'
 
 # Serialize discovery + comment upsert so scheduled/manual runs cannot both
@@ -64,7 +64,7 @@ jobs:
       # data. A missing/empty/malformed report or a failed GitHub read
       # fails this step with NO create and NO close — silence never reads
       # as green.
-      - name: The nightly board is issue supernovae-st/nika#841
+      - name: The nightly board is issue nika-open/nika#841
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

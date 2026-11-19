@@ -3,7 +3,7 @@
 # Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 #
 # ecosystem-coherence-issue.py — publish the nightly coherence report to its
-# durable board: ONE accepted-scope issue, supernovae-st/nika#841.
+# durable board: ONE accepted-scope issue, nika-open/nika#841.
 #
 # The board outgrew the old publication logic (2026-09): "ecosystem
 # coherence — nightly board" became "ecosystem coherence — Project
@@ -164,7 +164,7 @@ def upsert_comment(repo, number, mine, body):
 def main(argv):
     if len(argv) != 2:
         die("usage: ecosystem-coherence-issue.py <bot-report-file>")
-    repo = os.environ.get("BOARD_REPO", "supernovae-st/nika")
+    repo = os.environ.get("BOARD_REPO", "nika-open/nika")
     number = os.environ.get("BOARD_ISSUE", "841")
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     verdict, report = read_report(argv[1])

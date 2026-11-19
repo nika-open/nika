@@ -17,7 +17,7 @@
 #   ISSUE_BODY          the issue body (passed via env, never interpolated)
 #   ISSUE_STATE_REASON  GitHub close reason — completed | not_planned | duplicate
 #   ISSUE_LABELS        comma-joined label names
-#   GH_REPO             supernovae-st/nika
+#   GH_REPO             nika-open/nika
 #   GH_TOKEN            for gh issue reopen
 #
 # Co-Authored-By: Nika 🦋 <nika@supernovae.studio>
@@ -27,7 +27,7 @@ set -euo pipefail
 ISSUE=""
 FETCH_ISSUE=false
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-GH_REPO="${GH_REPO:-supernovae-st/nika}"
+GH_REPO="${GH_REPO:-nika-open/nika}"
 
 # This gate proves itself before it judges anything — the _lib.sh discipline,
 # fail CLOSED. A guard that cannot demonstrate its own verdicts must refuse to

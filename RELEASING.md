@@ -137,7 +137,7 @@ without an explicit operator decision.
    immutable source tag:
 
    ```sh
-   gh workflow run release.yml --repo supernovae-st/nika --ref main \
+   gh workflow run release.yml --repo nika-open/nika --ref main \
      -f tag=v<NEXT>
    ```
 
@@ -145,7 +145,13 @@ without an explicit operator decision.
    workflow YAML stored in the tag and can predate the immutable uploader and
    concurrency guards. This cannot be retrofitted into already-published tags;
    the operator command and the current workflow's ref guard are both part of
-   the replay boundary. All live and
+   the replay boundary. A tag up to v0.124.4 was published from
+   `supernovae-st/nika` with the `supernovae-st-nika-check-wasm-<ver>.tgz`
+   npm tarball: the current workflow expects the `nika-open-` name, so its
+   asset inventory refuses to replay such a tag. Its attestations are served
+   under the `supernovae-st` organization only, so verifying them needs
+   `--owner supernovae-st --signer-repo supernovae-st/nika`, a form
+   `verify-release-attestations.sh` does not take. All live and
    replay release trains share one global publication lane because Homebrew and
    the container `latest` tag are cross-version mutable pointers. GitHub
    publication explicitly uses `make_latest=legacy` for stable releases and
@@ -269,7 +275,7 @@ without an explicit operator decision.
    history is not rewritten to pretend otherwise.
 
    npm authority is the package's **trusted publisher** on npmjs.com
-   (`@supernovae-st/nika-check-wasm` → GitHub Actions · `supernovae-st/nika` ·
+   (`@nika-open/nika-check-wasm` → GitHub Actions · `nika-open/nika` ·
    `release.yml`): the job publishes through GitHub OIDC with `--provenance`
    and carries no token. A granular automation token stopped publishing on
    2026-09-12 (npm's 2FA-bypass restriction; the registry answers `E404` on
@@ -301,11 +307,11 @@ without an explicit operator decision.
 | `SHA256SUMS` | checksum manifest (proof 1) |
 | GitHub native attestation | `gh attestation verify` (proof 2) |
 | `multiple.intoto.jsonl` | SLSA provenance asset, offline-verifiable (proof 3) |
-| `ghcr.io/supernovae-st/nika:<ver>` | immutable multi-arch image, bit-identical to the tarballs |
-| `ghcr.io/supernovae-st/nika:latest` | stable-only floating pointer, moved after finalization |
-| Homebrew formula bump | `supernovae-st/homebrew-tap` (deploy-key scoped) |
-| `supernovae-st-nika-check-wasm-<ver>.tgz` (+ `.sha256`) | the npm tarball, byte-identical to what `npm publish` ships — attested like the binaries |
-| `@supernovae-st/nika-check-wasm` on npm | immutable browser checker; first publication requests npm provenance, while replay independently proves exact SRI (first publication requires configured npm trusted-publisher authority) |
+| `ghcr.io/nika-open/nika:<ver>` | immutable multi-arch image, bit-identical to the tarballs |
+| `ghcr.io/nika-open/nika:latest` | stable-only floating pointer, moved after finalization |
+| Homebrew formula bump | `nika-open/homebrew-tap` (deploy-key scoped) |
+| `nika-open-nika-check-wasm-<ver>.tgz` (+ `.sha256`) | the npm tarball, byte-identical to what `npm publish` ships — attested like the binaries |
+| `@nika-open/nika-check-wasm` on npm | immutable browser checker; first publication requests npm provenance, while replay independently proves exact SRI (first publication requires configured npm trusted-publisher authority) |
 
 The release body starts with the curated **What / Install / Verify /
 Provenance** front page rendered by `scripts/release/render-notes.sh`, with
@@ -317,13 +323,20 @@ or changed marker on replay.
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing            # macOS: shasum -a 256 -c
-gh attestation verify nika-<platform>-<ver>.tar.gz --repo supernovae-st/nika
+gh attestation verify nika-<platform>-<ver>.tar.gz --repo nika-open/nika
 slsa-verifier verify-artifact nika-<platform>-<ver>.tar.gz \
   --provenance-path multiple.intoto.jsonl \
-  --source-uri github.com/supernovae-st/nika --source-tag v<ver>
-gh attestation verify supernovae-st-nika-check-wasm-<ver>.tgz --repo supernovae-st/nika
+  --source-uri github.com/nika-open/nika --source-tag v<ver>
+gh attestation verify nika-open-nika-check-wasm-<ver>.tgz --repo nika-open/nika
 npm audit signatures                                # in a project depending on the package
 ```
+
+These commands hold from v0.124.5. Releases up to v0.124.4 were built and
+signed in `supernovae-st/nika`, and GitHub serves their attestations under
+the `supernovae-st` organization only: replace `--repo nika-open/nika` with
+`--owner supernovae-st --signer-repo supernovae-st/nika`, pass
+`--source-uri github.com/supernovae-st/nika` to `slsa-verifier`, and verify
+their npm tarball as `supernovae-st-nika-check-wasm-<ver>.tgz`.
 
 Three independent chains cover the native artifacts: the checksum manifest,
 GitHub's signed attestation, and the SLSA generator's intoto statement. npm's

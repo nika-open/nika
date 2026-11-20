@@ -77,7 +77,7 @@ if not license_id:
     raise SystemExit("crate has no license field — refusing to project")
 
 manifest = {
-    "name": "@supernovae-st/nika-check-wasm",
+    "name": "@nika-open/nika-check-wasm",
     "version": pkg["version"] + os.environ.get("NIKA_NPM_SUFFIX", ""),
     "description": description,
     "license": license_id,
@@ -105,7 +105,7 @@ manifest = {
         "directory": "crates/nika-check-wasm",
     },
     # deliberately NOT the workspace homepage: the package's home is the
-    # page where the artifact runs, not the studio site
+    # page where the artifact runs, not the project's front page
     "homepage": "https://nika.sh/play",
     "keywords": ["nika", "workflow", "checker", "wasm", "yaml", "static-analysis"],
     "publishConfig": {"access": "public", "provenance": True},

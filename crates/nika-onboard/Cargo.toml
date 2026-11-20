@@ -6,7 +6,7 @@ edition     = "2024"
 rust-version = "1.88"
 license     = "AGPL-3.0-or-later"
 description = "nika's onboarding surface — project bootstrap (init), read-only gallery discovery and the stateless Compile core"
-repository  = "https://github.com/supernovae-st/nika"
+repository  = "https://github.com/nika-open/nika"
 
 [dependencies]
 nika-compile-fidelity = { path = "../nika-compile-fidelity", version = "0.124.4" } # the copy door's contract, the judge and its budget (the same tier, no cycle)

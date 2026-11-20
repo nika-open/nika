@@ -12,7 +12,7 @@
 #   2. $ENGINE_ROOT/../docs/snippets/       (monorepo sibling submodule)
 #   3. error out with actionable message
 #
-# The docs live in the supernovae-st/nika-docs repo, submoduled at
+# The docs live in the nika-open/nika-docs repo, submoduled at
 # nika/docs/ in the supernovae-hq monorepo. This script runs from the
 # engine repo but writes to the docs submodule (cross-repo coordination).
 #

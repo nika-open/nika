@@ -2,7 +2,7 @@
 # as a hook (https://pre-commit.com). Consumers pin a tagged release:
 #
 #   repos:
-#     - repo: https://github.com/supernovae-st/nika
+#     - repo: https://github.com/nika-open/nika
 #       rev: v0.99.0   # first tag carrying this file: the NEXT release
 #       hooks:
 #         - id: nika-check

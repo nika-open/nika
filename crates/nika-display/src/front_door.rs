@@ -478,8 +478,8 @@ fn learn_line(s: &mut String, theme: Theme) {
                 theme.link("https://nika.sh", "nika.sh"),
                 theme.link("https://docs.nika.sh", "docs.nika.sh"),
                 theme.link(
-                    "https://github.com/supernovae-st/nika",
-                    "github.com/supernovae-st/nika"
+                    "https://github.com/nika-open/nika",
+                    "github.com/nika-open/nika"
                 ),
             )
         )

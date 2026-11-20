@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --filter=blob:none https://github.com/supernovae-st/nika-spec ../spec
+          git clone --filter=blob:none https://github.com/nika-open/nika-spec ../spec
           head="$(git -C ../spec rev-parse HEAD)"
           pin="$(grep -v '^#' SPEC_PIN | head -1 | tr -d '[:space:]')"
           if [ "$head" = "$pin" ]; then

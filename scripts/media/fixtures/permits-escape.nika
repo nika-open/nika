@@ -13,7 +13,7 @@ tasks:
   release:
     invoke:
       tool: "nika:fetch"
-      args: { url: "https://api.github.com/repos/supernovae-st/nika/releases/latest" }
+      args: { url: "https://api.github.com/repos/nika-open/nika/releases/latest" }
 
   changelog_page:
     invoke:

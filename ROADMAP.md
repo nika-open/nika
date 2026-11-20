@@ -35,7 +35,7 @@ itself implement, qualify or release it.
 > **Version policy as amended 2026-06-20 (D-2026-06-20-N1) · "forever-v0.x" retired.**
 > From June to October 2026 the plan followed real semver toward a **1.0**
 > public launch: each tagged release on the
-> [releases page](https://github.com/supernovae-st/nika/releases) was
+> [releases page](https://github.com/nika-open/nika/releases) was
 > release-candidate grade and `main` advanced to the next `-dev` version
 > immediately after it. The contract system and the hundred-year machinery
 > (NEP door · conformance tiers · archives · the compatibility promise · the
@@ -50,7 +50,7 @@ itself implement, qualify or release it.
 > ADR-113) is frozen forever and unaffected. The `v0.8X.Y` layer-tag scheme
 > below is superseded (kept for history). See ADR-002 amendment + §Tag scheme.
 > The dated history lives in the machine-verified
-> [timeline](https://github.com/supernovae-st/nika-spec/blob/main/timeline/timeline.yaml)
+> [timeline](https://github.com/nika-open/nika-spec/blob/main/timeline/timeline.yaml)
 > (every provable claim re-proven by the spec's CI · conditions, never dates).
 >
 > **🦋 ADR-037 — Bottom-up diamond progression (Accepted 2026-04-17, SUPREME)**
@@ -263,7 +263,7 @@ The **4-verb invariant (`infer · exec · invoke · agent`)** is locked through 
 
 ## Terminal workspace — implementation tracked in #1752
 
-[Terminal workspace scope and native acceptance gates](https://github.com/supernovae-st/nika/issues/1752)
+[Terminal workspace scope and native acceptance gates](https://github.com/nika-open/nika/issues/1752)
 track the active project, conversations, workflow revisions and executions as
 distinct identities. The terminal consumes the existing Session, execution,
 permission and artifact contracts; it introduces no parallel Session store.
@@ -719,7 +719,7 @@ Per D-2026-05-22-N18.)
 - `unstable-*` prefix for API surfaces not yet locked (per forward-compat-invariants)
 
 **Distribution channels**:
-- **Homebrew** — `brew install supernovae-st/tap/nika` (formula at `supernovae-st/homebrew-tap` · SHIPPED since v0.90.0)
+- **Homebrew** — `brew install nika-open/tap/nika` (formula at `nika-open/homebrew-tap` · SHIPPED since v0.90.0)
 - **`curl | sh`** — `curl -LsSf https://nika.sh/install.sh | sh` (platform detection, fallback to GH release tarball · SHIPPED)
 - **crates.io** — `cargo install nika` was to join at the 1.0.0 launch (not planned after 0.123; the `nika` name on crates.io is a placeholder)
 - **GitHub Releases** — four pre-built tarballs from the tag-triggered release
@@ -739,12 +739,12 @@ Per D-2026-05-22-N18.)
 - `/install.sh` + `/schema/workflow.json` (static assets for CLI consumers)
 
 **docs.nika.sh** (Mintlify, deployed from
-[`supernovae-st/nika-docs`](https://github.com/supernovae-st/nika-docs)
+[`nika-open/nika-docs`](https://github.com/nika-open/nika-docs)
 — split out of this repo in Wave 4E, 2026-04-17):
 - Getting started, concepts, guides, reference
 - 2-tab navigation (Guide / Reference), live snapshot of workspace state
 
-**Agent skill surface** ([`supernovae-st/nika-plugins`](https://github.com/supernovae-st/nika-plugins)):
+**Agent skill surface** ([`nika-open/nika-plugins`](https://github.com/nika-open/nika-plugins)):
 - The public skill + read-only MCP oracle ("make your AI agent a Nika expert")
 - Design tokens + motion ride the spec SSOT (`nika-spec` `design/`,
   vendored into the engine pack by `scripts/sync-pack.sh`)

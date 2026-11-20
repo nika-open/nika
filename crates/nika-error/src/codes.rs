@@ -326,7 +326,7 @@ pub fn code_help(code: NikaCode) -> &'static str {
         }
         750..=799 => "Sandbox denied or failed. Verify capability allowlist and platform support.",
         800..=819 => "Observability sink rejected the event. Check exporter configuration.",
-        999 => "Internal error. Please report at github.com/supernovae-st/nika/issues",
+        999 => "Internal error. Please report at github.com/nika-open/nika/issues",
         _ => "Unknown error code. Check documentation for details.",
     }
 }

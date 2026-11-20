@@ -27,7 +27,7 @@ class ReleaseNotes(unittest.TestCase):
 
     def test_stable_install_offers_brew_and_the_script(self):
         result = self.render("- Stable.")
-        self.assertIn("brew install supernovae-st/tap/nika", result)
+        self.assertIn("brew install nika-open/tap/nika", result)
         self.assertIn("curl -LsSf https://nika.sh/install.sh | sh   # script install", result)
 
     def test_prerelease_install_pins_its_version(self):
@@ -36,7 +36,7 @@ class ReleaseNotes(unittest.TestCase):
         self.assertNotIn("brew install", install)
         self.assertNotIn("install.sh | sh   #", install)
         self.assertIn("install.sh | sh -s -- --version 0.123.0-preview.1", install)
-        self.assertIn("ghcr.io/supernovae-st/nika:0.123.0-preview.1", install)
+        self.assertIn("ghcr.io/nika-open/nika:0.123.0-preview.1", install)
         self.assertIn("pre-release", install)
 
     def test_small_section_is_preserved(self):

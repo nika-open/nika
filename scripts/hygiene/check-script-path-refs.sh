@@ -37,7 +37,7 @@ checked=0
 # The four exemptions below are not guesses: each is a false positive
 # measured on 2026-07-30 while sweeping this exact class by hand.
 #
-#   1. a URL — `{RAW}/supernovae-st/nika-registry/main/scripts/cert.py`
+#   1. a URL — `{RAW}/nika-open/nika-registry/main/scripts/cert.py`
 #      names a path in ANOTHER repo, which is correct and unresolvable here
 #   2. a deliberate non-present reference — "the future docs/workspace.toml
 #      SSOT (ADR-026)", or an "ex <old path>" provenance citation

@@ -40,7 +40,7 @@ If you are unsure whether something is in scope, open an issue first.
 
 ## Philosophy
 
-- **Real semver** (D-2026-06-20-N1). The current workspace version is declared in `Cargo.toml`; published binaries are listed in [GitHub Releases](https://github.com/supernovae-st/nika/releases). 0.124 is the current release line: work stays focused on maintenance, security and the media capabilities workflows need, and native video is planned for 0.125. Each version is diamond-grade for its declared scope.
+- **Real semver** (D-2026-06-20-N1). The current workspace version is declared in `Cargo.toml`; published binaries are listed in [GitHub Releases](https://github.com/nika-open/nika/releases). 0.124 is the current release line: work stays focused on maintenance, security and the media capabilities workflows need, and native video is planned for 0.125. Each version is diamond-grade for its declared scope.
 - **Quality over speed.** No deadline pressure. A PR lands when it is ready.
 - **Perfect diamond.** Zero band-aid, zero residue, zero ghost reference. Every leftover gets fixed or flagged — never ignored.
 - **Craft, not extraction.** Legacy code on `brouillon` (v0.79.3) is a read-only reference. Diamond rewrites each crate from scratch, guided by the legacy.
@@ -213,7 +213,7 @@ lanes keep flowing.
 
 - **Bug**: GitHub Issues, include minimal repro and `nika --version`.
 - **Feature request** (engine behavior): new features beyond the media capabilities workflows need are out of scope for the 0.124 line. An issue that describes the use case still helps the record; a gap that is a defect of existing behavior is a bug.
-- **Language change** (anything normative: syntax, verbs, permits, envelope): the spec's [NEP door](https://github.com/supernovae-st/nika-spec/blob/main/governance/nep-0000-the-nep-process.md) — nobody amends the standard directly, maintainers included. Engine issues cannot change the language.
+- **Language change** (anything normative: syntax, verbs, permits, envelope): the spec's [NEP door](https://github.com/nika-open/nika-spec/blob/main/governance/nep-0000-the-nep-process.md) — nobody amends the standard directly, maintainers included. Engine issues cannot change the language.
 - **Security vulnerability**: see [`SECURITY.md`](SECURITY.md). Email `security@supernovae.studio`, **not** a public issue.
 
 ---

@@ -16,11 +16,11 @@ FILES = [
     {
         "path": SELF,  # noqa: F821
         "class": "pinned-copy",
-        "evidence": "the shared estate tool, mirrored byte-for-byte from supernovae-st/nika-estate · editing it here is a lost gesture: change it upstream, bump ESTATE_PIN, re-mirror",
+        "evidence": "the shared estate tool, mirrored byte-for-byte from nika-open/nika-estate · editing it here is a lost gesture: change it upstream, bump ESTATE_PIN, re-mirror",
         "derivation": {
             "tool": "curl the tool from nika-estate at the rev named in ESTATE_PIN",
             "gate": "the `mirror` job byte-compares scripts/estate.py against nika-estate@ESTATE_PIN and fails the run on any difference",
-            "inputs": ["ESTATE_PIN", "supernovae-st/nika-estate@<ESTATE_PIN>:scripts/estate.py"],
+            "inputs": ["ESTATE_PIN", "nika-open/nika-estate@<ESTATE_PIN>:scripts/estate.py"],
         },
     },
     {
@@ -118,7 +118,7 @@ PATTERNS = [
         "derivation": {
             "tool": "bash scripts/sync-pack.sh <nika-spec checkout at SPEC_PIN> — spec-pin-heal.yml advances the pin and pack together, and Diamond CI refuses any pack differing from spec@SPEC_PIN",
             "gate": "cargo test -p nika-pack → tests/pack_integrity.rs re-hashes every workflow (sha256_16 over lean text) against pack/examples/manifest.yaml",
-            "inputs": ["supernovae-st/nika-spec@SPEC_PIN: VERSION · QUICKSTART.md · canon.yaml · conformance/coverage-matrix.tsv · design/{tokens,motion}.yaml · spec/ · schemas/ · examples/ · templates/ · stdlib/*.md"],
+            "inputs": ["nika-open/nika-spec@SPEC_PIN: VERSION · QUICKSTART.md · canon.yaml · conformance/coverage-matrix.tsv · design/{tokens,motion}.yaml · spec/ · schemas/ · examples/ · templates/ · stdlib/*.md"],
         },
         "note": "pack/examples/manifest.yaml is itself GENERATED upstream (spec scripts/showcase-projector.py) — vendored here as part of the copy",
     },

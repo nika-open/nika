@@ -123,7 +123,7 @@ cat >"$FIXTURE/CHANGELOG.md" <<'EOF'
 
 One file per change under [`changelog.d/`](changelog.d/).
 
-## [0.114.0](https://github.com/supernovae-st/nika/compare/v0.113.0..v0.114.0) - 2026-08-23
+## [0.114.0](https://github.com/nika-open/nika/compare/v0.113.0..v0.114.0) - 2026-08-23
 EOF
 printf '%s\n' '- **Release composition.** One fragment becomes one release bullet.' \
   >"$FIXTURE/changelog.d/1.changed.md"

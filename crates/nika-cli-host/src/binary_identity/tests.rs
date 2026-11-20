@@ -508,14 +508,14 @@ fn the_installer_is_read_from_the_path_alone() {
     assert_eq!(
         of(
             "/usr/local/bin/nika",
-            "/usr/local/lib/node_modules/@supernovae-st/nika-linux-x64/bin/nika"
+            "/usr/local/lib/node_modules/@nika-open/nika-linux-x64/bin/nika"
         ),
         Installer::NpmGlobal
     );
     assert_eq!(
         of(
             "/work/app/node_modules/.bin/nika",
-            "/work/app/node_modules/@supernovae-st/nika-darwin-arm64/bin/nika"
+            "/work/app/node_modules/@nika-open/nika-darwin-arm64/bin/nika"
         ),
         Installer::NpmPayload
     );
@@ -609,6 +609,30 @@ fn an_older_npm_payload_is_uninstalled_from_its_project() {
     let m = Machine::new();
     let bin =
         std::fs::canonicalize(m.answering("app/node_modules/.bin", "nika 0.1.0")).expect("bin");
+    let me = m.running_dir();
+    let id = m.observe(&[&bin, &me], DEADLINE);
+    assert_eq!(id.entries[0].installer, Installer::NpmPayload);
+    assert_eq!(
+        path_rows(&id)[0].fix.as_deref(),
+        Some(
+            format!(
+                "(cd {} && npm uninstall @nika-open/nika) && hash -r   # the older copy runs first on PATH",
+                m.at("app").display()
+            )
+            .as_str()
+        )
+    );
+}
+
+/// A copy npm installed under the scope the package had before the move is
+/// removed by that package's name, read from where its `.bin` link resolves.
+#[test]
+fn a_payload_from_the_old_npm_scope_is_uninstalled_by_its_own_name() {
+    let m = Machine::new();
+    let package = m.answering("app/node_modules/@supernovae-st/nika/bin", "nika 0.1.0");
+    let bin = m.at("app/node_modules/.bin");
+    std::fs::create_dir_all(&bin).expect("mkdir .bin");
+    std::os::unix::fs::symlink(package.join("nika"), bin.join("nika")).expect("link");
     let me = m.running_dir();
     let id = m.observe(&[&bin, &me], DEADLINE);
     assert_eq!(id.entries[0].installer, Installer::NpmPayload);

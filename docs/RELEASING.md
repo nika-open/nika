@@ -41,11 +41,11 @@ Do not use a manual formula write to bypass those checks.
 
 ## Downstream owners
 
-- The [SDK release workflow](https://github.com/supernovae-st/nika-client/blob/main/.github/workflows/release.yml)
-  and [release evidence](https://github.com/supernovae-st/nika-client/blob/main/docs/testing.md)
+- The [SDK release workflow](https://github.com/nika-open/nika-client/blob/main/.github/workflows/release.yml)
+  and [release evidence](https://github.com/nika-open/nika-client/blob/main/docs/testing.md)
   own the public-engine replay and prepared publication of the four native
   payloads plus the root SDK. A bare `npm publish` is not this release train.
-- [Editor publishing](https://github.com/supernovae-st/nika-vscode/blob/main/PUBLISHING.md)
+- [Editor publishing](https://github.com/nika-open/nika-vscode/blob/main/PUBLISHING.md)
   owns the readiness, native-host and manual gates plus both Marketplace and
   OpenVSX publications. The matching public engine is a prerequisite.
 - The portable Agent Plugins mirror is downstream of the immutable engine

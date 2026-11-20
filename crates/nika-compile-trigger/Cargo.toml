@@ -6,7 +6,7 @@ edition     = "2024"
 rust-version = "1.88"
 license     = "AGPL-3.0-or-later"
 description = "The trigger a request names, read from its words: the cadence and time of day a phrase states, the period multiples five cron fields cannot hold, the plain cron fields and the form of a trigger clause. Layer L4 — a size-cap member of the nika-onboard unit (D-2026-07-09-N1 · ADR-142 · the ADR-141 precedent), ascended from nika-compile at the 15k prod-LOC wall; nika-compile depends on it and it depends on the reader, never the reverse."
-repository  = "https://github.com/supernovae-st/nika"
+repository  = "https://github.com/nika-open/nika"
 publish     = false  # member of the nika-onboard unit — never on crates.io alone
 
 [dependencies]

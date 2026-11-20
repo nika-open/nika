@@ -683,9 +683,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The tap repo is homebrew-tap — the canonical brew mapping for
-          # `brew install supernovae-st/tap/nika` (renamed back 2026-07-06;
+          # `brew install nika-open/tap/nika` (renamed back 2026-07-06;
           # the homebrew-nika interlude survives as a GitHub redirect).
-          repository: supernovae-st/homebrew-tap
+          repository: nika-open/homebrew-tap
           ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
           path: tap
       - name: Update + push the formula
@@ -750,7 +750,7 @@ jobs:
             echo "::error::SPEC_PIN is not a commit sha"
             exit 1
           }
-          git clone --filter=blob:none https://github.com/supernovae-st/nika-spec "$GITHUB_WORKSPACE/nika-spec"
+          git clone --filter=blob:none https://github.com/nika-open/nika-spec "$GITHUB_WORKSPACE/nika-spec"
           git -C "$GITHUB_WORKSPACE/nika-spec" checkout --detach "$pin"
       - name: Install the wasm toolchain (binder at the lock's version · pinned binaryen)
         run: |
@@ -920,7 +920,7 @@ jobs:
               exit 73
             }
           bash .release-tooling/scripts/release/npm-publish-immutable.sh \
-            publish "@supernovae-st/nika-check-wasm@${VERSION}" \
+            publish "@nika-open/nika-check-wasm@${VERSION}" \
             "${tarballs[0]}" "${sidecars[0]}"
 
   docker:
@@ -1185,8 +1185,8 @@ jobs:
             "artifacts/nika-linux-x64-${version}.tar.gz"
             artifacts/SHA256SUMS
             artifacts/multiple.intoto.jsonl
-            "artifacts/supernovae-st-nika-check-wasm-${version}.tgz"
-            "artifacts/supernovae-st-nika-check-wasm-${version}.tgz.sha256"
+            "artifacts/nika-open-nika-check-wasm-${version}.tgz"
+            "artifacts/nika-open-nika-check-wasm-${version}.tgz.sha256"
           )
           bash .release-tooling/scripts/release/release-assets-barrier.sh \
             stage "$REPO" "$RELEASE_ID" "$TAG" "$RELEASE_SHA" "${assets[@]}"
@@ -1296,9 +1296,9 @@ jobs:
           bash .release-tooling/scripts/release/verify-slsa-provenance.sh \
             "$TAG" "$REPO" artifacts/multiple.intoto.jsonl "${native[@]}"
           bash .release-tooling/scripts/release/npm-publish-immutable.sh verify \
-            "@supernovae-st/nika-check-wasm@${VERSION}" \
-            "artifacts/supernovae-st-nika-check-wasm-${VERSION}.tgz" \
-            "artifacts/supernovae-st-nika-check-wasm-${VERSION}.tgz.sha256"
+            "@nika-open/nika-check-wasm@${VERSION}" \
+            "artifacts/nika-open-nika-check-wasm-${VERSION}.tgz" \
+            "artifacts/nika-open-nika-check-wasm-${VERSION}.tgz.sha256"
           # The marker owner supplied this digest before version convergence.
           # Its fresh draft-state equality belongs to the isolated finalizer,
           # which rejects drift before publishing; this judge stays read-only.

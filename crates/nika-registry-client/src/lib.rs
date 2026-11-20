@@ -62,7 +62,7 @@ use nika_kernel::{HttpError, HttpRequest};
 const SCHEME: &str = "registry:";
 /// The public index this engine speaks to in v1 (org/private indexes
 /// arrive with the `nika add` verb — ADR-106 `--index`).
-const INDEX_BASE: &str = "https://raw.githubusercontent.com/supernovae-st/nika-registry/main";
+const INDEX_BASE: &str = "https://raw.githubusercontent.com/nika-open/nika-registry/main";
 /// Raw content host for pinned artifact bytes.
 const RAW_BASE: &str = "https://raw.githubusercontent.com";
 /// Artifact size cap (the registry-v0.1 reference cap — workflows are
@@ -660,7 +660,7 @@ impl<H: HttpGetDyn> RegistryClient<H> {
                 &format!("{INDEX_BASE}/index.json"),
                 "the registry index",
                 MAX_INDEX_BYTES,
-                "the registry may be unreachable or moved — see https://github.com/supernovae-st/nika-registry",
+                "the registry may be unreachable or moved — see https://github.com/nika-open/nika-registry",
             )
             .await?;
         let index: Index = serde_json::from_slice(&body).map_err(|e| {
@@ -855,7 +855,7 @@ fn select_artifact(
     if named.is_empty() {
         return Err(RegistryError::new(ErrKind::NotFound {
             what: format!("`{}/{}`", r.owner, r.name),
-            hint: "check the spelling against https://github.com/supernovae-st/nika-registry — a name an agent suggests must actually exist (this refusal is the guard)".to_owned(),
+            hint: "check the spelling against https://github.com/nika-open/nika-registry — a name an agent suggests must actually exist (this refusal is the guard)".to_owned(),
         }));
     }
     let workflows: Vec<&IndexArtifact> = named

@@ -587,7 +587,7 @@ fn human_mirror_carries_the_four_sections_and_no_key_names() {
         "ready for a real run",
         "not briefed → nika init",
         "learn: nika.sh",
-        "github.com/supernovae-st/nika",
+        "github.com/nika-open/nika",
     ] {
         assert!(text.contains(needle), "missing `{needle}`:\n{text}");
     }
@@ -1309,6 +1309,8 @@ mod front_door_oracle {
     }
 
     /// `(group, cases, sha256)` captured from the pre-move code; never recomputed by the code under test.
+    /// A human case is hashed once its repository link is mapped back to the pre-move one
+    /// ([`with_the_pre_move_repository`]), so every other byte is still compared with it.
     const EXPECTED: &[(&str, usize, &str)] = &[
         (
             "synthetic/empty",
@@ -1387,9 +1389,27 @@ mod front_door_oracle {
         ),
     ];
 
+    /// The repository the learn line links, as the pre-move code wrote it and as it is now.
+    const REPOSITORY: (&str, &str) = ("github.com/supernovae-st/nika", "github.com/nika-open/nika");
+
+    /// A human case as the pre-move code wrote it: the repository moved to `nika-open`, so
+    /// its link is mapped back, and every other byte is still compared with the pre-move one.
+    fn with_the_pre_move_repository(name: &str, text: &str) -> String {
+        let (before, now) = REPOSITORY;
+        assert!(text.contains(now), "{name}: no link to {now}");
+        assert!(!text.contains(before), "{name}: still links {before}");
+        text.replace(now, before)
+    }
+
     #[test]
     fn the_front_door_renders_the_pre_move_bytes() {
-        let mut cases = human_cases(&human);
+        let mut cases: Vec<(String, String)> = human_cases(&human)
+            .into_iter()
+            .map(|(name, text)| {
+                let text = with_the_pre_move_repository(&name, &text);
+                (name, text)
+            })
+            .collect();
         cases.extend(json_cases(&json, &chat));
         let want: Vec<(String, usize, String)> = EXPECTED
             .iter()

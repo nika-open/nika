@@ -234,7 +234,7 @@ fold_release() {
         line=$0; sub(/^## \[/,"",line); sub(/\].*/,"",line); print line; exit }' "$CHANGELOG"
   )"
   [ -n "$prev" ] || die "no previous ## [x.y.z] section under [Unreleased] — cannot build the compare link"
-  repo="${GITHUB_REPOSITORY:-supernovae-st/nika}"
+  repo="${GITHUB_REPOSITORY:-nika-open/nika}"
 
   while IFS= read -r frag; do
     [ -n "$frag" ] || continue

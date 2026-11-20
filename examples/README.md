@@ -4,7 +4,7 @@ New to Nika? Start with the [first-run walkthrough](../README.md#try-it-in-two-m
 It starts with a file-filtering request in the Session, then shows how to use
 DeepSeek and inspect the result. You do not need to choose from the full catalog first.
 
-> One source of truth: the [`nika-spec` examples pack](https://github.com/supernovae-st/nika-spec/tree/main/examples),
+> One source of truth: the [`nika-spec` examples pack](https://github.com/nika-open/nika-spec/tree/main/examples),
 > vendored into the binary at the spec commit [`SPEC_PIN`](../SPEC_PIN) names.
 > No loose copies live here — a second copy is a future lie. To read the
 > examples this engine embeds before you install anything, browse

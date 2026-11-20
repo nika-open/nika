@@ -20,8 +20,8 @@ edition      = "2024"
 license      = "AGPL-3.0-or-later"
 authors      = ["Thibaut Melen <thibaut@supernovae.studio>"]
 rust-version = "1.91"
-repository   = "https://github.com/supernovae-st/nika"
-homepage     = "https://supernovae.studio"
+repository   = "https://github.com/nika-open/nika"
+homepage     = "https://nika.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Diamond layer assignments — enforced by scripts/ci/check-layering.sh.
@@ -558,4 +558,4 @@ panic = "abort"
 # 40 identical runs → 30/10). The pinned rev carries the upstream-shaped fix (the
 # candidates keep their first-scored order · readability.js parity); it drops the
 # day upstream releases it.
-dom_smoothie = { git = "https://github.com/supernovae-st/dom_smoothie", rev = "fd6db004615af3c14d20f90bfb43ca514db4e57d" }
+dom_smoothie = { git = "https://github.com/nika-open/dom_smoothie", rev = "fd6db004615af3c14d20f90bfb43ca514db4e57d" }

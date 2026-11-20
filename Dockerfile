@@ -1,4 +1,4 @@
-# Nika — official image (ghcr.io/supernovae-st/nika · linux/amd64 + linux/arm64)
+# Nika — official image (ghcr.io/nika-open/nika · linux/amd64 + linux/arm64)
 #
 # Built on the release train (.github/workflows/release.yml `docker` job) from
 # the SAME tarball binaries the GitHub release ships — never a rebuild. The
@@ -11,22 +11,22 @@
 #
 # Lanes this image targets: `nika check` · `nika run` · `nika mcp`. `exec:`
 # tasks get the base's shell + coreutils and nothing more — extend the image
-# (`FROM ghcr.io/supernovae-st/nika` + apt-get) when a workflow shells out
+# (`FROM ghcr.io/nika-open/nika` + apt-get) when a workflow shells out
 # to heavier tools.
 #
 # CI stages binaries at dist/linux/<TARGETARCH>/nika. Local build = the same
 # staging (docker arch: amd64|arm64 · release tarball arch: x64|arm64):
 #   v=0.124.4; a=arm64                    # apple-silicon/arm hosts (amd64: a=x64)
-#   curl -fsSLO "https://github.com/supernovae-st/nika/releases/download/v${v}/nika-linux-${a}-${v}.tar.gz"
+#   curl -fsSLO "https://github.com/nika-open/nika/releases/download/v${v}/nika-linux-${a}-${v}.tar.gz"
 #   mkdir -p dist/linux/arm64 && tar -xzf "nika-linux-${a}-${v}.tar.gz" -C dist/linux/arm64 nika
 #   docker build -t nika .
 #
-# Run:  docker run --rm -v "$PWD:/work" -w /work ghcr.io/supernovae-st/nika check flow.nika
-# MCP:  docker run -i --rm ghcr.io/supernovae-st/nika mcp
+# Run:  docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika check flow.nika
+# MCP:  docker run -i --rm ghcr.io/nika-open/nika mcp
 
 FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
 ARG TARGETARCH
-LABEL org.opencontainers.image.source="https://github.com/supernovae-st/nika" \
+LABEL org.opencontainers.image.source="https://github.com/nika-open/nika" \
       org.opencontainers.image.description="Nika — say it once, keep it as a file. Checked before it runs, run with the model you choose, proven afterwards." \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 COPY dist/linux/${TARGETARCH}/nika /usr/local/bin/nika

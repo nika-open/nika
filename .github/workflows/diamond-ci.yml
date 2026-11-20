@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           pin="$(grep -v '^#' SPEC_PIN | head -1 | tr -d '[:space:]')"
-          git clone --filter=blob:none https://github.com/supernovae-st/nika-spec "$GITHUB_WORKSPACE/nika-spec"
+          git clone --filter=blob:none https://github.com/nika-open/nika-spec "$GITHUB_WORKSPACE/nika-spec"
           git -C "$GITHUB_WORKSPACE/nika-spec" checkout --detach "$pin"
       - name: The pack is spec@SPEC_PIN
         if: matrix.job == 'tests'

@@ -71,8 +71,8 @@ names=(
   "nika-linux-x64-${VERSION}.tar.gz"
   SHA256SUMS
   multiple.intoto.jsonl
-  "supernovae-st-nika-check-wasm-${VERSION}.tgz"
-  "supernovae-st-nika-check-wasm-${VERSION}.tgz.sha256"
+  "nika-open-nika-check-wasm-${VERSION}.tgz"
+  "nika-open-nika-check-wasm-${VERSION}.tgz.sha256"
 )
 assets=()
 for name in "${names[@]}"; do
@@ -106,15 +106,15 @@ if [ "${GH_LOOKUP:-ok}" = unknown ]; then
   echo 'gh: timeout' >&2
   exit 1
 fi
-if [ "$endpoint" = 'repos/supernovae-st/nika/releases/123' ]; then
+if [ "$endpoint" = 'repos/nika-open/nika/releases/123' ]; then
   if printf '%s\n' "$*" | grep -Fq 'upload_url'; then
-    printf 'https://uploads.github.com/repos/supernovae-st/nika/releases/123/assets{?name,label}\n'
+    printf 'https://uploads.github.com/repos/nika-open/nika/releases/123/assets{?name,label}\n'
   else
     printf '123\t%s\ttrue\tfalse\n' "$TAG"
   fi
   exit 0
 fi
-if [ "$endpoint" = 'repos/supernovae-st/nika/releases/123/assets' ]; then
+if [ "$endpoint" = 'repos/nika-open/nika/releases/123/assets' ]; then
   while IFS= read -r name; do
     [ -n "$name" ] && printf '%s\t%s\n' "$(asset_id "$name")" "$name"
   done < <(find "$REMOTE" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)
@@ -125,7 +125,7 @@ if [ "$endpoint" = 'repos/supernovae-st/nika/releases/123/assets' ]; then
   exit 0
 fi
 case "$endpoint" in
-  repos/supernovae-st/nika/releases/assets/*)
+  repos/nika-open/nika/releases/assets/*)
     wanted="${endpoint##*/}"
     while IFS= read -r name; do
       if [ "$(asset_id "$name")" = "$wanted" ]; then
@@ -161,12 +161,12 @@ chmod +x "$BIN/gh" "$BIN/git" "$BIN/curl"
 # First publication writes each exact name once; identical replay writes none.
 GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null
 [ "$(wc -l <"$LOG" | tr -d ' ')" = 8 ] || fail 'first publish did not upload eight assets'
 GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null
 [ "$(wc -l <"$LOG" | tr -d ' ')" = 8 ] || fail 'identical replay uploaded again'
 
@@ -175,7 +175,7 @@ for name in "${names[@]}"; do
   rm "$REMOTE/$name"
   GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
     bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-    stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+    stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
     "${assets[@]}" >/dev/null
   cmp -s "$LOCAL/$name" "$REMOTE/$name" || fail "missing heal failed for $name"
 done
@@ -185,7 +185,7 @@ rm "$REMOTE/${names[0]}"
 printf 'divergent\n' >"$REMOTE/${names[1]}"
 if GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null 2>&1; then
   fail 'divergent occupied asset passed'
 fi
@@ -194,7 +194,7 @@ cp "$LOCAL/${names[1]}" "$REMOTE/${names[1]}"
 printf 'extra\n' >"$REMOTE/extra.bin"
 if GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null 2>&1; then
   fail 'extra public asset passed'
 fi
@@ -202,7 +202,7 @@ rm "$REMOTE/extra.bin"
 cp "$LOCAL/${names[0]}" "$REMOTE/${names[0]}"
 if GH_DUPLICATE=1 GH_DUPLICATE_NAME="${names[0]}" PATH="$BIN:$PATH" \
   REMOTE="$REMOTE" LOG="$LOG" bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  verify supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  verify nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null 2>&1; then
   fail 'duplicate public identity passed'
 fi
@@ -214,7 +214,7 @@ before="$(grep -Fc "upload ${names[0]}" "$LOG" || true)"
 GH_COMMIT_THEN_FAIL="${names[0]}" GH_TOKEN=test PATH="$BIN:$PATH" \
   REMOTE="$REMOTE" LOG="$LOG" \
   bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >/dev/null
 after="$(grep -Fc "upload ${names[0]}" "$LOG" || true)"
 [ "$((after - before))" = 1 ] || fail 'concurrent publish was attempted more than once'
@@ -226,7 +226,7 @@ rm -f "$TAG_MOVED_FILE"
 before="$(wc -l <"$LOG" | tr -d ' ')"
 if MOVE_AFTER_CENSUS=1 GH_TOKEN=test PATH="$BIN:$PATH" REMOTE="$REMOTE" \
   LOG="$LOG" bash "$ROOT/scripts/release/release-assets-barrier.sh" \
-  stage supernovae-st/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
+  stage nika-open/nika "$RELEASE_ID" "$TAG" "$RELEASE_SHA" \
   "${assets[@]}" >"$TEST_ROOT/moved-before-upload.out" 2>&1; then
   fail 'tag move before upload passed'
 fi
@@ -251,10 +251,10 @@ exit 90
 EOF
 chmod +x "$BIN/git"
 resolved="$(PATH="$BIN:$PATH" bash "$ROOT/scripts/release/resolve-release-tag.sh" \
-  "$TAG" supernovae-st/nika)"
+  "$TAG" nika-open/nika)"
 [ "$resolved" = 2222222222222222222222222222222222222222 ] || fail 'annotated tag was not peeled'
 if TAG_SHA=3333333333333333333333333333333333333333 PATH="$BIN:$PATH" \
-  bash "$ROOT/scripts/release/resolve-release-tag.sh" "$TAG" supernovae-st/nika \
+  bash "$ROOT/scripts/release/resolve-release-tag.sh" "$TAG" nika-open/nika \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'tag move passed'
 fi
@@ -308,7 +308,7 @@ NOTES="$TEST_ROOT/notes.md"
 printf 'notes\n' >"$NOTES"
 PATH="$BIN:$PATH" RELEASE_STATE="$RELEASE_STATE" RELEASE_LOG="$RELEASE_LOG" \
   bash "$ROOT/scripts/release/prepare-draft-release.sh" "$TAG" \
-  supernovae-st/nika "$NOTES" \
+  nika-open/nika "$NOTES" \
   2222222222222222222222222222222222222222 >/dev/null
 [ "$(wc -l <"$RELEASE_LOG" | tr -d ' ')" = 1 ] || fail 'explicit 404 did not create one draft'
 # target_commitish is creation routing metadata, not an existing release's
@@ -318,21 +318,21 @@ PATH="$BIN:$PATH" RELEASE_STATE="$RELEASE_STATE" RELEASE_LOG="$RELEASE_LOG" \
   || fail 'existing release identity still trusts target_commitish'
 PATH="$BIN:$PATH" RELEASE_STATE="$RELEASE_STATE" RELEASE_LOG="$RELEASE_LOG" \
   bash "$ROOT/scripts/release/prepare-draft-release.sh" "$TAG" \
-  supernovae-st/nika "$NOTES" \
+  nika-open/nika "$NOTES" \
   2222222222222222222222222222222222222222 >"$TEST_ROOT/reused-release"
 grep -Fqx 'id=123' "$TEST_ROOT/reused-release" \
   || fail 'target_commitish=main release was not reused by bound identity'
 rm "$RELEASE_STATE"
 if RELEASE_LOOKUP=unknown PATH="$BIN:$PATH" RELEASE_STATE="$RELEASE_STATE" \
   RELEASE_LOG="$RELEASE_LOG" bash "$ROOT/scripts/release/prepare-draft-release.sh" \
-  "$TAG" supernovae-st/nika "$NOTES" \
+  "$TAG" nika-open/nika "$NOTES" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'unknown release lookup created a draft'
 fi
 [ "$(wc -l <"$RELEASE_LOG" | tr -d ' ')" = 1 ] || fail 'unknown release lookup mutated state'
 if RELEASE_LOOKUP=mixed PATH="$BIN:$PATH" RELEASE_STATE="$RELEASE_STATE" \
   RELEASE_LOG="$RELEASE_LOG" bash "$ROOT/scripts/release/prepare-draft-release.sh" \
-  "$TAG" supernovae-st/nika "$NOTES" \
+  "$TAG" nika-open/nika "$NOTES" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'mixed 500/404 release lookup created a draft'
 fi
@@ -397,7 +397,7 @@ SLEEP_LOG="$TEST_ROOT/sleep-log"
 printf 'equal\n' >"$NPM_STATE"
 PATH="$BIN:$PATH" NPM_STATE="$NPM_STATE" NPM_LOG="$NPM_LOG" NPM_SRI="$NPM_SRI" \
   bash "$ROOT/scripts/release/npm-publish-immutable.sh" verify \
-  '@supernovae-st/nika-check-wasm@9.9.9' "$NPM_TGZ" "$NPM_SHA" >/dev/null
+  '@nika-open/nika-check-wasm@9.9.9' "$NPM_TGZ" "$NPM_SHA" >/dev/null
 printf 'divergent\n' >"$NPM_STATE"
 if PATH="$BIN:$PATH" NPM_STATE="$NPM_STATE" NPM_LOG="$NPM_LOG" NPM_SRI="$NPM_SRI" \
   bash "$ROOT/scripts/release/npm-publish-immutable.sh" verify x "$NPM_TGZ" "$NPM_SHA" >/dev/null 2>&1; then
@@ -695,7 +695,7 @@ if printf '%s\n' "$*" | grep -Fq '.Manifest.Digest'; then
 fi
 revision="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 [ "$state" = label-drift ] && revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-printf '{"org.opencontainers.image.revision":"%s","org.opencontainers.image.version":"9.9.9","org.opencontainers.image.source":"https://github.com/supernovae-st/nika","org.opencontainers.image.licenses":"AGPL-3.0-or-later"}\n' "$revision"
+printf '{"org.opencontainers.image.revision":"%s","org.opencontainers.image.version":"9.9.9","org.opencontainers.image.source":"https://github.com/nika-open/nika","org.opencontainers.image.licenses":"AGPL-3.0-or-later"}\n' "$revision"
 EOF
 chmod +x "$BIN/docker"
 OCI_STATE="$TEST_ROOT/oci-state"
@@ -710,23 +710,23 @@ printf 'absent\n' >"$OCI_STATE"
 out="$(PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika)"
+  https://github.com/nika-open/nika)"
 [ "$out" = "$CANDIDATE" ] || fail 'OCI publish did not print the committed digest on stdout'
 # nika#1634: the alias converges BEFORE the version tag, which stays the
 # commit marker — the create order is v9.9.9 then 9.9.9, exactly once each,
 # and the absent alias lookup matched the exact buildx not-found line.
-printf 'create ghcr.io/supernovae-st/nika:v9.9.9\ncreate ghcr.io/supernovae-st/nika:9.9.9\n' \
+printf 'create ghcr.io/nika-open/nika:v9.9.9\ncreate ghcr.io/nika-open/nika:9.9.9\n' \
   >"$TEST_ROOT/oci-log-want"
 diff -u "$TEST_ROOT/oci-log-want" "$OCI_LOG" \
   || fail 'OCI absent coordinate did not create exactly the v-alias then the version tag'
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" verify \
-  ghcr.io/supernovae-st/nika 9.9.9 - \
+  ghcr.io/nika-open/nika 9.9.9 - \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null
+  https://github.com/nika-open/nika >/dev/null
 # A replay over the occupied version with the alias ABSENT exits on the equal
 # digest without ever reading the alias: no retag of an already published
 # release, and the early exit is pinned to not touch the alias at all.
@@ -736,39 +736,39 @@ rm "$OCI_TAGS/v9.9.9"
 out="$(PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika)"
+  https://github.com/nika-open/nika)"
 [ "$out" = "$CANDIDATE" ] || fail 'replay over an occupied equal version did not print its digest'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 2 ] \
   || fail 'an occupied equal version retagged an already published coordinate'
 [ ! -e "$OCI_TAGS/v9.9.9" ] || fail 'the occupied early exit recreated the absent v-alias'
-if grep -Fqx 'ghcr.io/supernovae-st/nika:v9.9.9' "$OCI_LOOKUP_LOG"; then
+if grep -Fqx 'ghcr.io/nika-open/nika:v9.9.9' "$OCI_LOOKUP_LOG"; then
   fail 'the occupied early exit read the v-alias'
 fi
 printf 'divergent\n' >"$OCI_STATE"
 if PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1; then
+  https://github.com/nika-open/nika >/dev/null 2>&1; then
   fail 'OCI divergent version passed'
 fi
 printf 'label-drift\n' >"$OCI_STATE"
 if PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" verify \
-  ghcr.io/supernovae-st/nika 9.9.9 - \
+  ghcr.io/nika-open/nika 9.9.9 - \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1; then
+  https://github.com/nika-open/nika >/dev/null 2>&1; then
   fail 'OCI label drift passed'
 fi
 
 printf 'credential-helper\n' >"$OCI_STATE"
 if PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1; then
+  https://github.com/nika-open/nika >/dev/null 2>&1; then
   fail 'credential-helper not-found error was classified as registry absence'
 fi
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 2 ] \
@@ -776,9 +776,9 @@ fi
 printf 'mixed\n' >"$OCI_STATE"
 if PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1; then
+  https://github.com/nika-open/nika >/dev/null 2>&1; then
   fail 'mixed OCI 500/unauthorized/manifest-unknown granted create authority'
 fi
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 2 ] || fail 'mixed OCI lookup reached a write'
@@ -792,12 +792,12 @@ printf '%s\n' "$CANDIDATE" >"$OCI_TAGS/v9.9.9"
 out="$(PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika)"
+  https://github.com/nika-open/nika)"
 [ "$out" = "$CANDIDATE" ] || fail 'alias-equal publish did not print the committed digest'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 3 ] || fail 'an equal v-alias was recreated'
-[ "$(sed -n '$p' "$OCI_LOG")" = 'create ghcr.io/supernovae-st/nika:9.9.9' ] \
+[ "$(sed -n '$p' "$OCI_LOG")" = 'create ghcr.io/nika-open/nika:9.9.9' ] \
   || fail 'the alias-equal path did not create exactly the version tag'
 [ "$(cat "$OCI_TAGS/v9.9.9")" = "$CANDIDATE" ] || fail 'the equal v-alias was moved'
 
@@ -809,9 +809,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >"$TEST_ROOT/oci-alias-err.out" 2>&1 || rc=$?
+  https://github.com/nika-open/nika >"$TEST_ROOT/oci-alias-err.out" 2>&1 || rc=$?
 [ "$rc" -eq 69 ] || fail 'a v-alias lookup error did not fail 69'
 grep -Fq 'v-alias lookup failed without explicit absence' "$TEST_ROOT/oci-alias-err.out" \
   || fail 'the v-alias lookup error lost its diagnosis'
@@ -825,9 +825,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >"$TEST_ROOT/oci-alias-fail.out" 2>&1 || rc=$?
+  https://github.com/nika-open/nika >"$TEST_ROOT/oci-alias-fail.out" 2>&1 || rc=$?
 [ "$rc" -eq 69 ] || fail 'a failed v-alias write did not fail 69'
 grep -Fq 'v-alias write failed and the version tag remains absent' "$TEST_ROOT/oci-alias-fail.out" \
   || fail 'the failed v-alias write lost its diagnosis'
@@ -839,9 +839,9 @@ printf 'equal\n' >"$OCI_STATE"
 out="$(PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika)"
+  https://github.com/nika-open/nika)"
 [ "$out" = "$CANDIDATE" ] || fail 'the re-run after a failed v-alias write did not recover'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 5 ] \
   || fail 'the recovery re-run did not create exactly the v-alias and the version tag'
@@ -855,9 +855,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >"$TEST_ROOT/oci-alias-diverge.out" 2>&1 || rc=$?
+  https://github.com/nika-open/nika >"$TEST_ROOT/oci-alias-diverge.out" 2>&1 || rc=$?
 [ "$rc" -eq 73 ] || fail 'a v-alias read-back mismatch did not fail 73'
 grep -Fq 'committed v-alias digest differs' "$TEST_ROOT/oci-alias-diverge.out" \
   || fail 'the v-alias read-back mismatch lost its diagnosis'
@@ -868,9 +868,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1 || rc=$?
+  https://github.com/nika-open/nika >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 73 ] || fail 'the replay after a divergent v-alias read-back did not refuse again'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 6 ] || fail 'the divergent v-alias replay wrote'
 
@@ -882,9 +882,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >"$TEST_ROOT/oci-alias.out" 2>&1 || rc=$?
+  https://github.com/nika-open/nika >"$TEST_ROOT/oci-alias.out" 2>&1 || rc=$?
 [ "$rc" -eq 73 ] || fail 'divergent occupied v-alias was not refused'
 grep -Fq 'REFUSED divergent occupied v-alias digest' "$TEST_ROOT/oci-alias.out" \
   || fail 'divergent v-alias refusal lost its diagnosis'
@@ -896,9 +896,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika 9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika 9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1 || rc=$?
+  https://github.com/nika-open/nika >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 73 ] || fail 'divergent occupied v-alias was not refused on replay'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 6 ] \
   || fail 'divergent v-alias refusal wrote on replay'
@@ -910,9 +910,9 @@ rc=0
 PATH="$BIN:$PATH" OCI_STATE="$OCI_STATE" OCI_LOG="$OCI_LOG" OCI_TAGS="$OCI_TAGS" \
   OCI_LOOKUP_LOG="$OCI_LOOKUP_LOG" \
   bash "$ROOT/scripts/release/oci-coordinate-immutable.sh" publish \
-  ghcr.io/supernovae-st/nika v9.9.9 "$CANDIDATE" \
+  ghcr.io/nika-open/nika v9.9.9 "$CANDIDATE" \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  https://github.com/supernovae-st/nika >/dev/null 2>&1 || rc=$?
+  https://github.com/nika-open/nika >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 64 ] || fail 'a v-prefixed version was accepted'
 [ ! -s "$OCI_LOOKUP_LOG" ] || fail 'the v-prefix guard ran after a registry lookup'
 [ "$(wc -l <"$OCI_LOG" | tr -d ' ')" = 6 ] || fail 'the v-prefix guard ran after a write'
@@ -933,14 +933,14 @@ PATH="$BIN:$PATH" PAYLOAD_LOG="$PAYLOAD_LOG" \
   PAYLOAD_SOURCE_AMD64="$TEST_ROOT/payload-x64/nika" \
   PAYLOAD_SOURCE_ARM64="$TEST_ROOT/payload-arm64/nika" \
   bash "$ROOT/scripts/release/verify-oci-payload.sh" \
-  ghcr.io/supernovae-st/nika "$CANDIDATE" "$VERSION" "$PAYLOAD_ARTIFACTS" >/dev/null
+  ghcr.io/nika-open/nika "$CANDIDATE" "$VERSION" "$PAYLOAD_ARTIFACTS" >/dev/null
 [ "$(grep -Ec '^(pull|create|cp|rm) ' "$PAYLOAD_LOG")" -eq 8 ] \
   || fail 'OCI payload proof did not pull/create/copy/remove both stopped containers'
 if PATH="$BIN:$PATH" PAYLOAD_LOG="$PAYLOAD_LOG" \
   PAYLOAD_SOURCE_AMD64="$TEST_ROOT/payload-x64/nika" \
   PAYLOAD_SOURCE_ARM64="$TEST_ROOT/payload-x64/nika" \
   bash "$ROOT/scripts/release/verify-oci-payload.sh" \
-  ghcr.io/supernovae-st/nika "$CANDIDATE" "$VERSION" \
+  ghcr.io/nika-open/nika "$CANDIDATE" "$VERSION" \
   "$PAYLOAD_ARTIFACTS" >/dev/null 2>&1; then
   fail 'OCI payload drift passed'
 fi
@@ -955,7 +955,7 @@ cat >"$BIN/slsa-verifier" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$*" >>"$SLSA_LOG"
 [ "$1" = verify-artifact ]
-printf '%s\n' "$*" | grep -Fq -- '--source-uri github.com/supernovae-st/nika'
+printf '%s\n' "$*" | grep -Fq -- '--source-uri github.com/nika-open/nika'
 printf '%s\n' "$*" | grep -Fq -- '--source-tag v9.9.9'
 [ "${SLSA_REFUSE:-0}" != 1 ]
 EOF
@@ -991,20 +991,20 @@ exit 90
 EOF
 chmod +x "$BIN/gh"
 matches="$(PATH="$BIN:$PATH" SLSA_REMOTE="$SLSA_REMOTE" \
-  gh api repos/supernovae-st/nika/releases/123)"
+  gh api repos/nika-open/nika/releases/123)"
 [ "$matches" = 1 ] || fail 'prior-run SLSA asset identity was not unique'
 PATH="$BIN:$PATH" SLSA_REMOTE="$SLSA_REMOTE" \
-  gh release download "$TAG" --repo supernovae-st/nika \
+  gh release download "$TAG" --repo nika-open/nika \
   --pattern multiple.intoto.jsonl --dir "$SLSA_RECOVERED"
 PATH="$BIN:$PATH" SLSA_LOG="$SLSA_LOG" \
   bash "$ROOT/scripts/release/verify-slsa-provenance.sh" \
-  "$TAG" supernovae-st/nika "$SLSA_RECOVERED/multiple.intoto.jsonl" \
+  "$TAG" nika-open/nika "$SLSA_RECOVERED/multiple.intoto.jsonl" \
   "${native[@]}"
 [ "$(wc -w <"$SLSA_LOG" | tr -d ' ')" -gt 10 ] \
   || fail 'prior-run SLSA verification did not invoke source/subject verification'
 if SLSA_REFUSE=1 PATH="$BIN:$PATH" SLSA_LOG="$SLSA_LOG" \
   bash "$ROOT/scripts/release/verify-slsa-provenance.sh" \
-  "$TAG" supernovae-st/nika "$LOCAL/multiple.intoto.jsonl" \
+  "$TAG" nika-open/nika "$LOCAL/multiple.intoto.jsonl" \
   "${native[@]}" >/dev/null 2>&1; then
   fail 'cryptographically rejected prior-run SLSA provenance passed'
 fi
@@ -1102,7 +1102,7 @@ release_env=(
 )
 env "${release_env[@]}" MARKER_COMMIT_THEN_ERROR=1 \
   bash "$ROOT/scripts/release/release-digest-marker.sh" stage \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 "$DIGEST" >/dev/null
 grep -Fqx 'curated release body' "$RELEASE_BODY" \
   || fail 'digest staging replaced the existing release body'
@@ -1117,7 +1117,7 @@ printf 'curated release body\n' >"$RELEASE_BODY"
 : >"$MARKER_PATCH_LOG"
 if env "${release_env[@]}" POST_PATCH_TAG=v9.9.8 \
   bash "$ROOT/scripts/release/release-digest-marker.sh" stage \
-  supernovae-st/nika 123 "$TAG" "$RELEASE_SHA" "$DIGEST" \
+  nika-open/nika 123 "$TAG" "$RELEASE_SHA" "$DIGEST" \
   >"$TEST_ROOT/post-patch-drift.out" 2>&1; then
   fail 'marker stage accepted post-write release identity drift'
 fi
@@ -1128,7 +1128,7 @@ grep -Fq 'REFUSED tag v9.9.8' "$TEST_ROOT/post-patch-drift.out" \
 : >"$MARKER_PATCH_LOG"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" stage \
-  supernovae-st/nika 123 "$TAG" "$RELEASE_SHA" "$DIGEST" >/dev/null 2>&1; then
+  nika-open/nika 123 "$TAG" "$RELEASE_SHA" "$DIGEST" >/dev/null 2>&1; then
   fail 'marker stage accepted pre-existing release identity drift'
 fi
 [ ! -s "$MARKER_PATCH_LOG" ] || fail 'marker stage overwrote a mismatched release tag'
@@ -1136,20 +1136,20 @@ printf '%s\n' "$TAG" >"${RELEASE_BODY}.tag"
 cp "$TEST_ROOT/valid-release-body" "$RELEASE_BODY"
 if env "${release_env[@]}" RELEASE_STATE_GET_ERROR=1 \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'digest marker read passed after release-state GET failure'
 fi
 if env "${release_env[@]}" RELEASE_BODY_GET_ERROR=1 \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'digest marker read passed after release-body GET failure'
 fi
 printf 'curated release body\n<!-- nika-ghcr-digest: malformed -->\n' >"$RELEASE_BODY"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'malformed digest marker passed'
 fi
@@ -1157,14 +1157,14 @@ printf 'curated release body\n  <!-- nika-ghcr-digest: %s -->\n' \
   "$DIGEST" >"$RELEASE_BODY"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'indented digest marker passed as absent'
 fi
 printf 'curated prose naming nika-ghcr-digest: %s\n' "$DIGEST" >"$RELEASE_BODY"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'embedded digest marker token passed as absent'
 fi
@@ -1172,20 +1172,20 @@ printf 'curated release body\n<!-- nika-ghcr-digest: %s -->\n<!-- nika-ghcr-dige
   "$DIGEST" >"$RELEASE_BODY"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" read \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'duplicate marker-prefix lines passed'
 fi
 cp "$TEST_ROOT/valid-release-body" "$RELEASE_BODY"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/release-digest-marker.sh" stage \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 "$OTHER_DIGEST" >/dev/null 2>&1; then
   fail 'digest marker drift passed'
 fi
 printf 'v9.9.8\n' >"${RELEASE_BODY}.tag"
 if env "${release_env[@]}" \
-  bash "$ROOT/scripts/release/read-release-state.sh" supernovae-st/nika 123 \
+  bash "$ROOT/scripts/release/read-release-state.sh" nika-open/nika 123 \
   "$TAG" 2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'stale release tag state passed'
 fi
@@ -1199,14 +1199,14 @@ printf 'false\n' >"$RELEASE_DRAFT"
 printf '123\tv9.9.9\n124\tv10.0.0\n' >"$RELEASE_LIST"
 if env "${release_env[@]}" \
   bash "$ROOT/scripts/release/assert-newest-public-stable.sh" \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null 2>&1; then
   fail 'old stable tag passed the floating-pointer downgrade guard'
 fi
 printf '123\tv9.9.9\n' >"$RELEASE_LIST"
 env "${release_env[@]}" \
   bash "$ROOT/scripts/release/assert-newest-public-stable.sh" \
-  supernovae-st/nika 123 "$TAG" \
+  nika-open/nika 123 "$TAG" \
   2222222222222222222222222222222222222222 >/dev/null
 
 # A stable replay after publication heals a failed latest job by digest and
@@ -1248,20 +1248,20 @@ printf 'old\n' >"$POINTER_STATE"
 PATH="$BIN:$PATH" POINTER_STATE="$POINTER_STATE" POINTER_LOG="$POINTER_LOG" \
   POINTER_TARGET="$DIGEST" POINTER_COMMIT_THEN_ERROR=1 \
   bash "$ROOT/scripts/release/converge-oci-pointer.sh" \
-  ghcr.io/supernovae-st/nika latest "$DIGEST" >/dev/null
+  ghcr.io/nika-open/nika latest "$DIGEST" >/dev/null
 [ "$(wc -l <"$POINTER_LOG" | tr -d ' ')" = 1 ] \
   || fail 'public stable replay did not heal latest exactly once'
 PATH="$BIN:$PATH" POINTER_STATE="$POINTER_STATE" POINTER_LOG="$POINTER_LOG" \
   POINTER_TARGET="$DIGEST" \
   bash "$ROOT/scripts/release/converge-oci-pointer.sh" \
-  ghcr.io/supernovae-st/nika latest "$DIGEST" >/dev/null
+  ghcr.io/nika-open/nika latest "$DIGEST" >/dev/null
 [ "$(wc -l <"$POINTER_LOG" | tr -d ' ')" = 1 ] \
   || fail 'equal latest replay wrote again'
 printf 'credential-helper\n' >"$POINTER_STATE"
 if PATH="$BIN:$PATH" POINTER_STATE="$POINTER_STATE" POINTER_LOG="$POINTER_LOG" \
   POINTER_TARGET="$DIGEST" \
   bash "$ROOT/scripts/release/converge-oci-pointer.sh" \
-  ghcr.io/supernovae-st/nika latest "$DIGEST" >/dev/null 2>&1; then
+  ghcr.io/nika-open/nika latest "$DIGEST" >/dev/null 2>&1; then
   fail 'unknown latest lookup error granted pointer write authority'
 fi
 [ "$(wc -l <"$POINTER_LOG" | tr -d ' ')" = 1 ] \
@@ -1270,7 +1270,7 @@ printf 'mixed\n' >"$POINTER_STATE"
 if PATH="$BIN:$PATH" POINTER_STATE="$POINTER_STATE" POINTER_LOG="$POINTER_LOG" \
   POINTER_TARGET="$DIGEST" \
   bash "$ROOT/scripts/release/converge-oci-pointer.sh" \
-  ghcr.io/supernovae-st/nika latest "$DIGEST" >/dev/null 2>&1; then
+  ghcr.io/nika-open/nika latest "$DIGEST" >/dev/null 2>&1; then
   fail 'mixed latest 500/unauthorized/manifest-unknown granted write authority'
 fi
 [ "$(wc -l <"$POINTER_LOG" | tr -d ' ')" = 1 ] \

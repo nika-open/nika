@@ -53,7 +53,7 @@ FINDINGS_REPORT = (
     "WARN  docs            status snapshot 0.120.1 != main workspace 0.120.2\n"
 )
 GREEN_REPORT = "latest release: v0.120.2 · 50.0h old · tag-pin severity: FAIL\nGREEN — every pin holds\n"
-COMMENTS_PAGE = "repos/supernovae-st/nika/issues/841/comments?per_page=100&page="
+COMMENTS_PAGE = "repos/nika-open/nika/issues/841/comments?per_page=100&page="
 
 # The fake gh: a stateful stand-in. argv is logged as one JSON line per call;
 # reads/writes go to a state file; comments carry GitHub's author shape and
@@ -190,7 +190,7 @@ class BoardPublisher(unittest.TestCase):
             env.update(PATH=f"{root}{os.pathsep}{env.get('PATH', '')}",
                        FAKE_GH_LOG=str(root / "gh.log"),
                        FAKE_GH_STATE=str(root / "state.json"),
-                       BOARD_REPO="supernovae-st/nika",
+                       BOARD_REPO="nika-open/nika",
                        BOARD_ISSUE="841",
                        GITHUB_RUN_ID="test-run",
                        GH_TOKEN="fake")
@@ -312,7 +312,7 @@ class BoardPublisher(unittest.TestCase):
         self.assertEqual(ops(calls2), [
             "issue view",
             f"api GET {COMMENTS_PAGE}1",
-            f"api PATCH repos/supernovae-st/nika/issues/comments/{marker_id}",
+            f"api PATCH repos/nika-open/nika/issues/comments/{marker_id}",
         ])
         self.assert_never_forbidden(calls2)
         self.assertEqual(len(state2["comments"]), 2)
@@ -336,7 +336,7 @@ class BoardPublisher(unittest.TestCase):
     # side effect to the publisher — no title search, no create, no close.
     def test_workflow_declares_identity_and_delegates(self):
         workflow = (ROOT / ".github/workflows/ecosystem-coherence.yml").read_text()
-        self.assertIn("BOARD_REPO: supernovae-st/nika", workflow)
+        self.assertIn("BOARD_REPO: nika-open/nika", workflow)
         self.assertIn("BOARD_ISSUE: '841'", workflow)
         self.assertIn("scripts/ci/ecosystem-coherence-issue.py bot.out", workflow)
         self.assertIn("scripts/ci/test-ecosystem-coherence-issue.py", workflow)
@@ -372,7 +372,7 @@ class BoardPublisher(unittest.TestCase):
             "issue view",
             f"api GET {COMMENTS_PAGE}1",
             f"api GET {COMMENTS_PAGE}2",
-            "api PATCH repos/supernovae-st/nika/issues/comments/500",
+            "api PATCH repos/nika-open/nika/issues/comments/500",
         ])
         self.assert_never_forbidden(calls)
         self.assertEqual(len(final["comments"]), 106)

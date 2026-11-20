@@ -3,12 +3,12 @@
 # Consumed by LFX Insights and planned for Scorecard v6 OSPS verdicts.
 header:
   schema-version: 2.0.0
-  last-updated: '2026-07-20'
+  last-updated: '2026-11-20'
   last-reviewed: '2026-07-20'
-  url: https://github.com/supernovae-st/nika/blob/main/security-insights.yml
+  url: https://github.com/nika-open/nika/blob/main/security-insights.yml
   comment: >-
     Security posture of the Nika reference engine. The spec repo
-    (supernovae-st/nika-spec) carries the language standard surfaces
+    (nika-open/nika-spec) carries the language standard surfaces
     (conformance suite · governance · certifications matrix).
 
 project:
@@ -22,10 +22,10 @@ project:
       primary: true
   repositories:
     - name: nika
-      url: https://github.com/supernovae-st/nika
+      url: https://github.com/nika-open/nika
       comment: Reference engine (Rust · AGPL-3.0-or-later).
     - name: nika-spec
-      url: https://github.com/supernovae-st/nika-spec
+      url: https://github.com/nika-open/nika-spec
       comment: Language specification + public conformance suite (Apache-2.0).
   vulnerability-reporting:
     reports-accepted: true
@@ -34,13 +34,13 @@ project:
       name: Security team
       email: security@supernovae.studio
       primary: true
-    security-policy: https://github.com/supernovae-st/nika/blob/main/SECURITY.md
+    security-policy: https://github.com/nika-open/nika/blob/main/SECURITY.md
     comment: >-
       Private disclosure via email or GitHub private vulnerability
       reporting. No public issues for vulnerabilities.
 
 repository:
-  url: https://github.com/supernovae-st/nika
+  url: https://github.com/nika-open/nika
   status: active
   accepts-change-request: true
   accepts-automated-change-request: true
@@ -51,7 +51,7 @@ repository:
       email: security@supernovae.studio
       primary: true
   license:
-    url: https://github.com/supernovae-st/nika/blob/main/LICENSE
+    url: https://github.com/nika-open/nika/blob/main/LICENSE
     expression: AGPL-3.0-or-later
   security:
     assessments:

@@ -6,7 +6,7 @@ edition     = "2024"
 rust-version = "1.88"
 license     = "AGPL-3.0-or-later"
 description = "The seats' doors of the Compile core: the COLD proposal (a private semantic plan a seat proposes, decoded, merged, composed), the native door (a seat writes the .nika, the compiler judges it), the sketch door (structure judged first, typed holes filled, the document emitted), the verified transform, the knowledge door and the bounded decision seats — above the deterministic compiler, never below it (ADR-140)."
-repository  = "https://github.com/supernovae-st/nika"
+repository  = "https://github.com/nika-open/nika"
 publish     = false  # member of the nika-onboard unit — never on crates.io alone
 
 [dependencies]

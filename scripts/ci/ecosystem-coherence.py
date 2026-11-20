@@ -41,7 +41,7 @@ import sys
 import urllib.request
 
 RAW = "https://raw.githubusercontent.com"
-VSCODE_RELEASE_API = "https://api.github.com/repos/supernovae-st/nika-vscode/releases/latest"
+VSCODE_RELEASE_API = "https://api.github.com/repos/nika-open/nika-vscode/releases/latest"
 VSCODE_MARKETPLACE_API = "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery"
 # The live listing is supernovae.nika; the retired nika-lang identity froze
 # at 0.116.3 and made the bot compare a dead extension (found 2026-09-19).
@@ -143,7 +143,7 @@ def vscode_marketplace_version():
 
 
 def main():
-    rel = json.loads(fetch("https://api.github.com/repos/supernovae-st/nika/releases/latest"))
+    rel = json.loads(fetch("https://api.github.com/repos/nika-open/nika/releases/latest"))
     tag = rel["tag_name"].lstrip("v")
     published = datetime.datetime.fromisoformat(rel["published_at"].replace("Z", "+00:00"))
     age_h = (datetime.datetime.now(datetime.timezone.utc) - published).total_seconds() / 3600
@@ -151,7 +151,7 @@ def main():
     tag_sev = "WARN" if grace else "FAIL"
     print(f"latest release: v{tag} · {age_h:.1f}h old · tag-pin severity: {tag_sev}")
 
-    tap = grab(f"{RAW}/supernovae-st/homebrew-tap/main/Formula/nika.rb",
+    tap = grab(f"{RAW}/nika-open/homebrew-tap/main/Formula/nika.rb",
                lambda t: next(l.split('"')[1] for l in t.splitlines() if l.strip().startswith('version "')),
                "tap", unreadable=tag_sev)
     if tap and tap != tag:
@@ -163,18 +163,18 @@ def main():
     if site and site != tag:
         FINDINGS.append((tag_sev, "site", f"served llms.txt version v{site} != latest release {tag}"))
 
-    sdk_repo = grab(f"{RAW}/supernovae-st/nika-client/main/package.json",
+    sdk_repo = grab(f"{RAW}/nika-open/nika-client/main/package.json",
                     lambda t: json.loads(t)["version"], "client-sdk repo")
-    npm = grab("https://registry.npmjs.org/@supernovae-st%2Fnika",
+    npm = grab("https://registry.npmjs.org/@nika-open%2Fnika",
                lambda t: json.loads(t)["dist-tags"]["latest"], "npm")
     if sdk_repo and npm and sdk_repo != npm:
         FINDINGS.append(("FAIL", "npm", f"published {npm} != repo {sdk_repo}"))
 
-    pack = grab(f"{RAW}/supernovae-st/nika/main/crates/nika-pack/pack/VERSION", str.strip, "pack")
-    pack_sha = grab(f"{RAW}/supernovae-st/nika/main/crates/nika-pack/pack/SPEC_SHA", str.strip, "pack identity")
+    pack = grab(f"{RAW}/nika-open/nika/main/crates/nika-pack/pack/VERSION", str.strip, "pack")
+    pack_sha = grab(f"{RAW}/nika-open/nika/main/crates/nika-pack/pack/SPEC_SHA", str.strip, "pack identity")
     # Main's SPEC_PIN judges one thing: the pack vendored on main is the
     # spec revision main pins.
-    engine_pin = grab(f"{RAW}/supernovae-st/nika/main/SPEC_PIN", spec_pin_line, "engine spec pin")
+    engine_pin = grab(f"{RAW}/nika-open/nika/main/SPEC_PIN", spec_pin_line, "engine spec pin")
     if pack_sha and engine_pin and pack_sha != engine_pin:
         FINDINGS.append(("FAIL", "pack identity", f"pack {pack_sha[:12]} != SPEC_PIN {engine_pin[:12]}"))
     # The two immune legs that watched nika.sh raw workflow files moved here:
@@ -189,7 +189,7 @@ def main():
     # right for the published release. A tag-pin like the tap: WARN inside
     # the cascade window, FAIL past it; an unreadable side follows the same
     # ladder.
-    release_pin = grab(f"{RAW}/supernovae-st/nika/v{tag}/SPEC_PIN", spec_pin_line,
+    release_pin = grab(f"{RAW}/nika-open/nika/v{tag}/SPEC_PIN", spec_pin_line,
                        "release spec pin", unreadable=tag_sev)
     site_pin = grab(SITE_SPEC_PIN, served_spec_commit, "site spec pin", unreadable=tag_sev)
     if site_pin and release_pin and site_pin != release_pin:
@@ -202,7 +202,7 @@ def main():
         print(f"spec-ripeness: main pins nika-spec {engine_pin[:12]}, v{tag} embeds "
               f"{release_pin[:12]} · the site follows at the next release")
     spec_ref = pack_sha if pack_sha and len(pack_sha) == 40 else None
-    spec = grab(f"{RAW}/supernovae-st/nika-spec/{spec_ref}/VERSION", str.strip, "spec at pack identity") if spec_ref else None
+    spec = grab(f"{RAW}/nika-open/nika-spec/{spec_ref}/VERSION", str.strip, "spec at pack identity") if spec_ref else None
     if pack and spec and pack != spec:
         FINDINGS.append(("FAIL", "pack", f"engine pack {pack} != spec@{spec_ref[:12]} {spec}"))
 
@@ -212,8 +212,8 @@ def main():
     # shelf). Hash the vendored canon against the spec's: a pin at the
     # wrong granularity is worse than no pin.
     import hashlib
-    pack_canon = grab(f"{RAW}/supernovae-st/nika/main/crates/nika-pack/pack/canon.yaml", str, "pack canon")
-    spec_canon = grab(f"{RAW}/supernovae-st/nika-spec/{spec_ref}/canon.yaml", str, "spec canon at pack identity") if spec_ref else None
+    pack_canon = grab(f"{RAW}/nika-open/nika/main/crates/nika-pack/pack/canon.yaml", str, "pack canon")
+    spec_canon = grab(f"{RAW}/nika-open/nika-spec/{spec_ref}/canon.yaml", str, "spec canon at pack identity") if spec_ref else None
     if pack_canon and spec_canon and pack_canon != spec_canon:
         ph = hashlib.sha256(pack_canon.encode()).hexdigest()[:12]
         sh = hashlib.sha256(spec_canon.encode()).hexdigest()[:12]
@@ -224,13 +224,13 @@ def main():
     # main; its own gate only fires on push/PR + a daily cron. This pin
     # gives the nightly issue the same eye (drift proven to reappear
     # within 24h of a resync, 2026-07-09).
-    eng_skill = grab(f"{RAW}/supernovae-st/nika/main/.agents/plugins/nika/skills/nika-authoring/SKILL.md", str, "agents mirror")
-    mir_skill = grab(f"{RAW}/supernovae-st/nika-plugins/main/.agents/plugins/nika/skills/nika-authoring/SKILL.md", str, "agents mirror")
+    eng_skill = grab(f"{RAW}/nika-open/nika/main/.agents/plugins/nika/skills/nika-authoring/SKILL.md", str, "agents mirror")
+    mir_skill = grab(f"{RAW}/nika-open/nika-plugins/main/.agents/plugins/nika/skills/nika-authoring/SKILL.md", str, "agents mirror")
     if eng_skill and mir_skill and eng_skill != mir_skill:
         FINDINGS.append(("WARN", "agents mirror",
                          "nika-plugins SKILL.md != engine main — the byte-parity claim drifted; resync the mirror"))
 
-    vscode_repo = grab(f"{RAW}/supernovae-st/nika-vscode/main/package.json",
+    vscode_repo = grab(f"{RAW}/nika-open/nika-vscode/main/package.json",
                        lambda t: json.loads(t)["version"], "vscode repo")
     vscode_release = grab(VSCODE_RELEASE_API,
                           lambda t: json.loads(t)["tag_name"].lstrip("v"), "vscode release")
@@ -252,10 +252,10 @@ def main():
         FINDINGS.append(("WARN", "vscode openvsx",
                          f"OpenVSX {ovsx} differs from latest release {vscode_release} (publish = tag · operator)"))
 
-    engine_main = grab(f"{RAW}/supernovae-st/nika/main/Cargo.toml",
+    engine_main = grab(f"{RAW}/nika-open/nika/main/Cargo.toml",
                        lambda t: next(l.split('"')[1] for l in t.splitlines() if l.replace(" ", "").startswith('version=')),
                        "engine main")
-    docs_ver = grab(f"{RAW}/supernovae-st/nika-docs/main/snippets/_status-snapshot.mdx",
+    docs_ver = grab(f"{RAW}/nika-open/nika-docs/main/snippets/_status-snapshot.mdx",
                     lambda t: next(l.split('"')[1] for l in t.splitlines() if '"version"' in l or "version:" in l),
                     "docs snapshot")
     if engine_main and docs_ver and docs_ver != engine_main:
@@ -265,16 +265,16 @@ def main():
     # SPEC_PIN the first-party showcases project from must be a real
     # nika-spec commit, and the index must carry artifacts — a wired,
     # living registry, not an orphan.
-    spec_pin = grab(f"{RAW}/supernovae-st/nika-registry/main/SPEC_PIN",
+    spec_pin = grab(f"{RAW}/nika-open/nika-registry/main/SPEC_PIN",
                     lambda t: next(l.strip() for l in t.splitlines() if l.strip() and not l.startswith("#")),
                     "registry pin")
-    reg_index = grab(f"{RAW}/supernovae-st/nika-registry/main/index.json",
+    reg_index = grab(f"{RAW}/nika-open/nika-registry/main/index.json",
                      lambda t: len(json.loads(t)["artifacts"]), "registry index")
     if reg_index is not None and reg_index == 0:
         FINDINGS.append(("FAIL", "registry", "index.json carries zero artifacts"))
     if spec_pin:
         try:
-            fetch(f"https://api.github.com/repos/supernovae-st/nika-spec/commits/{spec_pin}")
+            fetch(f"https://api.github.com/repos/nika-open/nika-spec/commits/{spec_pin}")
         except Exception:  # noqa: BLE001 — an unresolvable pin is the finding
             FINDINGS.append(("FAIL", "registry", f"SPEC_PIN {spec_pin[:9]} not a nika-spec commit"))
 
@@ -284,21 +284,21 @@ def main():
     # so an unbumped default OR an unrolled tag is the same finding. The
     # starter template and the registry certifier are deliberate-bump
     # surfaces: WARN (visible nightly, never a red board on their own).
-    act = grab(f"{RAW}/supernovae-st/nika-action/v1/action.yml",
+    act = grab(f"{RAW}/nika-open/nika-action/v1/action.yml",
                lambda t: next(l.split("'")[1] for l in t.splitlines() if "default: '0" in l),
                "action@v1", unreadable=tag_sev)
     if act and act != tag:
         FINDINGS.append((tag_sev, "action@v1",
                          f"served engine-version default {act} != latest release {tag} — bump main + roll v1"))
 
-    starter = grab(f"{RAW}/supernovae-st/nika-actions-starter/main/.github/workflows/nika-check.yml",
+    starter = grab(f"{RAW}/nika-open/nika-actions-starter/main/.github/workflows/nika-check.yml",
                    lambda t: next(l.split("'")[1] for l in t.splitlines() if "default: '0" in l),
                    "actions-starter")
     if starter and starter != tag:
         FINDINGS.append(("WARN", "actions-starter",
                          f"template engine-version default {starter} != latest release {tag}"))
 
-    cert_engine = grab(f"{RAW}/supernovae-st/nika-registry/main/scripts/cert.py",
+    cert_engine = grab(f"{RAW}/nika-open/nika-registry/main/scripts/cert.py",
                        lambda t: next(l.split('"')[1] for l in t.splitlines() if l.startswith("ENGINE_VERSION")),
                        "registry certifier")
     if cert_engine and cert_engine != tag:
@@ -320,7 +320,7 @@ def main():
         ("nika", "spec-pin-heal.yml"),
     ]
     for repo, wf in IMMUNE:
-        got = grab(f"{RAW}/supernovae-st/{repo}/main/.github/workflows/{wf}", str,
+        got = grab(f"{RAW}/nika-open/{repo}/main/.github/workflows/{wf}", str,
                    f"immune {repo}", unreadable=tag_sev)
         if got is not None and "on:" not in got:
             FINDINGS.append(("WARN", f"immune {repo}",
@@ -344,7 +344,7 @@ def main():
     # Wave-ripeness (operator ruling 2026-07-13 · option C): the release
     # stays a DELIBERATE act — the mechanism proposes, the operator
     # disposes. Informational only, never a finding.
-    ripe = grab(f"https://api.github.com/repos/supernovae-st/nika/compare/v{tag}...main",
+    ripe = grab(f"https://api.github.com/repos/nika-open/nika/compare/v{tag}...main",
                 lambda t: json.loads(t), "wave ripeness")
     if ripe and isinstance(ripe.get("ahead_by"), int) and ripe["ahead_by"] > 0:
         heads = [c["commit"]["message"].split("\n")[0]

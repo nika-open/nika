@@ -21,7 +21,7 @@ def native_names(tag):
 
 
 def payload_names(tag):
-    npm = f"supernovae-st-nika-check-wasm-{tag[1:]}.tgz"
+    npm = f"nika-open-nika-check-wasm-{tag[1:]}.tgz"
     return [*native_names(tag), "SHA256SUMS", npm, npm + ".sha256"]
 
 

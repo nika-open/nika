@@ -20,7 +20,7 @@ body:
     attributes:
       label: How did you install?
       options:
-        - Homebrew (brew install supernovae-st/tap/nika)
+        - Homebrew (brew install nika-open/tap/nika)
         - install.sh
         - GitHub release binary
         - Built from source

@@ -32,10 +32,10 @@ make_assets() {
   (cd "$ARTIFACTS" && sha256sum nika-*.tar.gz | LC_ALL=C sort >SHA256SUMS)
   printf 'tag-bound provenance\n' >"$ARTIFACTS/multiple.intoto.jsonl"
   printf 'npm package bytes for %s\n' "$version" \
-    >"$ARTIFACTS/supernovae-st-nika-check-wasm-${version}.tgz"
+    >"$ARTIFACTS/nika-open-nika-check-wasm-${version}.tgz"
   (cd "$ARTIFACTS" && sha256sum \
-    "supernovae-st-nika-check-wasm-${version}.tgz" \
-    >"supernovae-st-nika-check-wasm-${version}.tgz.sha256")
+    "nika-open-nika-check-wasm-${version}.tgz" \
+    >"nika-open-nika-check-wasm-${version}.tgz.sha256")
   cp "$ARTIFACTS"/* "$REMOTE/"
 }
 
@@ -129,7 +129,7 @@ run_finalizer() {
     POST_PATCH_TAG="${POST_PATCH_TAG:-}" \
     FINALIZE_COMMIT_THEN_ERROR="${FINALIZE_COMMIT_THEN_ERROR:-0}" \
     bash "$ROOT/scripts/release/finalize-release.sh" \
-    supernovae-st/nika 123 "$RELEASE_TAG" "$SHA" "$DIGEST" \
+    nika-open/nika 123 "$RELEASE_TAG" "$SHA" "$DIGEST" \
     "$ARTIFACTS" "$tap_ready"
 }
 

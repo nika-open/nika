@@ -164,7 +164,7 @@ fn canon_extract_modes() -> (u64, Vec<String>) {
 /// The projection (`nika spec --canon` prints the vendored canon) and the
 /// judge (`nika check` refuses a `mode:` outside `ExtractMode::ALL`) MUST
 /// hold the same closed set. The released 0.116.2 printed 9 while its
-/// checker accepted 10 (`raw`) — supernovae-st/nika#1386. Equality, in
+/// checker accepted 10 (`raw`) — nika-open/nika#1386. Equality, in
 /// both directions: a mode the checker knows and the canon does not is a
 /// projection lag; a mode the canon names and the checker refuses is a
 /// spec the binary does not speak.

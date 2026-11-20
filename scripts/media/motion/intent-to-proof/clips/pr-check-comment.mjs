@@ -1,5 +1,5 @@
 // pr-check-comment · "Every pull request gets a verdict."
-// The sticky comment supernovae-st/nika-action posts on a pull request,
+// The sticky comment nika-open/nika-action posts on a pull request,
 // for two pushes of one workflow. Its body is the action's own
 // render_comment.py run on `nika check --json` and `nika inspect --format
 // mermaid`, replayed exactly as the action runs them by

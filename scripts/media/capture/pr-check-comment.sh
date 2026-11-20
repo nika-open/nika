@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-check-comment.sh — capture the sticky comment supernovae-st/nika-action
+# pr-check-comment.sh — capture the sticky comment nika-open/nika-action
 # posts on a pull request, for two pushes of one workflow: a push with a
 # finding, then the push that fixes it.
 #

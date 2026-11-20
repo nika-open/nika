@@ -35,8 +35,8 @@ assets=(
   "$artifacts/nika-linux-x64-${version}.tar.gz"
   "$artifacts/SHA256SUMS"
   "$artifacts/multiple.intoto.jsonl"
-  "$artifacts/supernovae-st-nika-check-wasm-${version}.tgz"
-  "$artifacts/supernovae-st-nika-check-wasm-${version}.tgz.sha256"
+  "$artifacts/nika-open-nika-check-wasm-${version}.tgz"
+  "$artifacts/nika-open-nika-check-wasm-${version}.tgz.sha256"
 )
 read_state() {
   bash "$here/read-release-state.sh" "$repo" "$release_id" "$tag" "$sha"

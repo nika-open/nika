@@ -54,39 +54,39 @@ def fixtures(*, tag="0.95.0", age_h=48.0, tap="0.95.0", site="0.95.0",
              site_pin_doc=None):
     R = bot.RAW
     return {
-        "https://api.github.com/repos/supernovae-st/nika/releases/latest":
+        "https://api.github.com/repos/nika-open/nika/releases/latest":
             json.dumps({"tag_name": f"v{tag}", "published_at": iso(age_h)}),
-        f"{R}/supernovae-st/homebrew-tap/main/Formula/nika.rb": f'  version "{tap}"\n',
+        f"{R}/nika-open/homebrew-tap/main/Formula/nika.rb": f'  version "{tap}"\n',
         bot.SITE_LLMS: f"# site\nThe engine versions on real semver; currently v{site}.\n",
         bot.SITE_SPEC_PIN: site_pin_doc if site_pin_doc is not None
             else json.dumps({"spec_commit": pack_sha}),
-        f"{R}/supernovae-st/nika-client/main/package.json": json.dumps({"version": sdk}),
-        "https://registry.npmjs.org/@supernovae-st%2Fnika": json.dumps({"dist-tags": {"latest": npm}}),
-        f"{R}/supernovae-st/nika/main/crates/nika-pack/pack/VERSION": pack + "\n",
-        f"{R}/supernovae-st/nika/main/crates/nika-pack/pack/SPEC_SHA": pack_sha + "\n",
-        f"{R}/supernovae-st/nika/main/SPEC_PIN": "# pin\n" + (engine_pin or pack_sha) + "\n",
-        f"{R}/supernovae-st/nika/v{tag}/SPEC_PIN": "# pin\n" + (release_pin or pack_sha) + "\n",
-        f"{R}/supernovae-st/nika-spec/{pack_sha}/VERSION": spec_v + "\n",
-        f"{R}/supernovae-st/nika-spec/{pack_sha}/canon.yaml": "providers: {}\n",
-        f"{R}/supernovae-st/nika/main/crates/nika-pack/pack/canon.yaml": "providers: {}\n",
-        f"{R}/supernovae-st/nika-vscode/main/package.json": json.dumps({"version": vscode}),
+        f"{R}/nika-open/nika-client/main/package.json": json.dumps({"version": sdk}),
+        "https://registry.npmjs.org/@nika-open%2Fnika": json.dumps({"dist-tags": {"latest": npm}}),
+        f"{R}/nika-open/nika/main/crates/nika-pack/pack/VERSION": pack + "\n",
+        f"{R}/nika-open/nika/main/crates/nika-pack/pack/SPEC_SHA": pack_sha + "\n",
+        f"{R}/nika-open/nika/main/SPEC_PIN": "# pin\n" + (engine_pin or pack_sha) + "\n",
+        f"{R}/nika-open/nika/v{tag}/SPEC_PIN": "# pin\n" + (release_pin or pack_sha) + "\n",
+        f"{R}/nika-open/nika-spec/{pack_sha}/VERSION": spec_v + "\n",
+        f"{R}/nika-open/nika-spec/{pack_sha}/canon.yaml": "providers: {}\n",
+        f"{R}/nika-open/nika/main/crates/nika-pack/pack/canon.yaml": "providers: {}\n",
+        f"{R}/nika-open/nika-vscode/main/package.json": json.dumps({"version": vscode}),
         bot.VSCODE_RELEASE_API: json.dumps({"tag_name": f"v{vscode_release or vscode}"}),
         bot.VSCODE_MARKETPLACE_API: json.dumps({"results": [{"extensions": [{
             "versions": [{"version": marketplace or vscode}]
         }]}]}),
         bot.OPENVSX_API: json.dumps({"version": openvsx or vscode}),
-        f"{R}/supernovae-st/nika/main/Cargo.toml": f'version      = "{engine}"\n',
-        f"{R}/supernovae-st/nika-docs/main/snippets/_status-snapshot.mdx": f'  version: "{docs}",\n',
-        f"{R}/supernovae-st/nika-registry/main/SPEC_PIN": "# pin\n" + "a" * 40 + "\n",
-        f"{R}/supernovae-st/nika-registry/main/index.json": json.dumps({"artifacts": [{}] * reg_n}),
-        "https://api.github.com/repos/supernovae-st/nika-spec/commits/" + "a" * 40: "{}",
-        f"{R}/supernovae-st/nika-action/v1/action.yml": f"    default: '{action}'\n",
-        f"{R}/supernovae-st/nika-actions-starter/main/.github/workflows/nika-check.yml":
+        f"{R}/nika-open/nika/main/Cargo.toml": f'version      = "{engine}"\n',
+        f"{R}/nika-open/nika-docs/main/snippets/_status-snapshot.mdx": f'  version: "{docs}",\n',
+        f"{R}/nika-open/nika-registry/main/SPEC_PIN": "# pin\n" + "a" * 40 + "\n",
+        f"{R}/nika-open/nika-registry/main/index.json": json.dumps({"artifacts": [{}] * reg_n}),
+        "https://api.github.com/repos/nika-open/nika-spec/commits/" + "a" * 40: "{}",
+        f"{R}/nika-open/nika-action/v1/action.yml": f"    default: '{action}'\n",
+        f"{R}/nika-open/nika-actions-starter/main/.github/workflows/nika-check.yml":
             f"        default: '{starter}'\n",
-        f"{R}/supernovae-st/nika-registry/main/scripts/cert.py": f'ENGINE_VERSION = "{certeng}"\n',
-        f"https://api.github.com/repos/supernovae-st/nika/compare/v{tag}...main":
+        f"{R}/nika-open/nika-registry/main/scripts/cert.py": f'ENGINE_VERSION = "{certeng}"\n',
+        f"https://api.github.com/repos/nika-open/nika/compare/v{tag}...main":
             json.dumps({"ahead_by": 0, "commits": []}),
-        **{f"{R}/supernovae-st/{repo}/main/.github/workflows/{wf}": "on:\n  schedule: []\n"
+        **{f"{R}/nika-open/{repo}/main/.github/workflows/{wf}": "on:\n  schedule: []\n"
            for repo, wf in (("nika-docs","release-heal.yml"),("nika-action","release-heal.yml"),
                             ("nika-actions-starter","release-heal.yml"),("nika-client","release-heal.yml"),
                             ("nika-plugins","release-heal.yml"),("nika-registry","release-heal.yml"),
@@ -163,14 +163,14 @@ except Exception as exc:  # noqa: BLE001
 # never dies; past the window, blindness on a tag-pin or immune surface is
 # itself the finding (registry-class surfaces keep their flap tolerance).
 try:
-    code, f = run({"https://api.github.com/repos/supernovae-st/nika/releases/latest":
+    code, f = run({"https://api.github.com/repos/nika-open/nika/releases/latest":
                    json.dumps({"tag_name": "v0.95.0", "published_at": iso(2)})})
     check("T5a dark surfaces in grace = WARNs, no crash",
           code == 0 and all(x[0] == "WARN" for x in f), f)
 except Exception as exc:  # noqa: BLE001
     check("T5a dark surfaces in grace = WARNs, no crash", False, repr(exc))
 try:
-    code, f = run({"https://api.github.com/repos/supernovae-st/nika/releases/latest":
+    code, f = run({"https://api.github.com/repos/nika-open/nika/releases/latest":
                    json.dumps({"tag_name": "v0.95.0", "published_at": iso(48)})})
     check("T5b dark tag-pin/immune surfaces past grace = FAIL",
           code == 1
@@ -200,15 +200,15 @@ check("T6c deliberate-bump surfaces stay WARN",
 # T7 · guard-of-guards: a missing immune workflow is an unreadable surface —
 # WARN inside the cascade window, FAIL past it; a trigger-less one is named.
 tbl = fixtures(age_h=2.0)
-del tbl[bot.RAW + "/supernovae-st/nika-registry/main/.github/workflows/release-heal.yml"]
-tbl[bot.RAW + "/supernovae-st/nika-plugins/main/.github/workflows/release-heal.yml"] = "name: dead\n"
+del tbl[bot.RAW + "/nika-open/nika-registry/main/.github/workflows/release-heal.yml"]
+tbl[bot.RAW + "/nika-open/nika-plugins/main/.github/workflows/release-heal.yml"] = "name: dead\n"
 code, f = run(tbl)
 check("T7a immune legs watched in grace (missing=WARN · trigger-less named)",
       code == 0
       and any(x[0] == "WARN" and x[1] == "immune nika-registry" for x in f)
       and any(x[1] == "immune nika-plugins" and "no trigger" in x[2] for x in f), f)
 tbl = fixtures(age_h=48.0)
-del tbl[bot.RAW + "/supernovae-st/nika-registry/main/.github/workflows/release-heal.yml"]
+del tbl[bot.RAW + "/nika-open/nika-registry/main/.github/workflows/release-heal.yml"]
 code, f = run(tbl)
 check("T7b missing immune leg past grace = FAIL",
       code == 1 and any(x[0] == "FAIL" and x[1] == "immune nika-registry" for x in f), f)
@@ -245,14 +245,14 @@ check("T10g main's advance is an informational spec-ripeness line",
 # T10h · the release tag's SPEC_PIN unreadable: the tag ladder again, and no
 # comparison is made against a pin nobody read.
 tbl = fixtures(age_h=48.0, site_pin_doc=SITE_D)
-del tbl[bot.RAW + "/supernovae-st/nika/v0.95.0/SPEC_PIN"]
+del tbl[bot.RAW + "/nika-open/nika/v0.95.0/SPEC_PIN"]
 code, f = run(tbl)
 check("T10h unreadable release SPEC_PIN past grace = FAIL, no comparison",
       code == 1
       and any(x[0] == "FAIL" and x[1] == "release spec pin" and "unreadable" in x[2] for x in f)
       and not any(x[1] == "site spec pin" for x in f), f)
 tbl = fixtures(age_h=2.0)
-del tbl[bot.RAW + "/supernovae-st/nika/v0.95.0/SPEC_PIN"]
+del tbl[bot.RAW + "/nika-open/nika/v0.95.0/SPEC_PIN"]
 code, f = run(tbl)
 check("T10h unreadable release SPEC_PIN inside grace = WARN",
       code == 0 and any(x[0] == "WARN" and x[1] == "release spec pin" for x in f), f)

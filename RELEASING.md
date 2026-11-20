@@ -148,7 +148,10 @@ without an explicit operator decision.
    the replay boundary. A tag up to v0.124.4 was published from
    `supernovae-st/nika` with the `supernovae-st-nika-check-wasm-<ver>.tgz`
    npm tarball: the current workflow expects the `nika-open-` name, so its
-   asset inventory refuses to replay such a tag. All live and
+   asset inventory refuses to replay such a tag. Its attestations are served
+   under the `supernovae-st` organization only, so verifying them needs
+   `--owner supernovae-st --signer-repo supernovae-st/nika`, a form
+   `verify-release-attestations.sh` does not take. All live and
    replay release trains share one global publication lane because Homebrew and
    the container `latest` tag are cross-version mutable pointers. GitHub
    publication explicitly uses `make_latest=legacy` for stable releases and
@@ -329,9 +332,11 @@ npm audit signatures                                # in a project depending on 
 ```
 
 These commands hold from v0.124.5. Releases up to v0.124.4 were built and
-signed in `supernovae-st/nika`, so their proofs name that repository: pass
-`--repo supernovae-st/nika` and `--source-uri github.com/supernovae-st/nika`,
-and verify their npm tarball as `supernovae-st-nika-check-wasm-<ver>.tgz`.
+signed in `supernovae-st/nika`, and GitHub serves their attestations under
+the `supernovae-st` organization only: replace `--repo nika-open/nika` with
+`--owner supernovae-st --signer-repo supernovae-st/nika`, pass
+`--source-uri github.com/supernovae-st/nika` to `slsa-verifier`, and verify
+their npm tarball as `supernovae-st-nika-check-wasm-<ver>.tgz`.
 
 Three independent chains cover the native artifacts: the checksum manifest,
 GitHub's signed attestation, and the SLSA generator's intoto statement. npm's

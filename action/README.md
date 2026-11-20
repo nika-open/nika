@@ -15,7 +15,7 @@ jobs:
 
       - name: Run the review workflow
         id: nika
-        uses: supernovae-st/nika/action@main
+        uses: nika-open/nika/action@main
         with:
           file: workflows/pr-review.nika
           max-cost-usd: "0.50"

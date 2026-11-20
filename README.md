@@ -15,18 +15,18 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/supernovae-st/nika/releases/latest"><img src="https://img.shields.io/github/v/release/supernovae-st/nika?label=release" alt="Latest release"></a>
-  <a href="https://github.com/supernovae-st/nika/actions/workflows/diamond-ci.yml"><img src="https://github.com/supernovae-st/nika/actions/workflows/diamond-ci.yml/badge.svg?branch=main" alt="CI status"></a>
-  <a href="https://www.npmjs.com/package/@supernovae-st/nika"><img src="https://img.shields.io/npm/v/@supernovae-st/nika?label=npm" alt="npm package"></a>
+  <a href="https://github.com/nika-open/nika/releases/latest"><img src="https://img.shields.io/github/v/release/nika-open/nika?label=release" alt="Latest release"></a>
+  <a href="https://github.com/nika-open/nika/actions/workflows/diamond-ci.yml"><img src="https://github.com/nika-open/nika/actions/workflows/diamond-ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://www.npmjs.com/package/@nika-open/nika"><img src="https://img.shields.io/npm/v/@nika-open/nika?label=npm" alt="npm package"></a>
   <a href="https://docs.nika.sh"><img src="https://img.shields.io/badge/docs-docs.nika.sh-8b8cf8.svg" alt="Documentation"></a>
-  <a href="https://github.com/supernovae-st/nika-spec"><img src="https://img.shields.io/badge/spec-open-8b8cf8.svg" alt="Open specification"></a>
+  <a href="https://github.com/nika-open/nika-spec"><img src="https://img.shields.io/badge/spec-open-8b8cf8.svg" alt="Open specification"></a>
 </p>
 
 <p align="center">
-  <a href="https://scorecard.dev/viewer/?uri=github.com/supernovae-st/nika"><img src="https://api.scorecard.dev/projects/github.com/supernovae-st/nika/badge" alt="OpenSSF Scorecard"></a>
-  <a href="https://github.com/supernovae-st/nika/actions/workflows/codeql.yml"><img src="https://github.com/supernovae-st/nika/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL"></a>
-  <a href="https://github.com/supernovae-st/nika/releases/latest"><img src="https://slsa.dev/images/gh-badge-level3.svg" alt="SLSA 3 provenance on every release"></a>
-  <a href="https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/supernovae-st/nika"><img src="https://archive.softwareheritage.org/badge/origin/https://github.com/supernovae-st/nika/" alt="Archived by Software Heritage"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/nika-open/nika"><img src="https://api.scorecard.dev/projects/github.com/nika-open/nika/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://github.com/nika-open/nika/actions/workflows/codeql.yml"><img src="https://github.com/nika-open/nika/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL"></a>
+  <a href="https://github.com/nika-open/nika/releases/latest"><img src="https://slsa.dev/images/gh-badge-level3.svg" alt="SLSA 3 provenance on every release"></a>
+  <a href="https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/nika-open/nika"><img src="https://archive.softwareheritage.org/badge/origin/https://github.com/nika-open/nika/" alt="Archived by Software Heritage"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg" alt="AGPL-3.0-or-later"></a>
 </p>
 
@@ -280,22 +280,26 @@ curl -LsSf https://nika.sh/install.sh | sh
 <details>
 <summary>Homebrew, npm, a container, a release archive, Nix or Windows</summary>
 
-- **Homebrew:** `brew install supernovae-st/tap/nika`
+- **Homebrew:** `brew install nika-open/tap/nika`
 - **npm**, the binary plus the TypeScript SDK:
-  `npm install @supernovae-st/nika` (the `nika` command lands in
+  `npm install @nika-open/nika` (the `nika` command lands in
   `node_modules/.bin`). The package bundles the engine of its own version:
   check `nika --version`.
 - **A container** (Linux, amd64 and arm64), built from the same release
   binaries: `docker run --rm ghcr.io/supernovae-st/nika:0.124.4 --version`.
   Mount a project to check or run its files, for example
   `docker run --rm -v "$PWD:/work" -w /work ghcr.io/supernovae-st/nika:0.124.4 check hello.nika`.
+  Images up to 0.124.4 are at `ghcr.io/supernovae-st/nika`; later releases
+  publish theirs at `ghcr.io/nika-open/nika`.
 - **A release archive:** download one from the
-  [latest release](https://github.com/supernovae-st/nika/releases/latest).
+  [latest release](https://github.com/nika-open/nika/releases/latest).
   Every release ships a checksum manifest, a GitHub attestation and SLSA
   provenance; [RELEASING.md](RELEASING.md#what-a-user-can-prove) gives the
-  three verification commands, for example
-  `gh attestation verify nika-macos-arm64-0.124.4.tar.gz --repo supernovae-st/nika`.
-- **Nix:** `nix profile install github:supernovae-st/nika/v0.124.4` builds
+  three verification commands. Releases up to 0.124.4 were built in
+  `supernovae-st/nika`, and that organization serves their attestations:
+  `gh attestation verify nika-macos-arm64-0.124.4.tar.gz --owner supernovae-st --signer-repo supernovae-st/nika`.
+  Later releases verify with `--repo nika-open/nika`.
+- **Nix:** `nix profile install github:nika-open/nika/v0.124.4` builds
   the release from the repository's flake. Without the tag, the flake builds
   the default branch, which can be ahead of the latest release.
 - **Windows:** use WSL2 and the Linux binary. Native Windows binaries are
@@ -437,21 +441,21 @@ file for you, and the check keeps it honest:
 
 | Where | What you get | Watch |
 |---|---|---|
-| **Your coding agent** · [nika-plugins](https://github.com/supernovae-st/nika-plugins) | Claude Code, Codex, Cursor and others learn to write a workflow, check it and repair what the check finds. | ▶ [above](media/gifs/agent-plugin.optimized.gif) |
-| **Your editor** · `nika lsp` | The language server inside the binary: the check's findings as you type, in any LSP client. The VS Code extension ([nika-vscode](https://github.com/supernovae-st/nika-vscode)) stays at 0.120 and is not qualified with 0.124; point its `nika.server.path` at your 0.124 binary ([known limits](https://docs.nika.sh/changelog/known-limits#the-vs-code-extension-stays-at-0-120)). | ▶ [The audit, as you type](media/gifs/editor-diagnostics.optimized.gif) |
-| **Your pull requests** · [nika-action](https://github.com/supernovae-st/nika-action) | One comment with the verdict, before anyone spends a token. | ▶ [Every pull request gets a verdict](media/gifs/pr-check-comment.optimized.gif) |
-| **Your app** · [nika-client](https://github.com/supernovae-st/nika-client) | Run a workflow from TypeScript ([the package](https://www.npmjs.com/package/@supernovae-st/nika)), get a typed result and verify its receipt, with the engine the package bundles or against your `nika serve`. | ▶ [Run it from your app, prove what ran](media/gifs/typescript-client.optimized.gif) · ▶ [One client, two doors](media/gifs/sdk-doors.optimized.gif) |
+| **Your coding agent** · [nika-plugins](https://github.com/nika-open/nika-plugins) | Claude Code, Codex, Cursor and others learn to write a workflow, check it and repair what the check finds. | ▶ [above](media/gifs/agent-plugin.optimized.gif) |
+| **Your editor** · `nika lsp` | The language server inside the binary: the check's findings as you type, in any LSP client. The VS Code extension ([nika-vscode](https://github.com/nika-open/nika-vscode)) stays at 0.120 and is not qualified with 0.124; point its `nika.server.path` at your 0.124 binary ([known limits](https://docs.nika.sh/changelog/known-limits#the-vs-code-extension-stays-at-0-120)). | ▶ [The audit, as you type](media/gifs/editor-diagnostics.optimized.gif) |
+| **Your pull requests** · [nika-action](https://github.com/nika-open/nika-action) | One comment with the verdict, before anyone spends a token. | ▶ [Every pull request gets a verdict](media/gifs/pr-check-comment.optimized.gif) |
+| **Your app** · [nika-client](https://github.com/nika-open/nika-client) | Run a workflow from TypeScript ([the package](https://www.npmjs.com/package/@nika-open/nika)), get a typed result and verify its receipt, with the engine the package bundles or against your `nika serve`. | ▶ [Run it from your app, prove what ran](media/gifs/typescript-client.optimized.gif) · ▶ [One client, two doors](media/gifs/sdk-doors.optimized.gif) |
 
 ### From your application
 
-`npm install @supernovae-st/nika` brings the TypeScript SDK and the engine of
+`npm install @nika-open/nika` brings the TypeScript SDK and the engine of
 its own version (Node.js 22 or newer, on macOS or Linux with glibc). Run
 `NIKA_KEYCHAIN=off ./node_modules/.bin/nika key init` once, so the engine your
 app starts can seal each run's record. Then, beside a `hello.nika`, this is the
 package's quick start:
 
 ```ts
-import { Nika, isNikaRunSucceeded } from '@supernovae-st/nika';
+import { Nika, isNikaRunSucceeded } from '@nika-open/nika';
 
 const nika = new Nika({ cwd: process.cwd() });
 
@@ -490,7 +494,7 @@ Over HTTP, `run()` needs an `idempotencyKey` you own (a retry with the same
 key returns the same job) and refuses `maxCostUsd`: the server applies its
 own per-run ceiling, USD 1 by default. `hello.nika` is then a served name,
 the workflow's path from the server's project root.
-[nika-client](https://github.com/supernovae-st/nika-client) documents the
+[nika-client](https://github.com/nika-open/nika-client) documents the
 whole API.
 
 <p align="center">
@@ -599,18 +603,18 @@ judgement.
 
 | | Repository | What it gives you |
 |---|---|---|
-| 🦋 | **[nika](https://github.com/supernovae-st/nika)** | **The engine and CLI: write, check, run and verify AI workflows** |
-| 📖 | [nika-docs](https://github.com/supernovae-st/nika-docs) | The documentation, live at [docs.nika.sh](https://docs.nika.sh) |
-| 📜 | [nika-spec](https://github.com/supernovae-st/nika-spec) | The language specification and the suite that proves an engine follows it |
-| 🧩 | [nika-vscode](https://github.com/supernovae-st/nika-vscode) | The editor extension, frozen at 0.120 and not qualified with 0.124: use `nika lsp` and the JSON Schema |
-| 🟦 | [nika-client](https://github.com/supernovae-st/nika-client) | Run and verify workflows from TypeScript |
-| ✅ | [nika-action](https://github.com/supernovae-st/nika-action) | A GitHub Action that posts a `nika check` verdict on your pull requests |
-| 🚀 | [nika-actions-starter](https://github.com/supernovae-st/nika-actions-starter) | A ready template: workflows, editor setup and CI from the first push |
-| 📦 | [nika-registry](https://github.com/supernovae-st/nika-registry) | Shareable workflows, pinned and re-verified |
-| 🤖 | [nika-plugins](https://github.com/supernovae-st/nika-plugins) | Teaches your coding agent (Claude Code, Codex, Cursor…) to write Nika |
-| 🍺 | [homebrew-tap](https://github.com/supernovae-st/homebrew-tap) | `brew install supernovae-st/tap/nika` |
-| 🐙 | [gh-nika](https://github.com/supernovae-st/gh-nika) | The Nika CLI as a GitHub CLI extension |
-| 🏛️ | [nika-estate](https://github.com/supernovae-st/nika-estate) | Where each file in Nika's core repositories comes from, declared and re-checkable |
+| 🦋 | **[nika](https://github.com/nika-open/nika)** | **The engine and CLI: write, check, run and verify AI workflows** |
+| 📖 | [nika-docs](https://github.com/nika-open/nika-docs) | The documentation, live at [docs.nika.sh](https://docs.nika.sh) |
+| 📜 | [nika-spec](https://github.com/nika-open/nika-spec) | The language specification and the suite that proves an engine follows it |
+| 🧩 | [nika-vscode](https://github.com/nika-open/nika-vscode) | The editor extension, frozen at 0.120 and not qualified with 0.124: use `nika lsp` and the JSON Schema |
+| 🟦 | [nika-client](https://github.com/nika-open/nika-client) | Run and verify workflows from TypeScript |
+| ✅ | [nika-action](https://github.com/nika-open/nika-action) | A GitHub Action that posts a `nika check` verdict on your pull requests |
+| 🚀 | [nika-actions-starter](https://github.com/nika-open/nika-actions-starter) | A ready template: workflows, editor setup and CI from the first push |
+| 📦 | [nika-registry](https://github.com/nika-open/nika-registry) | Shareable workflows, pinned and re-verified |
+| 🤖 | [nika-plugins](https://github.com/nika-open/nika-plugins) | Teaches your coding agent (Claude Code, Codex, Cursor…) to write Nika |
+| 🍺 | [homebrew-tap](https://github.com/nika-open/homebrew-tap) | `brew install nika-open/tap/nika` |
+| 🐙 | [gh-nika](https://github.com/nika-open/gh-nika) | The Nika CLI as a GitHub CLI extension |
+| 🏛️ | [nika-estate](https://github.com/nika-open/nika-estate) | Where each file in Nika's core repositories comes from, declared and re-checkable |
 <!-- /city:map -->
 
 This repository is the one executable: it parses, checks, runs and traces
@@ -622,10 +626,10 @@ repositories drive this engine without adding to its authority.
 [Session guide](docs/usage/conversational-session.md) ·
 [Examples](examples/README.md) ·
 [Documentation](https://docs.nika.sh) ·
-[TypeScript SDK](https://www.npmjs.com/package/@supernovae-st/nika) ·
+[TypeScript SDK](https://www.npmjs.com/package/@nika-open/nika) ·
 [Editor extension (0.120, not qualified with 0.124)](https://marketplace.visualstudio.com/items?itemName=supernovae.nika) ·
-[Open specification](https://github.com/supernovae-st/nika-spec) ·
-[Registry](https://github.com/supernovae-st/nika-registry) ·
+[Open specification](https://github.com/nika-open/nika-spec) ·
+[Registry](https://github.com/nika-open/nika-registry) ·
 [Planning archive](https://github.com/orgs/supernovae-st/projects/3) ·
 [Website](https://nika.sh)
 
@@ -633,3 +637,6 @@ Nika 0.124 is the current open-source release line, usable today and
 maintained. The engine is
 [AGPL-3.0-or-later](LICENSE); the specification and the TypeScript SDK are
 Apache-2.0.
+
+Created and maintained by Thibaut Mélen ([@ThibautMelen](https://github.com/ThibautMelen)) ·
+SuperNovae Studio.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 #
-# `nix run github:supernovae-st/nika` — the zero-gatekeeper install path
+# `nix run github:nika-open/nika` — the zero-gatekeeper install path
 # (#388). Builds the same binary the release ships: the `nika` bin target
 # of `crates/nika-cli`, `--locked`. The executable is BORN `nika`
 # (ADR-135) — no rename here and none at packaging (release.yml stages

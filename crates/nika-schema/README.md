@@ -57,5 +57,5 @@ AGPL-3.0-or-later. Co-author `Nika 🦋 <nika@supernovae.studio>`.
 - `docs/architecture/forward-compat-invariants.md` — `#[non_exhaustive]` ratchet
 - `docs/architecture/crate-layer-registry.md` — L0 contract
 
-[nika-spec]: https://github.com/supernovae-st/nika-spec
+[nika-spec]: https://github.com/nika-open/nika-spec
 [miette]: https://docs.rs/miette

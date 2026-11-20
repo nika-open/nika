@@ -11,7 +11,7 @@ authors:
     city: "Paris"
     country: "FR"
     website: "https://nika.sh"
-repository-code: "https://github.com/supernovae-st/nika"
+repository-code: "https://github.com/nika-open/nika"
 url: "https://nika.sh"
 license: AGPL-3.0-or-later
 keywords:
@@ -24,7 +24,7 @@ keywords:
 references:
   - type: software
     title: "Nika language specification (nika-spec)"
-    repository-code: "https://github.com/supernovae-st/nika-spec"
+    repository-code: "https://github.com/nika-open/nika-spec"
     license: Apache-2.0
     authors:
       - name: "SuperNovae Studio"

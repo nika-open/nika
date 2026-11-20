@@ -16,30 +16,30 @@ for 0.125. The current release is 0.124.4. Its known limits are at
 **macOS / Linux with Homebrew (preferred):**
 
 ```sh
-brew install supernovae-st/tap/nika
+brew install nika-open/tap/nika
 ```
 
 **Any machine with a Rust toolchain (prebuilt download, no compile):**
 
 ```sh
-cargo binstall --git https://github.com/supernovae-st/nika nika-cli
+cargo binstall --git https://github.com/nika-open/nika nika-cli
 ```
 
 (`cargo install cargo-binstall` first if missing. The crate is named
 `nika-cli`; the installed binary is `nika`.)
 
 **Nix (builds the default branch via the flake; append `/<tag>` to the
-flake reference, e.g. `github:supernovae-st/nika/v0.124.4`, to build a release):**
+flake reference, e.g. `github:nika-open/nika/v0.124.4`, to build a release):**
 
 ```sh
-nix profile install github:supernovae-st/nika
-# one-shot, no install: nix run github:supernovae-st/nika -- --version
+nix profile install github:nika-open/nika
+# one-shot, no install: nix run github:nika-open/nika -- --version
 ```
 
 **GitHub CLI present (Actions runners · Codespaces · agents with `gh`):**
 
 ```sh
-gh extension install supernovae-st/gh-nika
+gh extension install nika-open/gh-nika
 gh nika --version   # pass-through to a PATH nika, else a one-time checksum-verified release fetch
 ```
 
@@ -50,6 +50,9 @@ docker run --rm ghcr.io/supernovae-st/nika:0.124.4 --version
 docker run --rm -v "$PWD:/work" -w /work ghcr.io/supernovae-st/nika:0.124.4 check flow.nika
 ```
 
+Images up to 0.124.4 are at `ghcr.io/supernovae-st/nika`; later releases
+publish theirs at `ghcr.io/nika-open/nika`.
+
 **No package manager (bare Linux/macOS box):** fetch the release
 tarball and verify it against `SHA256SUMS` — auditable, no `curl | sh`.
 Discover the version via the web redirect, NOT the GitHub API (anonymous
@@ -57,10 +60,10 @@ Discover the version via the web redirect, NOT the GitHub API (anonymous
 redirect never does):
 
 ```sh
-V=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/supernovae-st/nika/releases/latest); V=${V##*/tag/}
+V=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/nika-open/nika/releases/latest); V=${V##*/tag/}
 T=linux-x64   # or: linux-arm64 · macos-arm64 · macos-x64
-curl -fsSLO "https://github.com/supernovae-st/nika/releases/download/$V/nika-$T-${V#v}.tar.gz"
-curl -fsSLO "https://github.com/supernovae-st/nika/releases/download/$V/SHA256SUMS"
+curl -fsSLO "https://github.com/nika-open/nika/releases/download/$V/nika-$T-${V#v}.tar.gz"
+curl -fsSLO "https://github.com/nika-open/nika/releases/download/$V/SHA256SUMS"
 grep "nika-$T-${V#v}.tar.gz" SHA256SUMS | sha256sum -c -   # macOS: shasum -a 256 -c -
 tar -xzf "nika-$T-${V#v}.tar.gz"
 install -d ~/.local/bin && install -m 755 nika ~/.local/bin/nika   # any PATH dir works
@@ -68,8 +71,11 @@ install -d ~/.local/bin && install -m 755 nika ~/.local/bin/nika   # any PATH di
 
 Refuse to proceed if the checksum line does not print `OK`. With `gh`
 present, also check the build provenance of the same tarball:
-`gh attestation verify "nika-$T-${V#v}.tar.gz" --repo supernovae-st/nika`
+`gh attestation verify "nika-$T-${V#v}.tar.gz" --repo nika-open/nika`
 ([RELEASING.md](RELEASING.md#what-a-user-can-prove) lists all three proofs).
+A release up to v0.124.4 was built in `supernovae-st/nika`, and that
+organization serves its attestation: for such a release, replace
+`--repo nika-open/nika` with `--owner supernovae-st --signer-repo supernovae-st/nika`.
 
 **Windows:** native binaries are not shipped. Use WSL2 and the Linux
 path above; say so plainly — do not improvise a build.

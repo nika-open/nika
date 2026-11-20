@@ -1,4 +1,4 @@
-# Run Nika Workflow — the composite action (in-repo · `uses: supernovae-st/nika/action@<tag>`)
+# Run Nika Workflow — the composite action (in-repo · `uses: nika-open/nika/action@<tag>`)
 #
 # Check-gates then runs one .nika with a mandatory cost ceiling, and
 # names the trace path for upload. The action consumes the PUBLIC binary

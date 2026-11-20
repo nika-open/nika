@@ -286,20 +286,20 @@ curl -LsSf https://nika.sh/install.sh | sh
   `node_modules/.bin`). The package bundles the engine of its own version:
   check `nika --version`.
 - **A container** (Linux, amd64 and arm64), built from the same release
-  binaries: `docker run --rm ghcr.io/supernovae-st/nika:0.124.4 --version`.
+  binaries: `docker run --rm ghcr.io/nika-open/nika:0.124.5 --version`.
   Mount a project to check or run its files, for example
-  `docker run --rm -v "$PWD:/work" -w /work ghcr.io/supernovae-st/nika:0.124.4 check hello.nika`.
-  Images up to 0.124.4 are at `ghcr.io/supernovae-st/nika`; later releases
-  publish theirs at `ghcr.io/nika-open/nika`.
+  `docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika:0.124.5 check hello.nika`.
+  Images up to 0.124.4 stay at `ghcr.io/supernovae-st/nika`.
 - **A release archive:** download one from the
   [latest release](https://github.com/nika-open/nika/releases/latest).
   Every release ships a checksum manifest, a GitHub attestation and SLSA
   provenance; [RELEASING.md](RELEASING.md#what-a-user-can-prove) gives the
-  three verification commands. Releases up to 0.124.4 were built in
-  `supernovae-st/nika`, and that organization serves their attestations:
-  `gh attestation verify nika-macos-arm64-0.124.4.tar.gz --owner supernovae-st --signer-repo supernovae-st/nika`.
-  Later releases verify with `--repo nika-open/nika`.
-- **Nix:** `nix profile install github:nika-open/nika/v0.124.4` builds
+  three verification commands, for example
+  `gh attestation verify nika-macos-arm64-0.124.5.tar.gz --repo nika-open/nika`.
+  Releases up to 0.124.4 were built in `supernovae-st/nika`, and that
+  organization serves their attestations: verify one of them with
+  `--owner supernovae-st --signer-repo supernovae-st/nika` instead of `--repo`.
+- **Nix:** `nix profile install github:nika-open/nika/v0.124.5` builds
   the release from the repository's flake. Without the tag, the flake builds
   the default branch, which can be ahead of the latest release.
 - **Windows:** use WSL2 and the Linux binary. Native Windows binaries are
@@ -520,9 +520,9 @@ whole API.
   read a page or a model's answer for injected instructions, and a person
   who answers yes approves what follows. On a harness seat, what `permits:`
   covers is listed per seat ([harness agents](docs/usage/harness-agents.md)).
-- **This README describes the released 0.124.4.** Compare `nika --version`
+- **This README describes the released 0.124.5.** Compare `nika --version`
   with the [changelog](CHANGELOG.md), which lists what each release
-  changed. Until the next release, each change merged after 0.124.4 is
+  changed. Until the next release, each change merged after 0.124.5 is
   described in its own file under [`changelog.d/`](changelog.d/README.md),
   and the release folds those files into the changelog.
 

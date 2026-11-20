@@ -16,6 +16,64 @@ section below at tag time (`bash scripts/release/changelog-assemble.sh --fold
 pull requests collided on 2026-08-24 with no source overlap between them, and
 `--check` refuses a hand-written bullet in this section.
 
+## [0.124.5](https://github.com/nika-open/nika/compare/v0.124.4..v0.124.5) - 2026-11-20
+
+Nika 0.124.5 is the first release from the `nika-open` organization. The engine and its sibling
+repositories moved there from `supernovae-st` with their history, releases and issues, and GitHub
+redirects their old addresses. This release publishes its archives, `SHA256SUMS` and attestations
+from `nika-open/nika`, its image at `ghcr.io/nika-open/nika`, its Homebrew formula in
+`nika-open/tap` and `@nika-open/nika-check-wasm` on npm; releases up to 0.124.4 keep the
+coordinates they were published under. The language and the SDK protocol are unchanged. Apart from
+the new addresses, `nika doctor` names the scope an npm copy was installed under, `quinn` moves
+past three QUIC advisories, and four `zip` advisories and `chrono`'s unmaintained notice are
+recorded as not reached.
+
+### Changed
+
+- **Nika moved to the `nika-open` organization.** The engine and its
+  sibling repositories left `supernovae-st` with their history, releases
+  and issues, and every old address redirects. From this release the
+  archives, `SHA256SUMS` and their attestations come from `nika-open/nika`
+  (verify with `--repo nika-open/nika`), the image is
+  `ghcr.io/nika-open/nika`, Homebrew installs `nika-open/tap/nika`, and the
+  npm packages are `@nika-open/nika` and `@nika-open/nika-check-wasm`.
+  Releases up to 0.124.4 keep the names they were published under; their
+  attestations verify with `--owner supernovae-st --signer-repo
+  supernovae-st/nika`. `nika welcome`, the registry client, the agent kit
+  that `nika init` embeds and every `repository` field point at
+  `nika-open`.
+- **`nika doctor` names the package an npm copy was installed as.** When
+  an npm copy shadows the engine on PATH, the remedy used one package name
+  for every copy, so after the move to `@nika-open/nika` it would have told
+  the owner of an older install to uninstall a package that never put it
+  there. It now reads the scope from the copy's path and its resolved
+  target: a copy under `node_modules/@supernovae-st/` is removed as
+  `@supernovae-st/nika`, any other as `@nika-open/nika`.
+
+### Security
+
+- **`quinn-proto` and `quinn-udp` are past three QUIC advisories.** In
+  `quinn-proto` 0.11.18 a `MAX_STREAM_DATA` frame could open streams beyond
+  the stream limit and a long Retry token could panic or exhaust memory in
+  a client (RUSTSEC-2026-0523, RUSTSEC-2026-0524); in `quinn-udp` before
+  0.5.16 the receive loop could spin after a truncated datagram
+  (RUSTSEC-2026-0538). The lockfiles carry both crates only through the
+  optional `http3` feature of `reqwest`, which no crate here enables, so
+  no build of the engine compiled them; the audit reads every lockfile,
+  though, and the advisories refused each push. The three lockfiles (the
+  root, `fuzz/` and `crates/nika-acp/`) move to 0.11.19 and 0.5.16, and
+  nothing else in them changes.
+- **Four new `zip` 7.2.0 advisories and `chrono`'s unmaintained notice
+  are assessed, not waved through.** `zip` 7.2.0 reaches the engine only
+  through `candle-core` 0.10.2, the local inference stack the release
+  binaries include. RUSTSEC-2026-0545 and RUSTSEC-2026-0547 sit behind
+  the `aes-crypto` and `legacy-zip` features, which no build compiles;
+  RUSTSEC-2026-0546 and RUSTSEC-2026-0548 sit in `ZipArchive::extract`
+  and `ZipStreamReader`, which candle never calls. `chrono`
+  (RUSTSEC-2026-0543) arrives only through `feed-rs`, whose latest
+  release still requires it. `deny.toml` and `.cargo/audit.toml` record
+  each reason and when to look again; candle 0.11, whose `zip` carries
+  the fixes, is a separate change.
 ## [0.124.4](https://github.com/supernovae-st/nika/compare/v0.124.3..v0.124.4) - 2026-11-12
 
 Nika 0.124.4 lets the operator of a server decide once what may run on a route the catalog does not

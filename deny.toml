@@ -204,26 +204,38 @@ ignore = [
   # nika-infer-local (ADR-091), which reads `.npz` / `.pth` archives entry by entry
   # (`ZipArchive::new` + `by_index` / `by_name`) and writes `.npz` with `ZipWriter`: it never
   # extracts an archive to a directory, so the vulnerable paths are not reached (re-read in
-  # candle-core 0.10.2 `npy.rs` and `pickle.rs` on 2026-11-10 for RUSTSEC-2026-0429). No
-  # patched candle exists: candle-core 0.11.0 still requires zip ^8.6. Review: when
-  # candle-core accepts zip >=9.0. Upstream: github.com/huggingface/candle.
-  # Mirror: .cargo/audit.toml.
+  # candle-core 0.10.2 `npy.rs` and `pickle.rs` on 2026-11-10 for RUSTSEC-2026-0429).
+  # candle-core 0.11.1 (2026-10-31) requires zip ^9.1.3, which carries every fix: moving
+  # nika-infer-local to candle 0.11 drops zip 7.2 and every zip entry here. Review: with that
+  # upgrade (NIK-307). Upstream: github.com/huggingface/candle. Mirror: .cargo/audit.toml.
   "RUSTSEC-2026-0367",
   "RUSTSEC-2026-0368",
   "RUSTSEC-2026-0369",
   "RUSTSEC-2026-0429",
   #
-  # Three more zip advisories carry a GitHub id and no RUSTSEC id on 2026-11-10, so no entry
-  # can list them yet: GHSA-m665-v7pm-7grj (a central directory and a local header that
-  # disagree · fix >=9.0.5), GHSA-9hj8-73fh-9963 (the legacy Shrink, Reduce and Implode
-  # decoders · fix >=9.0.0) and GHSA-8hxf-qr8p-62x4 (AES entry authentication · fix >=9.0.0).
+  # RUSTSEC-2026-0545 + RUSTSEC-2026-0546 + RUSTSEC-2026-0547 + RUSTSEC-2026-0548 · four more
+  # zip 7.2.0 advisories (dated 2026-10-17 and 2026-10-22). RustSec has since numbered the
+  # three that the 2026-11-10 review could only name by GitHub id, plus one more:
+  #   · 0545 (GHSA-8hxf-qr8p-62x4) · WinZip AES entries returned without checking their
+  #     authentication code when the data ends early or is empty · `aes-crypto` · fix >=9.0.0.
+  #   · 0546 (GHSA-hjqx-j4rw-g7xv) · `ZipArchive::extract` can write outside the destination
+  #     through absolute or chained symlink targets · fix >=9.0.0.
+  #   · 0547 (GHSA-9hj8-73fh-9963) · the legacy Shrink, Reduce and Implode decoders reserve
+  #     the declared uncompressed size up front · `legacy-zip` · fix >=9.0.0.
+  #   · 0548 (GHSA-m665-v7pm-7grj) · `ZipStreamReader` extracts entries under local-header
+  #     names that can differ from the central directory · fix >=9.0.5.
   # candle-core asks for zip with `default-features = false`, and the lockfile resolves
-  # zip 7.2.0 with no feature at all: the legacy decoders (`legacy-zip`) and AES
-  # (`aes-crypto`) are not compiled. The header disagreement matters to a program that
-  # writes entries to disk or shows an archive to a second parser; candle reads tensors
-  # into memory by name and writes no entry path. Read on 2026-11-10 in zip 7.2.0
-  # (`Cargo.toml`, `src/lib.rs`, `src/read.rs`) and candle-core 0.10.2 (`npy.rs`,
-  # `pickle.rs`). When RustSec numbers them, add the ids above after reading them again.
+  # zip 7.2.0 with no feature at all (`cargo tree -e features -i zip` with the release
+  # features `local-infer,access-harness`): AES and the legacy decoders are not compiled.
+  # candle reads tensors into memory through `ZipArchive` (`by_index`, `by_name`) and writes
+  # `.npz` with `ZipWriter`; it calls neither `extract` nor `ZipStreamReader`, and writes no
+  # entry path to disk. Read on 2026-11-20 in the four advisories and candle-core 0.10.2
+  # (`npy.rs`, `pickle.rs`). Review: with the candle 0.11 upgrade (NIK-307).
+  # Mirror: .cargo/audit.toml.
+  "RUSTSEC-2026-0545",
+  "RUSTSEC-2026-0546",
+  "RUSTSEC-2026-0547",
+  "RUSTSEC-2026-0548",
   #
   # RUSTSEC-2026-0370 + RUSTSEC-2026-0371 + RUSTSEC-2026-0372 · `zvariant`, `zbus_names` and
   # `zvariant_derive` are unmaintained as standalone crates: zbus 6.0.0 merged them as its
@@ -245,6 +257,15 @@ ignore = [
   # leaves nix 0.26. Upstream: github.com/zhiburt/expectrl. cargo-audit reports it as an
   # allowed warning, as it does `paste`, so .cargo/audit.toml carries no entry.
   "RUSTSEC-2026-0441",
+  #
+  # RUSTSEC-2026-0543 · `chrono` is unmaintained (informational, no vulnerability, no patched
+  # version; the advisory points to jiff or time). No crate of this workspace depends on
+  # chrono: feed-rs 2.4.0 alone pulls it, the feed parser under nika-extract and
+  # nika-builtin, and feed-rs 3.0.0 (2026-09-27, the latest) still requires chrono ^0.4.45.
+  # Review: when feed-rs moves off chrono. Upstream: github.com/chronotope/chrono/issues/1768
+  # and github.com/feed-rs/feed-rs. cargo-audit reports it as an allowed warning, as it does
+  # `paste`, so .cargo/audit.toml carries no entry.
+  "RUSTSEC-2026-0543",
 ]
 
 [sources]

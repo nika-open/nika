@@ -162,7 +162,7 @@ patterns:
 - glob: "crates/**"
   class: authored
   match_count: 714
-  aggregate_sha256: 8fd4c599edc932720294b9dc81c1151e02bfea681cc09fd5853c557458abafca
+  aggregate_sha256: 0d8e1d82b93476373e00d5c86d34640d016babafdff50c55bb19a7bd9aa3226a
   evidence: "the remaining crate surface — Cargo.toml manifests · build.rs · benches · READMEs · hand-curated data catalogs (llm-providers · mcp-servers · embeddings · model-capabilities, probed daily by catalog-verify.yml); the pricing snapshot is excepted in files:"
   note: "scripts/sync-pack.sh is the ONE vendoring lane; the divergent crate-local duplicate was retired"
 - glob: "fuzz/**"

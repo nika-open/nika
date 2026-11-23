@@ -744,11 +744,10 @@ impl JobStore {
             }
             (Some(marker), Some(state)) => {
                 validate_initialization_marker(marker)?;
-                let decoded = decode_state(state)?;
-                self.verify_approval_history(&decoded.state)?;
-                if decoded.migrated {
-                    self.persist(&decoded.state)?;
-                }
+                // Validated, never rewritten: an older format is stored by
+                // the first writer, which a resident is only once it holds
+                // the server lease.
+                self.verify_approval_history(&decode_state(state)?)?;
                 Ok(())
             }
             (Some(marker), None) => {
@@ -913,7 +912,7 @@ impl JobStore {
         let text = self
             .read_state_optional()?
             .ok_or_else(missing_state_error)?;
-        let mut state = decode_state(&text)?.state;
+        let mut state = decode_state(&text)?;
         self.verify_approval_history(&state)?;
         for job in &mut state.jobs {
             job.project_settlement()?;

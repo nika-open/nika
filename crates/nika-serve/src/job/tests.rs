@@ -327,6 +327,12 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("migrated record exists");
     assert_eq!(migrated_record.execution_id(), None);
     assert_eq!(migrated_record.trace_id(), None);
+    // Opening lifts the format in memory; the first writer stores it.
+    drop(
+        migrated_store
+            .claim_server_incarnation()
+            .expect("the resident holds the lease"),
+    );
     drop(migrated_store);
     let migrated: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&queued_path).expect("read migrated state"))
@@ -383,6 +389,11 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("terminal exists");
     assert_eq!(migrated_record.status(), JobStatus::Succeeded);
     assert_eq!(migrated_record.receipt(), Some(&receipt));
+    drop(
+        migrated
+            .claim_server_incarnation()
+            .expect("the resident holds the lease"),
+    );
     drop(migrated);
     let persisted: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&terminal_path).expect("read migrated terminal"))

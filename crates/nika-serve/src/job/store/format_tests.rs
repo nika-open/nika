@@ -36,19 +36,13 @@ fn proofs(state: &Value) -> Vec<Value> {
 #[test]
 fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
     let decoded = decode_state(V3).expect("frozen v3 fixture validates");
-    assert!(decoded.migrated, "v3 is lifted to the current format once");
-    assert_eq!(decoded.state.version, STATE_VERSION);
-    assert_eq!(decoded.state.incarnation.current.get(), 4);
+    assert_eq!(decoded.version, STATE_VERSION, "v3 is lifted in memory");
+    assert_eq!(decoded.incarnation.current.get(), 4);
     assert_eq!(
-        decoded
-            .state
-            .incarnation
-            .settled
-            .expect("previous owner")
-            .get(),
+        decoded.incarnation.settled.expect("previous owner").get(),
         3
     );
-    let writer = decoded.state.writer.as_ref().expect("writer stamp");
+    let writer = decoded.writer.as_ref().expect("writer stamp");
     assert_eq!(
         (
             writer.engine_version.as_str(),
@@ -57,14 +51,13 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
         ("0.119.0", 1),
         "the stamp stays the last writer's until a resident holds the lease"
     );
-    assert_eq!(decoded.state.jobs.len(), 2);
-    assert_eq!(decoded.state.jobs[0].record.status(), JobStatus::Succeeded);
-    assert_eq!(decoded.state.jobs[1].record.status(), JobStatus::Queued);
-    assert_eq!(decoded.state.jobs[0].terminal_sequence, Some(1));
-    assert_eq!(decoded.state.jobs[1].terminal_sequence, None);
+    assert_eq!(decoded.jobs.len(), 2);
+    assert_eq!(decoded.jobs[0].record.status(), JobStatus::Succeeded);
+    assert_eq!(decoded.jobs[1].record.status(), JobStatus::Queued);
+    assert_eq!(decoded.jobs[0].terminal_sequence, Some(1));
+    assert_eq!(decoded.jobs[1].terminal_sequence, None);
     assert_eq!(
         decoded
-            .state
             .jobs
             .iter()
             .map(|job| job.record.ordinal)
@@ -72,9 +65,9 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
         [1, 2],
         "a migrated job is ranked in stored order, which is admission order"
     );
-    assert_eq!(decoded.state.next_ordinal, 3);
+    assert_eq!(decoded.next_ordinal, 3);
     assert!(
-        decoded.state.jobs.iter().all(|job| {
+        decoded.jobs.iter().all(|job| {
             job.record.owner().is_none()
                 && job.record.labels().is_empty()
                 && job.record.created_at().is_none()
@@ -83,7 +76,6 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
     );
     assert!(
         decoded
-            .state
             .jobs
             .iter()
             .flat_map(|job| job.events.iter())
@@ -91,7 +83,7 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
         "a v3 journal written before #1463 is undated, and stays so"
     );
 
-    let migrated = prepare_snapshot(&decoded.state).expect("encode");
+    let migrated = prepare_snapshot(&decoded).expect("encode");
     assert_eq!(
         proofs(&parsed(migrated.as_str())),
         proofs(&parsed(V3)),
@@ -103,7 +95,7 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
     let path = root.path().join("jobs/state.json");
     std::fs::write(&path, V3).expect("install frozen bytes");
     let store = JobStore::open(root.path()).expect("open frozen store");
-    for frozen in &decoded.state.jobs {
+    for frozen in &decoded.jobs {
         let loaded = store
             .get(frozen.record.id())
             .expect("read job")
@@ -112,12 +104,26 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
         assert_eq!(loaded.receipt(), frozen.record.receipt());
         assert_eq!(loaded.outputs(), frozen.record.outputs());
     }
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("frozen store"),
+        V3,
+        "opening and reading never rewrite an older store"
+    );
+    // The first writer stores the lifted state: the resident, once it holds
+    // the server lease.
+    drop(
+        store
+            .claim_server_incarnation()
+            .expect("the resident holds the lease"),
+    );
     drop(store);
     let persisted = std::fs::read_to_string(&path).expect("migrated store");
+    let written = parsed(&persisted);
+    assert_eq!(written["version"], STATE_VERSION);
     assert_eq!(
-        persisted,
-        migrated.as_str(),
-        "opening persists the migration once"
+        proofs(&written),
+        proofs(&parsed(V3)),
+        "the stored migration keeps every proof format 3 wrote"
     );
     drop(JobStore::open(root.path()).expect("reopen the migrated store"));
     assert_eq!(
@@ -127,13 +133,41 @@ fn version_three_golden_migrates_to_four_and_keeps_every_proof() {
     );
 }
 
+/// A second start on a state root whose resident is the previous engine
+/// loses the server lease, and must leave that resident's file exactly as it
+/// reads it: a format-4 file would stop every one of its operations.
+#[test]
+fn a_start_that_loses_the_lease_leaves_an_older_store_untouched() {
+    let root = tempfile::tempdir().expect("root");
+    let resident = JobStore::open(root.path()).expect("the live resident's store");
+    let _incarnation = resident
+        .claim_server_incarnation()
+        .expect("the live resident holds the lease");
+    let path = root.path().join("jobs/state.json");
+    std::fs::write(&path, V3).expect("the live resident writes format 3");
+
+    let second = JobStore::open(root.path()).expect("a second start reads the store");
+    let refused = second
+        .claim_server_incarnation()
+        .expect_err("the lease is held by the live resident");
+    assert!(
+        matches!(refused, JobStoreError::ServerLeaseHeld),
+        "{refused:?}"
+    );
+    drop(second);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the live resident's file"),
+        V3,
+        "the start that lost the lease wrote nothing"
+    );
+}
+
 #[test]
 fn version_four_golden_reads_and_roundtrips_byte_for_byte() {
     let decoded = decode_state(V4).expect("frozen v4 fixture validates");
-    assert!(!decoded.migrated, "v4 is read without migration");
-    assert_eq!(decoded.state.version, 4);
-    assert_eq!(decoded.state.next_ordinal, 4);
-    let jobs = &decoded.state.jobs;
+    assert_eq!(decoded.version, 4);
+    assert_eq!(decoded.next_ordinal, 4);
+    let jobs = &decoded.jobs;
     assert_eq!(jobs.len(), 3);
 
     let owned = &jobs[0].record;
@@ -168,10 +202,7 @@ fn version_four_golden_reads_and_roundtrips_byte_for_byte() {
     );
     assert_eq!(labelled.ordinal, 3);
 
-    assert_eq!(
-        prepare_snapshot(&decoded.state).expect("encode").as_str(),
-        V4
-    );
+    assert_eq!(prepare_snapshot(&decoded).expect("encode").as_str(), V4);
 
     let root = tempfile::tempdir().expect("root");
     drop(JobStore::open(root.path()).expect("initialize store"));

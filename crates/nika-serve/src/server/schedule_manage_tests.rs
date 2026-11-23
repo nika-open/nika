@@ -472,6 +472,70 @@ async fn a_removed_schedule_never_fires() {
     restarted.stop().await.expect("restart stop");
 }
 
+/// A slot keeps the one job it fired. Removing a schedule forgets its last
+/// decision, so declaring it again offers a slot that is still on time; with
+/// the workflow edited in between, the slot's key meets another world. The
+/// slot is consumed against the run it had: nothing fires twice, and the
+/// resident keeps serving (it used to stop on the conflict, again at every
+/// restart inside the window).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_schedule_declared_again_keeps_the_job_its_slot_already_fired() {
+    let world = TestWorld::new();
+    let backend = Arc::new(Recording::default());
+    let clock = Arc::new(ManualClock::new("2026-09-01T08:00:00Z[UTC]"));
+    let server = world
+        .start_with_clock(backend.clone(), limits(), clock.clone())
+        .await;
+    let at = "2026-09-01T09:00:00Z";
+    let declaration = schedule("root.nika", at, &json!({}));
+    create(&server, "daily", &declaration).await;
+    let fired = eventually("the slot fires", || async {
+        strike(&clock, "2026-09-01T09:00:00Z[UTC]");
+        let fired = jobs(&server, "?origin=schedule").await;
+        (!fired.is_empty()).then_some(fired)
+    })
+    .await;
+    let first = fired[0]["id"].as_str().expect("job id").to_owned();
+    wait_for_status(&server, &first, "succeeded")
+        .await
+        .expect("the slot's run ends");
+
+    // A deploy, two minutes into the slot: the workflow is edited, the
+    // schedule removed and declared again as it was.
+    std::fs::write(
+        world.workflows.join("root.nika"),
+        "nika: root\npermits:\n  tools: [\"nika:jq\"]\ntasks:\n  value:\n    invoke:\n      tool: nika:jq\n      args: { input: 2, expression: \".\" }\n",
+    )
+    .expect("edit the workflow");
+    let removed = server
+        .request(&delete_request("daily", "If-Match: *\r\n"))
+        .await;
+    assert_eq!(removed.status, 200, "{}", removed.body);
+    create(&server, "daily", &declaration).await;
+
+    let claim = eventually("the slot is consumed again", || async {
+        strike(&clock, "2026-09-01T09:02:00Z[UTC]");
+        let status = server.request(&get_request("/v1/schedules/daily")).await;
+        assert_eq!(status.status, 200, "{}", status.body);
+        let decision = status.json()["lastDecision"].clone();
+        (!decision.is_null()).then_some(decision)
+    })
+    .await;
+    assert_eq!(claim["action"], "claimed", "{claim}");
+    assert_eq!(
+        claim["claim"]["runId"],
+        first.as_str(),
+        "the slot is consumed against the run it had"
+    );
+    let fired = jobs(&server, "?origin=schedule").await;
+    assert_eq!(fired.len(), 1, "the slot never fires twice: {fired:?}");
+    assert_eq!(backend.runs().len(), 1);
+    server
+        .stop()
+        .await
+        .expect("the scheduler ended clean: the resident never stopped on the slot");
+}
+
 /// What the `intake` schedule declares for its jobs.
 fn declared() -> Value {
     json!({

@@ -428,6 +428,10 @@ fixed-size constant-time equality. Compressed request bodies are refused.
 4. Startup and every later operation reject malformed JSON, an unknown state
    version, invalid identifiers, duplicate ids or keys, and non-contiguous
    event sequences. Corrupt state is never interpreted partially.
+   An older supported format is lifted in memory at every load and stored by
+   the first writer. Opening alone never rewrites the file: a start that
+   loses the server lease leaves a live older resident's store in the format
+   that resident reads.
 5. The same idempotency key plus the same digest returns the same record. The
    same key plus another digest returns `Conflict` without mutation.
 6. A new record starts `queued`. Legal edges are:
@@ -977,6 +981,10 @@ revision is current. Without it, or under a stale tag, the answer is
 A removal takes the schedule's last-slot decision with it, so a schedule
 declared again under the same id starts with no history. A job the schedule
 already fired is untouched: cancel it through `POST /v1/jobs/{id}/cancel`. A
+slot keeps the one job it fired for as long as the store holds that job: if
+the schedule declared again offers that slot while it is still on time, the
+slot is consumed against that job, whatever the workflow has become since,
+and nothing fires twice. A
 slot the scheduler was preparing when the removal landed is dropped by the
 revision check every claim already makes. A project beat is declared in the
 project's file and is not this door's to remove: `409

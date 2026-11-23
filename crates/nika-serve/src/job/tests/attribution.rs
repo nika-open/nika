@@ -258,8 +258,14 @@ fn a_stored_attribution_outside_its_bounds_refuses_the_store() {
     let mut state = read_state(root.path());
     state["jobs"][0]["record"]["owner"] = json!("user 123");
     write_state(root.path(), &state);
-    assert!(matches!(
-        JobStore::open(root.path()),
-        Err(JobStoreError::Corrupt(_))
-    ));
+    // The reason is named: the edit also breaks the admission event's hash,
+    // which would refuse the store by itself were the bounds not judged.
+    let refused = JobStore::open(root.path()).err();
+    assert!(
+        matches!(
+            &refused,
+            Some(JobStoreError::Corrupt(reason)) if reason == "job attribution is outside its bounds"
+        ),
+        "{refused:?}"
+    );
 }

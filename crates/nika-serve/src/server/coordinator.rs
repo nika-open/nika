@@ -281,13 +281,14 @@ impl ResidentExecutionCoordinator {
                 permit,
                 max_cost_usd,
             )),
-            Admission::Existing(record) => {
+            // The slot already has its job. Under another world it means the
+            // workflow changed after that fire: a deploy between a crash and
+            // its restart, or a schedule removed and declared again while
+            // the slot is still on time. The slot stays consumed against the
+            // run it had; it never fires twice and never stops the resident.
+            Admission::Existing(record) | Admission::Conflict(record) => {
                 drop(permit);
                 Ok(PreparedScheduledRun::existing(self.clone(), record))
-            }
-            Admission::Conflict(_) => {
-                drop(permit);
-                Err(ServerError::ScheduledIdempotencyConflict)
             }
         }
     }

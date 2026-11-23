@@ -100,7 +100,10 @@ pub enum ServerError {
         "serve · the slot is answered or held by the CLI edge in the ARM ledger — one slot, one firer"
     )]
     SlotOwnedElsewhere,
-    /// A slot replay resolved to different immutable snapshot bytes.
+    /// A slot replay resolved to different immutable snapshot bytes. No
+    /// longer returned: a slot that already has its job is consumed against
+    /// that job, whatever the workflow has become since. Kept so a match on
+    /// it still compiles.
     #[error("scheduled execution idempotency key conflicts with another snapshot")]
     ScheduledIdempotencyConflict,
     /// A scheduled run did not reach durable terminal observation in bounds.

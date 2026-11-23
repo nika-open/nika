@@ -78,6 +78,61 @@ async fn a_settled_queue_duplicate_does_not_reopen_its_world() {
     authority.serve_until(async {}).await.expect("clean stop");
 }
 
+/// A replay's queue entry may outlive the job itself: once retention has
+/// forgotten the settled job, the entry runs nothing and the resident keeps
+/// serving. Refusing a job the store no longer holds used to stop it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_queue_entry_for_a_forgotten_job_runs_nothing() {
+    use std::time::Duration;
+
+    use super::schedule_tests::ManualClock;
+
+    let world = TestWorld::new();
+    let backend = Arc::new(TestBackend::completes(ExecutionDisposition::Succeeded));
+    let clock = Arc::new(ManualClock::new("2026-11-16T10:00:00Z[UTC]"));
+    let authority = super::ResidentAuthority::open(
+        super::ResidentConfig::new(&world.state)
+            .with_limits(limits().with_job_retention(Duration::from_secs(60)))
+            .with_clock(clock.clone()),
+        backend.clone(),
+    )
+    .await
+    .expect("authority");
+    let admit = |key: &'static str| {
+        let encoded = snapshot_body(WORKFLOW);
+        authority.coordinator.admit_manual(
+            crate::IdempotencyKey::new(key.to_owned()).expect("key"),
+            crate::RequestDigest::from_bytes(Sha256::digest(encoded.as_bytes()).into()),
+            "root.nika".to_owned(),
+            encoded,
+            None,
+        )
+    };
+    admit("forgotten").await.expect("admission");
+    let task = authority.jobs.recv().await.expect("queue entry");
+    let id = task.id.clone();
+    Box::pin(super::run_job(Arc::clone(&authority.state), task))
+        .await
+        .expect("the job settles");
+    assert_eq!(backend.calls(), 1);
+
+    // Past its window, the next admission forgets the settled job.
+    clock.advance_to("2026-11-16T10:01:01Z[UTC]");
+    admit("next").await.expect("the next admission evicts");
+    let gone = authority.state.store.get(id.clone()).await.expect("read");
+    assert!(gone.is_none(), "retention forgot the settled job");
+
+    Box::pin(super::run_job(
+        Arc::clone(&authority.state),
+        super::ExecutionTask::new(id, None),
+    ))
+    .await
+    .expect("an entry for a forgotten job is inert, never fatal");
+    assert_eq!(backend.calls(), 1, "nothing ran for it");
+    authority.serve_until(async {}).await.expect("clean stop");
+    assert_eq!(backend.calls(), 2, "the resident still ran the next job");
+}
+
 #[derive(Debug)]
 struct HeldBackend {
     entered: tokio::sync::Semaphore,

@@ -91,6 +91,12 @@ order and rewritten as 4. An unattributed record adds nothing to any hash preima
 hashes are what they were. An engine older than this one refuses a format-4 store by its
 version, never reinterprets it.
 
+The rewrite belongs to the first writer, which a resident is only once it holds the server
+lease. Opening lifts the format in memory and writes nothing: a second start on a state root
+whose live resident is the older engine loses the lease and leaves that resident's file in the
+format it reads. Persisting the migration at open would have stopped every later operation of
+the live resident.
+
 ### 3. `GET /v1/jobs`
 
 - Filters, all optional, combined with AND: `owner`, `status` (several), `workflow`, `origin`,
@@ -139,6 +145,11 @@ behaves as before.
 - `DELETE /v1/schedules/{id}` removes an API schedule under `If-Match` (the exact `ETag`, or
   `*`), with its last-slot decision. A job already fired is untouched. A project beat answers
   `409 schedule_declared_by_project`: its file is its one owner.
+- A slot keeps the one job it fired, for as long as the store holds that job. Removal forgets
+  the decision, so a schedule declared again can offer a slot that already ran; the slot's key
+  then meets that job and the slot is consumed against it, whatever the workflow has become
+  since. The same holds when a deploy edits the workflow between a crash and the restart that
+  offers the slot again. A slot never fires twice and never stops the resident.
 - `POST /v1/schedules/{id}/trigger` admits one **manual** job through the admission of
   `POST /v1/jobs`, under the schedule's workflow, inputs, ceiling, owner and labels. It
   consumes no slot and writes no decision and no firing-ledger entry, so "one slot, one firer"

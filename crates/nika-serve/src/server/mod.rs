@@ -1177,8 +1177,11 @@ async fn run_claimed(
     claim: cost_review::Claim,
 ) -> Result<(), ServerError> {
     // Replays can leave duplicate queue entries after the owner settles.
-    // This is only a read-avoidance optimization: the durable claim and
-    // queued-only refusal below still arbitrate concurrent transitions.
+    // For a job the store still holds this is only a read-avoidance
+    // optimization: the durable claim and queued-only refusal below still
+    // arbitrate concurrent transitions. A job the store no longer holds was
+    // settled and then forgotten by retention: its entry runs nothing, and
+    // must end here, since refusing an absent job is an error.
     let expected = if task.prestarted {
         JobStatus::Running
     } else {
@@ -1188,7 +1191,7 @@ async fn run_claimed(
         .store
         .execution_status(task.id.clone())
         .await?
-        .is_some_and(|status| status != expected)
+        .is_none_or(|status| status != expected)
     {
         return Ok(());
     }

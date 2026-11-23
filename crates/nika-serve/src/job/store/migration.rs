@@ -198,17 +198,16 @@ fn validate_legacy_events(job: &LegacyStoredJobV2) -> Result<(), JobStoreError> 
     Ok(())
 }
 
-pub(super) struct DecodedState {
-    pub(super) state: PersistedState,
-    pub(super) migrated: bool,
-}
-
 #[derive(Deserialize)]
 struct StateVersionProbe {
     version: u32,
 }
 
-pub(super) fn decode_state(text: &str) -> Result<DecodedState, JobStoreError> {
+/// Read one stored snapshot in the current format. An older format is lifted
+/// in memory, at every load; the first writer stores the result. Reading
+/// never writes: a start that goes on to lose the server lease must leave a
+/// live resident's file in the format that resident reads.
+pub(super) fn decode_state(text: &str) -> Result<PersistedState, JobStoreError> {
     let probe: StateVersionProbe = serde_json::from_str(text)
         .map_err(|_| JobStoreError::Corrupt("state is not valid JSON".to_owned()))?;
     match probe.version {
@@ -216,26 +215,17 @@ pub(super) fn decode_state(text: &str) -> Result<DecodedState, JobStoreError> {
             let state: PersistedState = serde_json::from_str(text)
                 .map_err(|_| JobStoreError::Corrupt("state is not valid JSON".to_owned()))?;
             state.validate()?;
-            Ok(DecodedState {
-                state,
-                migrated: false,
-            })
+            Ok(state)
         }
         PREVIOUS_STATE_VERSION => {
             let previous: PersistedState = serde_json::from_str(text)
                 .map_err(|_| JobStoreError::Corrupt("state is not valid JSON".to_owned()))?;
-            Ok(DecodedState {
-                state: previous.upgrade_from_previous()?,
-                migrated: true,
-            })
+            previous.upgrade_from_previous()
         }
         LEGACY_STATE_VERSION => {
             let legacy: LegacyPersistedStateV2 = serde_json::from_str(text)
                 .map_err(|_| JobStoreError::Corrupt("legacy state is not valid JSON".to_owned()))?;
-            Ok(DecodedState {
-                state: legacy.migrate()?,
-                migrated: true,
-            })
+            legacy.migrate()
         }
         _ => Err(JobStoreError::Corrupt(
             "state version is unsupported".to_owned(),

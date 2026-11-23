@@ -661,6 +661,195 @@ fn an_answer_against_edited_content_halts_with_content_mismatch() {
     );
 }
 
+// ─── (d) the answer binds what it unleashes (NEP-0013 law 1) ────────────
+
+/// One leg of a gated run in `dir`: `--json`, with `extra` arguments.
+fn bound_leg(dir: &std::path::Path, wf: &str, extra: &[&str]) -> (Option<i32>, String) {
+    let mut args = vec!["run", wf, "--json", "--color", "never"];
+    args.extend_from_slice(extra);
+    let out = bin()
+        .args(&args)
+        .env("NIKA_KEYCHAIN", "off")
+        .current_dir(dir)
+        .output()
+        .expect("binary runs");
+    (
+        out.status.code(),
+        String::from_utf8(out.stdout).expect("utf8"),
+    )
+}
+
+/// The resumed leg refused the answer under `approval.content_mismatch`: the
+/// typed halt, one attested deny that signs the paused ticket, and no start
+/// of the gated task.
+fn assert_answer_refused(paused: &str, (code, stdout): &(Option<i32>, String), gated: &str) {
+    assert_eq!(
+        *code,
+        Some(1),
+        "the refused answer fails the run:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("NIKA-SEC-010") && stdout.contains("approval.content_mismatch"),
+        "the typed refusal names the law:\n{stdout}"
+    );
+    let decided = events_for(stdout, "approval_decided", "approve");
+    assert_eq!(decided.len(), 1, "the deny is attested once:\n{stdout}");
+    assert_eq!(field_str(decided[0], "decision"), "deny");
+    assert_eq!(field_str(decided[0], "source"), "engine");
+    assert_eq!(field_str(decided[0], "why"), "approval.content_mismatch");
+    let pause = (paused.lines())
+        .rfind(|line| line.contains("\"kind\":\"workflow_paused\""))
+        .expect("the first leg paused");
+    assert_eq!(
+        field_str(decided[0], "digest"),
+        field_str(pause, "approval_digest"),
+        "the deny signs the ticket the pause journaled"
+    );
+    assert_ne!(
+        field_str(decided[0], "shown_hash"),
+        field_str(pause, "approval_shown_hash"),
+        "what the answer met is other content than the gate showed"
+    );
+    assert!(
+        events_for(stdout, "task_started", gated).is_empty(),
+        "`{gated}` never starts:\n{stdout}"
+    );
+}
+
+/// The resumed leg bound the answer: the run completes under one attested
+/// allow over the content the pause showed.
+fn assert_answer_bound(paused: &str, (code, stdout): &(Option<i32>, String)) {
+    assert_eq!(
+        *code,
+        Some(0),
+        "the bound answer completes the run:\n{stdout}"
+    );
+    let decided = events_for(stdout, "approval_decided", "approve");
+    assert_eq!(decided.len(), 1, "{stdout}");
+    assert_eq!(field_str(decided[0], "decision"), "allow");
+    assert_eq!(field_str(decided[0], "source"), "resume");
+    let pause = (paused.lines())
+        .rfind(|line| line.contains("\"kind\":\"workflow_paused\""))
+        .expect("the first leg paused");
+    assert_eq!(
+        field_str(decided[0], "shown_hash"),
+        field_str(pause, "approval_shown_hash")
+    );
+}
+
+const BOUND_WRITE: &str = r#"
+nika: resume-bound-write
+permits:
+  fs: { write: ["./out/**"] }
+  tools: ["nika:prompt", "nika:write"]
+tasks:
+  approve:
+    invoke:
+      tool: "nika:prompt"
+      args: { mode: "confirm", message: "Write the approved note to out/approved.txt?" }
+  write_note:
+    with: { go: "${{ tasks.approve.output }}" }
+    when: "${{ with.go == true }}"
+    invoke:
+      tool: "nika:write"
+      args: { path: "./out/approved.txt", content: "the approved note" }
+"#;
+
+/// The operator is asked about one write; the gated task is rewritten while
+/// the run waits (another path, another text, the question untouched). The
+/// answer does not carry over: the resume halts typed and writes nothing.
+/// Put back as it was asked about, the same file takes the same answer.
+#[test]
+fn an_answer_never_writes_a_gated_file_edited_after_the_question() {
+    let dir = tempfile::tempdir().expect("owned fixture room");
+    let wf = dir.path().join("bound.nika");
+    std::fs::write(&wf, BOUND_WRITE).expect("workflow written");
+    let (code, paused) = bound_leg(dir.path(), "bound.nika", &[]);
+    assert_eq!(code, Some(4), "the first run pauses:\n{paused}");
+    std::fs::write(dir.path().join("first.ndjson"), &paused).expect("trace written");
+    let answer = ["--resume", "first.ndjson", "--answer", "approve=true"];
+
+    let edited = BOUND_WRITE
+        .replace("path: \"./out/approved.txt\"", "path: \"./out/other.txt\"")
+        .replace(
+            "content: \"the approved note\"",
+            "content: \"another text entirely\"",
+        );
+    assert!(edited.contains("message: \"Write the approved note to out/approved.txt?\""));
+    assert!(edited.contains("./out/other.txt") && edited.contains("another text entirely"));
+    std::fs::write(&wf, &edited).expect("workflow edited");
+    let refused = bound_leg(dir.path(), "bound.nika", &answer);
+    assert_answer_refused(&paused, &refused, "write_note");
+    assert!(
+        !dir.path().join("out").exists(),
+        "nothing was written, neither the edited file nor the approved one"
+    );
+
+    std::fs::write(&wf, BOUND_WRITE).expect("workflow restored");
+    let bound = bound_leg(dir.path(), "bound.nika", &answer);
+    assert_answer_bound(&paused, &bound);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("out/approved.txt")).expect("the approved file"),
+        "the approved note"
+    );
+    assert!(!dir.path().join("out/other.txt").exists());
+}
+
+const BOUND_PARENT: &str = r#"
+nika: resume-bound-parent
+permits: { exec: ["echo"], tools: ["nika:prompt"] }
+tasks:
+  approve:
+    invoke:
+      tool: "nika:prompt"
+      args: { mode: "confirm", message: "Run the greeting child?" }
+  call:
+    with: { go: "${{ tasks.approve.output }}" }
+    when: "${{ with.go == true }}"
+    invoke:
+      workflow: "./child.nika"
+      args: { name: "composition" }
+    returns: { object: { greeting: string } }
+outputs:
+  echoed: { value: "${{ tasks.call.output.greeting }}", type: string }
+"#;
+
+/// The operator is asked about a child workflow call; the child file is
+/// swapped while the run waits, the parent untouched. The parent's gated task
+/// reads the same on the page, yet its identity covers the child's source
+/// closure: the answer does not carry over and the swapped child never runs.
+#[test]
+fn an_answer_never_runs_a_child_workflow_swapped_after_the_question() {
+    let dir = tempfile::tempdir().expect("owned fixture room");
+    std::fs::write(dir.path().join("parent.nika"), BOUND_PARENT).expect("parent written");
+    let child = dir.path().join("child.nika");
+    std::fs::write(&child, COMP_CHILD).expect("child written");
+    let (code, paused) = bound_leg(dir.path(), "parent.nika", &[]);
+    assert_eq!(code, Some(4), "the first run pauses:\n{paused}");
+    std::fs::write(dir.path().join("first.ndjson"), &paused).expect("trace written");
+    let answer = ["--resume", "first.ndjson", "--answer", "approve=true"];
+
+    let swapped = COMP_CHILD.replace("\"hello ", "\"goodbye ");
+    assert_ne!(swapped, COMP_CHILD, "the fixture swaps the child");
+    std::fs::write(&child, &swapped).expect("child swapped");
+    let refused = bound_leg(dir.path(), "parent.nika", &answer);
+    assert_answer_refused(&paused, &refused, "call");
+    assert!(
+        !refused.1.contains("goodbye composition"),
+        "the swapped child never ran:\n{}",
+        refused.1
+    );
+
+    std::fs::write(&child, COMP_CHILD).expect("child restored");
+    let bound = bound_leg(dir.path(), "parent.nika", &answer);
+    assert_answer_bound(&paused, &bound);
+    assert!(
+        bound.1.contains("hello composition"),
+        "the child asked about ran:\n{}",
+        bound.1
+    );
+}
+
 // ─── (e) resume ACROSS a composition (spec 14 law 10 · condition 8) ─────
 //
 // The def_hash-tier demonstration: a parent's `invoke: workflow:` call

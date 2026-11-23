@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
+use crate::job::JobBindings;
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -152,11 +153,8 @@ enum RequestCommand {
         workflow: String,
         world: String,
         access_pin: Option<String>,
-        /// The literal inputs and the per-job ceiling its requester bound.
-        bindings: (
-            std::collections::BTreeMap<String, serde_json::Value>,
-            Option<f64>,
-        ),
+        /// The literal inputs, the per-job ceiling and the attribution its requester bound.
+        bindings: JobBindings,
         reply: Reply<Admission>,
     },
     Replay {
@@ -174,7 +172,7 @@ enum RequestCommand {
         execution_id: String,
         trace_id: String,
         snapshot_digest: String,
-        inputs: BTreeMap<String, Value>,
+        bindings: JobBindings,
         event: Value,
         reply: Reply<Admission>,
     },
@@ -263,10 +261,7 @@ impl StoreHandle {
         workflow: String,
         world: String,
         access_pin: Option<String>,
-        bindings: (
-            std::collections::BTreeMap<String, serde_json::Value>,
-            Option<f64>,
-        ),
+        bindings: JobBindings,
     ) -> Result<Admission, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_request(RequestCommand::Create {
@@ -305,7 +300,7 @@ impl StoreHandle {
         execution_id: String,
         trace_id: String,
         snapshot_digest: String,
-        inputs: BTreeMap<String, Value>,
+        bindings: JobBindings,
         event: Value,
     ) -> Result<Admission, ServerError> {
         let (reply, answer) = oneshot::channel();
@@ -319,7 +314,7 @@ impl StoreHandle {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            bindings,
             event,
             reply,
         })?;
@@ -690,7 +685,7 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            bindings,
             event,
             reply,
         } => {
@@ -704,7 +699,7 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
                 execution_id,
                 trace_id,
                 snapshot_digest,
-                inputs,
+                bindings,
                 &event,
             );
             let _result = reply.send(result);

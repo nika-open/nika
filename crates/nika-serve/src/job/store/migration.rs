@@ -3,8 +3,8 @@
 
 use super::{
     BTreeSet, Deserialize, EventHash, IncarnationLedger, JobEvent, JobRecord, JobStatus,
-    JobStoreError, LEGACY_STATE_VERSION, PersistedState, STATE_VERSION, StoredJob, Value,
-    hash_event, hash_execution_identity, migrate_legacy_nonterminal_record,
+    JobStoreError, LEGACY_STATE_VERSION, PREVIOUS_STATE_VERSION, PersistedState, STATE_VERSION,
+    StoredJob, Value, hash_event, hash_execution_identity, migrate_legacy_nonterminal_record,
     validate_approval_event, validate_terminal_record,
 };
 use crate::JobEventKind as Kind;
@@ -33,6 +33,15 @@ impl LegacyPersistedStateV2 {
                     "legacy job cannot carry API input bindings".to_owned(),
                 ));
             }
+            if job.record.owner.is_some()
+                || !job.record.labels.is_empty()
+                || job.record.created_at.is_some()
+                || job.record.ordinal != 0
+            {
+                return Err(JobStoreError::Corrupt(
+                    "legacy job cannot carry format-4 members".to_owned(),
+                ));
+            }
             job.record.id.validate()?;
             job.record.idempotency_key.validate()?;
             job.record.request_digest.validate()?;
@@ -47,7 +56,7 @@ impl LegacyPersistedStateV2 {
             }
             validate_legacy_events(job)?;
         }
-        let state = PersistedState {
+        let mut state = PersistedState {
             version: STATE_VERSION,
             incarnation: self.incarnation,
             jobs: self
@@ -55,9 +64,11 @@ impl LegacyPersistedStateV2 {
                 .into_iter()
                 .map(migrate_job)
                 .collect::<Result<Vec<_>, _>>()?,
+            next_ordinal: 1,
             // a migrated store is written by THIS engine (ADR-132)
             writer: Some(crate::writer::WriterStamp::this_engine()),
         };
+        state.assign_ordinals()?;
         state.validate()?;
         Ok(state)
     }
@@ -208,6 +219,14 @@ pub(super) fn decode_state(text: &str) -> Result<DecodedState, JobStoreError> {
             Ok(DecodedState {
                 state,
                 migrated: false,
+            })
+        }
+        PREVIOUS_STATE_VERSION => {
+            let previous: PersistedState = serde_json::from_str(text)
+                .map_err(|_| JobStoreError::Corrupt("state is not valid JSON".to_owned()))?;
+            Ok(DecodedState {
+                state: previous.upgrade_from_previous()?,
+                migrated: true,
             })
         }
         LEGACY_STATE_VERSION => {

@@ -865,7 +865,7 @@
             "properties": {
               "jobs": {
                 "examples": [
-                  3
+                  4
                 ],
                 "minimum": 1,
                 "type": "integer"

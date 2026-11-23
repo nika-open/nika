@@ -40,9 +40,9 @@ async fn health_is_public_and_contains_only_compile_bound_identity() {
     }
     assert_eq!(
         body["storeFormatVersion"],
-        json!({"jobs": 3, "schedules": 1})
+        json!({"jobs": 4, "schedules": 1})
     );
-    for (store, version) in [("jobs", 3), ("schedules", 1)] {
+    for (store, version) in [("jobs", 4), ("schedules", 1)] {
         let persisted: Value = serde_json::from_slice(
             &std::fs::read(world.state.join(store).join("state.json")).expect("store"),
         )

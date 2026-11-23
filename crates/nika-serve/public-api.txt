@@ -899,13 +899,16 @@ pub type nika_serve::JobReceipt::Output = T
 #[non_exhaustive] pub struct nika_serve::job::JobRecord
 impl nika_serve::JobRecord
 pub fn nika_serve::JobRecord::access_pin(&self) -> core::option::Option<&str>
+pub fn nika_serve::JobRecord::created_at(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::error(&self) -> core::option::Option<(&str, &str)>
 pub const fn nika_serve::JobRecord::evidence(&self) -> core::option::Option<nika_serve::JournalEvidence>
 pub fn nika_serve::JobRecord::execution_id(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::id(&self) -> &nika_serve::JobId
 pub fn nika_serve::JobRecord::idempotency_key(&self) -> &nika_serve::IdempotencyKey
+pub const fn nika_serve::JobRecord::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub const fn nika_serve::JobRecord::origin(&self) -> &nika_serve::JobOrigin
 pub fn nika_serve::JobRecord::outputs(&self) -> core::option::Option<&alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>>
+pub fn nika_serve::JobRecord::owner(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::receipt(&self) -> core::option::Option<&nika_serve::JobReceipt>
 pub fn nika_serve::JobRecord::request_digest(&self) -> &nika_serve::RequestDigest
 pub fn nika_serve::JobRecord::settlement(&self) -> core::option::Option<&serde_json::value::Value>
@@ -3779,13 +3782,16 @@ pub type nika_serve::JobReceipt::Output = T
 #[non_exhaustive] pub struct nika_serve::JobRecord
 impl nika_serve::JobRecord
 pub fn nika_serve::JobRecord::access_pin(&self) -> core::option::Option<&str>
+pub fn nika_serve::JobRecord::created_at(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::error(&self) -> core::option::Option<(&str, &str)>
 pub const fn nika_serve::JobRecord::evidence(&self) -> core::option::Option<nika_serve::JournalEvidence>
 pub fn nika_serve::JobRecord::execution_id(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::id(&self) -> &nika_serve::JobId
 pub fn nika_serve::JobRecord::idempotency_key(&self) -> &nika_serve::IdempotencyKey
+pub const fn nika_serve::JobRecord::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub const fn nika_serve::JobRecord::origin(&self) -> &nika_serve::JobOrigin
 pub fn nika_serve::JobRecord::outputs(&self) -> core::option::Option<&alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>>
+pub fn nika_serve::JobRecord::owner(&self) -> core::option::Option<&str>
 pub fn nika_serve::JobRecord::receipt(&self) -> core::option::Option<&nika_serve::JobReceipt>
 pub fn nika_serve::JobRecord::request_digest(&self) -> &nika_serve::RequestDigest
 pub fn nika_serve::JobRecord::settlement(&self) -> core::option::Option<&serde_json::value::Value>

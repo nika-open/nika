@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
+mod attribution;
 mod evidence;
 mod kind;
 mod model;
 mod store;
 
+pub(crate) use attribution::{JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
 pub use model::{

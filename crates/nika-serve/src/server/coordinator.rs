@@ -9,6 +9,7 @@ use nika_execution::AdmittedExecution;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
+use crate::job::JobBindings;
 use crate::{
     Admission, IdempotencyKey, JobId, JobOrigin, JobReceipt, JobRecord, JobStatus, RequestDigest,
 };
@@ -148,7 +149,7 @@ impl ResidentExecutionCoordinator {
                 workflow,
                 world,
                 access_pin,
-                (inputs, declared),
+                JobBindings::of(inputs, declared),
             )
             .await?;
         match &admission {
@@ -234,7 +235,7 @@ impl ResidentExecutionCoordinator {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            JobBindings::of(inputs, None),
             json!({
                 "kind": crate::JobEventKind::Prepared,
                 "origin": event_origin,

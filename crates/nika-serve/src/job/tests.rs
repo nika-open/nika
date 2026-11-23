@@ -41,9 +41,15 @@ fn stamp_execution(store: &JobStore, id: &JobId, byte: u8) {
 
 fn downgrade_state_to_v2(state: &mut serde_json::Value) {
     state["version"] = json!(2);
-    // a v2 store predates the writer stamp (ADR-132)
-    state.as_object_mut().expect("state").remove("writer");
+    // a v2 store predates the writer stamp (ADR-132) and the ordinals,
+    // admission dates and attribution of format 4 (ADR-155)
+    let root = state.as_object_mut().expect("state");
+    root.remove("writer");
+    root.remove("next_ordinal");
     for job in state["jobs"].as_array_mut().expect("jobs") {
+        let record = job["record"].as_object_mut().expect("record");
+        record.remove("ordinal");
+        record.remove("created_at");
         let stored = job.as_object_mut().expect("stored job");
         stored.remove("terminal_sequence");
         stored.remove("identity_digest");
@@ -325,7 +331,13 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     let migrated: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&queued_path).expect("read migrated state"))
             .expect("decode migrated state");
-    assert_eq!(migrated["version"], 3);
+    assert_eq!(migrated["version"], 4);
+    assert_eq!(migrated["next_ordinal"], 2);
+    assert_eq!(migrated["jobs"][0]["record"]["ordinal"], 1);
+    assert!(
+        migrated["jobs"][0]["record"].get("created_at").is_none(),
+        "a migrated job gains no invented admission date"
+    );
     assert!(migrated["jobs"][0].get("terminal_sequence").is_some());
 
     let terminal_root = tempfile::tempdir().expect("terminal root");
@@ -375,7 +387,7 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     let persisted: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&terminal_path).expect("read migrated terminal"))
             .expect("decode migrated terminal");
-    assert_eq!(persisted["version"], 3);
+    assert_eq!(persisted["version"], 4);
     assert!(persisted["jobs"][0]["identity_digest"].as_str().is_some());
     assert!(persisted["jobs"][0]["terminal_sequence"].as_u64().is_some());
 }
@@ -1167,6 +1179,8 @@ fn transition_and_events_commit_as_one_mutation() {
     assert_eq!(committed.as_slice(), mutation.events());
 }
 
+#[cfg(test)]
+mod attribution;
 #[cfg(test)]
 mod event_integrity;
 #[cfg(test)]

@@ -3,6 +3,7 @@
 
 use sha2::{Digest as _, Sha256};
 
+use crate::job::JobAttribution;
 use crate::{JobOrigin, JobReceipt, JobRecord, JobStoreError, RequestDigest};
 
 use super::{EVENT_HASH_DOMAIN, EventHash, IDENTITY_HASH_DOMAIN, StoredJob};
@@ -108,6 +109,7 @@ pub(super) fn hash_execution_identity(record: &JobRecord) -> Result<EventHash, J
     if let Some(ceiling) = &record.max_cost_usd {
         preimage["max_cost_usd"] = Value::Number(ceiling.clone());
     }
+    JobAttribution::bind(record.owner(), record.labels(), &mut preimage);
     let canonical = serde_json::to_vec(&preimage)
         .map_err(|_| JobStoreError::Corrupt("identity preimage cannot be encoded".to_owned()))?;
     let mut hasher = Sha256::new();
@@ -190,6 +192,7 @@ pub(super) fn hash_event(
     if let Some(ceiling) = &record.max_cost_usd {
         preimage["max_cost_usd"] = Value::Number(ceiling.clone());
     }
+    JobAttribution::bind(record.owner(), record.labels(), &mut preimage);
     let canonical = serde_json::to_vec(&preimage)
         .map_err(|_| JobStoreError::Corrupt("event preimage cannot be encoded".to_owned()))?;
     let mut hasher = Sha256::new();

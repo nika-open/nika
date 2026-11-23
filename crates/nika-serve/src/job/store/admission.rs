@@ -6,10 +6,10 @@ use serde_json::Value;
 use crate::JobOrigin;
 
 use super::{
-    Admission, EventHash, IdempotencyKey, JobId, JobMutation, JobReceipt, JobRecord, JobStatus,
-    JobStore, JobStoreError, MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES, RequestDigest, StoredJob,
-    ValidatedEventBatch, ensure_receipt_matches, hash_execution_identity, unique_job_id,
-    validate_snapshot_digest, world_file,
+    Admission, EventHash, IdempotencyKey, JobBindings, JobId, JobMutation, JobReceipt, JobRecord,
+    JobStatus, JobStore, JobStoreError, MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES, RequestDigest,
+    StoredJob, UNBOUND_CEILING, ValidatedEventBatch, ensure_receipt_matches,
+    hash_execution_identity, unique_job_id, validate_snapshot_digest, world_file,
 };
 
 impl JobStore {
@@ -197,6 +197,111 @@ impl JobStore {
             }))
     }
 
+    /// The one transaction that creates a manual job, or answers a key that
+    /// is already bound.
+    pub(super) fn create_or_replay_inner(
+        &self,
+        key: IdempotencyKey,
+        digest: RequestDigest,
+        max_jobs: usize,
+        workflow: String,
+        world: Option<&str>,
+        access_pin: Option<String>,
+        bindings: JobBindings,
+    ) -> Result<Admission, JobStoreError> {
+        let JobBindings {
+            inputs,
+            max_cost_usd,
+            attribution,
+        } = bindings;
+        let (owner, labels) = attribution.into_parts();
+        let max_cost_usd = match max_cost_usd {
+            Some(usd) => Some(
+                (serde_json::Number::from_f64(usd).filter(|_| usd >= 0.0))
+                    .ok_or_else(|| JobStoreError::Corrupt(UNBOUND_CEILING.to_owned()))?,
+            ),
+            None => None,
+        };
+        key.validate()?;
+        digest.validate()?;
+        if let Some(world) = world
+            && world.len() > MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES
+        {
+            return Err(JobStoreError::SnapshotTooLarge {
+                bytes: world.len() as u64,
+                maximum: MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES,
+            });
+        }
+        let _local = self.local_guard()?;
+        let _lease = self.kernel_lease()?;
+        let mut state = self.load_state()?;
+
+        if let Some(existing) = state
+            .jobs
+            .iter()
+            .find(|job| job.record.idempotency_key == key)
+        {
+            return Ok(if existing.record.request_digest == digest {
+                Admission::Existing(existing.record.clone())
+            } else {
+                Admission::Conflict(existing.record.clone())
+            });
+        }
+
+        if state.jobs.len() >= max_jobs {
+            return Err(JobStoreError::CapacityExceeded);
+        }
+
+        let record = JobRecord {
+            id: unique_job_id(&state),
+            idempotency_key: key,
+            request_digest: digest,
+            status: JobStatus::Queued,
+            origin: JobOrigin::Manual,
+            workflow,
+            access_pin,
+            inputs,
+            max_cost_usd,
+            owner,
+            labels,
+            created_at: Some(self.now()),
+            ordinal: state.take_ordinal()?,
+            execution_id: String::new(),
+            trace_id: String::new(),
+            snapshot_digest: String::new(),
+            error_code: String::new(),
+            error_message: String::new(),
+            outputs: None,
+            receipt: None,
+            settlement: None,
+            evidence: None,
+            paused_outputs: None,
+            paused_receipt: None,
+        };
+        if let Some(world) = world {
+            self.dir.write_atomic(&world_file(&record.id), world)?;
+        }
+        let mut stored = StoredJob {
+            record: record.clone(),
+            events: Vec::new(),
+            event_count: 0,
+            event_head: None,
+            identity_digest: None,
+            terminal_sequence: None,
+        };
+        // Bind caller values, a requested ceiling and a stated attribution before execution,
+        // including during durable queue recovery. The payload carries no values; the event
+        // preimage binds them.
+        if record.binds_admission() {
+            let queued = serde_json::json!({"kind": crate::JobEventKind::Queued, "status": JobStatus::Queued});
+            let batch = ValidatedEventBatch::for_transition(std::slice::from_ref(&queued))?;
+            stored.append_payloads(&batch, &self.now())?;
+        }
+        state.jobs.push(stored);
+        self.persist(&state)?;
+        Ok(Admission::Created(record))
+    }
+
     /// Atomically create one scheduled run already claimed as `running`.
     ///
     /// The caller has reserved the shared queue before entering this method.
@@ -214,9 +319,11 @@ impl JobStore {
         execution_id: String,
         trace_id: String,
         snapshot_digest: String,
-        inputs: std::collections::BTreeMap<String, Value>,
+        bindings: JobBindings,
         event: &Value,
     ) -> Result<Admission, JobStoreError> {
+        let (owner, labels) = bindings.attribution.into_parts();
+        let inputs = bindings.inputs;
         key.validate()?;
         digest.validate()?;
         origin.validate()?;
@@ -263,6 +370,10 @@ impl JobStore {
             access_pin: None,
             inputs,
             max_cost_usd: None,
+            owner,
+            labels,
+            created_at: Some(self.now()),
+            ordinal: state.take_ordinal()?,
             execution_id,
             trace_id,
             snapshot_digest,

@@ -1648,6 +1648,8 @@ mod failure_tests;
 #[cfg(test)]
 mod fair_admission_tests;
 #[cfg(test)]
+mod fault_tests;
+#[cfg(test)]
 mod job_list_tests;
 #[cfg(test)]
 mod registry_tests;

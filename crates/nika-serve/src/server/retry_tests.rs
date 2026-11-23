@@ -503,13 +503,13 @@ fn a_job_a_schedule_fired_is_never_started_again() {
 
 /// A backend whose run writes its boot record through the resident's own
 /// sink and then never returns: what a run leaves when its owner goes.
-struct StartedThenLost {
+pub(super) struct StartedThenLost {
     project: PathBuf,
     calls: AtomicUsize,
 }
 
 impl StartedThenLost {
-    fn over(world: &TestWorld) -> Arc<Self> {
+    pub(super) fn over(world: &TestWorld) -> Arc<Self> {
         Arc::new(Self {
             project: world.workflows.clone(),
             calls: AtomicUsize::new(0),
@@ -590,7 +590,7 @@ pub(super) async fn running_job(
     (id, job)
 }
 
-async fn until_called(backend: &StartedThenLost) {
+pub(super) async fn until_called(backend: &StartedThenLost) {
     for _ in 0..500 {
         if backend.calls.load(Ordering::SeqCst) > 0 {
             break;

@@ -386,13 +386,17 @@ Written for reading attempts:
 - `crates/nika-serve/src/job/tests/attempts.rs`,
   `crates/nika-serve/src/server/retry_route_tests.rs`
 
-Planned:
+Written for the faults:
 
-- Fault-injection tests beside `server/tests/shutdown/process.rs`: a kill in the middle of a
-  mock workflow then a restart (two attempts, completed tasks skipped in the journal, total
-  spend under the ceiling); a stop with a grace shorter than the job; a poisoned job; a
-  workflow with effects and no consent; an idempotency replay across attempts; a format 3
-  store migrated and then re-attempted
+- `crates/nika-serve/src/server/tests/shutdown/kill_resume.rs` -- a resident process killed
+  by SIGKILL in the middle of a workflow; the next one resumes the job from the killed
+  attempt's journal (the completed task served, never run again; the lost attempt's spend
+  read as zero; its journal verified on its own)
+- `crates/nika-serve/src/server/fault_tests.rs` -- a job that takes down every resident that
+  runs it stops at its bound; a lost run whose workflow runs a program waits for a request;
+  a job a format 3 store kept queued is refused at readmission and cannot be started again
+- `crates/nika-serve/src/server/retry_tests.rs` -- a stop with a grace shorter than the job,
+  and the same idempotency key answering the same job across its attempts
 
 ## Alternatives considered
 
@@ -554,6 +558,14 @@ Written for reading attempts:
     terminal event, or for a lost attempt queued again the requeue event.
 23. **The trace query** takes one member, `attempt=N`. Anything else is
     `400 invalid_trace_query`; a number the job has not reached is `404 attempt_not_found`.
+
+Written for the faults:
+
+24. **A job of an older store.** A format 3 job carries no effects class: a lost one is read
+    as having effects and waits for a request. A format 3 job left queued carries no captured
+    world: it is refused at readmission, as in 0.124.5, and its attempt never started, so a
+    request cannot start it again. No frozen format 3 store holds a running job; that case
+    is judged by the rules above and is not proved from a fixture.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

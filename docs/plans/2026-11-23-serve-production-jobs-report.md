@@ -245,7 +245,8 @@ Gates on `439145eac`, the commit that closes the reviews:
 | `scripts/ci/check-crate-size.sh`, `scripts/ci/check-loc-limits.sh` | pass |
 | OpenAPI snapshot and published-SDK contract tests | pass, inside the `nika-serve` tests |
 | `scripts/hygiene/check-all.sh`, on `4758d72b8` before the review fixes | 0 red, yellow rows only (exit 1); the run left the tree unchanged |
-| the repository's pre-push gate (workspace tests, clippy, sweep, ratchets) | runs on the push; its result is on the pull request |
+| the repository's pre-push gate (workspace tests, clippy, sweep, ratchets), on `0fba9e759` | refused: 14,677 tests passed, the sweep had yellow rows only, and the `fn-length` ratchet found `serve_control` at 101 lines |
+| the same gate on `3a17f3805`, which makes that function shorter | pass: 14,677 tests passed, 25 skipped; the sweep had yellow rows only; every ratchet held. The gate runs the library tests; CI runs the integration files |
 
 | Target | Result |
 |---|---|
@@ -480,6 +481,8 @@ Workstream C, on `feat/serve-job-attempts`:
 | `4758d72b8` | C6 · the fault tests |
 | `572368d19` | the retry flags in the public API of `nika-cli-host` |
 | `439145eac` | what the two reviews of C found |
+| `0fba9e759` | this report on C, and the SDK plan for `jobRetry` |
+| `3a17f3805` | the control lane answers a persisted write in one place (`fn-length`) |
 
 ## 11. Next candidates, not designed
 

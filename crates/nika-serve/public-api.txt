@@ -1676,6 +1676,8 @@ pub nika_serve::server::ServerLaunchRefuse::InvalidBind
 pub nika_serve::server::ServerLaunchRefuse::InvalidJobLimit
 pub nika_serve::server::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::server::ServerLaunchRefuse::InvalidProviderConcurrency
+pub nika_serve::server::ServerLaunchRefuse::InvalidRetryInterrupted
+pub nika_serve::server::ServerLaunchRefuse::InvalidRetryMaxAttempts
 pub nika_serve::server::ServerLaunchRefuse::InvalidRunCostCeiling
 pub nika_serve::server::ServerLaunchRefuse::InvalidShutdownGrace
 pub nika_serve::server::ServerLaunchRefuse::MissingBindOrWorkflows
@@ -2114,6 +2116,7 @@ pub fn nika_serve::ResidentOptions::with_job_capacity(self, max_concurrent: core
 pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_owner_limits(self, max_queued: core::option::Option<usize>, max_concurrent: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_provider_concurrency(self, stated: &[alloc::string::String]) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_retry_interrupted(self, mode: core::option::Option<&str>, max_attempts: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_shutdown_grace(self, stated: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 impl core::clone::Clone for nika_serve::ResidentOptions
 pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions
@@ -3344,6 +3347,8 @@ pub nika_serve::ServerLaunchRefuse::InvalidBind
 pub nika_serve::ServerLaunchRefuse::InvalidJobLimit
 pub nika_serve::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::ServerLaunchRefuse::InvalidProviderConcurrency
+pub nika_serve::ServerLaunchRefuse::InvalidRetryInterrupted
+pub nika_serve::ServerLaunchRefuse::InvalidRetryMaxAttempts
 pub nika_serve::ServerLaunchRefuse::InvalidRunCostCeiling
 pub nika_serve::ServerLaunchRefuse::InvalidShutdownGrace
 pub nika_serve::ServerLaunchRefuse::MissingBindOrWorkflows
@@ -4294,6 +4299,7 @@ pub fn nika_serve::ResidentOptions::with_job_capacity(self, max_concurrent: core
 pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_owner_limits(self, max_queued: core::option::Option<usize>, max_concurrent: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_provider_concurrency(self, stated: &[alloc::string::String]) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_retry_interrupted(self, mode: core::option::Option<&str>, max_attempts: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_shutdown_grace(self, stated: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 impl core::clone::Clone for nika_serve::ResidentOptions
 pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions

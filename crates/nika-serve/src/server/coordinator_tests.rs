@@ -252,7 +252,7 @@ fn admitted(world: &TestWorld) -> AdmittedExecution {
         .expect("admitted workflow")
 }
 
-fn scheduled_origin(origin: ScheduleOrigin, schedule_id: &str, slot: char) -> JobOrigin {
+pub(super) fn scheduled_origin(origin: ScheduleOrigin, schedule_id: &str, slot: char) -> JobOrigin {
     scheduled_origin_with_decision(origin, schedule_id, slot, ScheduleDecision::Scheduled)
 }
 

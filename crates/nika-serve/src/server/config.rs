@@ -72,6 +72,7 @@ pub struct ServerLimits {
     unsuccessful_job_retention: Option<Duration>,
     max_queued_per_owner: Option<usize>,
     max_concurrent_per_owner: Option<usize>,
+    retry: crate::job::RetryPolicy,
 }
 
 /// Concurrent `POST /v1/compile` computations out of the box. Authoring is
@@ -118,6 +119,10 @@ impl ServerLimits {
             unsuccessful_job_retention: None,
             max_queued_per_owner: None,
             max_concurrent_per_owner: None,
+            retry: crate::job::RetryPolicy::new(
+                crate::job::OnInterrupted::Off,
+                crate::job::DEFAULT_RETRY_ATTEMPTS,
+            ),
         }
     }
 
@@ -280,6 +285,17 @@ impl ServerLimits {
 
     pub(crate) const fn shutdown_grace(self) -> Duration {
         self.shutdown_grace
+    }
+
+    /// What becomes of a job whose run lost its owner, and after how many
+    /// attempts it stops (ADR-156). Off out of the box.
+    pub(crate) const fn with_retry_policy(mut self, retry: crate::job::RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    pub(crate) const fn retry_policy(self) -> crate::job::RetryPolicy {
+        self.retry
     }
 
     pub(crate) const fn max_concurrent_jobs(self) -> usize {

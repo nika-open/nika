@@ -3,7 +3,7 @@
 
 use sha2::{Digest as _, Sha256};
 
-use crate::job::JobAttribution;
+use crate::job::{ClosedAttempt, JobAttribution, RetryStatement};
 use crate::{JobOrigin, JobReceipt, JobRecord, JobStoreError, RequestDigest};
 
 use super::{EVENT_HASH_DOMAIN, EventHash, IDENTITY_HASH_DOMAIN, StoredJob};
@@ -81,25 +81,41 @@ pub(super) fn validate_identity_binding(job: &StoredJob) -> Result<(), JobStoreE
 }
 
 pub(super) fn hash_execution_identity(record: &JobRecord) -> Result<EventHash, JobStoreError> {
+    hash_identity_of(
+        record,
+        &record.execution_id,
+        &record.trace_id,
+        &record.snapshot_digest,
+    )
+}
+
+/// The binding digest of one execution identity of `record`: its current
+/// one, or the one an attempt it left ran under.
+fn hash_identity_of(
+    record: &JobRecord,
+    execution_id: &str,
+    trace_id: &str,
+    snapshot_digest: &str,
+) -> Result<EventHash, JobStoreError> {
     // Preserve the exact v3 manual preimage so existing durable stores remain
     // readable. Schedule provenance is additive and participates in the
     // identity binding for every newly-introduced scheduled run.
     let mut preimage = if record.origin == JobOrigin::Manual {
         serde_json::json!({
-            "execution_id": &record.execution_id,
+            "execution_id": execution_id,
             "job_id": record.id.as_str(),
             "request_digest": record.request_digest.as_str(),
-            "snapshot_digest": &record.snapshot_digest,
-            "trace_id": &record.trace_id,
+            "snapshot_digest": snapshot_digest,
+            "trace_id": trace_id,
         })
     } else {
         serde_json::json!({
-            "execution_id": &record.execution_id,
+            "execution_id": execution_id,
             "job_id": record.id.as_str(),
             "origin": &record.origin,
             "request_digest": record.request_digest.as_str(),
-            "snapshot_digest": &record.snapshot_digest,
-            "trace_id": &record.trace_id,
+            "snapshot_digest": snapshot_digest,
+            "trace_id": trace_id,
         })
     };
     if !record.inputs.is_empty() {
@@ -110,6 +126,7 @@ pub(super) fn hash_execution_identity(record: &JobRecord) -> Result<EventHash, J
         preimage["max_cost_usd"] = Value::Number(ceiling.clone());
     }
     JobAttribution::bind(record.owner(), record.labels(), &mut preimage);
+    RetryStatement::bind(record, &mut preimage);
     let canonical = serde_json::to_vec(&preimage)
         .map_err(|_| JobStoreError::Corrupt("identity preimage cannot be encoded".to_owned()))?;
     let mut hasher = Sha256::new();
@@ -193,10 +210,91 @@ pub(super) fn hash_event(
         preimage["max_cost_usd"] = Value::Number(ceiling.clone());
     }
     JobAttribution::bind(record.owner(), record.labels(), &mut preimage);
+    RetryStatement::bind(record, &mut preimage);
+    // The event that queued a new attempt binds the attempt the job left:
+    // its identity, its receipt and what it spent (ADR-156 section 7).
+    if let Some(closed) = record
+        .attempts
+        .iter()
+        .find(|attempt| attempt.requeued_sequence == sequence)
+    {
+        preimage["closed_attempt"] = serde_json::to_value(closed)
+            .map_err(|_| JobStoreError::Corrupt("closed attempt cannot be encoded".to_owned()))?;
+    }
     let canonical = serde_json::to_vec(&preimage)
         .map_err(|_| JobStoreError::Corrupt("event preimage cannot be encoded".to_owned()))?;
     let mut hasher = Sha256::new();
     hasher.update(EVENT_HASH_DOMAIN);
     hasher.update(canonical);
     Ok(EventHash::from_bytes(hasher.finalize().into()))
+}
+
+/// The attempts a job left are evidence: each one keeps a whole identity,
+/// its own receipt and binding digest, and the place in the event chain
+/// where the attempt after it was queued.
+pub(super) fn validate_attempts(job: &StoredJob) -> Result<(), JobStoreError> {
+    let corrupt = |reason: &str| JobStoreError::Corrupt(reason.to_owned());
+    let mut previous = 0;
+    for attempt in &job.record.attempts {
+        validate_attempt(&job.record, attempt)?;
+        if attempt.requeued_sequence <= previous || attempt.requeued_sequence > job.event_count {
+            return Err(corrupt("attempt history is out of the event order"));
+        }
+        previous = attempt.requeued_sequence;
+        let queued = usize::try_from(attempt.requeued_sequence - 1)
+            .ok()
+            .and_then(|index| job.events.get(index))
+            .is_some_and(|event| crate::JobEventKind::Requeued.is(&event.payload));
+        if !queued {
+            return Err(corrupt("a closed attempt names no requeue event"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_attempt(record: &JobRecord, attempt: &ClosedAttempt) -> Result<(), JobStoreError> {
+    let corrupt = |reason: &str| JobStoreError::Corrupt(reason.to_owned());
+    if !matches!(
+        attempt.status,
+        crate::JobStatus::Interrupted | crate::JobStatus::Failed
+    ) {
+        return Err(corrupt(
+            "a closed attempt ended in a status no attempt ends in",
+        ));
+    }
+    if attempt.execution_id.is_empty()
+        || attempt.trace_id.is_empty()
+        || validate_snapshot_digest(&attempt.snapshot_digest).is_err()
+    {
+        return Err(corrupt("a closed attempt lacks its execution identity"));
+    }
+    if let Some(receipt) = &attempt.receipt {
+        receipt
+            .validate()
+            .map_err(|_| corrupt("a closed attempt carries an invalid receipt"))?;
+        if receipt.job_id() != &record.id
+            || receipt.execution_id() != attempt.execution_id
+            || receipt.trace_id() != attempt.trace_id
+            || receipt.snapshot_digest() != attempt.snapshot_digest
+        {
+            return Err(corrupt(
+                "a closed attempt's receipt names another execution",
+            ));
+        }
+    }
+    if let Some(digest) = &attempt.identity_digest {
+        digest.validate()?;
+        let expected = hash_identity_of(
+            record,
+            &attempt.execution_id,
+            &attempt.trace_id,
+            &attempt.snapshot_digest,
+        )?;
+        if digest != &expected {
+            return Err(corrupt(
+                "a closed attempt does not match its canonical binding digest",
+            ));
+        }
+    }
+    Ok(())
 }

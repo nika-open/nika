@@ -211,7 +211,9 @@ pub(super) async fn trigger(
         return ApiError::internal().into_response();
     };
     let workflow = admitted.snapshot().root().to_owned();
-    let bindings = JobBindings::of(inputs, Some(definition.max_cost_usd())).attributed(attribution);
+    let bindings = JobBindings::of(inputs, Some(definition.max_cost_usd()))
+        .attributed(attribution)
+        .classed(super::retry::effects_word(&admitted));
     admit_job(state, key, digest, workflow, world, None, bindings).await
 }
 

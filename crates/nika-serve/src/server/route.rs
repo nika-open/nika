@@ -52,9 +52,16 @@ pub(super) struct JobByName {
     /// The caller's labels, as written and judged the same way.
     #[serde(default, deserialize_with = "present_value")]
     labels: Option<serde_json::Value>,
+    /// What the caller states about starting the job again if its run is
+    /// lost (ADR-156), as written and judged the same way.
+    #[serde(default, deserialize_with = "present_value")]
+    retry: Option<serde_json::Value>,
     /// The validated attribution: never read from the wire.
     #[serde(skip)]
     pub(super) attribution: JobAttribution,
+    /// The validated retry statement: never read from the wire.
+    #[serde(skip)]
+    pub(super) retry_statement: Option<crate::job::RetryStatement>,
 }
 
 /// A present member keeps its JSON value, null included, so the judge that
@@ -337,6 +344,9 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
     // checked when present).
     match named_job(&body) {
         Ok(Some(mut job)) if job.cost_review.is_some() => {
+            if job.retry_statement.is_some() {
+                return super::retry::reviewed_states_no_retry().into_response();
+            }
             let reference = job
                 .cost_review
                 .take()
@@ -356,7 +366,10 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
             let Ok(world) = admitted.snapshot().encode() else {
                 return admission_refused().into_response();
             };
-            let bindings = JobBindings::of(inputs, None).attributed(job.attribution);
+            let bindings = JobBindings::of(inputs, None)
+                .attributed(job.attribution)
+                .retrying(job.retry_statement)
+                .classed(super::retry::effects_word(&admitted));
             return admit_job(
                 state,
                 key,
@@ -384,17 +397,10 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
     let Ok(world) = admitted.snapshot().encode() else {
         return admission_refused().into_response();
     };
-    // A frozen world carries no request overlay: a snapshot job is unattributed.
-    admit_job(
-        state,
-        key,
-        digest,
-        workflow,
-        world,
-        None,
-        JobBindings::default(),
-    )
-    .await
+    // A frozen world carries no request overlay: a snapshot job is unattributed
+    // and states no retry. The resident's own policy still reads its class.
+    let bindings = JobBindings::default().classed(super::retry::effects_word(&admitted));
+    admit_job(state, key, digest, workflow, world, None, bindings).await
 }
 
 /// The preamble of a POST that admits a job or a review, in this order: the
@@ -440,6 +446,7 @@ pub(super) fn named_job(body: &[u8]) -> Result<Option<JobByName>, ApiError> {
         return Err(empty_access_pin());
     }
     job.attribution = super::attribution::stated(job.owner.as_ref(), job.labels.as_ref())?;
+    job.retry_statement = super::retry::stated(job.retry.as_ref())?;
     Ok(Some(job))
 }
 
@@ -447,7 +454,7 @@ fn invalid_job_envelope() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         "malformed_snapshot",
-        "use workflow with optional literal inputs, access, owner and labels; unknown fields, null inputs/pins and snapshot overlays are refused",
+        "use workflow with optional literal inputs, access, owner, labels and retry; unknown fields, null inputs/pins and snapshot overlays are refused",
     )
 }
 
@@ -784,12 +791,27 @@ pub(super) async fn cancel_job(path: &str, state: &AppState) -> Response<Respons
         return json_response(StatusCode::OK, &JobResponse::from(&record));
     }
     if record.status() == crate::JobStatus::Running {
-        state.cancellations.cancel(&id);
-        return current_job(state, id).await;
+        return cancel_running_job(state, id).await;
     }
     match cancel_queued_job(state, id, record).await {
         Ok(response) | Err(response) => response,
     }
+}
+
+/// Cancel a running job. Durable first: a job its caller cancelled is never
+/// started again, even if the resident dies before the run settles. Then
+/// its run is told.
+async fn cancel_running_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
+    match state.store.cancel_requested(id.clone()).await {
+        Ok(_) => {}
+        Err(
+            super::ServerError::JobStore(crate::JobStoreError::Busy)
+            | super::ServerError::StoreQueueFull,
+        ) => return store_busy(),
+        Err(_) => return internal_error(),
+    }
+    state.cancellations.cancel(&id);
+    current_job(state, id).await
 }
 
 async fn cancel_queued_job(
@@ -859,9 +881,9 @@ async fn cancel_queued_job(
         }
         Err(super::ServerError::JobStore(crate::JobStoreError::IllegalTransition { .. })) => {
             // A worker may have started while admission was reconstructed.
-            // Only its execution owner may persist the resulting settlement.
-            state.cancellations.cancel(&id);
-            Ok(current_job(state, id).await)
+            // Only its execution owner may persist the resulting settlement;
+            // the cancellation is made durable as for any running job.
+            Ok(cancel_running_job(state, id).await)
         }
         Err(
             super::ServerError::JobStore(crate::JobStoreError::Busy)

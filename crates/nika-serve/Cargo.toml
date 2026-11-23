@@ -39,7 +39,7 @@ nika-vocab = { path = "../nika-vocab", version = "0.124.5" }
 nika-source = { path = "../nika-source", version = "0.124.5" } # lexical program-source naming (#1684)
 nix        = { workspace = true, features = ["fs"] }
 serde      = { workspace = true }
-serde_json = { workspace = true, features = ["raw_value"] }  # RawValue — a compile answer reaches the core as the literal text the caller sent, parsed once (CLI parity · additive type, no behaviour change)
+serde_json = { workspace = true, features = ["raw_value", "float_roundtrip"] }  # RawValue — a compile answer reaches the core as the literal text the caller sent, parsed once (CLI parity · additive type, no behaviour change) · float_roundtrip — a ceiling or a spend in a hashed record reads back to the same bits it was written with, so its digest recomputes (ADR-156)
 sha2       = { workspace = true }
 subtle     = { workspace = true }
 thiserror  = { workspace = true }

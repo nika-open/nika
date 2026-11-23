@@ -1178,7 +1178,7 @@ pub(super) fn get_request(path: &str) -> String {
     )
 }
 
-fn cancel_request(id: &str) -> String {
+pub(super) fn cancel_request(id: &str) -> String {
     format!(
         "POST /v1/jobs/{id}/cancel HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{}\r\n",
         auth_header()

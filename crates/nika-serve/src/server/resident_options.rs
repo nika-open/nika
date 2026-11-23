@@ -13,7 +13,7 @@ use std::time::Duration;
 use super::ServerLimits;
 use super::production::ServerLaunchRefuse;
 use super::provider_gate::{MAX_PROVIDER_CONCURRENCY, ProviderGates};
-use crate::job::MIN_JOB_RETENTION;
+use crate::job::{MAX_RETRY_ATTEMPTS, MIN_JOB_RETENTION, OnInterrupted, RetryPolicy};
 
 /// The resident's own startup options, with or without an HTTP listener.
 /// The default changes nothing.
@@ -113,6 +113,39 @@ impl ResidentOptions {
                 .ok_or(ServerLaunchRefuse::InvalidShutdownGrace)?;
             self.limits = self.limits.with_shutdown_grace(grace);
         }
+        Ok(self)
+    }
+
+    /// Apply `nika serve --retry-interrupted` and `--retry-max-attempts`:
+    /// whether a job whose run lost its owner is started again, and the most
+    /// attempts one job gets, counting the first. Absent, such a job stays
+    /// `interrupted` and the bound is three. A job may state its own `retry`
+    /// when it is submitted; it lowers this bound and never raises it.
+    ///
+    /// # Errors
+    /// A mode that is not `off` or `restart`, or a bound outside 1 to 16.
+    pub fn with_retry_interrupted(
+        mut self,
+        mode: Option<&str>,
+        max_attempts: Option<usize>,
+    ) -> Result<Self, ServerLaunchRefuse> {
+        let current = self.limits.retry_policy();
+        let on_interrupted = match mode {
+            Some(word) => {
+                OnInterrupted::parse(word).ok_or(ServerLaunchRefuse::InvalidRetryInterrupted)?
+            }
+            None => current.on_interrupted(),
+        };
+        let bound = match max_attempts {
+            Some(stated) => u32::try_from(stated)
+                .ok()
+                .filter(|bound| (1..=MAX_RETRY_ATTEMPTS).contains(bound))
+                .ok_or(ServerLaunchRefuse::InvalidRetryMaxAttempts)?,
+            None => current.max_attempts(),
+        };
+        self.limits = self
+            .limits
+            .with_retry_policy(RetryPolicy::new(on_interrupted, bound));
         Ok(self)
     }
 
@@ -380,6 +413,59 @@ mod tests {
                 ResidentOptions::default().with_job_retention(succeeded, unsuccessful),
                 Err(ServerLaunchRefuse::InvalidJobRetention),
                 "{succeeded:?} {unsuccessful:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_flags_set_the_policy_or_are_refused() {
+        use crate::job::{OnInterrupted, RetryPolicy};
+
+        let unset = ResidentOptions::default()
+            .with_retry_interrupted(None, None)
+            .expect("no flag");
+        assert_eq!(unset, ResidentOptions::default());
+        assert_eq!(
+            unset.limits().retry_policy(),
+            RetryPolicy::new(OnInterrupted::Off, 3),
+            "a lost run stays interrupted unless the operator says otherwise"
+        );
+
+        let policy = |mode, bound| {
+            ResidentOptions::default()
+                .with_retry_interrupted(mode, bound)
+                .map(|options| options.limits().retry_policy())
+        };
+        assert_eq!(
+            policy(Some("restart"), None),
+            Ok(RetryPolicy::new(OnInterrupted::Restart, 3))
+        );
+        assert_eq!(
+            policy(Some("restart"), Some(16)),
+            Ok(RetryPolicy::new(OnInterrupted::Restart, 16))
+        );
+        assert_eq!(
+            policy(Some("off"), Some(1)),
+            Ok(RetryPolicy::new(OnInterrupted::Off, 1))
+        );
+        // The bound alone is kept: a job may still state its own mode.
+        assert_eq!(
+            policy(None, Some(2)),
+            Ok(RetryPolicy::new(OnInterrupted::Off, 2))
+        );
+
+        for mode in ["", "on", "Restart", "always", "restart "] {
+            assert_eq!(
+                policy(Some(mode), None),
+                Err(ServerLaunchRefuse::InvalidRetryInterrupted),
+                "{mode:?}"
+            );
+        }
+        for bound in [0, 17, usize::MAX] {
+            assert_eq!(
+                policy(Some("restart"), Some(bound)),
+                Err(ServerLaunchRefuse::InvalidRetryMaxAttempts),
+                "{bound}"
             );
         }
     }

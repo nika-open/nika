@@ -254,6 +254,88 @@ fn job_limits_are_explicit_options_of_the_persistent_resident() {
     assert!(message.contains("--shutdown-grace") && message.contains("one second"));
 }
 
+/// What becomes of a job whose run was lost is an option of the persistent
+/// resident: a mode word the engine knows and a bound from 1 to 16. A
+/// rehearsal has no job to start again.
+#[test]
+fn a_lost_run_s_policy_is_an_option_of_the_persistent_resident() {
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    let unset = parse(&["serve"]);
+    assert_eq!(
+        (unset.retry_interrupted, unset.retry_max_attempts),
+        (None, None)
+    );
+    let args = parse(&[
+        "serve",
+        "--retry-interrupted",
+        "restart",
+        "--retry-max-attempts",
+        "5",
+    ]);
+    assert_eq!(args.retry_interrupted.as_deref(), Some("restart"));
+    assert_eq!(args.retry_max_attempts, Some(5));
+    for refused in ["-1", "1.5", "many"] {
+        assert!(
+            command()
+                .try_get_matches_from(["serve", "--retry-max-attempts", refused])
+                .is_err(),
+            "{refused}"
+        );
+    }
+    for rehearsal in ["--once", "--dry"] {
+        for (flag, value) in [
+            ("--retry-interrupted", "restart"),
+            ("--retry-max-attempts", "2"),
+        ] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", rehearsal, flag, value])
+                    .is_err(),
+                "{flag} means nothing with {rehearsal}"
+            );
+        }
+    }
+    let options = nika_serve::ResidentOptions::default;
+    for (mode, bound) in [
+        (None, None),
+        (Some("off"), Some(1)),
+        (Some("restart"), Some(16)),
+    ] {
+        assert!(
+            options().with_retry_interrupted(mode, bound).is_ok(),
+            "{mode:?} {bound:?}"
+        );
+    }
+    // `resume` is a mode of a later version: today it is refused, not read
+    // as another.
+    for word in ["resume", "Restart", ""] {
+        assert_eq!(
+            options().with_retry_interrupted(Some(word), None).err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidRetryInterrupted),
+            "{word:?}"
+        );
+    }
+    for bound in [0, 17] {
+        assert_eq!(
+            options().with_retry_interrupted(None, Some(bound)).err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidRetryMaxAttempts),
+            "{bound}"
+        );
+    }
+    let message = nika_serve::launch_operator_message(
+        nika_serve::ServerLaunchRefuse::InvalidRetryMaxAttempts,
+    );
+    assert!(message.contains("--retry-max-attempts") && message.contains("1 to 16"));
+    let message = nika_serve::launch_operator_message(
+        nika_serve::ServerLaunchRefuse::InvalidRetryInterrupted,
+    );
+    assert!(message.contains("--retry-interrupted"), "{message}");
+}
+
 /// `--provider-concurrency PROVIDER=N` is a repeatable option of the
 /// persistent resident: one cap per provider, a provider the engine knows,
 /// and a count of at least one. A rehearsal has no jobs to bound.

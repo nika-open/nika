@@ -23,6 +23,7 @@ mod production;
 mod provider_gate;
 mod registry;
 mod resident_options;
+mod retry;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
@@ -523,11 +524,19 @@ impl ResidentAuthority {
         backend: Arc<dyn ExecutionBackend>,
     ) -> Result<Self, ServerError> {
         validate_resident_config(&config)?;
-        let prepared = prepare_authority(&config).await?;
+        // One judge decides what becomes of a run that lost its owner: at
+        // this start for the incarnation before, and at this one's stop.
+        let judge = Arc::new(retry::LostRunJudge::new(
+            config.limits(),
+            backend.trace_journal_dir(),
+            config.snapshot_limits(),
+        ));
+        let prepared = prepare_authority(&config, Arc::clone(&judge)).await?;
         let control_capacity = store_control_capacity(config.limits());
         let store_actor = StoreActor::start(
             prepared.store,
             prepared.incarnation,
+            judge,
             config.limits().max_connections(),
             control_capacity,
         )?;
@@ -799,7 +808,10 @@ struct PreparedHttp {
     project: Arc<OwnedDir>,
 }
 
-async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority, ServerError> {
+async fn prepare_authority(
+    config: &ResidentConfig,
+    judge: Arc<retry::LostRunJudge>,
+) -> Result<PreparedAuthority, ServerError> {
     let state_root = config.state_root().to_owned();
     let workflow_root = config.workflow_root().map(Path::to_owned);
     let clock = Arc::clone(config.clock());
@@ -825,7 +837,7 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
         schedules
             .stamp_writer_as_resident()
             .map_err(ServerError::ScheduleStore)?;
-        store.settle_interrupted_jobs(&incarnation)?;
+        store.settle_lost_jobs(&incarnation, judge.as_ref())?;
         // After the interruptions are dated: a job this start just settled is new.
         store.evict_expired()?;
         Ok(PreparedAuthority {
@@ -1051,6 +1063,7 @@ async fn finish_authority(
 ) -> Result<(), ServerError> {
     authority.jobs.close();
     if fatal.is_some() {
+        authority.state.store.begin_stop();
         executions.abort_all();
     }
     let grace = authority.state.limits.shutdown_grace();
@@ -1072,6 +1085,10 @@ async fn finish_authority(
             Ok(())
         }
     } else {
+        // Past the grace the resident drops its runs. Each one lost its
+        // owner: the retry policy decides whether its job is started again
+        // by the next incarnation (ADR-156).
+        authority.state.store.begin_stop();
         executions.abort_all();
         while executions.join_next().await.is_some() {}
         match authority.state.store.settle_interrupted().await {
@@ -1213,10 +1230,11 @@ async fn run_claimed(
         .await?
         .ok_or_else(|| crate::JobStoreError::JobNotFound(task.id.clone()))?;
     // A ceiling the job's requester bound restricts the task's, never widens it: on admission,
-    // replay and restart alike.
-    let max_cost_usd = match (task.max_cost_usd, record.max_cost_usd()) {
-        (Some(task), Some(job)) => Some(task.min(job)),
-        (task, job) => task.or(job),
+    // replay and restart alike. One ceiling covers every attempt of the job: a later attempt
+    // runs under what the earlier ones left (ADR-156).
+    let max_cost_usd = match retry::attempt_ceiling(task.max_cost_usd, &record) {
+        Ok(ceiling) => ceiling,
+        Err(refusal) => return retry::refuse_attempt(state, task, refusal).await,
     };
     let inputs = record.inputs;
     let mut guard = RunningGuard::new(state.store.clone(), task.id.clone(), task.prestarted);
@@ -1254,6 +1272,17 @@ async fn refuse_admission(
             "workflow world could not be readmitted".to_owned(),
         ),
     };
+    refuse_queued_job(state, task, &code, &message).await
+}
+
+/// Fail a queued job before it runs, with the event's `code` and `message`.
+/// A job another transition already moved stays as it is.
+async fn refuse_queued_job(
+    state: &AuthorityState,
+    task: &ExecutionTask,
+    code: &str,
+    message: &str,
+) -> Result<(), ServerError> {
     let refused = state
         .store
         .refuse_queued(
@@ -1567,6 +1596,8 @@ mod registry_tests;
 mod result_tests;
 #[cfg(test)]
 mod retention_tests;
+#[cfg(test)]
+mod retry_tests;
 #[cfg(test)]
 mod schedule_inputs_tests;
 #[cfg(test)]

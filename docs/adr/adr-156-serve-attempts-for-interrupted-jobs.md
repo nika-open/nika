@@ -332,7 +332,24 @@ Not established, to settle while implementing:
 
 ## Evidence / Affected code
 
-Planned, none of it written:
+Written for the `restart` mode of the automatic re-attempt (the first delivery):
+
+- `crates/nika-dap/src/attempt.rs` -- the effects class from the check report, the route a run
+  rode, the spend of a journal with no terminal record
+- `crates/nika-serve/src/job/attempt.rs` -- the policy, the statement, the attempt history, the
+  decision and the fold of what is left under the ceiling
+- `crates/nika-serve/src/job/store/lost.rs` -- the one write that records a loss and queues the
+  next attempt or leaves the job `interrupted` with its reason; the durable cancellation mark
+- `crates/nika-serve/src/server/retry.rs` -- the resident's judge, the ceiling of the attempt
+  about to run
+- `crates/nika-serve/src/server/mod.rs`, `crates/nika-serve/src/server/store.rs` -- the start
+  pass and the stop path ask the same judge
+- `crates/nika-cli-host/src/serve_args.rs`, `crates/nika-cli/src/verbs/serve.rs` --
+  `--retry-interrupted off|restart`, `--retry-max-attempts`
+- `crates/nika-serve/src/job/tests/attempts.rs`, `crates/nika-serve/src/server/retry_tests.rs`,
+  `crates/nika-dap/src/attempt_tests.rs`
+
+Planned:
 
 - `crates/nika-serve/src/job/` -- the attempt history, the counter, the reasons
 - `crates/nika-serve/src/job/store.rs` -- `settle_interrupted_jobs` creates the next attempt
@@ -395,6 +412,55 @@ Rejected: the effects of an interrupted attempt are unknown by definition.
 - ADR-117 -- one credential, one authority domain
 
 ## Notes
+
+Found while writing the `restart` mode, 2026-11-23. None of it changes a decision above; each
+point narrows or corrects a sentence of it.
+
+1. **No journal that can be read is unknown spend.** A run's journal opens at its first event,
+   and a journal that fails to open or to write disables its own lane while the run goes on. A
+   missing journal therefore cannot be told apart from a run that sent nothing, and counts as
+   unknown, never as zero.
+2. **The static bound prices the declared output only.** The check's per-task bound multiplies
+   the output token limit by the output price, the `for_each` fan-out and the `retry` attempts.
+   The input of a call in flight is not in it, so section 6's "it can only overstate" holds for
+   the output only: the spend read from a lost attempt can be short by the input of the calls
+   it had in flight. The next attempt's own calls are metered as any run's are. A route that
+   bills reasoning beyond the declared output has no bound in section 6's sense: a call in
+   flight on it makes the spend unknown.
+3. **Which tasks were in flight** (first open point of "What was read"). Every task's
+   `task.scheduled` record is written before the first task runs, and a wave's records are
+   written before the next wave exists. The tasks with no terminal record in the first wave that
+   has one are the ones that may have been sent; a fan-out task stays unsettled until all its
+   items settle and counts whole. A workflow with an `on_error: { recover: ... }` task defers
+   records past that wave, and then every unsettled task counts. A journal whose writes failed
+   during the run stops early: what it shows is short, and one that stops after its first record
+   reads as a run that sent nothing.
+4. **The per-task bound** (second open point). The resident checks the job's captured workflow
+   again, once per lost job, when it decides; it does not read a stored certificate.
+5. **Scope of the automatic re-attempt.** A job a schedule fired on its beat is never re-attempted
+   by the resident: its schedule's catch-up owns what follows a lost fire. A job admitted through
+   a cost review states no `retry` (`422 invalid_job_retry`) and is not classed, so it stays
+   `interrupted` with `effects_need_consent`. An accepted cancellation is made durable on the job
+   before the run is told, so no later incarnation starts it again; that mark is not part of the
+   event chain.
+6. **Not yet delivered**: the `resume` mode, the manual retry route, the attempts route and the
+   members of section 10, a `retry` member on a schedule declared over HTTP.
+7. **The class is read twice.** The word kept on the job at admission enters the job's event
+   chain only when the job starts. The resident reads the class again from the captured
+   workflow, whose digest the job's identity binds, and the stricter of the two holds. A world
+   whose digest is not the job's own is not read, and the job is then not contained.
+8. **A journal is evidence only while its chain holds.** A torn last line is what a kill
+   leaves and reads. A journal whose chain is broken, or that has a line that does not parse
+   before its last, counts as unknown spend, like a missing one.
+9. **A child workflow in flight is unknown spend.** The per-task bound of section 6 comes
+   from the parent's own check, which does not bound the calls of a child workflow. A task that
+   calls a child and did not settle makes the spend unknown; a settled one counts what it
+   reported.
+10. **Every job admitted from this version on keeps its class.** Each door that admits a
+    job classes it, whatever the policy, so a later resident started with a policy can decide.
+    Under `off` no decision changes; the record gains that one optional member.
+11. **A cancellation racing a worker.** A cancellation accepted while a worker claims the
+    job is made durable as for a running job before the run is told.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

@@ -170,6 +170,9 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     // `GET /v1/occupancy`: what the resident holds against its limits, and
     // `429 owner_queue_full` at an owner's own bound (ADR-155).
     "occupancy",
+    // `retry` on the by-name form of `POST /v1/jobs`: a job whose run lost
+    // its owner is started again as a new attempt of the same job (ADR-156).
+    "jobRetry",
     "compile",
     "artifacts",
     "accessServiceTier",

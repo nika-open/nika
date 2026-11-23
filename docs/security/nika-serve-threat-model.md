@@ -199,7 +199,26 @@ billing cannot be proven stopped by a local deadline.
 - Queue, active-run, request-body, SSE-client, event-buffer, and graceful-stop
   limits are explicit and tested at their boundary values.
 - Process restart preserves enough idempotency/job state to avoid a duplicate
-  effect or else fails closed before rerun.
+  effect or else fails closed before rerun. The one exception is opt-in
+  (ADR-156): a job whose run lost its resident is run again when a retry
+  policy says so (`--retry-interrupted`, or the job's `retry`). The default
+  is `off`. A workflow the engine does not class as free of external effects
+  is run again only when its own request stated `retry`: the resident's flag
+  alone never repeats an effect. The class is read from the check at
+  admission and kept on the job; whatever the check could not derive counts
+  as an effect. Before a restart the resident reads the class again from
+  the captured workflow whose digest the job's identity binds, and the
+  stricter of the two holds, so an edited stored word cannot loosen it. A
+  lost attempt's journal is read only while its chain holds; an edited or
+  reordered journal counts as unknown spend. A cancelled job is never run
+  again: the accepted cancellation is written before the run is told.
+- A retry is bounded three ways: `max_attempts` (1 to 16, counted before an
+  attempt runs, so a job that kills the resident each time is counted each
+  time), one cost ceiling over all attempts, and the queue bounds of
+  ADR-155. A spend that cannot be read is never counted as zero. The
+  attempt history (identity, receipt, spend) is bound into the hash of the
+  event that queued the next attempt. The chain is unkeyed: it detects a
+  torn or drifted state, not a writer who holds the state root.
 - A job's `owner` and `labels` are what the caller states (ADR-155). They are
   validated against a closed alphabet and bounds, bound in the request digest
   and the durable record, and never trusted as identity: one Bearer is one

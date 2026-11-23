@@ -120,6 +120,52 @@ curl -s -H "Authorization: Bearer $TOKEN" -o totals.svg \
   http://127.0.0.1:8787/v1/jobs/<id>/artifacts/file/out/totals.svg
 ```
 
+## Starting a job again after a restart
+
+A deploy restarts the resident. A job that was running then is
+`interrupted`, and stays so, unless you ask for more:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --retry-interrupted restart \
+  --retry-max-attempts 3
+```
+
+With `restart`, the next resident runs such a job again from its first task
+as a new attempt of the same job: same id, same `Idempotency-Key`, a new
+execution and trace identity. The attempt that was interrupted is kept as
+it was, with its receipt. `/health` advertises `jobRetry`.
+
+- **What counts.** Only a run that lost its resident: a kill, or a stop
+  whose `--shutdown-grace` ended first. A cancelled job, a job that failed
+  or timed out, and a job a schedule fired on its beat are never started
+  again.
+- **Effects.** A workflow that only reads and computes (model calls, file
+  reads, `GET` fetches) is started again on the flag alone. One that runs a
+  program, writes a file, calls a child workflow, sends anything but a
+  `GET` or `HEAD`, or gives an agent a tool that acts, is started again only
+  if its request said so: `"retry": {}` in the body of `POST /v1/jobs` is
+  the caller's consent to run those effects twice. Killing a process does
+  not prove that an effect did not happen.
+- **Per job.** `"retry": {"on_interrupted": "restart", "max_attempts": 2}`
+  asks for a restart whatever the flag says, or `"off"` refuses one. A job
+  lowers `--retry-max-attempts`, never raises it.
+- **Cost.** `--run-cost-ceiling` (or the lower ceiling a job bound) covers
+  all the attempts of a job together. What the lost attempt spent is read
+  from its journal; a call that may have been sent counts at the bound
+  `nika check` gives its task, which prices its declared output, not its
+  input. When that spend cannot be known (a model with no price, a task
+  with no `max_tokens`, a call in flight on a model that bills reasoning
+  beyond `max_tokens`, a run that left no journal), the job is not started
+  again under a ceiling. `"retry": {"max_cost_usd": 0.5}` is how a caller
+  accepts it: the re-attempts then run under that amount.
+- **Why not.** A job left `interrupted` says why on its last event:
+  `retry_exhausted`, `effects_need_consent`, `unknown_spend` or
+  `budget_exhausted`.
+- **Clients.** A job that is started again shows `queued` then `running`
+  again, and its event stream gains one `execution.requeued` frame; it
+  never shows `interrupted` in between. A client that waits for a terminal
+  status keeps waiting for the real end.
+
 ## Keeping the job store bounded
 
 The resident keeps every job it admits in one state file under the state

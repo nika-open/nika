@@ -807,6 +807,16 @@ pub enum ServerLaunchRefuse {
         "serve · --provider-concurrency takes PROVIDER=N: a provider id (openai, anthropic, mock; `nika catalog` lists them) and a whole number of calls from 1 to 65535, each provider once"
     )]
     InvalidProviderConcurrency,
+    /// `--retry-interrupted` names no known mode.
+    #[error(
+        "serve · --retry-interrupted takes off or restart: off leaves a job whose run was lost interrupted, restart runs its captured workflow again from the first task"
+    )]
+    InvalidRetryInterrupted,
+    /// `--retry-max-attempts` is outside its range.
+    #[error(
+        "serve · --retry-max-attempts takes a whole number from 1 to 16: the most attempts one job gets, counting the first"
+    )]
+    InvalidRetryMaxAttempts,
 }
 
 impl NikaErrorCode for ServerLaunchRefuse {

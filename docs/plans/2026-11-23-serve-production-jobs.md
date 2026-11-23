@@ -1,9 +1,10 @@
 # `nika serve` ready for production jobs · plan
 
-> Status: in execution on `feat/serve-production-jobs`, branched from `main`
-> at `8b640a9b7` (0.124.5). Three workstreams in order: A (list a user's
-> jobs), B (concurrency and fairness), C (retry interrupted jobs). C stops at
-> its ADR until that ADR is ratified. The report is
+> Status: A and B are built on `feat/serve-production-jobs`, branched from
+> `main` at `8b640a9b7` (0.124.5). C (retry interrupted jobs) is stopped at
+> ADR-156, which is proposed; none of it is built until that ADR is
+> ratified. Three workstreams in order: A (list a user's jobs), B
+> (concurrency and fairness), C. The report is
 > `2026-11-23-serve-production-jobs-report.md`.
 
 ## 1. Goal
@@ -488,8 +489,16 @@ crates, the crate's tests):
 8. Review fixes on A: the migration written under the lease, a forgotten
    queue entry, a slot keeps its job (`85c005729`).
 9. B2 provider gate, its flag, `providers` in the occupancy (`46d711ea1`).
-10. B3 ADR-155 and this plan brought to what is built.
-11. C0 ADR-156, then stop.
+10. B3 ADR-155 and this plan brought to what is built (`a1963ab1c`).
+11. C0 ADR-156, then stop (`64ca2b1d6`).
+12. The SDK follow-up plan and the roadmap line (`a59e8d25e`).
+13. Review fixes on B: an approved cost review survives a queue refusal, a
+    job a worker holds is not queued again, `--max-concurrent-jobs` stops
+    at 256 (`95e11b1f0`).
+14. `url` moved to its patched release (`9eaa908fb`). It is independent of
+    the workstreams: an advisory published on 20 November had turned two
+    rows of the hygiene sweep red on `main`.
+15. The report, `2026-11-23-serve-production-jobs-report.md`.
 
 One pull request per workstream is the natural split for review; they stack
 on this branch in that order.

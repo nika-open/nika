@@ -20,7 +20,7 @@ use nika_verb_exec::ExecVerb;
 use nika_verb_infer::InferVerb;
 use nika_verb_invoke::InvokeVerb;
 
-use super::from_trace;
+use nika_dap::continuation::recorded_facts as from_trace;
 
 const SLOT: Timestamp = Timestamp::from_unix_ns(1_792_141_200_000_000_000);
 const FIRST: Timestamp = Timestamp::from_unix_ns(1_791_882_000_000_000_000);

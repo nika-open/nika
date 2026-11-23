@@ -49,6 +49,7 @@ pub(crate) use provenance::run_verdict;
 pub use provenance::{run_with_inputs_json, run_with_repair_target};
 mod heartbeat;
 mod literal_inputs;
+#[cfg(test)]
 mod resume_facts;
 mod resume_setup;
 mod teardown;

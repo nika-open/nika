@@ -19,6 +19,7 @@ mod model;
 mod openapi;
 mod production;
 mod registry;
+mod resident_options;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
@@ -70,8 +71,9 @@ use listen::listen_line;
 pub use production::{
     ResidentExecutionBackend, ServerLaunchRefuse, launch_operator_message, optional_server_config,
     process_shutdown, seat_cost_review, serve_resident, serve_resident_process,
-    server_operator_message,
+    serve_resident_process_with, server_operator_message,
 };
+pub use resident_options::ResidentOptions;
 use store::{StoreActor, StoreHandle};
 
 /// Backend-owned terminal class projected onto the durable job lifecycle.
@@ -795,9 +797,11 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
     let state_root = config.state_root().to_owned();
     let workflow_root = config.workflow_root().map(Path::to_owned);
     let clock = Arc::clone(config.clock());
+    let retention = config.limits().job_retention();
     tokio::task::spawn_blocking(move || {
         ensure_state_root(&state_root)?;
-        let store = Arc::new(JobStore::open_fail_fast(&state_root)?.with_clock(clock));
+        let store = JobStore::open_fail_fast(&state_root)?.with_clock(clock);
+        let store = Arc::new(store.with_retention(retention));
         let schedules = ScheduleStore::open(&state_root).map_err(ServerError::ScheduleStore)?;
         let project = workflow_root
             .map(|root| {
@@ -816,6 +820,8 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
             .stamp_writer_as_resident()
             .map_err(ServerError::ScheduleStore)?;
         store.settle_interrupted_jobs(&incarnation)?;
+        // After the interruptions are dated: a job this start just settled is new.
+        store.evict_expired()?;
         Ok(PreparedAuthority {
             store,
             incarnation,
@@ -850,6 +856,11 @@ fn validate_resident_config(config: &ResidentConfig) -> Result<(), ServerError> 
     if !config.limits().valid() {
         return Err(ServerError::InvalidConfig(
             "all size, timeout, concurrency, queue, connection, sse, and header ceilings must be non-zero, and the default budget ceiling must be finite and non-negative",
+        ));
+    }
+    if !config.limits().job_retention().valid() {
+        return Err(ServerError::InvalidConfig(
+            "a job retention window must be at least one minute",
         ));
     }
     if config.limits().max_body_bytes() > crate::MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES {
@@ -1551,6 +1562,8 @@ mod job_list_tests;
 mod registry_tests;
 #[cfg(test)]
 mod result_tests;
+#[cfg(test)]
+mod retention_tests;
 #[cfg(test)]
 mod schedule_inputs_tests;
 #[cfg(test)]

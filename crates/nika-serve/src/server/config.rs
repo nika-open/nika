@@ -67,6 +67,8 @@ pub struct ServerLimits {
     default_max_cost_usd: Option<f64>,
     max_compile_requests: usize,
     max_artifact_bytes: u64,
+    job_retention: Option<Duration>,
+    unsuccessful_job_retention: Option<Duration>,
 }
 
 /// Concurrent `POST /v1/compile` computations out of the box. Authoring is
@@ -109,6 +111,39 @@ impl ServerLimits {
             default_max_cost_usd: Some(DEFAULT_MAX_COST_USD),
             max_compile_requests: DEFAULT_MAX_COMPILE_REQUESTS,
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
+            job_retention: None,
+            unsuccessful_job_retention: None,
+        }
+    }
+
+    /// Evict a `succeeded` job once it has been settled this long (at least
+    /// one minute). Absent, the store keeps every job, and at its record
+    /// ceiling it refuses every admission. An evicted job's idempotency key
+    /// is forgotten, its trace journal stays. Unsuccessful jobs follow this
+    /// window unless [`Self::with_unsuccessful_job_retention`] sets theirs.
+    #[must_use]
+    pub const fn with_job_retention(mut self, settled_for: Duration) -> Self {
+        self.job_retention = Some(settled_for);
+        self
+    }
+
+    /// Evict a `failed`, `cancelled` or `interrupted` job once it has been
+    /// settled this long (at least one minute).
+    #[must_use]
+    pub const fn with_unsuccessful_job_retention(mut self, settled_for: Duration) -> Self {
+        self.unsuccessful_job_retention = Some(settled_for);
+        self
+    }
+
+    /// The windows the store evicts by: an unsuccessful job follows the
+    /// succeeded window when the operator named none for it.
+    pub(crate) const fn job_retention(self) -> crate::job::JobRetention {
+        crate::job::JobRetention {
+            succeeded: self.job_retention,
+            unsuccessful: match self.unsuccessful_job_retention {
+                Some(window) => Some(window),
+                None => self.job_retention,
+            },
         }
     }
 

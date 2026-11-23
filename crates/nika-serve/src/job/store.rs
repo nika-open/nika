@@ -19,6 +19,7 @@ mod binding;
 mod format;
 mod list;
 mod migration;
+mod retention;
 mod stored_job;
 
 #[cfg(test)]
@@ -98,6 +99,8 @@ pub struct JobStore {
     fail_fast_lease: bool,
     /// The clock every appended event's `at` reads (#1463).
     clock: Arc<dyn ResidentClock>,
+    /// The windows after which a settled job leaves the store (ADR-155).
+    retention: crate::job::JobRetention,
     #[cfg(test)]
     fail_next_persist: AtomicBool,
 }
@@ -163,6 +166,7 @@ impl JobStore {
             local: Mutex::new(()),
             fail_fast_lease,
             clock: Arc::new(crate::SystemResidentClock),
+            retention: crate::job::JobRetention::default(),
             #[cfg(test)]
             fail_next_persist: AtomicBool::new(false),
         };

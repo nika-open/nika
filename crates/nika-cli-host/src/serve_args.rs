@@ -114,6 +114,17 @@ pub struct ServeArgs {
     /// Durable job-state root. Defaults to `<cwd>/.nika/serve`.
     #[arg(long, value_name = "DIR")]
     pub state_root: Option<PathBuf>,
+    /// Forget a succeeded job once it has been settled this long (`36h`, `7d`; a whole number
+    /// and s, m, h or d; at least one minute). Absent, every job is kept and a full store
+    /// refuses every admission. A forgotten job's Idempotency-Key is forgotten with it, so
+    /// keep this longer than your callers retry. Trace journals are not removed. Persistent
+    /// mode only.
+    #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
+    pub job_retention: Option<String>,
+    /// The same for failed, cancelled and interrupted jobs. Absent, they follow
+    /// `--job-retention`.
+    #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
+    pub job_retention_unsuccessful: Option<String>,
     #[command(flatten)]
     pub authoring: NativeAuthoringArgs,
     /// Explicit model invocation and physical-request ceiling per authoring round; absent, no

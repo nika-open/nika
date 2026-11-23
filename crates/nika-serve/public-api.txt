@@ -1672,6 +1672,7 @@ impl<T> typenum::type_operators::Same for nika_serve::ServerError
 pub type nika_serve::ServerError::Output = T
 #[non_exhaustive] pub enum nika_serve::server::ServerLaunchRefuse
 pub nika_serve::server::ServerLaunchRefuse::InvalidBind
+pub nika_serve::server::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::server::ServerLaunchRefuse::InvalidRunCostCeiling
 pub nika_serve::server::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::server::ServerLaunchRefuse::MissingTokenFile
@@ -2102,6 +2103,55 @@ impl<T> tracing::instrument::Instrument for nika_serve::ResidentExecutionCoordin
 impl<T> tracing::instrument::WithSubscriber for nika_serve::ResidentExecutionCoordinator
 impl<T> typenum::type_operators::Same for nika_serve::ResidentExecutionCoordinator
 pub type nika_serve::ResidentExecutionCoordinator::Output = T
+#[non_exhaustive] pub struct nika_serve::server::ResidentOptions
+impl nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+impl core::clone::Clone for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions
+impl core::cmp::PartialEq for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::eq(&self, other: &nika_serve::ResidentOptions) -> bool
+impl core::default::Default for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::default() -> nika_serve::ResidentOptions
+impl core::fmt::Debug for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_serve::ResidentOptions
+impl<D> owo_colors::OwoColorize for nika_serve::ResidentOptions
+impl<T, U> core::convert::Into<U> for nika_serve::ResidentOptions where U: core::convert::From<T>
+pub fn nika_serve::ResidentOptions::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_serve::ResidentOptions where U: core::convert::Into<T>
+pub type nika_serve::ResidentOptions::Error = core::convert::Infallible
+pub fn nika_serve::ResidentOptions::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_serve::ResidentOptions where U: core::convert::TryFrom<T>
+pub type nika_serve::ResidentOptions::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_serve::ResidentOptions::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_serve::ResidentOptions where T: core::clone::Clone
+pub type nika_serve::ResidentOptions::Owned = T
+pub fn nika_serve::ResidentOptions::clone_into(&self, target: &mut T)
+pub fn nika_serve::ResidentOptions::to_owned(&self) -> T
+impl<T> core::any::Any for nika_serve::ResidentOptions where T: 'static + ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_serve::ResidentOptions where T: core::clone::Clone
+pub unsafe fn nika_serve::ResidentOptions::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_serve::ResidentOptions where T: core::clone::Clone
+pub fn nika_serve::ResidentOptions::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_serve::ResidentOptions where T: 'static
+pub fn nika_serve::ResidentOptions::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_serve::ResidentOptions::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_serve::ResidentOptions
+impl<T> tracing::instrument::WithSubscriber for nika_serve::ResidentOptions
+impl<T> typenum::type_operators::Same for nika_serve::ResidentOptions
+pub type nika_serve::ResidentOptions::Output = T
+impl<T> zvariant::optional::NoneValue for nika_serve::ResidentOptions where T: core::default::Default
+pub type nika_serve::ResidentOptions::NoneType = T
+pub fn nika_serve::ResidentOptions::null_value() -> T
 #[non_exhaustive] pub struct nika_serve::server::ServerConfig
 impl nika_serve::ServerConfig
 pub fn nika_serve::ServerConfig::new(bind: core::net::socket_addr::SocketAddr, workflow_root: impl core::convert::Into<std::path::PathBuf>, token_file: impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -2153,10 +2203,12 @@ pub type nika_serve::ServerConfig::Output = T
 impl nika_serve::ServerLimits
 pub const fn nika_serve::ServerLimits::new(max_body_bytes: usize, request_timeout: core::time::Duration, execution_timeout: core::time::Duration, shutdown_grace: core::time::Duration, max_concurrent_jobs: usize, queue_capacity: usize, max_connections: usize, max_headers: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_default_max_cost_usd(self, ceiling: core::option::Option<f64>) -> Self
+pub const fn nika_serve::ServerLimits::with_job_retention(self, settled_for: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_max_compile_requests(self, max_compile_requests: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_jobs(self, max_jobs: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_sse_clients(self, max_sse_clients: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_sse_timing(self, heartbeat: core::time::Duration, reconnect: core::time::Duration) -> Self
+pub const fn nika_serve::ServerLimits::with_unsuccessful_job_retention(self, settled_for: core::time::Duration) -> Self
 impl core::clone::Clone for nika_serve::ServerLimits
 pub fn nika_serve::ServerLimits::clone(&self) -> nika_serve::ServerLimits
 impl core::cmp::PartialEq for nika_serve::ServerLimits
@@ -2275,6 +2327,7 @@ pub fn nika_serve::server::seat_native_authoring_with_calls(http: core::option::
 pub async fn nika_serve::server::serve_http(bind: &str, workflow_root: impl core::convert::AsRef<std::path::Path>, state_root: impl core::convert::AsRef<std::path::Path>, token_file: impl core::convert::AsRef<std::path::Path>, allow_remote: bool, backend: alloc::sync::Arc<dyn nika_serve::server::ExecutionBackend>, shutdown: impl core::future::future::Future<Output = ()>) -> core::result::Result<(), nika_serve::ServerError>
 pub async fn nika_serve::server::serve_resident(resident: nika_serve::ResidentConfig, server: core::option::Option<nika_serve::ServerConfig>, backend: alloc::sync::Arc<dyn nika_serve::server::ExecutionBackend>, shutdown: impl core::future::future::Future<Output = ()>) -> core::result::Result<(), nika_serve::ServerError>
 pub fn nika_serve::server::serve_resident_process(workflow_root: &std::path::Path, state_root: std::path::PathBuf, server: core::option::Option<nika_serve::ServerConfig>) -> core::result::Result<(), alloc::string::String>
+pub fn nika_serve::server::serve_resident_process_with(workflow_root: &std::path::Path, state_root: std::path::PathBuf, server: core::option::Option<nika_serve::ServerConfig>, options: &nika_serve::ResidentOptions) -> core::result::Result<(), alloc::string::String>
 pub fn nika_serve::server::server_operator_message(error: nika_serve::ServerError) -> alloc::string::String
 pub mod nika_serve::writer
 pub struct nika_serve::writer::WriterStamp
@@ -3273,6 +3326,7 @@ impl<T> typenum::type_operators::Same for nika_serve::ServerError
 pub type nika_serve::ServerError::Output = T
 #[non_exhaustive] pub enum nika_serve::ServerLaunchRefuse
 pub nika_serve::ServerLaunchRefuse::InvalidBind
+pub nika_serve::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::ServerLaunchRefuse::InvalidRunCostCeiling
 pub nika_serve::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::ServerLaunchRefuse::MissingTokenFile
@@ -4215,6 +4269,55 @@ impl<T> tracing::instrument::Instrument for nika_serve::ResidentExecutionCoordin
 impl<T> tracing::instrument::WithSubscriber for nika_serve::ResidentExecutionCoordinator
 impl<T> typenum::type_operators::Same for nika_serve::ResidentExecutionCoordinator
 pub type nika_serve::ResidentExecutionCoordinator::Output = T
+#[non_exhaustive] pub struct nika_serve::ResidentOptions
+impl nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+impl core::clone::Clone for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions
+impl core::cmp::PartialEq for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::eq(&self, other: &nika_serve::ResidentOptions) -> bool
+impl core::default::Default for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::default() -> nika_serve::ResidentOptions
+impl core::fmt::Debug for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_serve::ResidentOptions
+impl<D> owo_colors::OwoColorize for nika_serve::ResidentOptions
+impl<T, U> core::convert::Into<U> for nika_serve::ResidentOptions where U: core::convert::From<T>
+pub fn nika_serve::ResidentOptions::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_serve::ResidentOptions where U: core::convert::Into<T>
+pub type nika_serve::ResidentOptions::Error = core::convert::Infallible
+pub fn nika_serve::ResidentOptions::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_serve::ResidentOptions where U: core::convert::TryFrom<T>
+pub type nika_serve::ResidentOptions::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_serve::ResidentOptions::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_serve::ResidentOptions where T: core::clone::Clone
+pub type nika_serve::ResidentOptions::Owned = T
+pub fn nika_serve::ResidentOptions::clone_into(&self, target: &mut T)
+pub fn nika_serve::ResidentOptions::to_owned(&self) -> T
+impl<T> core::any::Any for nika_serve::ResidentOptions where T: 'static + ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_serve::ResidentOptions where T: core::clone::Clone
+pub unsafe fn nika_serve::ResidentOptions::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_serve::ResidentOptions where T: core::clone::Clone
+pub fn nika_serve::ResidentOptions::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_serve::ResidentOptions where T: 'static
+pub fn nika_serve::ResidentOptions::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_serve::ResidentOptions where T: ?core::marker::Sized
+pub fn nika_serve::ResidentOptions::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_serve::ResidentOptions::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_serve::ResidentOptions
+impl<T> tracing::instrument::WithSubscriber for nika_serve::ResidentOptions
+impl<T> typenum::type_operators::Same for nika_serve::ResidentOptions
+pub type nika_serve::ResidentOptions::Output = T
+impl<T> zvariant::optional::NoneValue for nika_serve::ResidentOptions where T: core::default::Default
+pub type nika_serve::ResidentOptions::NoneType = T
+pub fn nika_serve::ResidentOptions::null_value() -> T
 #[non_exhaustive] pub struct nika_serve::ResidentReport
 pub nika_serve::ResidentReport::alive: bool
 pub nika_serve::ResidentReport::jobs_writer: core::option::Option<nika_serve::writer::WriterStamp>
@@ -4380,10 +4483,12 @@ pub type nika_serve::ServerIncarnation::Output = T
 impl nika_serve::ServerLimits
 pub const fn nika_serve::ServerLimits::new(max_body_bytes: usize, request_timeout: core::time::Duration, execution_timeout: core::time::Duration, shutdown_grace: core::time::Duration, max_concurrent_jobs: usize, queue_capacity: usize, max_connections: usize, max_headers: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_default_max_cost_usd(self, ceiling: core::option::Option<f64>) -> Self
+pub const fn nika_serve::ServerLimits::with_job_retention(self, settled_for: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_max_compile_requests(self, max_compile_requests: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_jobs(self, max_jobs: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_sse_clients(self, max_sse_clients: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_sse_timing(self, heartbeat: core::time::Duration, reconnect: core::time::Duration) -> Self
+pub const fn nika_serve::ServerLimits::with_unsuccessful_job_retention(self, settled_for: core::time::Duration) -> Self
 impl core::clone::Clone for nika_serve::ServerLimits
 pub fn nika_serve::ServerLimits::clone(&self) -> nika_serve::ServerLimits
 impl core::cmp::PartialEq for nika_serve::ServerLimits
@@ -4572,4 +4677,5 @@ pub fn nika_serve::seat_native_authoring_with_calls(http: core::option::Option<n
 pub async fn nika_serve::serve_http(bind: &str, workflow_root: impl core::convert::AsRef<std::path::Path>, state_root: impl core::convert::AsRef<std::path::Path>, token_file: impl core::convert::AsRef<std::path::Path>, allow_remote: bool, backend: alloc::sync::Arc<dyn nika_serve::server::ExecutionBackend>, shutdown: impl core::future::future::Future<Output = ()>) -> core::result::Result<(), nika_serve::ServerError>
 pub async fn nika_serve::serve_resident(resident: nika_serve::ResidentConfig, server: core::option::Option<nika_serve::ServerConfig>, backend: alloc::sync::Arc<dyn nika_serve::server::ExecutionBackend>, shutdown: impl core::future::future::Future<Output = ()>) -> core::result::Result<(), nika_serve::ServerError>
 pub fn nika_serve::serve_resident_process(workflow_root: &std::path::Path, state_root: std::path::PathBuf, server: core::option::Option<nika_serve::ServerConfig>) -> core::result::Result<(), alloc::string::String>
+pub fn nika_serve::serve_resident_process_with(workflow_root: &std::path::Path, state_root: std::path::PathBuf, server: core::option::Option<nika_serve::ServerConfig>, options: &nika_serve::ResidentOptions) -> core::result::Result<(), alloc::string::String>
 pub fn nika_serve::server_operator_message(error: nika_serve::ServerError) -> alloc::string::String

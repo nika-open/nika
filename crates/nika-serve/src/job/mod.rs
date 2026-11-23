@@ -6,6 +6,7 @@ mod evidence;
 mod kind;
 mod listing;
 mod model;
+mod retention;
 mod store;
 
 pub(crate) use attribution::{
@@ -23,6 +24,7 @@ pub use model::{
     MAX_EVENT_PAYLOAD_BYTES, MAX_EXECUTION_SNAPSHOT_METADATA_BYTES,
     MAX_EXECUTION_SNAPSHOT_PATH_BYTES, MAX_JOB_SNAPSHOT_BYTES, RequestDigest, ServerIncarnation,
 };
+pub(crate) use retention::{JobRetention, MIN_JOB_RETENTION};
 pub(crate) use store::STATE_VERSION;
 pub use store::{ApprovalHistory, JobStore};
 

@@ -102,6 +102,55 @@ fn cost_review_and_run_cost_ceiling_are_explicit_listener_options() {
     ));
 }
 
+/// Job retention is an explicit option of the persistent resident: it needs
+/// no listener (scheduled runs fill the store too), means nothing in a
+/// rehearsal, and takes a duration of at least one minute.
+#[test]
+fn job_retention_is_an_explicit_option_of_the_persistent_resident() {
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    let unset = parse(&["serve"]);
+    assert!(unset.job_retention.is_none() && unset.job_retention_unsuccessful.is_none());
+    let args = parse(&[
+        "serve",
+        "--job-retention",
+        "24h",
+        "--job-retention-unsuccessful",
+        "7d",
+    ]);
+    assert_eq!(args.job_retention.as_deref(), Some("24h"));
+    assert_eq!(args.job_retention_unsuccessful.as_deref(), Some("7d"));
+    for rehearsal in ["--once", "--dry"] {
+        for flag in ["--job-retention", "--job-retention-unsuccessful"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", rehearsal, flag, "24h"])
+                    .is_err(),
+                "{flag} means nothing with {rehearsal}"
+            );
+        }
+    }
+    let options = |succeeded, unsuccessful| {
+        nika_serve::ResidentOptions::default().with_job_retention(succeeded, unsuccessful)
+    };
+    assert!(options(Some("24h"), Some("7d")).is_ok());
+    assert!(options(None, None).is_ok());
+    for refused in ["59s", "0d", "7", "1.5h", "a week", ""] {
+        let outcome = options(Some(refused), None);
+        assert_eq!(
+            outcome.err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidJobRetention),
+            "{refused}"
+        );
+    }
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidJobRetention);
+    assert!(message.contains("--job-retention") && message.contains("one minute"));
+}
+
 /// `--cost-policy` is an explicit, repeatable listener option: it needs
 /// `--bind`, each occurrence is one rule kept as written, and it never
 /// changes the ceiling or seats the review door. The launch reads every rule

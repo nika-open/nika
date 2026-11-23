@@ -120,6 +120,35 @@ curl -s -H "Authorization: Bearer $TOKEN" -o totals.svg \
   http://127.0.0.1:8787/v1/jobs/<id>/artifacts/file/out/totals.svg
 ```
 
+## Keeping the job store bounded
+
+The resident keeps every job it admits in one state file under the state
+root. Out of the box nothing ever leaves it: after 10,000 jobs every
+admission answers `507 job_capacity`, and each operation costs more as the
+file grows. A resident that takes steady traffic sets a retention window:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
+  --token-file .nika/serve.token \
+  --job-retention 24h --job-retention-unsuccessful 7d
+```
+
+- `--job-retention` forgets a `succeeded` job once it has been settled that
+  long. `--job-retention-unsuccessful` does the same for `failed`,
+  `cancelled` and `interrupted` jobs; without it they follow the first
+  window. A duration is a whole number and one unit: `s`, `m`, `h` or `d`.
+  The minimum is one minute.
+- A job that is `queued`, `running` or `paused` is never forgotten.
+- Jobs leave when the next job is admitted, and at startup. A read never
+  evicts.
+- A forgotten job's `Idempotency-Key` is forgotten with it: the same key
+  then creates a new job. Keep the window longer than your callers retry.
+- `GET /v1/jobs/{id}` and the artifact routes answer `404` for a forgotten
+  job. Its trace journal under `.nika/traces` is not removed: it is the
+  evidence of the run, and `nika trace` still reads it.
+
+Both flags work without `--bind`: scheduled runs fill the same store.
+
 ## Runs on a route the catalog does not price
 
 A workflow whose model the engine's catalog does not price (an API route

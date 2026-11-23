@@ -75,6 +75,13 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
         .map(|config| config.with_sessions(args.sessions));
     let http = nika_serve::server::seat_cost_policy(http, &args.cost_policy)
         .map_err(|error| fail(format!("serve · {error}")))?;
+    let options = nika_serve::ResidentOptions::default()
+        .with_job_retention(
+            args.job_retention.as_deref(),
+            args.job_retention_unsuccessful.as_deref(),
+        )
+        .map_err(nika_serve::launch_operator_message)
+        .map_err(&fail)?;
     let now = instant(args.now.as_deref()).map_err(&fail)?;
     let until = instant(args.until.as_deref()).map_err(&fail)?;
     if now.is_some() && !args.once && until.is_none() {
@@ -116,7 +123,7 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
             .state_root
             .clone()
             .unwrap_or_else(|| cwd.join(".nika/serve"));
-        nika_serve::serve_resident_process(&root, state_root, http).map_err(fail)?;
+        nika_serve::serve_resident_process_with(&root, state_root, http, &options).map_err(fail)?;
     }
     Ok(VerbOutput::ok(String::new()))
 }

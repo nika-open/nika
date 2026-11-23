@@ -235,6 +235,9 @@ impl JobStore {
         let _local = self.local_guard()?;
         let _lease = self.kernel_lease()?;
         let mut state = self.load_state()?;
+        // A job that outlived its retention window is gone before this
+        // admission is judged: its key is forgotten and its place is free.
+        let evicted = self.evict_from(&mut state);
 
         if let Some(existing) = state
             .jobs
@@ -299,6 +302,7 @@ impl JobStore {
         }
         state.jobs.push(stored);
         self.persist(&state)?;
+        self.forget_worlds(&evicted);
         Ok(Admission::Created(record))
     }
 
@@ -344,6 +348,9 @@ impl JobStore {
         let _local = self.local_guard()?;
         let _lease = self.kernel_lease()?;
         let mut state = self.load_state()?;
+        // A job that outlived its retention window is gone before this
+        // admission is judged: its key is forgotten and its place is free.
+        let evicted = self.evict_from(&mut state);
 
         if let Some(existing) = state
             .jobs
@@ -399,6 +406,7 @@ impl JobStore {
         self.dir.write_atomic(&world_file(&record.id), world)?;
         state.jobs.push(stored);
         self.persist(&state)?;
+        self.forget_worlds(&evicted);
         Ok(Admission::Created(record))
     }
 }

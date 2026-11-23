@@ -469,6 +469,24 @@ fixed-size constant-time equality. Compressed request bodies are refused.
     the real adapter and durable anchor; until then approval operations fail
     closed.
 11. `Debug` for `JobStore` is opaque and cannot expose its held root.
+12. Retention is opt-in (ADR-155). Without a window the store keeps every job
+    and, at its record ceiling (10,000), refuses every admission
+    `507 job_capacity`. `--job-retention <DURATION>` makes a `succeeded` job
+    leave once its settlement is that old; `--job-retention-unsuccessful` sets
+    the window of `failed`, `cancelled` and `interrupted` jobs, which otherwise
+    follow the first. A duration is a whole number and one unit (`s`, `m`, `h`,
+    `d`), at least one minute. Eviction runs inside every admission, before the
+    idempotency lookup and the capacity check, and once at startup after
+    ownerless runs are settled. It removes the record, its events and its
+    captured world: the record and events in the same atomic replacement as
+    the admission, the world file after it. `queued`, `running` and `paused`
+    jobs never leave, and a settlement that carries no date is never aged. An
+    evicted job's idempotency key is forgotten, so the same key and bytes
+    create a new job: a window must outlive the caller's retries. Its rank is
+    never given again, so a list cursor stays valid across an eviction. Its
+    trace journal under `.nika/traces` stays: the store row is an index of a
+    run, never its evidence, and its artifacts are no longer served over HTTP
+    once the row is gone. A start also removes the captured worlds no job owns.
 
 ## 4. W05 + W06 verification
 

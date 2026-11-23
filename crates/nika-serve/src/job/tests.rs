@@ -1186,6 +1186,8 @@ mod event_integrity;
 #[cfg(test)]
 mod listing;
 #[cfg(test)]
+mod retention;
+#[cfg(test)]
 mod throughput;
 
 #[test]

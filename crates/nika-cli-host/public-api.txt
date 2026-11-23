@@ -3133,6 +3133,8 @@ pub nika_cli_host::serve_args::ServeArgs::bind: core::option::Option<alloc::stri
 pub nika_cli_host::serve_args::ServeArgs::cost_policy: alloc::vec::Vec<alloc::string::String>
 pub nika_cli_host::serve_args::ServeArgs::cost_review: bool
 pub nika_cli_host::serve_args::ServeArgs::dry: bool
+pub nika_cli_host::serve_args::ServeArgs::job_retention: core::option::Option<alloc::string::String>
+pub nika_cli_host::serve_args::ServeArgs::job_retention_unsuccessful: core::option::Option<alloc::string::String>
 pub nika_cli_host::serve_args::ServeArgs::now: core::option::Option<alloc::string::String>
 pub nika_cli_host::serve_args::ServeArgs::once: bool
 pub nika_cli_host::serve_args::ServeArgs::run_cost_ceiling: core::option::Option<alloc::string::String>

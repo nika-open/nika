@@ -739,6 +739,11 @@ pub enum ServerLaunchRefuse {
         "serve · --run-cost-ceiling takes a finite non-negative USD amount (0 vetoes every priced run) or `none` (the only disarm)"
     )]
     InvalidRunCostCeiling,
+    /// A job retention flag is not a duration of at least one minute.
+    #[error(
+        "serve · --job-retention and --job-retention-unsuccessful take a duration of at least one minute: a whole number and a unit, s, m, h or d (36h, 7d)"
+    )]
+    InvalidJobRetention,
 }
 
 impl NikaErrorCode for ServerLaunchRefuse {
@@ -817,6 +822,21 @@ pub fn serve_resident_process(
     state_root: PathBuf,
     server: Option<ServerConfig>,
 ) -> Result<(), String> {
+    let options = super::ResidentOptions::default();
+    serve_resident_process_with(workflow_root, state_root, server, &options)
+}
+
+/// [`serve_resident_process`] under the operator's own resident options
+/// (job retention). The listener's per-run ceiling still applies over them.
+///
+/// # Errors
+/// Returns a bounded operator-facing startup or lifecycle refusal.
+pub fn serve_resident_process_with(
+    workflow_root: &Path,
+    state_root: PathBuf,
+    server: Option<ServerConfig>,
+    options: &super::ResidentOptions,
+) -> Result<(), String> {
     // A resident never opens the keychain: every custody reader in
     // this process (the seal, the signed-memory fold) takes files only.
     nika_dap::seal::resident_custody();
@@ -831,8 +851,13 @@ pub fn serve_resident_process(
         None => backend,
     });
     let resident = ResidentConfig::new(state_root).with_workflow_root(workflow_root.to_path_buf());
-    let limits = server.as_ref().and_then(ServerConfig::resident_limits);
-    let resident = resident.with_limits(limits.unwrap_or_default());
+    let limits = match server.as_ref().and_then(ServerConfig::resident_limits) {
+        Some(asked) => options
+            .limits()
+            .with_default_max_cost_usd(asked.default_max_cost_usd()),
+        None => options.limits(),
+    };
+    let resident = resident.with_limits(limits);
     runtime
         .block_on(serve_resident(
             resident,

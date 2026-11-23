@@ -32,9 +32,9 @@ pub use server::{
     BoundServer, CredentialRefuse, DEFAULT_MAX_COST_USD, ExecutionBackend, ExecutionDisposition,
     ExecutionOutcome, NativeAuthoring, NativeAuthoringArgs, NativeAuthoringError,
     PreparedScheduledRun, ResidentAuthority, ResidentClock, ResidentConfig,
-    ResidentExecutionBackend, ResidentExecutionCoordinator, ServerConfig, ServerError,
-    ServerLaunchRefuse, ServerLimits, SystemResidentClock, launch_operator_message,
+    ResidentExecutionBackend, ResidentExecutionCoordinator, ResidentOptions, ServerConfig,
+    ServerError, ServerLaunchRefuse, ServerLimits, SystemResidentClock, launch_operator_message,
     optional_server_config, process_shutdown, seat_native_authoring,
     seat_native_authoring_with_calls, serve_http, serve_resident, serve_resident_process,
-    server_operator_message,
+    serve_resident_process_with, server_operator_message,
 };

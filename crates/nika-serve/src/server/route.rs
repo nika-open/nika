@@ -259,6 +259,12 @@ async fn route_authenticated(
         (&Method::POST, "/v1/check") => check_snapshot(request, state).await,
         (&Method::POST, "/v1/compile") => super::compile::handle(request, state).await,
         (&Method::POST, path) if path.ends_with("/cancel") => cancel_job(path, &state).await,
+        (&Method::POST, path) if path.starts_with("/v1/jobs/") && path.ends_with("/retry") => {
+            match job_action_id(path, "/retry").map(str::to_owned) {
+                Some(id) => super::retry_route::retry_job(request, &id, state).await,
+                None => ApiError::route_not_found().into_response(),
+            }
+        }
         (&Method::GET, "/v1/openapi.json") => json_response(StatusCode::OK, &contract(&state)),
         (&Method::GET, "/v1/workflows") => list_registry(&state).await,
         (&Method::GET, path) if path.starts_with("/v1/workflows/") => {

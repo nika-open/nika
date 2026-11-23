@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicU8;
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
-use crate::job::{JobBindings, JobListFilter, JobPage, LostOwnerJudge};
+use crate::job::{JobBindings, JobListFilter, JobPage, LostOwnerJudge, Retried, RetriedAttempt};
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -247,6 +247,11 @@ enum ControlCommand {
     CancelRequested {
         id: JobId,
         reply: Reply<bool>,
+    },
+    Retry {
+        id: JobId,
+        retried: Box<RetriedAttempt>,
+        reply: Reply<Retried>,
     },
     SettleInterrupted {
         reply: Reply<usize>,
@@ -549,6 +554,19 @@ impl StoreHandle {
         receive(answer).await
     }
 
+    /// Close a settled job's latest attempt and queue the next one, as a
+    /// retry request decided (ADR-156 section 9).
+    pub(super) async fn retry(
+        &self,
+        id: JobId,
+        retried: RetriedAttempt,
+    ) -> Result<Retried, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        let retried = Box::new(retried);
+        self.send_control_blocking(ControlCommand::Retry { id, retried, reply })?;
+        receive(answer).await
+    }
+
     pub(super) async fn settle_interrupted(&self) -> Result<usize, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_control_blocking(ControlCommand::SettleInterrupted { reply })?;
@@ -809,6 +827,21 @@ fn notify_persisted<T>(result: &Result<T, JobStoreError>, events: &Notify) {
     }
 }
 
+/// A retry request's write; a waiter on the job's events wakes only when
+/// the request queued a new attempt.
+fn retry_settled(
+    store: &JobStore,
+    id: &JobId,
+    retried: &RetriedAttempt,
+    events: &Notify,
+) -> Result<Retried, JobStoreError> {
+    let result = store.retry_settled(id, retried);
+    if matches!(result, Ok(Retried::Queued(_))) {
+        events.notify_waiters();
+    }
+    result
+}
+
 fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
     let StoreOwner {
         store,
@@ -894,6 +927,9 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
         }
         ControlCommand::CancelRequested { id, reply } => {
             let _result = reply.send(store.mark_cancel_requested(&id));
+        }
+        ControlCommand::Retry { id, retried, reply } => {
+            let _result = reply.send(retry_settled(store, &id, &retried, events));
         }
         ControlCommand::SettleInterrupted { reply } => {
             let result = store.settle_interrupted_jobs(incarnation);

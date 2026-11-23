@@ -108,6 +108,12 @@ impl ResidentExecutionCoordinator {
         self.jobs.forget(id);
     }
 
+    /// Queue the task of a record a retry request moved back to `queued`,
+    /// under the place taken before the store wrote it (ADR-156 section 9).
+    pub(super) fn send_queued(&self, permit: Place, record: &JobRecord) {
+        permit.send(record.id().clone(), self.queued_task(record));
+    }
+
     /// The task that runs a queued record.
     fn queued_task(&self, record: &JobRecord) -> ExecutionTask {
         ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())

@@ -176,6 +176,31 @@ with `resume_refused` instead, without running a task.
   never shows `interrupted` in between. A client that waits for a terminal
   status keeps waiting for the real end.
 
+### Retrying a job by hand
+
+Support can start a job that ended `interrupted` or `failed` again, as a
+new attempt of the same job, whatever the flag says:
+
+```sh
+curl -sS -X POST http://127.0.0.1:8787/v1/jobs/<id>/retry \
+  -H "Authorization: Bearer $(cat serve.token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"attempt": 1, "mode": "restart", "max_cost_usd": 0.5}'
+```
+
+`attempt` names the job's latest attempt (the first is 1), so sending the
+same request twice starts one attempt: the second answer is `200` with the
+job as it stands. The request is your consent to run the workflow's effects
+again. `resume` serves what the attempt's journal completed and runs the
+rest; a journal that cannot be resumed answers `409 resume_refused` and
+nothing runs. The bound of attempts and the job's ceiling hold as for a
+restart after a deploy: a failed run that left no journal has an unknown
+spend, which `max_cost_usd` accepts. A job that was cancelled, that
+succeeded, or whose latest attempt is not the one named answers
+`409 job_not_retryable`. To find what to retry, list one owner's jobs of
+the last week that did not succeed:
+`GET /v1/jobs?owner=<owner>&status=failed,interrupted&created_after=2026-11-17T00:00:00Z`.
+
 ## Keeping the job store bounded
 
 The resident keeps every job it admits in one state file under the state

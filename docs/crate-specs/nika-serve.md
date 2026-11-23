@@ -1280,6 +1280,45 @@ A job admitted through a cost review: its review covered one run, so its
 request states no `retry` (`422 invalid_job_retry`) and it carries no
 effects class; it stays `interrupted` with `effects_need_consent`.
 
+**By request.** `POST /v1/jobs/{id}/retry` starts the latest attempt of a
+settled job again, as a new attempt of the same job. The body is a closed
+object:
+
+| member | meaning |
+|---|---|
+| `attempt` | required; the attempt the request retries, the first being 1. It must be the job's latest |
+| `mode` | required; `restart` or `resume` |
+| `max_cost_usd` | optional; a ceiling for the re-attempts alone, as `retry.max_cost_usd`. It holds for the attempts after this one until another request states one |
+
+Anything else, `null` included, is `422 invalid_job_retry`. The request is
+the caller's consent to run the workflow's effects again, whatever its
+class. The latest attempt must have ended `interrupted` or `failed`, with an
+execution identity, and no cancellation may have been accepted on it. The
+bound of attempts in force for the job holds, then, for `resume`, the
+judgment of the attempt's journal (no budget makes a journal resumable),
+then the ceiling over every attempt. What the retried attempt spent is read
+from its journal as for a lost run, so an attempt that left none is of
+unknown spend: under a ceiling the request states `max_cost_usd`. A job a
+schedule fired on its beat is never resumed; it can be restarted.
+
+The place in the owner's lane is taken before anything is written: an owner
+at its bound is refused as an admission is (ADR-155), with nothing changed.
+The store then closes the attempt and queues the next one in one write,
+with one `execution.requeued` frame (`attempt 2 of 3 (restart): attempt 1
+retried by request`). The closed attempt keeps its result, its receipt, the
+sequence of its terminal event and what the request stated.
+
+| answer | when |
+|---|---|
+| `202` | the new attempt is queued; the job is returned |
+| `200` | the same request already retried this attempt: the job as it stands, nothing written, nothing queued |
+| `404 job_not_found` | unknown job, or one retention forgot |
+| `409 job_not_retryable` | another status, a cancellation accepted, an attempt that never started, or `attempt` is not the latest |
+| `409 retry_exhausted` | the job has taken its bound of attempts |
+| `409 resume_refused` | the attempt's journal cannot be resumed, or a schedule fired the job |
+| `409 unknown_spend` · `409 budget_exhausted` | as for a lost run |
+| `429 owner_queue_full` · `503 queue_full` · `503 store_busy` · `503 stopping` | as for an admission |
+
 **Limits of this version.**
 
 - A client that streams a job's events across the resident's restart reads
@@ -1307,3 +1346,10 @@ effects class; it stays `interrupted` with `effects_need_consent`.
 - A journal whose writes failed during the run (a full disk) stops early.
   The spend read from it is short, and one that stops after its first
   record reads as a run that sent nothing.
+- A failed attempt that never started (refused before its execution
+  identity was stamped) cannot be retried by request: there is no attempt to
+  close. A new job is the answer.
+- A retry request is judged against the job as the resident reads it, and
+  written only if the store still holds the job so (under its lease). Two
+  different requests racing for one attempt: the first written wins, the
+  other is `409 job_not_retryable`.

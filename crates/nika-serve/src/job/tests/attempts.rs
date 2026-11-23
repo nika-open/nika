@@ -9,7 +9,8 @@
 
 use super::*;
 use crate::job::{
-    AttemptMode, JobBindings, LostOwnerJudge, LostVerdict, RetryRefusal, RetryStatement, Spend,
+    AttemptMode, JobBindings, LostOwnerJudge, LostVerdict, Retried, RetriedAttempt, RetryAsk,
+    RetryRefusal, RetryStatement, Spend,
 };
 
 /// A judge that answers what a test tells it to.
@@ -454,4 +455,174 @@ fn an_accepted_cancellation_is_durable_while_the_job_runs() {
     let record = reopened.get(record.id()).expect("get").expect("job");
     assert!(record.cancel_requested);
     assert_eq!(record.status(), JobStatus::Running);
+}
+
+/// One job that ran once and failed, settled with its receipt.
+fn failed_once(store: &JobStore) -> JobId {
+    let record = admit(store, "request-failed", 31, JobBindings::default());
+    let id = record.id().clone();
+    start(store, &id, 31);
+    let receipt = JobReceipt::new(
+        id.clone(),
+        "execution-31",
+        "trace-31",
+        digest(31).as_str(),
+        None,
+    )
+    .expect("receipt");
+    store
+        .settle_with_events(
+            &id,
+            JobStatus::Failed,
+            &[json!({"kind": "execution.settled", "status": "failed"})],
+            Some(std::collections::BTreeMap::from([(
+                "partial".to_owned(),
+                json!(1),
+            )])),
+            Some(receipt),
+        )
+        .expect("failed");
+    id
+}
+
+fn retried(attempt: u64, mode: &str, spend: f64) -> RetriedAttempt {
+    RetriedAttempt {
+        ask: RetryAsk::read(&json!({"attempt": attempt, "mode": mode})).expect("a request"),
+        spend: Spend::new(spend, false),
+        bound: 3,
+    }
+}
+
+#[test]
+fn a_settled_attempt_a_request_retried_stays_bound_to_its_end() {
+    let root = tempfile::tempdir().expect("root");
+    let store = JobStore::open(root.path()).expect("store");
+    let id = failed_once(&store);
+    // A request that does not name the latest attempt writes nothing.
+    assert!(matches!(
+        store.retry_settled(&id, &retried(2, "restart", 0.0)),
+        Ok(Retried::NotRetryable)
+    ));
+    let queued = store
+        .retry_settled(&id, &retried(1, "restart", 0.25))
+        .ok()
+        .and_then(|written| match written {
+            Retried::Queued(mutation) => Some(mutation),
+            Retried::Replayed(_) | Retried::NotRetryable => None,
+        })
+        .expect("the request is written");
+    let record = queued.record();
+    assert_eq!(record.status(), JobStatus::Queued);
+    assert_eq!(record.attempt(), 2);
+    assert_eq!(
+        record.execution_id(),
+        None,
+        "the new attempt has no identity yet"
+    );
+    assert!(record.settlement().is_none() && record.receipt().is_none());
+    let closed = &record.attempts[0];
+    assert_eq!(closed.status, JobStatus::Failed);
+    assert_eq!(closed.execution_id, "execution-31");
+    assert_eq!(closed.terminal_sequence, Some(2));
+    assert_eq!(closed.requeued_sequence, 3);
+    assert_eq!(
+        closed.outputs.as_ref().map(std::collections::BTreeMap::len),
+        Some(1)
+    );
+    assert_eq!(closed.spend, Spend::new(0.25, false));
+    // The same request again: nothing written. Another one: refused.
+    assert!(matches!(
+        store.retry_settled(&id, &retried(1, "restart", 0.25)),
+        Ok(Retried::Replayed(_))
+    ));
+    assert!(matches!(
+        store.retry_settled(&id, &retried(1, "resume", 0.25)),
+        Ok(Retried::NotRetryable)
+    ));
+    assert_eq!(events(&store, &id).len(), 3);
+    drop(store);
+
+    // The first attempt's end is still bound: by its own terminal event,
+    // now hashed from the closed attempt, and by the requeue event.
+    let original = read_state(root.path());
+    let forgeries: [(&str, serde_json::Value); 6] = [
+        ("status", json!("interrupted")),
+        ("outputs", json!({"partial": 2})),
+        ("terminal_sequence", json!(1)),
+        ("terminal_sequence", json!(3)),
+        ("terminal_sequence", serde_json::Value::Null),
+        ("requested", json!({"max_cost_usd": 9})),
+    ];
+    for (member, forged) in forgeries {
+        let mut state = original.clone();
+        state["jobs"][0]["record"]["attempts"][0][member] = forged.clone();
+        write_state(root.path(), &state);
+        assert!(
+            matches!(JobStore::open(root.path()), Err(JobStoreError::Corrupt(_))),
+            "a forged {member} ({forged}) is refused"
+        );
+    }
+    write_state(root.path(), &original);
+    let reopened = JobStore::open(root.path()).expect("the untouched state reads back");
+    assert_eq!(
+        reopened.get(&id).expect("get").expect("job").status(),
+        JobStatus::Queued
+    );
+}
+
+#[test]
+fn a_request_retries_neither_a_success_nor_a_cancelled_job() {
+    let root = tempfile::tempdir().expect("root");
+    let store = JobStore::open(root.path()).expect("store");
+    let record = admit(&store, "request-done", 32, JobBindings::default());
+    let id = record.id().clone();
+    start(&store, &id, 32);
+    let receipt = JobReceipt::new(
+        id.clone(),
+        "execution-32",
+        "trace-32",
+        digest(32).as_str(),
+        None,
+    )
+    .expect("receipt");
+    store
+        .settle_with_events(
+            &id,
+            JobStatus::Succeeded,
+            &[json!({"kind": "execution.settled", "status": "succeeded"})],
+            Some(std::collections::BTreeMap::new()),
+            Some(receipt),
+        )
+        .expect("succeeded");
+    assert!(matches!(
+        store.retry_settled(&id, &retried(1, "restart", 0.0)),
+        Ok(Retried::NotRetryable)
+    ));
+    // A cancellation accepted while the job ran, which then failed.
+    let record = admit(&store, "request-cancelled", 33, JobBindings::default());
+    let cancelled = record.id().clone();
+    start(&store, &cancelled, 33);
+    assert!(store.mark_cancel_requested(&cancelled).expect("mark"));
+    let receipt = JobReceipt::new(
+        cancelled.clone(),
+        "execution-33",
+        "trace-33",
+        digest(33).as_str(),
+        None,
+    )
+    .expect("receipt");
+    store
+        .settle_with_events(
+            &cancelled,
+            JobStatus::Failed,
+            &[json!({"kind": "execution.settled", "status": "failed"})],
+            None,
+            Some(receipt),
+        )
+        .expect("failed");
+    assert!(matches!(
+        store.retry_settled(&cancelled, &retried(1, "restart", 0.0)),
+        Ok(Retried::NotRetryable)
+    ));
+    assert_eq!(events(&store, &cancelled).len(), 2, "nothing written");
 }

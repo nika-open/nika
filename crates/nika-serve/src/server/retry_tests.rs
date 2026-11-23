@@ -331,8 +331,10 @@ fn closed_attempt(usd: f64, unknown: bool, sequence: u64) -> ClosedAttempt {
         receipt: None,
         identity_digest: None,
         requeued_sequence: sequence,
+        terminal_sequence: None,
         spend: Spend::new(usd, unknown),
         next: AttemptMode::Restart,
+        requested: None,
     }
 }
 
@@ -426,8 +428,10 @@ fn the_bound_and_the_ceiling_count_every_attempt_the_job_left() {
         receipt: None,
         identity_digest: None,
         requeued_sequence: sequence,
+        terminal_sequence: None,
         spend: Spend::new(usd, false),
         next: AttemptMode::Restart,
+        requested: None,
     };
     // The resident's ceiling is one dollar; the first attempt spent it.
     lost.job.attempts.push(closed(1.0, 2));
@@ -538,7 +542,7 @@ impl ExecutionBackend for StartedThenLost {
 }
 
 /// A resident that drops a run 200 ms into its stop and never times it out.
-fn dropping(policy: OnInterrupted) -> ServerLimits {
+pub(super) fn dropping(policy: OnInterrupted) -> ServerLimits {
     ServerLimits::new(
         1024,
         Duration::from_secs(2),
@@ -552,13 +556,13 @@ fn dropping(policy: OnInterrupted) -> ServerLimits {
     .with_retry_policy(RetryPolicy::new(policy, 3))
 }
 
-fn stored_jobs(world: &TestWorld) -> Vec<Value> {
+pub(super) fn stored_jobs(world: &TestWorld) -> Vec<Value> {
     let text = std::fs::read_to_string(world.state.join("jobs/state.json")).expect("job state");
     let state: Value = serde_json::from_str(&text).expect("job state json");
     state["jobs"].as_array().expect("jobs").clone()
 }
 
-fn named(extra: &Value) -> String {
+pub(super) fn named(extra: &Value) -> String {
     let mut body = json!({"workflow": "root.nika"});
     for (key, value) in extra.as_object().expect("members") {
         body[key] = value.clone();
@@ -566,7 +570,11 @@ fn named(extra: &Value) -> String {
     body.to_string()
 }
 
-async fn running_job(server: &super::tests::TestServer, body: &str, key: &str) -> (String, Value) {
+pub(super) async fn running_job(
+    server: &super::tests::TestServer,
+    body: &str,
+    key: &str,
+) -> (String, Value) {
     let created = server
         .request(&post_request(body, key, &auth_header()))
         .await;
@@ -595,7 +603,7 @@ async fn until_called(backend: &StartedThenLost) {
     );
 }
 
-fn kinds_and_statuses(frames: &[Value]) -> Vec<(String, String)> {
+pub(super) fn kinds_and_statuses(frames: &[Value]) -> Vec<(String, String)> {
     frames
         .iter()
         .map(|frame| {
@@ -607,7 +615,7 @@ fn kinds_and_statuses(frames: &[Value]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn pair(kind: &str, status: &str) -> (String, String) {
+pub(super) fn pair(kind: &str, status: &str) -> (String, String) {
     (kind.to_owned(), status.to_owned())
 }
 
@@ -1108,9 +1116,9 @@ fn a_broken_chain_leaves_the_job_interrupted_rather_than_run_it_from_the_start()
 
 /// Two tasks in one wave: `first` ends at once, `second` waits long enough
 /// for the resident to be stopped while it runs.
-const TWO_TASKS: &str = "nika: two-tasks\npermits:\n  tools: [\"nika:jq\", \"nika:wait\"]\ntasks:\n  first:\n    invoke:\n      tool: nika:jq\n      args: { input: 1, expression: \".\" }\n  second:\n    invoke:\n      tool: nika:wait\n      args: { duration: \"3s\" }\n";
+pub(super) const TWO_TASKS: &str = "nika: two-tasks\npermits:\n  tools: [\"nika:jq\", \"nika:wait\"]\ntasks:\n  first:\n    invoke:\n      tool: nika:jq\n      args: { input: 1, expression: \".\" }\n  second:\n    invoke:\n      tool: nika:wait\n      args: { duration: \"3s\" }\n";
 
-fn journal_lines(path: &Path) -> Vec<Value> {
+pub(super) fn journal_lines(path: &Path) -> Vec<Value> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
@@ -1119,7 +1127,7 @@ fn journal_lines(path: &Path) -> Vec<Value> {
 }
 
 /// One field of a journal record, as the record keeps it.
-fn field<'a>(line: &'a Value, key: &str) -> Option<&'a Value> {
+pub(super) fn field<'a>(line: &'a Value, key: &str) -> Option<&'a Value> {
     line["fields"]
         .as_array()?
         .iter()
@@ -1127,13 +1135,13 @@ fn field<'a>(line: &'a Value, key: &str) -> Option<&'a Value> {
         .map(|entry| &entry["value"])
 }
 
-fn names_task(lines: &[Value], kind: &str, task: &str) -> bool {
+pub(super) fn names_task(lines: &[Value], kind: &str, task: &str) -> bool {
     lines
         .iter()
         .any(|line| line["kind"] == kind && field(line, "task").is_some_and(|named| named == task))
 }
 
-fn journal_of(dir: &Path, job: &Value) -> Option<PathBuf> {
+pub(super) fn journal_of(dir: &Path, job: &Value) -> Option<PathBuf> {
     nika_dap::store::locate_trace(
         dir,
         job["execution_id"].as_str()?,

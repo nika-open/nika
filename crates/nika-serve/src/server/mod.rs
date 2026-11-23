@@ -24,6 +24,7 @@ mod provider_gate;
 mod registry;
 mod resident_options;
 mod retry;
+mod retry_route;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
@@ -463,6 +464,9 @@ struct AppState {
     cost_policy: bool,
     /// The project's native Session door, when the operator started this server with it.
     sessions: Option<Arc<nika_session_host::http::Sessions>>,
+    /// The judge of a run that lost its owner, which also decides a retry
+    /// request (ADR-156 section 9).
+    retry_judge: Arc<retry::LostRunJudge>,
 }
 
 struct AuthorityState {
@@ -487,6 +491,8 @@ struct AuthorityState {
     cancellations: Arc<ActiveCancellations>,
     /// Reviewed jobs' captured worlds and cost authority, until their run.
     reviewed: Arc<cost_review::Reviewed>,
+    /// The judge of a run that lost its owner (ADR-156).
+    retry_judge: Arc<retry::LostRunJudge>,
 }
 
 #[derive(Debug)]
@@ -565,7 +571,7 @@ impl ResidentAuthority {
         let store_actor = StoreActor::start(
             prepared.store,
             prepared.incarnation,
-            judge,
+            Arc::<retry::LostRunJudge>::clone(&judge),
             config.limits().max_connections(),
             control_capacity,
         )?;
@@ -623,6 +629,7 @@ impl ResidentAuthority {
             clock: Arc::clone(config.clock()),
             cancellations,
             reviewed,
+            retry_judge: judge,
         });
         Ok(Self {
             state,
@@ -771,6 +778,7 @@ impl BoundServer {
             cost_review,
             cost_policy,
             sessions: sessions.map(|root| Arc::new(session::open(root, state.clone()))),
+            retry_judge: Arc::clone(&authority.state.retry_judge),
         });
         Ok(Self { listener, state })
     }
@@ -1646,6 +1654,8 @@ mod registry_tests;
 mod result_tests;
 #[cfg(test)]
 mod retention_tests;
+#[cfg(test)]
+mod retry_route_tests;
 #[cfg(test)]
 mod retry_tests;
 #[cfg(test)]

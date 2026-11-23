@@ -22,8 +22,8 @@ use serde_json::Value;
 use super::error::ApiError;
 use super::{AuthorityState, ExecutionTask, ServerError, ServerLimits};
 use crate::job::{
-    AttemptMode, LostOwnerJudge, LostRun, LostVerdict, Remaining, RetryPolicy, RetryRefusal,
-    RetryStatement, Spend, decide, remaining,
+    AttemptMode, LostOwnerJudge, LostRun, LostVerdict, Remaining, RetriedAttempt, RetryAsk,
+    RetryPolicy, RetryRefusal, RetryStatement, Spend, decide, remaining,
 };
 use crate::{JobOrigin, JobRecord};
 
@@ -88,7 +88,7 @@ pub(super) fn attempt_ceiling(
     }
     let left = remaining(
         job_ceiling(resident, job),
-        job.retry.as_ref().and_then(RetryStatement::budget),
+        retry_budget(job),
         job.attempts.iter().map(|attempt| &attempt.spend),
     );
     match left {
@@ -97,6 +97,17 @@ pub(super) fn attempt_ceiling(
         Remaining::UnknownSpend => Err(RetryRefusal::UnknownSpend),
         Remaining::Exhausted => Err(RetryRefusal::BudgetExhausted),
     }
+}
+
+/// The ceiling of a job's re-attempts alone: the latest a retry request
+/// stated, else the one its submission stated (ADR-156 §6). A request that
+/// states none leaves the earlier one in force.
+pub(super) fn retry_budget(job: &JobRecord) -> Option<f64> {
+    job.attempts
+        .iter()
+        .rev()
+        .find_map(|attempt| attempt.requested.as_ref()?.budget())
+        .or_else(|| job.retry.as_ref().and_then(RetryStatement::budget))
 }
 
 /// A queued attempt its job's ceiling no longer covers does not run. The
@@ -139,6 +150,49 @@ impl LostRunJudge {
             service: ExecutionService::new(snapshots),
             snapshots,
         }
+    }
+
+    /// The decision for a request that retries `job`'s latest attempt
+    /// (ADR-156 §9). The request is the consent of section 5; the bound of
+    /// section 8, the resume judgment of section 3 and the cost of section 6
+    /// hold as for a lost run, in that order: no budget makes a journal
+    /// resumable. A job a schedule fired is never resumed.
+    ///
+    /// # Errors
+    /// Why the request is refused.
+    pub(super) fn retried(
+        &self,
+        job: &JobRecord,
+        world: Option<&str>,
+        ask: &RetryAsk,
+    ) -> Result<RetriedAttempt, RetryRefusal> {
+        let policy = self.policy.for_job(job.retry.as_ref());
+        if job.attempt() >= policy.max_attempts() {
+            return Err(RetryRefusal::Exhausted);
+        }
+        let admitted = self.workflow(job, world);
+        let fired = job.origin() != &JobOrigin::Manual;
+        if ask.mode == AttemptMode::Resume && (fired || !self.resumable(job, admitted.as_ref())) {
+            return Err(RetryRefusal::ResumeRefused);
+        }
+        let (retried, _) = self.lost_attempt(job, admitted.as_ref());
+        let spent: Vec<Spend> = job
+            .attempts
+            .iter()
+            .map(|attempt| attempt.spend.clone())
+            .chain(std::iter::once(retried.clone()))
+            .collect();
+        let budget = ask.request.budget().or_else(|| retry_budget(job));
+        match remaining(job_ceiling(self.ceiling, job), budget, spent.iter()) {
+            Remaining::UnknownSpend => return Err(RetryRefusal::UnknownSpend),
+            Remaining::Exhausted => return Err(RetryRefusal::BudgetExhausted),
+            Remaining::Unbounded | Remaining::Usd(_) => {}
+        }
+        Ok(RetriedAttempt {
+            ask: ask.clone(),
+            spend: retried,
+            bound: policy.max_attempts(),
+        })
     }
 
     /// What the lost attempt of `job` committed, and whether running its
@@ -269,7 +323,7 @@ impl LostOwnerJudge for LostRunJudge {
             contained,
             cancel_requested: job.cancel_requested,
             ceiling: job_ceiling(self.ceiling, job),
-            budget: job.retry.as_ref().and_then(RetryStatement::budget),
+            budget: retry_budget(job),
             spent: &every_attempt,
         };
         match decide(&lost) {

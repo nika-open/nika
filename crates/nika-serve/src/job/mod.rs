@@ -12,7 +12,7 @@ mod store;
 
 pub(crate) use attempt::{
     AttemptMode, ClosedAttempt, DEFAULT_RETRY_ATTEMPTS, LostRun, MAX_RETRY_ATTEMPTS, OnInterrupted,
-    Remaining, RetryPolicy, RetryRefusal, RetryStatement, Spend, decide, remaining,
+    Remaining, RetryAsk, RetryPolicy, RetryRefusal, RetryStatement, Spend, decide, remaining,
 };
 pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
@@ -29,7 +29,10 @@ pub use model::{
 };
 pub(crate) use retention::{JobRetention, MIN_JOB_RETENTION};
 pub use store::{ApprovalHistory, JobStore};
-pub(crate) use store::{LostOwnerJudge, LostVerdict, QueuedJob, STATE_VERSION};
+pub(crate) use store::{
+    LostOwnerJudge, LostVerdict, QueuedJob, Retried, RetriedAttempt, STATE_VERSION, is_replay,
+    retryable,
+};
 
 #[cfg(test)]
 mod result_tests;

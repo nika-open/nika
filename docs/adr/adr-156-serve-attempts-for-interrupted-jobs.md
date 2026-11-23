@@ -361,10 +361,24 @@ Written for the `resume` mode:
   refuses
 - `crates/nika-dap/src/continuation/tests.rs`, `crates/nika-serve/src/server/retry_tests.rs`
 
+Written for the manual retry route:
+
+- `crates/nika-serve/src/job/attempt.rs` -- the request a route reads, and what a closed
+  attempt keeps of it
+- `crates/nika-serve/src/job/store/retried.rs` -- the one write that closes a settled attempt
+  and queues the next; `crates/nika-serve/src/job/store/binding.rs` -- the hash of a settled
+  attempt's terminal event once a request closed it
+- `crates/nika-serve/src/server/retry.rs` -- the decision for a request, and the budget the
+  latest request stated
+- `crates/nika-serve/src/server/retry_route.rs` -- `POST /v1/jobs/{id}/retry`
+- `crates/nika-serve/src/server/openapi/job_retry.rs`, `crates/nika-serve/openapi.json`
+- `crates/nika-serve/src/job/tests/attempts.rs`,
+  `crates/nika-serve/src/server/retry_route_tests.rs`
+
 Planned:
 
-- `crates/nika-serve/src/server/` -- the retry route, the attempts route
-- `crates/nika-serve/openapi.json` -- the two routes
+- `crates/nika-serve/src/server/` -- the attempts route
+- `crates/nika-serve/openapi.json` -- the attempts route
 - Fault-injection tests beside `server/tests/shutdown/process.rs`: a kill in the middle of a
   mock workflow then a restart (two attempts, completed tasks skipped in the journal, total
   spend under the ceiling); a stop with a grace shorter than the job; a poisoned job; a
@@ -450,8 +464,8 @@ point narrows or corrects a sentence of it.
    `interrupted` with `effects_need_consent`. An accepted cancellation is made durable on the job
    before the run is told, so no later incarnation starts it again; that mark is not part of the
    event chain.
-6. **Not yet delivered**: the manual retry route, the attempts route and the members of
-   section 10, a `retry` member on a schedule declared over HTTP.
+6. **Not yet delivered**: the attempts route and the members of section 10, a `retry`
+   member on a schedule declared over HTTP.
 7. **The class is read twice.** The word kept on the job at admission enters the job's event
    chain only when the job starts. The resident reads the class again from the captured
    workflow, whose digest the job's identity binds, and the stricter of the two holds. A world
@@ -490,6 +504,34 @@ Written for the `resume` mode:
 14. **What a resumed attempt continues.** The facts the lost attempt recorded on its first
     manifest (a scheduled slot) are carried on; a gate the journal holds as paused asks
     again.
+
+Written for the manual retry route:
+
+15. **The answer to the same request.** The first request answers `202` with the queued job.
+    The same request sent again (same `attempt`, `mode` and `max_cost_usd`) answers `200`
+    with the job as it stands, writes nothing and takes no place in the queue, as a replayed
+    admission does. A different request for an attempt already retried is
+    `409 job_not_retryable`: it does not name the latest attempt.
+16. **What section 9 also refuses.** A job on which a cancellation was accepted, as section 2
+    states for the resident, and a failed job whose latest attempt never started (refused
+    before its execution identity was stamped): there is no attempt to close, so a new job is
+    the answer. Both are `409 job_not_retryable`.
+17. **The order of the refusals.** The bound of section 8, then for `resume` the journal
+    judgment of section 3, then the cost of section 6: no budget makes a journal resumable.
+    A job a schedule fired is never resumed; a request may restart it.
+18. **What the retried attempt spent** is read from its journal, as for a lost run. A failed
+    run that left no journal is of unknown spend: under a ceiling, the request states
+    `max_cost_usd`. A request's `max_cost_usd` holds for the attempts after it until another
+    request states one; a request that states none leaves the earlier one in force.
+19. **A settled attempt stays bound to its end.** The closed attempt keeps the sequence of its
+    terminal event and the request that closed it. That terminal event is hashed from the
+    closed attempt as it was written, and the requeue event binds the closed attempt whole,
+    so neither its result nor the request can be changed afterwards. Both members are
+    optional and join store format 4, which has not shipped, with no migration.
+20. **The place before the write.** The owner's place in the queue is taken after the
+    decision and before the store writes, so an owner at its bound is refused with nothing
+    changed. The store checks again under its lease that the request names the latest
+    attempt: of two different requests racing for one attempt, the first written wins.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

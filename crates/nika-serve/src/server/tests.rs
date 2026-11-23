@@ -1316,6 +1316,7 @@ async fn openapi_is_authenticated_and_lists_only_real_authorities() {
     assert!(body["paths"].get("/v1/jobs").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/events").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/cancel").is_some());
+    assert!(body["paths"].get("/v1/jobs/{id}/retry").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/trace/verify").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/artifacts").is_some());
     server.stop().await.expect("clean stop");

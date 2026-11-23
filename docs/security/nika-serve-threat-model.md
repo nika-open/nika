@@ -230,6 +230,15 @@ billing cannot be proven stopped by a local deadline.
   attempt history (identity, receipt, spend) is bound into the hash of the
   event that queued the next attempt. The chain is unkeyed: it detects a
   torn or drifted state, not a writer who holds the state root.
+- `POST /v1/jobs/{id}/retry` runs a settled job's effects again on request.
+  It takes the server's Bearer, as every job route does: whoever holds it
+  can retry any job it can read, owner labels included, since an owner is
+  attribution and not an identity (ADR-155). The request is the consent; the
+  bound of attempts, the one ceiling and the resume judgment hold as for a
+  lost run, and the owner's queue place is taken before the write, so a
+  retry cannot widen what one owner may hold. A cancelled job is never
+  retried. The request and the result of the attempt it closed are bound
+  into the job's event chain.
 - A job's `owner` and `labels` are what the caller states (ADR-155). They are
   validated against a closed alphabet and bounds, bound in the request digest
   and the durable record, and never trusted as identity: one Bearer is one

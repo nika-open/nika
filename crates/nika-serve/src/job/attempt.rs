@@ -48,6 +48,13 @@ impl AttemptMode {
             Self::Resume => "resume",
         }
     }
+
+    /// Read the word of a retry request.
+    pub(crate) fn parse(word: &str) -> Option<Self> {
+        [Self::Restart, Self::Resume]
+            .into_iter()
+            .find(|mode| mode.as_str() == word)
+    }
 }
 
 /// What becomes of a job whose run lost its owner.
@@ -210,6 +217,64 @@ impl RetryStatement {
     }
 }
 
+/// What a retry request stated when it closed an attempt (ADR-156 §9).
+/// Kept on the attempt it closed: the same request sent again finds the
+/// attempt it created, and its budget holds for the attempts after it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RetryRequest {
+    /// The ceiling of the re-attempts alone (USD).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_cost_usd: Option<Number>,
+}
+
+impl RetryRequest {
+    /// The ceiling of the re-attempts alone, when the request stated one.
+    pub(crate) fn budget(&self) -> Option<f64> {
+        self.max_cost_usd.as_ref().and_then(Number::as_f64)
+    }
+}
+
+/// A retry request, validated (ADR-156 §9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RetryAsk {
+    /// The attempt the request retries; the first is 1.
+    pub(crate) attempt: u32,
+    /// How the new attempt runs.
+    pub(crate) mode: AttemptMode,
+    /// What the request states beside the attempt and the mode.
+    pub(crate) request: RetryRequest,
+}
+
+impl RetryAsk {
+    /// Read a request body: `attempt` (1 or more) and `mode` (`restart` or
+    /// `resume`), and optionally `max_cost_usd` (a non-negative amount).
+    /// `None` for anything else: nothing is repaired or clamped here.
+    pub(crate) fn read(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let known = ["attempt", "mode", "max_cost_usd"];
+        if object.keys().any(|key| !known.contains(&key.as_str())) {
+            return None;
+        }
+        let attempt = u32::try_from(object.get("attempt")?.as_u64()?)
+            .ok()
+            .filter(|attempt| *attempt >= 1)?;
+        let mode = AttemptMode::parse(object.get("mode")?.as_str()?)?;
+        let max_cost_usd = match object.get("max_cost_usd") {
+            Some(Value::Number(usd)) if usd.as_f64().is_some_and(|usd| usd >= 0.0) => {
+                Some(usd.clone())
+            }
+            Some(_) => return None,
+            None => None,
+        };
+        Some(Self {
+            attempt,
+            mode,
+            request: RetryRequest { max_cost_usd },
+        })
+    }
+}
+
 /// What one attempt committed against the job's ceiling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -260,9 +325,17 @@ pub(crate) struct ClosedAttempt {
     pub(crate) identity_digest: Option<EventHash>,
     /// The `execution.requeued` event that queued the next attempt.
     pub(crate) requeued_sequence: u64,
+    /// The attempt's own terminal event, when it settled before a request
+    /// retried it. That event's hash binds the attempt's identity and
+    /// result, which this closed attempt keeps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) terminal_sequence: Option<u64>,
     pub(crate) spend: Spend,
     /// How the attempt after this one runs.
     pub(crate) next: AttemptMode,
+    /// The retry request that closed the attempt, when a request did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) requested: Option<RetryRequest>,
 }
 
 /// Why a lost run is not started again. The word is the `code` of the
@@ -627,5 +700,48 @@ mod tests {
         for word in ["Resume", "resume ", "resumed"] {
             assert_eq!(OnInterrupted::parse(word), None, "{word:?}");
         }
+    }
+
+    #[test]
+    fn a_retry_request_is_read_exactly_or_refused() {
+        let ask = RetryAsk::read(&serde_json::json!({
+            "attempt": 2, "mode": "resume", "max_cost_usd": 0.25
+        }))
+        .expect("a legal request");
+        assert_eq!(ask.attempt, 2);
+        assert_eq!(ask.mode, AttemptMode::Resume);
+        assert_eq!(ask.request.budget(), Some(0.25));
+        let bare = RetryAsk::read(&serde_json::json!({"attempt": 1, "mode": "restart"}))
+            .expect("a request with no budget");
+        assert_eq!(bare.mode, AttemptMode::Restart);
+        assert_eq!(bare.request, RetryRequest::default());
+        assert_eq!(bare.request.budget(), None);
+        let zero = RetryAsk::read(&serde_json::json!({
+            "attempt": 1, "mode": "restart", "max_cost_usd": 0
+        }));
+        assert_eq!(zero.and_then(|ask| ask.request.budget()), Some(0.0));
+        for refused in [
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!({"mode": "restart"}),
+            serde_json::json!({"attempt": 1}),
+            serde_json::json!({"attempt": 0, "mode": "restart"}),
+            serde_json::json!({"attempt": -1, "mode": "restart"}),
+            serde_json::json!({"attempt": 1.5, "mode": "restart"}),
+            serde_json::json!({"attempt": "1", "mode": "restart"}),
+            serde_json::json!({"attempt": 4_294_967_296_u64, "mode": "restart"}),
+            serde_json::json!({"attempt": 1, "mode": "Restart"}),
+            serde_json::json!({"attempt": 1, "mode": "off"}),
+            serde_json::json!({"attempt": 1, "mode": null}),
+            serde_json::json!({"attempt": 1, "mode": "restart", "max_cost_usd": -0.5}),
+            serde_json::json!({"attempt": 1, "mode": "restart", "max_cost_usd": null}),
+            serde_json::json!({"attempt": 1, "mode": "restart", "max_cost_usd": "1"}),
+            serde_json::json!({"attempt": 1, "mode": "restart", "max_attempts": 2}),
+        ] {
+            assert_eq!(RetryAsk::read(&refused), None, "{refused}");
+        }
+        assert_eq!(AttemptMode::parse("restart"), Some(AttemptMode::Restart));
+        assert_eq!(AttemptMode::parse("resume"), Some(AttemptMode::Resume));
+        assert_eq!(AttemptMode::parse("off"), None, "off starts nothing");
     }
 }

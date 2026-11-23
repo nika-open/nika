@@ -276,8 +276,10 @@ impl StoredJob {
             receipt: self.record.receipt.take(),
             identity_digest: self.identity_digest.take(),
             requeued_sequence: self.final_sequence_after(&batch)?,
+            terminal_sequence: None,
             spend,
             next: mode,
+            requested: None,
         };
         self.record.attempts.push(closed);
         self.record.status = JobStatus::Queued;

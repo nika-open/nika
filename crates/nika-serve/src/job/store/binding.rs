@@ -177,21 +177,41 @@ pub(super) fn hash_event(
     previous_hash: Option<&EventHash>,
     payload: &Value,
 ) -> Result<EventHash, JobStoreError> {
-    let mut preimage = if terminal_sequence == Some(sequence) {
+    // A settled attempt a request retried keeps what its terminal event
+    // bound (ADR-156 section 9): that event is hashed as it was written.
+    let settled = record
+        .attempts
+        .iter()
+        .find(|attempt| attempt.terminal_sequence == Some(sequence));
+    let terminal_binding = if terminal_sequence == Some(sequence) {
+        Some(serde_json::json!({
+            "execution_id": &record.execution_id,
+            "outputs": &record.outputs,
+            "receipt": &record.receipt,
+            "snapshot_digest": &record.snapshot_digest,
+            "status": record.status,
+            "trace_id": &record.trace_id,
+        }))
+    } else {
+        settled.map(|attempt| {
+            serde_json::json!({
+                "execution_id": &attempt.execution_id,
+                "outputs": &attempt.outputs,
+                "receipt": &attempt.receipt,
+                "snapshot_digest": &attempt.snapshot_digest,
+                "status": attempt.status,
+                "trace_id": &attempt.trace_id,
+            })
+        })
+    };
+    let mut preimage = if let Some(terminal_binding) = terminal_binding {
         serde_json::json!({
             "job_id": record.id.as_str(),
             "payload": payload,
             "previous_hash": previous_hash.map(EventHash::as_str),
             "request_digest": record.request_digest.as_str(),
             "sequence": sequence,
-            "terminal_binding": {
-                "execution_id": &record.execution_id,
-                "outputs": &record.outputs,
-                "receipt": &record.receipt,
-                "snapshot_digest": &record.snapshot_digest,
-                "status": record.status,
-                "trace_id": &record.trace_id,
-            },
+            "terminal_binding": terminal_binding,
         })
     } else {
         serde_json::json!({
@@ -239,6 +259,14 @@ pub(super) fn validate_attempts(job: &StoredJob) -> Result<(), JobStoreError> {
         validate_attempt(&job.record, attempt)?;
         if attempt.requeued_sequence <= previous || attempt.requeued_sequence > job.event_count {
             return Err(corrupt("attempt history is out of the event order"));
+        }
+        // A settled attempt's terminal event comes after the attempt before
+        // it was queued, and before its own retry.
+        if attempt
+            .terminal_sequence
+            .is_some_and(|terminal| terminal <= previous || terminal >= attempt.requeued_sequence)
+        {
+            return Err(corrupt("a closed attempt's terminal event is out of order"));
         }
         previous = attempt.requeued_sequence;
         let queued = usize::try_from(attempt.requeued_sequence - 1)

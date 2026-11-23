@@ -23,6 +23,8 @@ mod lost;
 pub(crate) use lost::{LostOwnerJudge, LostVerdict};
 mod migration;
 mod retention;
+mod retried;
+pub(crate) use retried::{Retried, RetriedAttempt, is_replay, retryable};
 mod stored_job;
 
 #[cfg(test)]

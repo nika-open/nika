@@ -117,6 +117,8 @@ pub(crate) fn under_cost_policy(mut document: Value, reviewed: bool) -> Value {
 #[cfg(test)]
 mod job_list;
 #[cfg(test)]
+mod job_retry;
+#[cfg(test)]
 mod occupancy;
 #[cfg(test)]
 mod schedule_manage;
@@ -237,7 +239,9 @@ mod builder {
                 schedule_precondition_schema(),
             );
             let listed = super::job_list::schemas().into_iter();
-            let listed = listed.chain(super::occupancy::schemas());
+            let listed = listed
+                .chain(super::occupancy::schemas())
+                .chain(super::job_retry::schemas());
             for (name, schema) in listed.chain(super::schedule_manage::schemas()) {
                 named.insert(name.to_owned(), schema);
             }
@@ -708,6 +712,7 @@ mod builder {
             "/v1/jobs/{id}/status": job_status_path(),
             "/v1/jobs/{id}/events": job_events_path(),
             "/v1/jobs/{id}/cancel": job_cancel_path(),
+            "/v1/jobs/{id}/retry": super::job_retry::path(&error_named, &json_job()),
             "/v1/jobs/{id}/trace/verify": job_trace_verify_path(),
             "/v1/jobs/{id}/artifacts": job_artifacts_path(),
             "/v1/jobs/{id}/artifacts/{name}": job_artifact_path(),
@@ -1165,6 +1170,7 @@ mod tests {
         "/v1/jobs/{id}/status",
         "/v1/jobs/{id}/events",
         "/v1/jobs/{id}/cancel",
+        "/v1/jobs/{id}/retry",
         "/v1/jobs/{id}/trace/verify",
         "/v1/jobs/{id}/artifacts",
         "/v1/jobs/{id}/artifacts/{name}",

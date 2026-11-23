@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
-use crate::job::JobBindings;
+use crate::job::{JobBindings, JobListFilter, JobPage};
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -187,6 +187,12 @@ enum RequestCommand {
     Queued {
         reply: Reply<Vec<(JobId, String, Option<String>)>>,
     },
+    List {
+        filter: Box<JobListFilter>,
+        limit: usize,
+        before: Option<u64>,
+        reply: Reply<JobPage>,
+    },
     EventsAfter {
         id: JobId,
         after: u64,
@@ -272,6 +278,23 @@ impl StoreHandle {
             world,
             access_pin,
             bindings,
+            reply,
+        })?;
+        receive(answer).await
+    }
+
+    /// One page of the job list, read from one snapshot (ADR-155).
+    pub(super) async fn list(
+        &self,
+        filter: JobListFilter,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<JobPage, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        self.send_request(RequestCommand::List {
+            filter: Box::new(filter),
+            limit,
+            before,
             reply,
         })?;
         receive(answer).await
@@ -712,6 +735,14 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
         }
         RequestCommand::Queued { reply } => {
             let _result = reply.send(store.queued_jobs_pinned());
+        }
+        RequestCommand::List {
+            filter,
+            limit,
+            before,
+            reply,
+        } => {
+            let _result = reply.send(store.list(&filter, limit, before));
         }
         RequestCommand::EventsAfter {
             id,

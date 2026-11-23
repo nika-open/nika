@@ -4,12 +4,18 @@
 mod attribution;
 mod evidence;
 mod kind;
+mod listing;
 mod model;
 mod store;
 
-pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
+pub(crate) use attribution::{
+    AttributionError, JobAttribution, JobBindings, valid_label_key, valid_label_value, valid_owner,
+};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
+pub(crate) use listing::{
+    DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind,
+};
 pub use model::{
     Admission, ApprovalHistoryError, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobMutation,
     JobOrigin, JobReceipt, JobRecord, JobStatus, JobStoreError,

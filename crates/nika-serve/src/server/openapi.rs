@@ -114,6 +114,9 @@ pub(crate) fn under_cost_policy(mut document: Value, reviewed: bool) -> Value {
     document
 }
 
+#[cfg(test)]
+mod job_list;
+
 /// The document's source: the builder the committed file is generated from.
 #[cfg(test)]
 mod builder {
@@ -229,6 +232,9 @@ mod builder {
                 "SchedulePreconditionFailed".to_owned(),
                 schedule_precondition_schema(),
             );
+            for (name, schema) in super::job_list::schemas() {
+                named.insert(name.to_owned(), schema);
+            }
         }
         schemas
     }
@@ -905,7 +911,7 @@ mod builder {
     }
 
     fn jobs_path() -> Value {
-        json!({"post": {
+        json!({"get": super::job_list::operation(&error_named), "post": {
             "summary": "Admit a workflow as a durable job — by served name, or as immutable snapshot bytes",
             "description": "Two forms, one admission (ADR-131). `{\"workflow\": \"<name>\"}` names a workflow the served registry lists: the resident captures its world through ExecutionService, exactly as a schedule does. Optional `access` on that form is CLI `--access` for this job only. A snapshot body is the world `nika check <file> --json --sdk-snapshot` prints, decoded and readmitted through the same ExecutionService; its digests are optional caller-supplied integrity digests (a content assertion, never a signature). Snapshot jobs inherit the resident's unpinned plan. The server never interprets a caller filesystem path. Idempotency binds to the exact request bytes.",
             "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],

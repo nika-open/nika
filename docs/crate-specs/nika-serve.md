@@ -106,6 +106,7 @@ No public job mutation accepts a filesystem path. Startup paths live only in
 | `GET` | `/v1/workflows/{name}` | exactly one Bearer | `{ "workflow": "<contained name>" }` |
 | `GET` | `/v1/access-offers/{name}` | exactly one Bearer | the `nika/access-offer@1` document: the file's declared route, then one row per session shape and model with bounded tokens only (models, reasoning efforts, service tiers, adapter name and release) · 404 unknown name · 422 a workflow the job door would refuse · 408 · 503 `access_offer_busy` |
 | `POST` | `/v1/jobs` | exactly one Bearer + `Idempotency-Key` | opaque id + status · 422 `{error:{code,message}}` names the capture NIKA code when stamped · also 400/408/409/413/415/503/507 |
+| `GET` | `/v1/jobs` | exactly one Bearer | one page of light job summaries, newest first, and `next_cursor` while an older match exists · 400 `invalid_job_query` / `invalid_job_cursor` · also 408/503 |
 | `GET` | `/v1/jobs/{id}` | exactly one Bearer | opaque id + status · optional `{error:{code,message}}` on `failed` |
 | `GET` | `/v1/jobs/{id}/status` | exactly one Bearer | status only · diagnosis lives on GET job and SSE |
 | `GET` | `/v1/jobs/{id}/events` | exactly one Bearer | SSE `text/event-stream`; `id:` sequence; `data:` `{sequence,kind,status}` plus optional redacted `{code,message}` |
@@ -132,6 +133,34 @@ under another owner is `409 idempotency_conflict`, and they are hash-bound in
 the durable record from admission. A snapshot body carries none. A cost review
 binds none: they are stated on the admission that consumes it. The published
 `Job` object stays closed and does not carry them.
+
+`/health` advertises `jobList` when `GET /v1/jobs` answers (ADR-155). The list
+is how an application finds its jobs again. Every query member is optional and
+they combine with AND: `owner`, `status` (repeat it or separate values with
+commas), `workflow`, `origin` (`manual` or `schedule`), `label=key:value`
+(repeatable, at most 16), `created_after` and `created_before` (RFC 3339,
+exclusive), `limit` (1 to 200, default 50) and `cursor`. An unknown member, a
+repeated single member or a value outside its bounds is refused
+`400 invalid_job_query`, never ignored; a cursor this list did not write is
+`400 invalid_job_cursor`.
+
+The order is newest admission first, by the rank the store gives each job and
+never reuses. `next_cursor` names the rank of the last summary served, so a job
+admitted while a caller pages is newer than every page still to come: no
+summary repeats and none is skipped. The store answers a page from one
+snapshot read.
+
+A summary carries `id`, `status`, `workflow`, `origin`, `owner`, `labels`,
+`created_at`, `execution_id`, `trace_id` and, on a failed job, the same
+redacted `error` as `GET /v1/jobs/{id}`. It never carries inputs, outputs, a
+receipt or a settlement. A job admitted before the resident dated admissions
+shows the date of its first dated event, and is left out of a dated listing
+when it has none. `JobList` and `JobSummary` are open by contract: a later
+engine may add a member and a client ignores what it does not know.
+
+Filtering by `owner` is not an authorization boundary. One bearer credential is
+one authority domain (ADR-117): whoever holds it lists every job. An
+application that serves several users filters on its own side of the token.
 
 `/health` advertises `accessServiceTier` when the resident admits a served
 workflow that declares `run.access.service_tier`. The tier is a field of the

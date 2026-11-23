@@ -1088,6 +1088,27 @@
         ],
         "type": "object"
       },
+      "JobList": {
+        "additionalProperties": true,
+        "description": "One page of the job list, newest admission first. Open by contract: a later engine may add a member, and a client ignores the members it does not know.",
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobSummary"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Present while an older match exists: send it back as `cursor` with the same filters. Absent on the last page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "type": "object"
+      },
       "JobOrigin": {
         "oneOf": [
           {
@@ -1243,6 +1264,73 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "JobSummary": {
+        "additionalProperties": true,
+        "description": "What the list shows of one job. Open by contract, like `JobList`. It never carries inputs, outputs, a receipt or a settlement.",
+        "properties": {
+          "created_at": {
+            "description": "When the resident admitted the job (UTC). For a job admitted before the resident dated admissions: the date of its first dated event, or absent.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": false,
+            "description": "On a failed job only: the redacted diagnosis GET /v1/jobs/{id} carries.",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What the caller stated; empty on an unlabelled job.",
+            "type": "object"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/JobOrigin"
+          },
+          "owner": {
+            "description": "What the caller stated; absent on an unattributed job.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "workflow": {
+            "description": "The served workflow name captured at admission.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "workflow",
+          "origin",
+          "labels"
         ],
         "type": "object"
       },
@@ -2144,6 +2232,171 @@
       }
     },
     "/v1/jobs": {
+      "get": {
+        "description": "Health capability `jobList`. One page of the jobs this resident keeps, newest admission first, as light summaries: a summary never carries inputs, outputs, a receipt or a settlement (read them on GET /v1/jobs/{id}). Every query member is optional and they combine with AND. The list is a view inside one authority domain: filtering by `owner` is never an authorization boundary, and whoever holds the token reads every job. Pages are stable: a job admitted while a caller pages is newer than every page still to come, so no summary repeats or is skipped; a job the resident stopped keeping simply no longer appears. An unknown member, a repeated single member or a value outside its bounds is refused, never ignored.",
+        "parameters": [
+          {
+            "description": "The exact owner the job's caller stated.",
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:@-]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Any of these statuses. Repeat the member or separate values with commas.",
+            "explode": true,
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "The exact served workflow name captured at admission.",
+            "in": "query",
+            "name": "workflow",
+            "required": false,
+            "schema": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "`manual`: submitted through POST /v1/jobs. `schedule`: fired by a resident schedule.",
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "enum": [
+                "manual",
+                "schedule"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "`key:value`, split on the first colon. Repeatable, at most 16; every pair must be a label of the job.",
+            "explode": true,
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "items": {
+                "pattern": "^[A-Za-z0-9._/-]{1,64}:",
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Admitted strictly after this RFC 3339 instant. Write a `+` offset as `%2B`. A job admitted before the resident dated admissions is placed by its first dated event, and left out of a dated listing when it has none.",
+            "in": "query",
+            "name": "created_after",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Admitted strictly before this RFC 3339 instant.",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The `next_cursor` of the previous page, sent back unchanged with the same filters. Opaque: never build or parse one.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            },
+            "description": "One page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`invalid_job_query`: an unknown member, a repeated single member or a value outside its bounds · `invalid_job_cursor`: not a cursor this list wrote"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error envelope"
+          },
+          "408": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Request deadline"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`store_busy`: durable job state unavailable"
+          }
+        },
+        "summary": "List jobs, newest first"
+      },
       "post": {
         "description": "Two forms, one admission (ADR-131). `{\"workflow\": \"<name>\"}` names a workflow the served registry lists: the resident captures its world through ExecutionService, exactly as a schedule does. Optional `access` on that form is CLI `--access` for this job only. A snapshot body is the world `nika check <file> --json --sdk-snapshot` prints, decoded and readmitted through the same ExecutionService; its digests are optional caller-supplied integrity digests (a content assertion, never a signature). Snapshot jobs inherit the resident's unpinned plan. The server never interprets a caller filesystem path. Idempotency binds to the exact request bytes.",
         "parameters": [

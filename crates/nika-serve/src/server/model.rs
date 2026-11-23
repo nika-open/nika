@@ -165,6 +165,8 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     "jobInputs",
     // `owner` and `labels` on the by-name form of `POST /v1/jobs` (ADR-155).
     "jobAttribution",
+    // `GET /v1/jobs`: the filtered, paged job list (ADR-155).
+    "jobList",
     "compile",
     "artifacts",
     "accessServiceTier",

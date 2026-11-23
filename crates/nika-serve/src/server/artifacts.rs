@@ -347,7 +347,7 @@ fn decode_name(raw: &str) -> Option<String> {
 }
 
 /// One byte from two hexadecimal digits (either case), nothing else.
-fn hex_pair(pair: &[u8]) -> Option<u8> {
+pub(super) fn hex_pair(pair: &[u8]) -> Option<u8> {
     let digit = |byte: u8| char::from(byte).to_digit(16);
     match pair {
         [high, low] => u8::try_from(digit(*high)? * 16 + digit(*low)?).ok(),

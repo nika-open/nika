@@ -13,6 +13,7 @@ mod cost_policy;
 mod cost_review;
 mod error;
 mod inputs;
+mod job_list;
 mod listen;
 mod model;
 mod openapi;
@@ -1544,6 +1545,8 @@ mod coordinator_tests;
 mod credential_tests;
 #[cfg(test)]
 mod failure_tests;
+#[cfg(test)]
+mod job_list_tests;
 #[cfg(test)]
 mod registry_tests;
 #[cfg(test)]

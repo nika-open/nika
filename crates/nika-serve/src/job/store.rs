@@ -17,6 +17,7 @@ use serde_json::Value;
 mod admission;
 mod binding;
 mod format;
+mod list;
 mod migration;
 mod stored_job;
 

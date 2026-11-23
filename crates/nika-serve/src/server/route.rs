@@ -212,6 +212,7 @@ async fn route_authenticated(
     }
     let path = request.uri().path().to_owned();
     match (request.method(), path.as_str()) {
+        (&Method::GET, "/v1/jobs") => super::job_list::list(request.uri().query(), &state).await,
         (&Method::PUT, path) if path.starts_with("/v1/schedules/") => {
             let Some(id) = schedule_route(path) else {
                 return ApiError::route_not_found().into_response();

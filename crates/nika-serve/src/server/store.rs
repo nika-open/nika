@@ -858,6 +858,13 @@ fn retry_settled(
     result
 }
 
+/// Wake the job's event waiters when the write persisted, then answer the
+/// caller with it.
+fn answer_persisted<T>(result: Result<T, JobStoreError>, events: &Notify, reply: Reply<T>) {
+    notify_persisted(&result, events);
+    let _result = reply.send(result);
+}
+
 fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
     let StoreOwner {
         store,
@@ -876,8 +883,7 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
             let result = store
                 .refuse_queued(&id, &event)
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::CancelQueued {
             id,
@@ -898,8 +904,7 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
                     *receipt,
                 )
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::Transition {
             id,
@@ -910,8 +915,7 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
             reply,
         } => {
             let result = transition_job(store, &id, status, &event, outputs, receipt);
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::StartExecution {
             id,
@@ -930,8 +934,7 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
                     std::slice::from_ref(&event),
                 )
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::Interrupt { id, reply, lost } => {
             let judge: Option<&dyn LostOwnerJudge> = if lost { Some(judge) } else { None };
@@ -949,8 +952,7 @@ fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
         }
         ControlCommand::SettleInterrupted { reply } => {
             let result = store.settle_interrupted_jobs(incarnation);
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::Shutdown { reply } => {
             let _result = reply.send(());

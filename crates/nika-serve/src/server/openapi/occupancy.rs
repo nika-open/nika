@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 pub(super) fn path(error: &dyn Fn(&'static str) -> Value) -> Value {
     json!({"get": {
         "summary": "Read what the resident holds against its limits",
-        "description": "Health capability `occupancy`. How many jobs run and wait now, the limits they are held to, and the owners that hold the most. A point-in-time reading of this resident's memory, never a durable record: read GET /v1/jobs for the jobs themselves. Authenticated, unlike /health, because it names owners. At most 100 owners are named, busiest first; `owners_omitted` counts the rest.",
+        "description": "Health capability `occupancy`. How many jobs run and wait now, the limits they are held to, the owners that hold the most, and the model calls in flight on each provider the operator capped. A point-in-time reading of this resident's memory, never a durable record: read GET /v1/jobs for the jobs themselves. Authenticated, unlike /health, because it names owners. At most 100 owners are named, busiest first; `owners_omitted` counts the rest.",
         "responses": {
             "200": {"description": "The current load", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Occupancy"}}}},
             "401": error("Error envelope"),
@@ -40,7 +40,7 @@ pub(super) fn schemas() -> [(&'static str, Value); 1] {
             "type": "object",
             "additionalProperties": true,
             "description": "What the resident holds now against its limits. Open by contract: a later engine may add a member, and a client ignores the members it does not know.",
-            "required": ["jobs", "owners", "owners_omitted"],
+            "required": ["jobs", "owners", "owners_omitted", "providers"],
             "properties": {
                 "jobs": {
                     "type": "object",
@@ -70,7 +70,22 @@ pub(super) fn schemas() -> [(&'static str, Value); 1] {
                         }
                     }
                 },
-                "owners_omitted": {"allOf": [count], "description": "Owners that hold a job and are not named above."}
+                "owners_omitted": {"allOf": [count.clone()], "description": "Owners that hold a job and are not named above."},
+                "providers": {
+                    "type": "array",
+                    "description": "The providers the operator capped (`--provider-concurrency`), by id. A provider with no cap is not listed: the resident does not count its calls. Empty when none is capped.",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["provider", "max_concurrent", "in_flight", "waiting"],
+                        "properties": {
+                            "provider": {"type": "string", "description": "The canonical provider id."},
+                            "max_concurrent": {"type": "integer", "minimum": 1, "description": "Model calls this provider may have in flight at once, all jobs together."},
+                            "in_flight": {"allOf": [count.clone()], "description": "Calls that hold a slot now: sent and not yet answered."},
+                            "waiting": {"allOf": [count], "description": "Calls that wait for a slot. They are sent in turn as slots free."}
+                        }
+                    }
+                }
             }
         }),
     )]

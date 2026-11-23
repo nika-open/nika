@@ -12,6 +12,7 @@ use std::time::Duration;
 use jiff::Zoned;
 use nika_execution::SnapshotLimits;
 
+use super::provider_gate::ProviderGates;
 use crate::MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES;
 
 /// Injected time and wait authority for the resident schedule planner.
@@ -371,6 +372,7 @@ pub struct ResidentConfig {
     limits: ServerLimits,
     snapshot_limits: SnapshotLimits,
     clock: Arc<dyn ResidentClock>,
+    provider_gates: Option<Arc<ProviderGates>>,
 }
 
 impl ResidentConfig {
@@ -383,6 +385,7 @@ impl ResidentConfig {
             limits: ServerLimits::default(),
             snapshot_limits: SnapshotLimits::default(),
             clock: Arc::new(SystemResidentClock),
+            provider_gates: None,
         }
     }
 
@@ -432,6 +435,17 @@ impl ResidentConfig {
 
     pub(crate) fn clock(&self) -> &Arc<dyn ResidentClock> {
         &self.clock
+    }
+
+    /// Report the provider caps the backend's jobs run under: the same
+    /// gates the backend was given, so occupancy reads what the calls take.
+    pub(crate) fn with_provider_gates(mut self, gates: Option<Arc<ProviderGates>>) -> Self {
+        self.provider_gates = gates;
+        self
+    }
+
+    pub(crate) fn provider_gates(&self) -> Option<Arc<ProviderGates>> {
+        self.provider_gates.clone()
     }
 }
 

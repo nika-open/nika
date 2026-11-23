@@ -154,6 +154,11 @@ pub struct ServeArgs {
     /// interrupted. Give the supervisor a longer kill timeout than this.
     #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
     pub shutdown_grace: Option<String>,
+    /// Keep at most N model calls in flight on one provider, across every job
+    /// (`openai=16`; repeat for each provider). A call past it waits its turn; retries are
+    /// unchanged. Absent, each job's own fan-out is the only bound on a provider's calls.
+    #[arg(long, value_name = "PROVIDER=N", conflicts_with_all = ["once", "dry"])]
+    pub provider_concurrency: Vec<String>,
     #[command(flatten)]
     pub authoring: NativeAuthoringArgs,
     /// Explicit model invocation and physical-request ceiling per authoring round; absent, no

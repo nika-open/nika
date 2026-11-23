@@ -61,6 +61,12 @@ pub struct RuntimeConfig {
     /// run's teardown moves only what the run created. `None` = nothing
     /// recorded (the teardown then moves nothing it cannot place).
     pub write_origins: Option<std::sync::Arc<nika_builtin::WriteOrigins>>,
+    /// The host's bound on the provider calls in flight ACROSS its runs
+    /// (a resident serving many jobs). Every round-trip this run's
+    /// providers send takes one slot first. `None` = only the run's own
+    /// fan-out bounds its calls (`nika run`). Children of the run share
+    /// the same gate.
+    pub provider_gate: Option<std::sync::Arc<dyn nika_providers::ProviderCallGate>>,
 }
 
 /// The ONE fingerprint of a project root — blake3 of its canonical path —
@@ -93,7 +99,19 @@ impl RuntimeConfig {
             sandbox_waived: false,
             project_root_fingerprint: None,
             write_origins: None,
+            provider_gate: None,
         }
+    }
+
+    /// Bound this run's provider calls by the host's shared gate (builder —
+    /// `new()` stays stable).
+    #[must_use]
+    pub fn with_provider_gate(
+        mut self,
+        gate: std::sync::Arc<dyn nika_providers::ProviderCallGate>,
+    ) -> Self {
+        self.provider_gate = Some(gate);
+        self
     }
 
     /// Record the run's write origins in the host's ledger (builder —

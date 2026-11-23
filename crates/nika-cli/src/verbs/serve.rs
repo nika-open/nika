@@ -87,6 +87,7 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
             options.with_owner_limits(args.max_queued_per_owner, args.max_concurrent_per_owner)
         })
         .and_then(|options| options.with_shutdown_grace(args.shutdown_grace.as_deref()))
+        .and_then(|options| options.with_provider_concurrency(&args.provider_concurrency))
         .map_err(nika_serve::launch_operator_message)
         .map_err(&fail)?;
     let now = instant(args.now.as_deref()).map_err(&fail)?;
@@ -595,6 +596,7 @@ mod tests {
             "SIGTERM",
             "30 seconds",
             "--shutdown-grace",
+            "--provider-concurrency",
             "--max-concurrent-jobs",
             "queued",
             "interrupted",

@@ -1465,12 +1465,56 @@
               }
             ],
             "description": "Owners that hold a job and are not named above."
+          },
+          "providers": {
+            "description": "The providers the operator capped (`--provider-concurrency`), by id. A provider with no cap is not listed: the resident does not count its calls. Empty when none is capped.",
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "in_flight": {
+                  "allOf": [
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ],
+                  "description": "Calls that hold a slot now: sent and not yet answered."
+                },
+                "max_concurrent": {
+                  "description": "Model calls this provider may have in flight at once, all jobs together.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "provider": {
+                  "description": "The canonical provider id.",
+                  "type": "string"
+                },
+                "waiting": {
+                  "allOf": [
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ],
+                  "description": "Calls that wait for a slot. They are sent in turn as slots free."
+                }
+              },
+              "required": [
+                "provider",
+                "max_concurrent",
+                "in_flight",
+                "waiting"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           }
         },
         "required": [
           "jobs",
           "owners",
-          "owners_omitted"
+          "owners_omitted",
+          "providers"
         ],
         "type": "object"
       },
@@ -3261,7 +3305,7 @@
     },
     "/v1/occupancy": {
       "get": {
-        "description": "Health capability `occupancy`. How many jobs run and wait now, the limits they are held to, and the owners that hold the most. A point-in-time reading of this resident's memory, never a durable record: read GET /v1/jobs for the jobs themselves. Authenticated, unlike /health, because it names owners. At most 100 owners are named, busiest first; `owners_omitted` counts the rest.",
+        "description": "Health capability `occupancy`. How many jobs run and wait now, the limits they are held to, the owners that hold the most, and the model calls in flight on each provider the operator capped. A point-in-time reading of this resident's memory, never a durable record: read GET /v1/jobs for the jobs themselves. Authenticated, unlike /health, because it names owners. At most 100 owners are named, busiest first; `owners_omitted` counts the rest.",
         "responses": {
           "200": {
             "content": {

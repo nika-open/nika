@@ -128,6 +128,7 @@ pub struct ProviderRegistry<H = NoHttp> {
     config: ProvidersConfig,
     pub(crate) admission: Option<crate::InferenceAdmission>,
     admission_http: Option<Arc<H>>,
+    gate: Option<Arc<dyn crate::ProviderCallGate>>,
 }
 
 impl ProviderRegistry<NoHttp> {
@@ -141,6 +142,7 @@ impl ProviderRegistry<NoHttp> {
             config,
             admission: None,
             admission_http: None,
+            gate: None,
         }
     }
 }
@@ -154,6 +156,15 @@ impl<H> ProviderRegistry<H> {
     pub fn with_inference_admission(mut self, admission: crate::InferenceAdmission) -> Self {
         self.admission = Some(admission);
         self.admission_http = None;
+        self
+    }
+
+    /// Bound the calls in flight per provider across every run that shares
+    /// `gate`: each round-trip this registry's providers send takes one slot
+    /// first and gives it back when it returns. Retries are unchanged.
+    #[must_use]
+    pub fn with_call_gate(mut self, gate: Arc<dyn crate::ProviderCallGate>) -> Self {
+        self.gate = Some(gate);
         self
     }
 
@@ -285,6 +296,7 @@ where
             config,
             admission: None,
             admission_http: None,
+            gate: None,
         }
     }
 
@@ -395,6 +407,7 @@ where
             key,
             http,
             admission,
+            gate: self.gate.clone(),
         })
     }
 
@@ -462,9 +475,28 @@ pub struct ResolvedProvider<H = NoHttp> {
     pub(crate) key: Option<Secret>,
     pub(crate) http: Option<Arc<H>>,
     pub(crate) admission: Option<crate::InferenceAdmission>,
+    pub(crate) gate: Option<Arc<dyn crate::ProviderCallGate>>,
 }
 
 impl<H> ResolvedProvider<H> {
+    /// One slot on this provider, when the host bounds its calls across
+    /// runs. Held by the caller for the whole round-trip.
+    ///
+    /// # Errors
+    /// The host withdrew the call while it waited: nothing was sent, and
+    /// the error is never transient, so no verb retries it.
+    async fn call_slot(&self) -> Result<Option<crate::ProviderCallSlot>, ProviderError> {
+        let Some(gate) = &self.gate else {
+            return Ok(None);
+        };
+        match gate.enter(self.profile.id).await {
+            Ok(slot) => Ok(Some(slot)),
+            Err(refused) => Err(ProviderError::Other {
+                reason: format!("no request was sent to {}: {refused}", self.profile.id),
+            }),
+        }
+    }
+
     /// The wire-level model identifier (nickname already resolved).
     #[must_use]
     pub fn wire_model(&self) -> &str {
@@ -515,6 +547,13 @@ where
         request: InferRequest,
     ) -> Result<(InferResponse, TransportReport), (ProviderError, Box<TransportReport>)> {
         let mut report = TransportReport::new();
+        // Taken before the cost reservation: a call that waits its turn
+        // holds no money. Given back when this round-trip returns, so the
+        // verb's retry backoff holds no slot.
+        let _slot = match self.call_slot().await {
+            Ok(slot) => slot,
+            Err(refused) => return Err((refused, Box::new(report))),
+        };
         // A request over the window is told apart by the route's known window
         // and the engine's own estimate, never by the provider's words.
         let window = crate::overflow::route_window(self.profile.id, &self.wire_model);
@@ -647,7 +686,37 @@ where
         if let Some(a) = &self.admission {
             return Err(a.refuse("streaming has no qualified aggregate admission settlement"));
         }
-        self.infer_stream_once(request).await
+        let slot = self.call_slot().await?;
+        let stream = self.infer_stream_once(request).await?;
+        // A stream is in flight until it is dropped: it keeps its slot.
+        Ok(match slot {
+            Some(slot) => Box::pin(Gated {
+                stream,
+                _slot: slot,
+            }),
+            None => stream,
+        })
+    }
+}
+
+/// A stream that keeps its provider slot until it is dropped.
+struct Gated {
+    stream: InferEventStream,
+    _slot: crate::ProviderCallSlot,
+}
+
+impl futures_core::Stream for Gated {
+    type Item = Result<nika_kernel::ai::provider::InferEvent, ProviderError>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.get_mut().stream.as_mut().poll_next(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.stream.size_hint()
     }
 }
 

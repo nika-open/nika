@@ -254,6 +254,69 @@ fn job_limits_are_explicit_options_of_the_persistent_resident() {
     assert!(message.contains("--shutdown-grace") && message.contains("one second"));
 }
 
+/// `--provider-concurrency PROVIDER=N` is a repeatable option of the
+/// persistent resident: one cap per provider, a provider the engine knows,
+/// and a count of at least one. A rehearsal has no jobs to bound.
+#[test]
+fn provider_concurrency_is_a_repeatable_option_of_the_persistent_resident() {
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    assert!(parse(&["serve"]).provider_concurrency.is_empty());
+    let args = parse(&[
+        "serve",
+        "--provider-concurrency",
+        "openai=16",
+        "--provider-concurrency",
+        "anthropic=8",
+    ]);
+    assert_eq!(args.provider_concurrency, ["openai=16", "anthropic=8"]);
+    for rehearsal in ["--once", "--dry"] {
+        assert!(
+            command()
+                .try_get_matches_from(["serve", rehearsal, "--provider-concurrency", "openai=16"])
+                .is_err(),
+            "a cap means nothing with {rehearsal}"
+        );
+    }
+    let stated = |values: &[&str]| {
+        let values: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
+        nika_serve::ResidentOptions::default().with_provider_concurrency(&values)
+    };
+    assert!(stated(&["openai=16", "anthropic=8", "mock=1"]).is_ok());
+    assert_eq!(
+        stated(&[]).ok(),
+        Some(nika_serve::ResidentOptions::default()),
+        "no cap changes nothing"
+    );
+    for refused in [
+        &["openai"][..],
+        &["openai=0"],
+        &["openai=-1"],
+        &["openai=016"],
+        &["openai=many"],
+        &["openai=65536"],
+        &["=4"],
+        &["nobody=4"],
+        &["openai=4", "openai=8"],
+    ] {
+        assert_eq!(
+            stated(refused).err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidProviderConcurrency),
+            "{refused:?}"
+        );
+    }
+    let message = nika_serve::launch_operator_message(
+        nika_serve::ServerLaunchRefuse::InvalidProviderConcurrency,
+    );
+    assert!(
+        message.contains("--provider-concurrency") && message.contains("PROVIDER=N"),
+        "{message}"
+    );
+}
+
 /// `--cost-policy` is an explicit, repeatable listener option: it needs
 /// `--bind`, each occurrence is one rule kept as written, and it never
 /// changes the ceiling or seats the review door. The launch reads every rule

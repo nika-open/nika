@@ -422,7 +422,8 @@ async fn occupancy_is_authenticated_and_advertised() {
                 "max_queued_per_owner": null
             },
             "owners": [],
-            "owners_omitted": 0
+            "owners_omitted": 0,
+            "providers": []
         })
     );
     let health = server

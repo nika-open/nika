@@ -15,6 +15,7 @@ use crate::{
 };
 
 use super::fair_queue::{FairQueue, QueueLoad, QueueRefusal, Reservation};
+use super::provider_gate::{ProviderGates, ProviderLoad};
 use super::{ExecutionTask, ServerError, ServerLimits, StoreHandle};
 
 /// A place in the execution queue that was not given: a FULL queue is
@@ -46,6 +47,8 @@ pub struct ResidentExecutionCoordinator {
     jobs: std::sync::Arc<FairQueue<ExecutionTask>>,
     limits: ServerLimits,
     reviewed: std::sync::Arc<super::cost_review::Reviewed>,
+    /// The operator's caps on provider calls in flight, when any is set.
+    provider_gates: Option<std::sync::Arc<ProviderGates>>,
 }
 
 impl fmt::Debug for ResidentExecutionCoordinator {
@@ -69,13 +72,31 @@ impl ResidentExecutionCoordinator {
             jobs,
             limits,
             reviewed,
+            provider_gates: None,
         }
+    }
+
+    /// Report the provider caps the resident's jobs run under.
+    pub(super) fn with_provider_gates(
+        mut self,
+        gates: Option<std::sync::Arc<ProviderGates>>,
+    ) -> Self {
+        self.provider_gates = gates;
+        self
     }
 
     /// The resident's ceilings and what its queue holds now, with the `most`
     /// busiest owners.
     pub(super) fn occupancy(&self, most: usize) -> (ServerLimits, QueueLoad) {
         (self.limits, self.jobs.load(most))
+    }
+
+    /// What each capped provider holds now. Empty when none is capped.
+    pub(super) fn provider_load(&self) -> Vec<ProviderLoad> {
+        self.provider_gates
+            .as_ref()
+            .map(|gates| gates.load())
+            .unwrap_or_default()
     }
 
     /// Give back the queue place of a job that left `queued` without

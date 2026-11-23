@@ -159,6 +159,7 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
   --token-file .nika/serve.token \
   --max-concurrent-jobs 16 --queue-capacity 2000 \
   --max-queued-per-owner 50 --max-concurrent-per-owner 2 \
+  --provider-concurrency openai=16 --provider-concurrency anthropic=8 \
   --job-retention 24h --shutdown-grace 5m
 ```
 
@@ -178,6 +179,13 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
   (`30s` by default). Give your supervisor a longer kill timeout: with
   systemd, `TimeoutStopSec` of the grace plus 15 seconds.
 - A scheduled run is never refused or held back by a per-owner limit.
+- `--provider-concurrency PROVIDER=N` keeps at most `N` model calls in
+  flight on that provider, all jobs together: set it under the provider's
+  own rate limit for your account. A call past it waits its turn; a
+  `for_each` still fans out, its calls go as slots free. Retries are
+  unchanged, and a retry waits its turn like any call. The wait counts in a
+  task's `timeout:`, so a cap far under the demand shows as task timeouts.
+  Calls an agent harness makes through its own client are not counted.
 
 Read what the resident holds at any time:
 
@@ -186,8 +194,11 @@ curl -sS -H "Authorization: Bearer $(cat .nika/serve.token)" \
   http://127.0.0.1:8787/v1/occupancy
 ```
 
-The answer counts the jobs running and waiting, repeats the limits, and names
-the busiest owners (at most 100). The owner is what your backend states: it
+The answer counts the jobs running and waiting, repeats the limits, names
+the busiest owners (at most 100), and gives for each capped provider the
+calls in flight and the calls waiting. A provider whose `waiting` stays above
+zero is your bottleneck: raise its cap if the provider allows it, or lower
+`--max-concurrent-jobs`. The owner is what your backend states: it
 shares the workers fairly, it is not a security boundary between users.
 
 ## Managing schedules over HTTP

@@ -20,6 +20,7 @@ mod model;
 mod occupancy;
 mod openapi;
 mod production;
+mod provider_gate;
 mod registry;
 mod resident_options;
 mod route;
@@ -550,7 +551,8 @@ impl ResidentAuthority {
             jobs,
             config.limits(),
             Arc::clone(&reviewed),
-        );
+        )
+        .with_provider_gates(config.provider_gates());
         let project = Arc::new(OnceLock::new());
         if let Some(held) = prepared.project {
             let _set = project.set(held);

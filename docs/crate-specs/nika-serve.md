@@ -1040,6 +1040,7 @@ members of `nika.yaml`: they describe one process, not the project.
 | `--max-concurrent-per-owner <N>` | none | jobs one owner runs at once | its others wait; free workers serve other owners |
 | `--max-jobs <N>` | 10,000 | jobs the store keeps | `507 job_capacity` |
 | `--shutdown-grace <DURATION>` | `30s` | the drain at a stop | running jobs settle `interrupted` |
+| `--provider-concurrency <PROVIDER=N>` | none | model calls in flight on one provider, all jobs together | the others wait their turn |
 
 A count is a whole number of at least 1. `429 owner_queue_full` writes
 nothing and leaves the `Idempotency-Key` unbound: the same request is sent
@@ -1065,6 +1066,37 @@ their owner's lane in admission order, past today's bounds: a limit lowered
 across a restart never drops an admitted job. The running counts start at
 zero, as no job runs.
 
+**Provider calls.** A provider's rate limit belongs to the account every job
+shares, so the resident bounds calls per provider, across jobs.
+`--provider-concurrency openai=16 --provider-concurrency anthropic=8` keeps
+at most sixteen OpenAI calls and eight Anthropic calls in flight, whichever
+jobs send them. The provider is a canonical id or an alias of one; the count
+is 1 to 65535; a provider is named once. A provider that is not named is not
+bounded.
+
+- **Where.** One slot is taken around each round-trip a job's provider
+  sends, in `nika-providers`, and given back when it returns
+  (`ProviderCallGate`, handed to each run through
+  `RuntimeConfig::provider_gate`). A run's child workflows take their slots
+  from the same gate. A stream keeps its slot until it is dropped.
+- **Fan-out.** A `for_each` still starts up to `max_parallel` items. Each
+  item's call waits for a slot, so the calls in flight are the smaller of
+  `max_parallel` and the slots that are free. Items that make no model call
+  are not slowed.
+- **Retries.** Unchanged (ADR-019). The gate re-sends nothing. A call its
+  task will retry gave its slot back when it returned, so a backoff holds no
+  slot, and the retry waits its turn like any call.
+- **Timeouts.** The wait for a slot counts inside a task's own `timeout:`.
+  A cap far under the demand turns into task timeouts, not into a longer
+  queue: size the cap from the provider's limit, and `--max-concurrent-jobs`
+  from the cap.
+- **Cancel.** A job cancelled while its calls wait leaves the line at once:
+  those calls are never sent, and their places go to the next jobs. A call
+  already sent finishes or is dropped with the job, as before.
+- **Not bounded.** Calls an agent harness makes through its own client
+  (ACP), image and speech tools, and the authoring door (`POST /v1/compile`)
+  do not pass this gate.
+
 **Occupancy.** `GET /v1/occupancy` (one Bearer) answers what the resident
 holds now:
 
@@ -1079,13 +1111,18 @@ holds now:
     {"owner": "user_123", "running": 1, "queued": 47},
     {"owner": null, "running": 1, "queued": 0}
   ],
-  "owners_omitted": 0
+  "owners_omitted": 0,
+  "providers": [
+    {"provider": "openai", "max_concurrent": 16, "in_flight": 16, "waiting": 5}
+  ]
 }
 ```
 
 At most 100 owners are named, busiest first; `owners_omitted` counts the
-rest. `owner` is `null` for the anonymous lane. The object is open: a later
-engine adds members. It is authenticated and absent from `/health` because it
+rest. `owner` is `null` for the anonymous lane. `providers` lists the capped
+providers only: `in_flight` calls hold a slot, `waiting` calls wait for one.
+A provider with `waiting` above zero for long is the bottleneck. The object
+is open: a later engine adds members. It is authenticated and absent from `/health` because it
 names owners.
 
 **What this is not.** The owner is what the credential holder states, never

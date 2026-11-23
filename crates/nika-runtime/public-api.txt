@@ -566,6 +566,7 @@ pub nika_runtime::config::RuntimeConfig::inference_admission: core::option::Opti
 pub nika_runtime::config::RuntimeConfig::jitter_seed: u64
 pub nika_runtime::config::RuntimeConfig::max_cost_usd: core::option::Option<f64>
 pub nika_runtime::config::RuntimeConfig::project_root_fingerprint: core::option::Option<alloc::string::String>
+pub nika_runtime::config::RuntimeConfig::provider_gate: core::option::Option<alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>>
 pub nika_runtime::config::RuntimeConfig::sandbox_backend: core::option::Option<alloc::string::String>
 pub nika_runtime::config::RuntimeConfig::sandbox_policy: core::option::Option<alloc::string::String>
 pub nika_runtime::config::RuntimeConfig::sandbox_root: core::option::Option<std::path::PathBuf>
@@ -578,6 +579,7 @@ pub fn nika_runtime::config::RuntimeConfig::with_approval_operator(self, operato
 pub fn nika_runtime::config::RuntimeConfig::with_inference_admission(self, account: &nika_providers::admission::InferenceAdmission, candidate: &str, invocation: &str) -> core::result::Result<Self, nika_kernel_ai::provider::ProviderError>
 pub fn nika_runtime::config::RuntimeConfig::with_max_cost_usd(self, budget: core::option::Option<f64>) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_project_root(self, root: &std::path::Path) -> Self
+pub fn nika_runtime::config::RuntimeConfig::with_provider_gate(self, gate: alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_backend(self, backend: &str) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_policy(self, policy: &str) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_root(self, root: std::path::PathBuf) -> Self
@@ -1273,6 +1275,7 @@ pub nika_runtime::RuntimeConfig::inference_admission: core::option::Option<nika_
 pub nika_runtime::RuntimeConfig::jitter_seed: u64
 pub nika_runtime::RuntimeConfig::max_cost_usd: core::option::Option<f64>
 pub nika_runtime::RuntimeConfig::project_root_fingerprint: core::option::Option<alloc::string::String>
+pub nika_runtime::RuntimeConfig::provider_gate: core::option::Option<alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>>
 pub nika_runtime::RuntimeConfig::sandbox_backend: core::option::Option<alloc::string::String>
 pub nika_runtime::RuntimeConfig::sandbox_policy: core::option::Option<alloc::string::String>
 pub nika_runtime::RuntimeConfig::sandbox_root: core::option::Option<std::path::PathBuf>
@@ -1285,6 +1288,7 @@ pub fn nika_runtime::config::RuntimeConfig::with_approval_operator(self, operato
 pub fn nika_runtime::config::RuntimeConfig::with_inference_admission(self, account: &nika_providers::admission::InferenceAdmission, candidate: &str, invocation: &str) -> core::result::Result<Self, nika_kernel_ai::provider::ProviderError>
 pub fn nika_runtime::config::RuntimeConfig::with_max_cost_usd(self, budget: core::option::Option<f64>) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_project_root(self, root: &std::path::Path) -> Self
+pub fn nika_runtime::config::RuntimeConfig::with_provider_gate(self, gate: alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_backend(self, backend: &str) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_policy(self, policy: &str) -> Self
 pub fn nika_runtime::config::RuntimeConfig::with_sandbox_root(self, root: std::path::PathBuf) -> Self

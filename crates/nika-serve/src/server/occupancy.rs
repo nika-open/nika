@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use super::AppState;
 use super::error::{ApiError, ResponseBody};
 use super::fair_queue::QueueLoad;
+use super::provider_gate::ProviderLoad;
 use super::route::json_response;
 
 /// Owners one answer names, busiest first. The rest are counted.
@@ -37,8 +38,24 @@ pub(super) fn read(state: &AppState) -> Response<ResponseBody> {
             },
             "owners": owners(&load),
             "owners_omitted": load.owners_omitted,
+            "providers": providers(&state.coordinator.provider_load()),
         }),
     )
+}
+
+/// Every provider the operator capped, by id. A provider with no cap is not
+/// listed: the resident does not count its calls.
+fn providers(load: &[ProviderLoad]) -> Vec<Value> {
+    load.iter()
+        .map(|provider| {
+            json!({
+                "provider": provider.provider,
+                "max_concurrent": provider.limit,
+                "in_flight": provider.in_flight,
+                "waiting": provider.waiting,
+            })
+        })
+        .collect()
 }
 
 /// The busiest owners. `owner` is null for the jobs that state none.

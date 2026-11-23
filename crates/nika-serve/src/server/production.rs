@@ -31,6 +31,8 @@ pub struct ResidentExecutionBackend {
     seal: Arc<dyn JournalSeal>,
     /// The operator's standing cost policy, when this backend holds one.
     standing: Option<Arc<cost_policy::Seat>>,
+    /// The resident's caps on provider calls in flight, shared by every job.
+    provider_gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
     /// The plan every job runs under in tests (the machine's probes otherwise).
     #[cfg(test)]
     plan: Option<nika_service_execution::ExecutionAccessPlan>,
@@ -44,6 +46,7 @@ impl ResidentExecutionBackend {
             display_root: display_root.into(),
             seal: Arc::new(CustodySeal),
             standing: None,
+            provider_gate: None,
             #[cfg(test)]
             plan: None,
         }
@@ -67,6 +70,16 @@ impl ResidentExecutionBackend {
     #[must_use]
     pub fn with_cost_policy(mut self, policy: StandingCostPolicy) -> Self {
         self.standing = Some(Arc::new(cost_policy::Seat::new(policy)));
+        self
+    }
+
+    /// Run every job's provider calls under one shared gate: a call takes a
+    /// slot on its provider before it is sent, whichever job sends it.
+    pub(crate) fn with_provider_gate(
+        mut self,
+        gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
+    ) -> Self {
+        self.provider_gate = gate;
         self
     }
 
@@ -103,6 +116,7 @@ impl ResidentExecutionBackend {
             display_root: self.display_root.clone(),
             seal: Arc::clone(&self.seal),
             standing: self.standing.clone(),
+            provider_gate: self.provider_gate.clone(),
             #[cfg(test)]
             plan: self.plan.clone(),
         };
@@ -125,6 +139,7 @@ struct Host {
     display_root: PathBuf,
     seal: Arc<dyn JournalSeal>,
     standing: Option<Arc<cost_policy::Seat>>,
+    provider_gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
     #[cfg(test)]
     plan: Option<nika_service_execution::ExecutionAccessPlan>,
 }
@@ -307,6 +322,7 @@ async fn drive_resident_execution(
         display_root,
         seal,
         standing,
+        provider_gate,
         #[cfg(test)]
             plan: forced,
     } = host;
@@ -372,6 +388,7 @@ async fn drive_resident_execution(
         inputs,
         run_facts: told.unwrap_or_default(),
         standing,
+        provider_gate,
     };
     match tokio::task::spawn_blocking(move || run_admitted_resident_job(job, cancel_rx)).await {
         Ok(outcome) => outcome,
@@ -503,6 +520,8 @@ struct ResidentJob {
     run_facts: nika_runtime::RunFacts,
     /// Set for a Run a standing rule admitted ([`StandingRun`]).
     standing: Option<StandingRun>,
+    /// The resident's caps on provider calls, shared with every other job.
+    provider_gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
 }
 
 /// Run one admitted job to its end. A Run a standing rule admitted says so on
@@ -544,6 +563,7 @@ fn settle_resident_job(
         inputs,
         run_facts,
         standing: _,
+        provider_gate,
     } = job;
     // Defaults retain file provenance; explicit HTTP bindings are the API
     // caller's, never a person, CI context or environment read from here.
@@ -566,6 +586,15 @@ fn settle_resident_job(
     } else {
         let run = driver.workflow().run.as_ref().map(|run| &run.value);
         nika_runtime::RuntimeConfig::new(None, nika_runtime::RunSeams::of(run).jitter_seed)
+    };
+    // Every call this run and its children send takes a slot on its
+    // provider first: the cap is the resident's, across all its jobs.
+    // A stop of this run withdraws its calls that still wait their turn.
+    let config = match provider_gate {
+        Some(gate) => {
+            config.with_provider_gate(super::provider_gate::for_run(gate, operator_cancel.clone()))
+        }
+        None => config,
     };
     let options =
         options.with_runtime_config(config.with_write_origins(Arc::clone(&write_origins)));
@@ -754,6 +783,11 @@ pub enum ServerLaunchRefuse {
         "serve · --shutdown-grace takes a duration of at least one second: a whole number and a unit, s, m, h or d (30s, 5m)"
     )]
     InvalidShutdownGrace,
+    /// `--provider-concurrency` is not `PROVIDER=N` for a known provider.
+    #[error(
+        "serve · --provider-concurrency takes PROVIDER=N: a provider id (openai, anthropic, mock; `nika catalog` lists them) and a whole number of calls from 1 to 65535, each provider once"
+    )]
+    InvalidProviderConcurrency,
 }
 
 impl NikaErrorCode for ServerLaunchRefuse {
@@ -855,13 +889,21 @@ pub fn serve_resident_process_with(
         .enable_all()
         .build()
         .map_err(|error| format!("serve · the signal runtime refused: {error}"))?;
-    let backend = ResidentExecutionBackend::new(workflow_root);
+    // One set of provider caps: the backend's jobs take their slots from
+    // it, and the resident reports what it holds.
+    let gates = options.provider_gates();
+    let gate = gates
+        .clone()
+        .map(|gates| gates as Arc<dyn nika_providers::ProviderCallGate>);
+    let backend = ResidentExecutionBackend::new(workflow_root).with_provider_gate(gate);
     // The operator's standing cost policy is the backend's to enforce.
     let backend = Arc::new(match server.as_ref().and_then(ServerConfig::cost_policy) {
         Some(policy) => backend.with_cost_policy(policy.clone()),
         None => backend,
     });
-    let resident = ResidentConfig::new(state_root).with_workflow_root(workflow_root.to_path_buf());
+    let resident = ResidentConfig::new(state_root)
+        .with_workflow_root(workflow_root.to_path_buf())
+        .with_provider_gates(gates);
     let limits = match server.as_ref().and_then(ServerConfig::resident_limits) {
         Some(asked) => options
             .limits()

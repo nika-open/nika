@@ -1604,6 +1604,80 @@ impl<T> nika_error::traits::AsAny for nika_providers::dispatch_journal::Dispatch
 pub fn nika_providers::dispatch_journal::DispatchJournal::as_any(&self) -> &(dyn core::any::Any + 'static)
 impl<T> typenum::type_operators::Same for nika_providers::dispatch_journal::DispatchJournal
 pub type nika_providers::dispatch_journal::DispatchJournal::Output = T
+pub mod nika_providers::gate
+#[non_exhaustive] pub struct nika_providers::gate::ProviderCallRefused
+impl nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::new(reason: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn nika_providers::gate::ProviderCallRefused::reason(&self) -> &str
+impl core::clone::Clone for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::clone(&self) -> nika_providers::gate::ProviderCallRefused
+impl core::cmp::Eq for nika_providers::gate::ProviderCallRefused
+impl core::cmp::PartialEq for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::eq(&self, other: &nika_providers::gate::ProviderCallRefused) -> bool
+impl core::fmt::Debug for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_providers::gate::ProviderCallRefused
+impl<D> owo_colors::OwoColorize for nika_providers::gate::ProviderCallRefused
+impl<T, U> core::convert::Into<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::From<T>
+pub fn nika_providers::gate::ProviderCallRefused::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::Into<T>
+pub type nika_providers::gate::ProviderCallRefused::Error = core::convert::Infallible
+pub fn nika_providers::gate::ProviderCallRefused::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::TryFrom<T>
+pub type nika_providers::gate::ProviderCallRefused::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_providers::gate::ProviderCallRefused::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_providers::gate::ProviderCallRefused where T: core::clone::Clone
+pub type nika_providers::gate::ProviderCallRefused::Owned = T
+pub fn nika_providers::gate::ProviderCallRefused::clone_into(&self, target: &mut T)
+pub fn nika_providers::gate::ProviderCallRefused::to_owned(&self) -> T
+impl<T> alloc::string::ToString for nika_providers::gate::ProviderCallRefused where T: core::fmt::Display + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for nika_providers::gate::ProviderCallRefused where T: 'static + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_providers::gate::ProviderCallRefused where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_providers::gate::ProviderCallRefused where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_providers::gate::ProviderCallRefused where T: core::clone::Clone
+pub unsafe fn nika_providers::gate::ProviderCallRefused::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_providers::gate::ProviderCallRefused where T: 'static
+pub fn nika_providers::gate::ProviderCallRefused::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> typenum::type_operators::Same for nika_providers::gate::ProviderCallRefused
+pub type nika_providers::gate::ProviderCallRefused::Output = T
+pub struct nika_providers::gate::ProviderCallSlot(_)
+impl nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::holding(held: impl core::marker::Send + core::marker::Sync + 'static) -> Self
+pub const fn nika_providers::gate::ProviderCallSlot::unbounded() -> Self
+impl core::fmt::Debug for nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D> owo_colors::OwoColorize for nika_providers::gate::ProviderCallSlot
+impl<T, U> core::convert::Into<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::From<T>
+pub fn nika_providers::gate::ProviderCallSlot::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::Into<T>
+pub type nika_providers::gate::ProviderCallSlot::Error = core::convert::Infallible
+pub fn nika_providers::gate::ProviderCallSlot::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::TryFrom<T>
+pub type nika_providers::gate::ProviderCallSlot::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_providers::gate::ProviderCallSlot::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for nika_providers::gate::ProviderCallSlot where T: 'static + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_providers::gate::ProviderCallSlot where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_providers::gate::ProviderCallSlot where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_providers::gate::ProviderCallSlot where T: 'static
+pub fn nika_providers::gate::ProviderCallSlot::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> typenum::type_operators::Same for nika_providers::gate::ProviderCallSlot
+pub type nika_providers::gate::ProviderCallSlot::Output = T
+pub trait nika_providers::gate::ProviderCallGate: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn nika_providers::gate::ProviderCallGate::enter<'a>(&'a self, provider: &'a str) -> nika_providers::gate::ProviderCallEntry<'a>
+pub type nika_providers::gate::ProviderCallEntry<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<nika_providers::gate::ProviderCallSlot, nika_providers::gate::ProviderCallRefused>> + core::marker::Send + 'a)>>
 pub mod nika_providers::key_check
 #[non_exhaustive] pub enum nika_providers::key_check::KeyCheck
 pub nika_providers::key_check::KeyCheck::Refused
@@ -2350,6 +2424,7 @@ impl<H> nika_providers::registry::ProviderRegistry<H>
 pub fn nika_providers::registry::ProviderRegistry<H>::cloud_listing_target(&self, provider: &str) -> core::option::Option<(alloc::string::String, nika_kernel_core::infra::secret::Secret)>
 pub fn nika_providers::registry::ProviderRegistry<H>::effective_base_url(&self, provider: &str) -> core::option::Option<&str>
 pub fn nika_providers::registry::ProviderRegistry<H>::supports_response_format(&self, model: &str) -> bool
+pub fn nika_providers::registry::ProviderRegistry<H>::with_call_gate(self, gate: alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>) -> Self
 pub fn nika_providers::registry::ProviderRegistry<H>::with_inference_admission(self, admission: nika_providers::admission::InferenceAdmission) -> Self
 pub fn nika_providers::registry::ProviderRegistry<H>::with_inference_admission_http(self, admission: nika_providers::admission::InferenceAdmission, http: alloc::sync::Arc<H>) -> Self
 impl<H: core::fmt::Debug> core::fmt::Debug for nika_providers::registry::ProviderRegistry<H>
@@ -3460,6 +3535,76 @@ impl<T> nika_error::traits::AsAny for nika_providers::profile::Profile where T: 
 pub fn nika_providers::profile::Profile::as_any(&self) -> &(dyn core::any::Any + 'static)
 impl<T> typenum::type_operators::Same for nika_providers::profile::Profile
 pub type nika_providers::profile::Profile::Output = T
+#[non_exhaustive] pub struct nika_providers::ProviderCallRefused
+impl nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::new(reason: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn nika_providers::gate::ProviderCallRefused::reason(&self) -> &str
+impl core::clone::Clone for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::clone(&self) -> nika_providers::gate::ProviderCallRefused
+impl core::cmp::Eq for nika_providers::gate::ProviderCallRefused
+impl core::cmp::PartialEq for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::eq(&self, other: &nika_providers::gate::ProviderCallRefused) -> bool
+impl core::fmt::Debug for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_providers::gate::ProviderCallRefused
+impl<D> owo_colors::OwoColorize for nika_providers::gate::ProviderCallRefused
+impl<T, U> core::convert::Into<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::From<T>
+pub fn nika_providers::gate::ProviderCallRefused::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::Into<T>
+pub type nika_providers::gate::ProviderCallRefused::Error = core::convert::Infallible
+pub fn nika_providers::gate::ProviderCallRefused::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_providers::gate::ProviderCallRefused where U: core::convert::TryFrom<T>
+pub type nika_providers::gate::ProviderCallRefused::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_providers::gate::ProviderCallRefused::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_providers::gate::ProviderCallRefused where T: core::clone::Clone
+pub type nika_providers::gate::ProviderCallRefused::Owned = T
+pub fn nika_providers::gate::ProviderCallRefused::clone_into(&self, target: &mut T)
+pub fn nika_providers::gate::ProviderCallRefused::to_owned(&self) -> T
+impl<T> alloc::string::ToString for nika_providers::gate::ProviderCallRefused where T: core::fmt::Display + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for nika_providers::gate::ProviderCallRefused where T: 'static + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_providers::gate::ProviderCallRefused where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_providers::gate::ProviderCallRefused where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallRefused::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_providers::gate::ProviderCallRefused where T: core::clone::Clone
+pub unsafe fn nika_providers::gate::ProviderCallRefused::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_providers::gate::ProviderCallRefused
+pub fn nika_providers::gate::ProviderCallRefused::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_providers::gate::ProviderCallRefused where T: 'static
+pub fn nika_providers::gate::ProviderCallRefused::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> typenum::type_operators::Same for nika_providers::gate::ProviderCallRefused
+pub type nika_providers::gate::ProviderCallRefused::Output = T
+pub struct nika_providers::ProviderCallSlot(_)
+impl nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::holding(held: impl core::marker::Send + core::marker::Sync + 'static) -> Self
+pub const fn nika_providers::gate::ProviderCallSlot::unbounded() -> Self
+impl core::fmt::Debug for nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D> owo_colors::OwoColorize for nika_providers::gate::ProviderCallSlot
+impl<T, U> core::convert::Into<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::From<T>
+pub fn nika_providers::gate::ProviderCallSlot::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::Into<T>
+pub type nika_providers::gate::ProviderCallSlot::Error = core::convert::Infallible
+pub fn nika_providers::gate::ProviderCallSlot::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_providers::gate::ProviderCallSlot where U: core::convert::TryFrom<T>
+pub type nika_providers::gate::ProviderCallSlot::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_providers::gate::ProviderCallSlot::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for nika_providers::gate::ProviderCallSlot where T: 'static + ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_providers::gate::ProviderCallSlot where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_providers::gate::ProviderCallSlot where T: ?core::marker::Sized
+pub fn nika_providers::gate::ProviderCallSlot::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for nika_providers::gate::ProviderCallSlot
+pub fn nika_providers::gate::ProviderCallSlot::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_providers::gate::ProviderCallSlot where T: 'static
+pub fn nika_providers::gate::ProviderCallSlot::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> typenum::type_operators::Same for nika_providers::gate::ProviderCallSlot
+pub type nika_providers::gate::ProviderCallSlot::Output = T
 pub struct nika_providers::ProviderRegistry<H>
 impl nika_providers::registry::ProviderRegistry<nika_providers::registry::NoHttp>
 pub fn nika_providers::registry::ProviderRegistry<nika_providers::registry::NoHttp>::without_http(config: nika_providers::registry::ProvidersConfig) -> Self
@@ -3472,6 +3617,7 @@ impl<H> nika_providers::registry::ProviderRegistry<H>
 pub fn nika_providers::registry::ProviderRegistry<H>::cloud_listing_target(&self, provider: &str) -> core::option::Option<(alloc::string::String, nika_kernel_core::infra::secret::Secret)>
 pub fn nika_providers::registry::ProviderRegistry<H>::effective_base_url(&self, provider: &str) -> core::option::Option<&str>
 pub fn nika_providers::registry::ProviderRegistry<H>::supports_response_format(&self, model: &str) -> bool
+pub fn nika_providers::registry::ProviderRegistry<H>::with_call_gate(self, gate: alloc::sync::Arc<dyn nika_providers::gate::ProviderCallGate>) -> Self
 pub fn nika_providers::registry::ProviderRegistry<H>::with_inference_admission(self, admission: nika_providers::admission::InferenceAdmission) -> Self
 pub fn nika_providers::registry::ProviderRegistry<H>::with_inference_admission_http(self, admission: nika_providers::admission::InferenceAdmission, http: alloc::sync::Arc<H>) -> Self
 impl<H: core::fmt::Debug> core::fmt::Debug for nika_providers::registry::ProviderRegistry<H>
@@ -3799,6 +3945,8 @@ pub type nika_providers::retry::TransportReport::Output = T
 pub const nika_providers::CANONICAL_IDS: [&str; 18]
 pub const nika_providers::PREFIX_REFUSAL_CODE: &str
 pub const nika_providers::STAND_IN_MODEL: &str
+pub trait nika_providers::ProviderCallGate: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn nika_providers::ProviderCallGate::enter<'a>(&'a self, provider: &'a str) -> nika_providers::gate::ProviderCallEntry<'a>
 pub fn nika_providers::catalog_warning(model: &str) -> core::option::Option<alloc::string::String>
 pub async fn nika_providers::check_key<H: nika_kernel_core::io::http::HttpGetDyn>(http: &H, config: nika_providers::registry::ProvidersConfig, provider: &str, deadline: core::time::Duration) -> nika_providers::key_check::KeyCheck
 pub fn nika_providers::lifecycle_note(model: &str) -> core::option::Option<alloc::string::String>
@@ -3814,3 +3962,4 @@ pub fn nika_providers::server_backed_local(provider: &str) -> bool
 pub fn nika_providers::transient_rejection(err: &nika_kernel_ai::provider::ProviderError) -> core::option::Option<nika_providers::retry::TransientRejection>
 pub fn nika_providers::wired_facet(wired: usize, local: usize) -> alloc::string::String
 pub fn nika_providers::wired_facet_of_this_build() -> alloc::string::String
+pub type nika_providers::ProviderCallEntry<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<nika_providers::gate::ProviderCallSlot, nika_providers::gate::ProviderCallRefused>> + core::marker::Send + 'a)>>

@@ -6,10 +6,13 @@
 //! These are the `nika serve` flags that need no listener: they shape the
 //! resident's durable job state, which scheduled runs fill as well.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::ServerLimits;
 use super::production::ServerLaunchRefuse;
+use super::provider_gate::{MAX_PROVIDER_CONCURRENCY, ProviderGates};
 use crate::job::MIN_JOB_RETENTION;
 
 /// The resident's own startup options, with or without an HTTP listener.
@@ -18,6 +21,8 @@ use crate::job::MIN_JOB_RETENTION;
 #[non_exhaustive]
 pub struct ResidentOptions {
     limits: ServerLimits,
+    /// Calls in flight each capped provider may hold, by canonical id.
+    provider_concurrency: BTreeMap<String, usize>,
 }
 
 impl ResidentOptions {
@@ -108,10 +113,57 @@ impl ResidentOptions {
         Ok(self)
     }
 
+    /// Apply every `nika serve --provider-concurrency PROVIDER=N`: at most
+    /// `N` model calls in flight on that provider, across all jobs. The
+    /// provider is a canonical id or one of its aliases. Absent, a
+    /// provider's calls are bounded by each job's own fan-out only.
+    ///
+    /// # Errors
+    /// A value that is not `PROVIDER=N`, an unknown provider, a count
+    /// outside 1 to 65535, or a provider named twice.
+    pub fn with_provider_concurrency(
+        mut self,
+        stated: &[String],
+    ) -> Result<Self, ServerLaunchRefuse> {
+        for value in stated {
+            let (provider, limit) = stated_provider_limit(value)
+                .ok_or(ServerLaunchRefuse::InvalidProviderConcurrency)?;
+            if self
+                .provider_concurrency
+                .insert(provider.to_owned(), limit)
+                .is_some()
+            {
+                return Err(ServerLaunchRefuse::InvalidProviderConcurrency);
+            }
+        }
+        Ok(self)
+    }
+
     /// The resident ceilings these options ask for.
     pub(crate) const fn limits(&self) -> ServerLimits {
         self.limits
     }
+
+    /// One gate over the provider caps these options ask for, or none.
+    pub(crate) fn provider_gates(&self) -> Option<Arc<ProviderGates>> {
+        (!self.provider_concurrency.is_empty())
+            .then(|| ProviderGates::new(&self.provider_concurrency))
+    }
+}
+
+/// One `PROVIDER=N` as an operator writes it: a known provider under its
+/// canonical id, and a whole count without sign or leading zero.
+fn stated_provider_limit(value: &str) -> Option<(&'static str, usize)> {
+    let (provider, count) = value.split_once('=')?;
+    let canonical = nika_providers::canonical_provider(provider);
+    let provider = nika_providers::CANONICAL_IDS
+        .iter()
+        .find(|id| **id == canonical)?;
+    let canonical_count = !count.is_empty()
+        && count.bytes().all(|byte| byte.is_ascii_digit())
+        && !count.starts_with('0');
+    let limit = count.parse::<usize>().ok().filter(|_| canonical_count)?;
+    (limit <= MAX_PROVIDER_CONCURRENCY).then_some((*provider, limit))
 }
 
 /// One count as an operator states it on a limit flag: at least one.
@@ -227,6 +279,49 @@ mod tests {
                 "{grace:?}"
             );
         }
+    }
+
+    #[test]
+    fn provider_caps_are_kept_under_the_canonical_provider_id() {
+        let stated = |values: &[&str]| {
+            let values: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
+            ResidentOptions::default().with_provider_concurrency(&values)
+        };
+        assert!(
+            ResidentOptions::default().provider_gates().is_none(),
+            "no cap, no gate: a call never waits"
+        );
+        let gates = stated(&["OpenAI=16", "anthropic=8"])
+            .expect("two caps")
+            .provider_gates()
+            .expect("a gate");
+        let caps: Vec<(String, usize)> = gates
+            .load()
+            .into_iter()
+            .map(|load| (load.provider, load.limit))
+            .collect();
+        assert_eq!(
+            caps,
+            [("anthropic".to_owned(), 8), ("openai".to_owned(), 16)],
+            "by canonical id, whatever the spelling"
+        );
+        for refused in [
+            &["openai"][..],
+            &["openai=0"],
+            &["openai=+4"],
+            &["openai=04"],
+            &["openai= 4"],
+            &["openai=65536"],
+            &["nobody=4"],
+            &["openai=4", "OpenAI=8"],
+        ] {
+            assert_eq!(
+                stated(refused),
+                Err(ServerLaunchRefuse::InvalidProviderConcurrency),
+                "{refused:?}"
+            );
+        }
+        assert!(stated(&["openai=65535"]).is_ok(), "the largest cap");
     }
 
     #[test]

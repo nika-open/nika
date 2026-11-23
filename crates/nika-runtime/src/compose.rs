@@ -855,11 +855,16 @@ pub fn production_runtime_with_emitter(
     // The provider registry (real http + env keys) drives infer directly
     // and the agent via the per-call RegistryProvider bridge.
     let registry = ProviderRegistry::new(provider_http, config);
-    let registry = Arc::new(match account {
+    let registry = match account {
         Some(a) if scoped => {
             registry.with_inference_admission_http(a, Arc::new(self::provider_http()?))
         }
         Some(a) => registry.with_inference_admission(a),
+        None => registry,
+    };
+    // The host's cap on calls in flight per provider, across its runs.
+    let registry = Arc::new(match runtime_config.provider_gate.clone() {
+        Some(gate) => registry.with_call_gate(gate),
         None => registry,
     });
     let agent_provider = Arc::new(RegistryProvider::new(Arc::clone(&registry), default_model));

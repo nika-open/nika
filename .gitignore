@@ -102,3 +102,6 @@ target-wcomp/
 # the estate tool imports scripts/estate_rules.py
 __pycache__/
 *.pyc
+
+# Plugin evaluation reports (`claude plugin eval` writes them next to the cases)
+.agents/plugins/nika/evals/results/

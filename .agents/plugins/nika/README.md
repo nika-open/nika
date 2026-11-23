@@ -49,6 +49,16 @@ oracle wiring.
 | check-on-edit hook | every agent edit to a `*.nika` is audited immediately, and an edit to `nika.yaml` gets its shape checked and every beat read by `nika arm`, as the [`nika arm` reference](https://docs.nika.sh/reference/arm) teaches (findings in the hook log; never blocks the edit) |
 | guard-run hook | pre-run judgment with findings on refusal (Cursor `beforeShellExecution` · Claude Code `PreToolUse`); installation and availability boundaries below |
 | MCP oracle (9 tools) | `nika_check` · `nika_explain` · `nika_schema` · `nika_examples` · `nika_template` · `nika_canon` · `nika_catalog` · `nika_tools` · `nika_inspect` — read-only, by design |
+| `nika-running` skill | the smooth path: a plain-words verdict, one yes that carries a spending cap, the run, and the workflow's own questions asked in the conversation |
+| `/nika:run` · `/nika:pending` · `/nika:make` | check, then run with one confirmation · list the runs waiting for an answer · turn the user's own sentence into a workflow: the engine reads the sentence first (`nika compile`, no model call), the agent asks only the engine's questions and writes by hand only what the engine could not read |
+| language server (Claude Code) | `nika lsp` wired through `.lsp.json`: the findings of `nika check` reach the agent after each edit, with no process started per edit. Terminal sessions only; the check-on-edit hook covers the rest |
+| session-status hook (Claude Code) | says at session start that the binary is missing (the guard then refuses every shell command), or that a run in the workspace is waiting for an answer |
+| intent hook (Claude Code) | a prompt that sounds like a schedule, a batch or "do it again" gets ONE hint per session; when the engine can read the sentence, the hint already carries its reading (pieces, schedule, questions). Silent otherwise, no model call, and nothing is written in the project |
+| stop gate (Claude Code) | a `*.nika` changed during the session that fails `nika check` sends the agent back once, with the reason in plain words; it also catches files written through the shell, which the edit hook and the language server never see |
+| waiting-runs monitor (Claude Code) | prints one line when a run starts waiting for an answer, while the `nika-running` skill is in use; interactive sessions only |
+| `port-to-nika` workflow (Claude Code) | ports many files at once (n8n exports, scripts), one agent per file, each result checked, with a report of what could not be ported. Written and syntax-checked, not yet run in a session |
+| `evals/` | four cases for `claude plugin eval`: offered on intent · plain verdict · never answers a question for the user · stays quiet when it has nothing to add. Written, not yet run |
+| `max_cost_usd` setting (Claude Code) | the spending cap `/nika:run` puts on every run unless the user names another one; asked once when the plugin is enabled |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/nika-open/nika/main/media/gifs/editor-diagnostics.optimized.gif" alt="The language server's findings in an editor: a squiggle, its explanation, and one keystroke that clears it" width="640">

@@ -87,6 +87,14 @@
 //!   (spec 04) and the step raises `NIKA-VAR-001`/`006` at run; the advice
 //!   names the reader, the read, the producer and why it can skip, and
 //!   teaches the whole-value binding tested in `when:`.
+//! - **guard steered by untrusted content** (`branch-steering`) — emitted
+//!   by the `check/trifecta/steering.rs` lane when the trifecta's three
+//!   legs are armed: a task's `when:` reads the output of a task the
+//!   content-taint pass marks, and the task or one downstream is an egress
+//!   task. `NIKA-SEC-009` judges content that reaches an argument, a guard
+//!   is not one, and the content still picks the branch. Not judged: an
+//!   `inputs.*` guard, a guard inside a child workflow (the lane's doc
+//!   lists the rest).
 //! - **exec JSON stdout capture** (`exec-json-capture`) — an `exec:` task
 //!   declares `capture: structured`, a binding parses `.stdout | fromjson`,
 //!   and NO binding reads `exit_code`/`stderr`; use `capture: stdout` for
@@ -146,7 +154,7 @@ pub struct Hint {
     /// · `glob-readme` · `assert-quarantine` · `jq-as-map` · `infer-as-law`
     /// · `fail-open-consent`
     /// · `unproven-law` · `silent-literal` · `documentation-host`
-    /// · `exec-read-path` · `mcp-pins` · `skipped-read`
+    /// · `exec-read-path` · `mcp-pins` · `skipped-read` · `branch-steering`
     /// · `harness` (composed by the check doors from the access plan —
     /// [`Hint::harness`] — since this crate has no notion of a seat)
     /// (additive · agents route on it; the module doc describes each).

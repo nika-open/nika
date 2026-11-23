@@ -762,7 +762,7 @@ pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -
         gated_scans(wf, conforms, &edges, &topo_waves, &composed_calls);
     hints.extend(std::mem::take(&mut consent_scan.hints));
     hints.extend(skipped_read::hints(wf, conforms, &edges, &topo_waves));
-    hints::credit_gates(&mut hints, &trifecta.mitigations);
+    let mut hints = trifecta::advise(hints, wf, &edges, &topo_waves, &composed_calls, &trifecta);
     let capability_escapes = permits_fit::scan_escapes(wf);
     let effective = boundary_offer::lane(wf, capability_escapes.is_empty(), conforms, &mut hints);
     let cost = cost::ceiling(wf);

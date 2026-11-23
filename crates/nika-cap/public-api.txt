@@ -926,6 +926,7 @@ pub unsafe fn nika_cap::TrifectaSubject::clone_to_uninit(&self, dest: *mut u8)
 impl<T> core::convert::From<T> for nika_cap::TrifectaSubject
 pub fn nika_cap::TrifectaSubject::from(t: T) -> T
 #[non_exhaustive] pub struct nika_cap::TrifectaVerdict
+pub nika_cap::TrifectaVerdict::armed: bool
 pub nika_cap::TrifectaVerdict::mitigations: alloc::vec::Vec<nika_cap::TrifectaMitigation>
 pub nika_cap::TrifectaVerdict::violations: alloc::vec::Vec<nika_cap::TrifectaViolation>
 impl core::clone::Clone for nika_cap::TrifectaVerdict

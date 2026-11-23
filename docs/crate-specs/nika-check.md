@@ -91,6 +91,28 @@ depend on without pulling the CLI:
   path from the workspace, the home directory or above the workspace names
   a rooted file the rooted path ends with (holds anywhere, for a
   directory), and a rooted directory may hold any of them.
+- **branch steering** (`trifecta/steering.rs`, the advisory side of the
+  trifecta lane) — the hint `branch-steering`, never a finding. With the
+  three legs armed (`nika_cap::TrifectaVerdict::armed`, read off the verdict
+  the trifecta lane already reached), a task whose `when:` reads, through a
+  `with:` key, the content of a task the content-taint pass marks, and that
+  is an egress task or has one downstream over any derived edge, carries one
+  hint: `NIKA-SEC-009` follows content into arguments, and a guard decides
+  whether the task runs without entering one. Not steered: the answer of a
+  blocking human gate; a guard a confirm gate's refusal proves false
+  (`human_confirm` and `affirmed_by`: `with.go == true && …`), where the
+  content can only cancel what a person approved; a read of `status`,
+  `error` or timings. The hint fires whether or not a gate sits upstream,
+  and names a confirm gate scheduled before the task the guard reads, with
+  the binding that makes its approval provable. A sink `NIKA-SEC-009`
+  refuses keeps no twin hint. It does NOT judge: a guard that reads only
+  `inputs.*` (a root check does not know its caller, and a call's arguments
+  are not followed into the child's guards); a guard inside a child
+  workflow; a `for_each:` collection, an `after:` predicate or a status
+  read; whether the downstream task's run depends on the steered one
+  (reachability only); a refusal that closes the guard through a skipped
+  producer (`with.x != null` under a gated `x` is still named, an
+  over-approximation). `is_clean` and the paid-run kinds ignore it.
 - **the conformance harness** (`tests/common`) — the Core, Deep, lint, runtime
   and stdlib fixture levels from the checkout pinned by `SPEC_PIN`. Core and
   Deep verdicts now include the Agent Skill resolution lane through the same

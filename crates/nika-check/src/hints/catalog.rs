@@ -307,6 +307,26 @@ const ROWS: &[(&str, &str)] = &[
          or `has(with.out.field)`), then read `with.out.field` in the verb. \
          Advisory (`is_clean` ignores it)",
     ),
+    (
+        "branch-steering",
+        "a task's `when:` reads, through a `with:` binding, the output of a \
+         task that carries untrusted content (a fetch, an exec, an MCP result, \
+         or a model answer that saw one), while `permits:` grants private read, \
+         untrusted ingress and external egress, and the task or one downstream \
+         of it is an egress task. NIKA-SEC-009 judges content that reaches a \
+         task's arguments, and a guard is not an argument: that law is silent \
+         on the read, and whoever writes the content still chooses whether the \
+         branch runs. A confirm gate upstream does not settle it by \
+         standing there: the guard itself must test the answer. Bind a confirm \
+         gate's answer and test it first (`with: { go: \"${{ tasks.ask.output \
+         }}\" }` + `when: ${{ with.go == true && <content test> }}`): the \
+         content can then only cancel what a person approved. Or drop one of \
+         the three grants. Version 1 does not judge a guard that reads only \
+         `inputs.*`, a guard inside a child workflow, a `for_each:` collection \
+         or a status read, and it does not follow a refusal through a skipped \
+         producer (`with.x != null` under a gated `x` is still named). Advisory \
+         (`is_clean` ignores it)",
+    ),
 ];
 
 #[cfg(test)]

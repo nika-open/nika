@@ -1169,6 +1169,8 @@ fn transition_and_events_commit_as_one_mutation() {
 
 #[cfg(test)]
 mod event_integrity;
+#[cfg(test)]
+mod throughput;
 
 #[test]
 fn a_queued_pin_survives_reopen_without_changing_the_legacy_listing() {

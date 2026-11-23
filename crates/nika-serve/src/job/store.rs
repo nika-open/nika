@@ -18,6 +18,7 @@ mod admission;
 mod binding;
 mod format;
 mod list;
+pub(crate) use list::QueuedJob;
 mod migration;
 mod retention;
 mod stored_job;

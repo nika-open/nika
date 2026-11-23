@@ -149,6 +149,47 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
 
 Both flags work without `--bind`: scheduled runs fill the same store.
 
+## Sharing the workers between users
+
+A resident that runs jobs for many users of one application states who each
+job is for (`owner` on `POST /v1/jobs`) and bounds what one of them holds:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
+  --token-file .nika/serve.token \
+  --max-concurrent-jobs 16 --queue-capacity 2000 \
+  --max-queued-per-owner 50 --max-concurrent-per-owner 2 \
+  --job-retention 24h --shutdown-grace 5m
+```
+
+- A free worker goes to the owner with the fewest jobs running, in turn
+  among equals. A user who submits fifty jobs does not delay the user who
+  submits one. Jobs without an `owner` share one lane.
+- `--max-queued-per-owner` refuses the owner's next job with
+  `429 owner_queue_full` and a `Retry-After` header. Nothing is written:
+  send the same request again, with the same `Idempotency-Key`.
+- `--max-concurrent-per-owner` refuses nothing: the owner's other jobs wait
+  while free workers serve other owners.
+- `--queue-capacity` bounds all waiting jobs together (`503 queue_full`), and
+  `--max-jobs` the jobs the store keeps (`507 job_capacity`). Every job
+  operation rewrites the whole store, so prefer a retention window to a
+  larger `--max-jobs`.
+- `--shutdown-grace` is how long a stop waits for running and queued jobs
+  (`30s` by default). Give your supervisor a longer kill timeout: with
+  systemd, `TimeoutStopSec` of the grace plus 15 seconds.
+- A scheduled run is never refused or held back by a per-owner limit.
+
+Read what the resident holds at any time:
+
+```sh
+curl -sS -H "Authorization: Bearer $(cat .nika/serve.token)" \
+  http://127.0.0.1:8787/v1/occupancy
+```
+
+The answer counts the jobs running and waiting, repeats the limits, and names
+the busiest owners (at most 100). The owner is what your backend states: it
+shares the workers fairly, it is not a security boundary between users.
+
 ## Managing schedules over HTTP
 
 A resident whose `/health` lists `scheduleManage` lets an operator see,

@@ -51,6 +51,11 @@ impl JobAttribution {
         Ok(Self { owner, labels })
     }
 
+    /// The owner whose queue lane the job waits in.
+    pub(crate) fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
     pub(crate) fn is_unattributed(&self) -> bool {
         self.owner.is_none() && self.labels.is_empty()
     }

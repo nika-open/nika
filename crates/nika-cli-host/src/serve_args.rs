@@ -66,13 +66,14 @@ pub struct NativeAuthoringArgs {
 
 const SHUTDOWN_HELP: &str = "Shutdown (persistent mode): Ctrl-C/SIGINT and SIGTERM stop HTTP admissions \
 and new scheduling, then drain running AND queued jobs for up to 30 seconds \
-with four workers. On grace expiry, running jobs become interrupted and \
+with four workers (--shutdown-grace and --max-concurrent-jobs set another \
+grace and worker count). On grace expiry, running jobs become interrupted and \
 jobs still queued remain queued. Restart with the same --state-root resumes queued \
 jobs from their captured snapshots; interrupted jobs are not retried. SIGKILL \
 skips cleanup: the next start interrupts ownerless running jobs and resumes \
-queued jobs. A completed drain exits 0; grace expiry exits 1. The 30-second \
-grace bounds execution draining, not filesystem cleanup or a stuck backend. \
-Allow extra time before a supervisor forces SIGKILL.";
+queued jobs. A completed drain exits 0; grace expiry exits 1. The grace \
+bounds execution draining, not filesystem cleanup or a stuck backend. \
+Allow extra time beyond it before a supervisor forces SIGKILL.";
 
 /// `nika serve` — the resident firer's args, plus the explicit HTTP pair.
 #[allow(clippy::struct_excessive_bools)] // one bool per independent CLI switch
@@ -125,6 +126,34 @@ pub struct ServeArgs {
     /// `--job-retention`.
     #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
     pub job_retention_unsuccessful: Option<String>,
+    /// Run at most this many jobs at once (default 4). Persistent mode only, like every limit
+    /// below.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub max_concurrent_jobs: Option<usize>,
+    /// Let at most this many jobs wait for a worker, all owners together (default 64). Past it
+    /// an admission answers 503 `queue_full`.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub queue_capacity: Option<usize>,
+    /// Keep at most this many jobs in the store (default 10000). At it every admission
+    /// answers 507 until `--job-retention` forgets some. Every job operation rewrites the
+    /// whole store, so a larger store makes each one slower.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub max_jobs: Option<usize>,
+    /// Let one owner have at most this many jobs waiting. Past it that owner's admission
+    /// answers 429 `owner_queue_full` with Retry-After; other owners are still admitted.
+    /// Jobs that state no owner count as one owner. Absent, only `--queue-capacity` bounds
+    /// an owner.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub max_queued_per_owner: Option<usize>,
+    /// Run at most this many jobs of one owner at once; its other jobs wait while free
+    /// workers serve other owners. Absent, only `--max-concurrent-jobs` bounds an owner.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub max_concurrent_per_owner: Option<usize>,
+    /// At a stop, wait this long for running and queued jobs to end (`30s` by default; a
+    /// whole number and s, m, h or d; at least one second). Past it running jobs settle
+    /// interrupted. Give the supervisor a longer kill timeout than this.
+    #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
+    pub shutdown_grace: Option<String>,
     #[command(flatten)]
     pub authoring: NativeAuthoringArgs,
     /// Explicit model invocation and physical-request ceiling per authoring round; absent, no

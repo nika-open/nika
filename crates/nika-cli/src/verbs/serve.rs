@@ -80,6 +80,13 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
             args.job_retention.as_deref(),
             args.job_retention_unsuccessful.as_deref(),
         )
+        .and_then(|options| {
+            options.with_job_capacity(args.max_concurrent_jobs, args.queue_capacity, args.max_jobs)
+        })
+        .and_then(|options| {
+            options.with_owner_limits(args.max_queued_per_owner, args.max_concurrent_per_owner)
+        })
+        .and_then(|options| options.with_shutdown_grace(args.shutdown_grace.as_deref()))
         .map_err(nika_serve::launch_operator_message)
         .map_err(&fail)?;
     let now = instant(args.now.as_deref()).map_err(&fail)?;
@@ -587,6 +594,8 @@ mod tests {
             "SIGINT",
             "SIGTERM",
             "30 seconds",
+            "--shutdown-grace",
+            "--max-concurrent-jobs",
             "queued",
             "interrupted",
             "SIGKILL",

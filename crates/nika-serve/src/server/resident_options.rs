@@ -48,9 +48,77 @@ impl ResidentOptions {
         Ok(self)
     }
 
+    /// Apply `nika serve --max-concurrent-jobs`, `--queue-capacity` and
+    /// `--max-jobs`: how many jobs run at once, how many may wait, and how
+    /// many the store keeps. Absent, each keeps its default.
+    ///
+    /// # Errors
+    /// A count of zero.
+    pub fn with_job_capacity(
+        mut self,
+        max_concurrent: Option<usize>,
+        queue: Option<usize>,
+        max_jobs: Option<usize>,
+    ) -> Result<Self, ServerLaunchRefuse> {
+        if let Some(workers) = stated_count(max_concurrent)? {
+            self.limits = self.limits.with_max_concurrent_jobs(workers);
+        }
+        if let Some(waiting) = stated_count(queue)? {
+            self.limits = self.limits.with_queue_capacity(waiting);
+        }
+        if let Some(kept) = stated_count(max_jobs)? {
+            self.limits = self.limits.with_max_jobs(kept);
+        }
+        Ok(self)
+    }
+
+    /// Apply `nika serve --max-queued-per-owner` and
+    /// `--max-concurrent-per-owner`: what one owner may hold. Absent, an
+    /// owner is bounded by the resident's own limits only.
+    ///
+    /// # Errors
+    /// A count of zero.
+    pub fn with_owner_limits(
+        mut self,
+        max_queued: Option<usize>,
+        max_concurrent: Option<usize>,
+    ) -> Result<Self, ServerLaunchRefuse> {
+        if let Some(waiting) = stated_count(max_queued)? {
+            self.limits = self.limits.with_max_queued_per_owner(waiting);
+        }
+        if let Some(running) = stated_count(max_concurrent)? {
+            self.limits = self.limits.with_max_concurrent_per_owner(running);
+        }
+        Ok(self)
+    }
+
+    /// Apply `nika serve --shutdown-grace`: how long a stop waits for running
+    /// and queued jobs. A whole number and a unit (`s`, `m`, `h`, `d`), at
+    /// least one second. Absent, thirty seconds.
+    ///
+    /// # Errors
+    /// A value that is not such a duration, or is under one second.
+    pub fn with_shutdown_grace(mut self, stated: Option<&str>) -> Result<Self, ServerLaunchRefuse> {
+        if let Some(stated) = stated {
+            let grace = stated_duration(stated)
+                .filter(|grace| !grace.is_zero())
+                .ok_or(ServerLaunchRefuse::InvalidShutdownGrace)?;
+            self.limits = self.limits.with_shutdown_grace(grace);
+        }
+        Ok(self)
+    }
+
     /// The resident ceilings these options ask for.
     pub(crate) const fn limits(&self) -> ServerLimits {
         self.limits
+    }
+}
+
+/// One count as an operator states it on a limit flag: at least one.
+fn stated_count(stated: Option<usize>) -> Result<Option<usize>, ServerLaunchRefuse> {
+    match stated {
+        Some(0) => Err(ServerLaunchRefuse::InvalidJobLimit),
+        other => Ok(other),
     }
 }
 
@@ -109,6 +177,55 @@ mod tests {
             "18446744073709551615d",
         ] {
             assert_eq!(stated_duration(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn limit_flags_set_the_limits_or_are_refused() {
+        let unset = ResidentOptions::default()
+            .with_job_capacity(None, None, None)
+            .and_then(|options| options.with_owner_limits(None, None))
+            .and_then(|options| options.with_shutdown_grace(None))
+            .expect("no flag");
+        assert_eq!(unset, ResidentOptions::default());
+        let limits = unset.limits();
+        assert_eq!(limits.max_concurrent_jobs(), 4);
+        assert_eq!(limits.queue_capacity(), 64);
+        assert_eq!(limits.max_jobs(), 10_000);
+        assert_eq!(limits.shutdown_grace(), Duration::from_secs(30));
+        assert_eq!(limits.max_queued_per_owner(), None);
+        assert_eq!(limits.max_concurrent_per_owner(), None);
+
+        let stated = ResidentOptions::default()
+            .with_job_capacity(Some(16), Some(5_000), Some(20_000))
+            .and_then(|options| options.with_owner_limits(Some(50), Some(2)))
+            .and_then(|options| options.with_shutdown_grace(Some("5m")))
+            .expect("every flag");
+        let limits = stated.limits();
+        assert!(limits.valid());
+        assert_eq!(limits.max_concurrent_jobs(), 16);
+        assert_eq!(limits.queue_capacity(), 5_000);
+        assert_eq!(limits.max_jobs(), 20_000);
+        assert_eq!(limits.shutdown_grace(), Duration::from_secs(300));
+        assert_eq!(limits.max_queued_per_owner(), Some(50));
+        assert_eq!(limits.max_concurrent_per_owner(), Some(2));
+
+        let options = ResidentOptions::default;
+        for refused in [
+            options().with_job_capacity(Some(0), None, None),
+            options().with_job_capacity(None, Some(0), None),
+            options().with_job_capacity(None, None, Some(0)),
+            options().with_owner_limits(Some(0), None),
+            options().with_owner_limits(None, Some(0)),
+        ] {
+            assert_eq!(refused, Err(ServerLaunchRefuse::InvalidJobLimit));
+        }
+        for grace in ["0s", "30", "soon", "1.5m", ""] {
+            assert_eq!(
+                options().with_shutdown_grace(Some(grace)),
+                Err(ServerLaunchRefuse::InvalidShutdownGrace),
+                "{grace:?}"
+            );
         }
     }
 

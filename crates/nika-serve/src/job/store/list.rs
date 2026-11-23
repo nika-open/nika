@@ -7,7 +7,37 @@ use super::{JobEvent, JobStatus, JobStore, JobStoreError, StoredJob};
 use crate::JobOrigin;
 use crate::job::{JobListFilter, JobPage, JobSummary, OriginKind};
 
+/// A job that was `queued` when the resident last stopped, as its queue
+/// takes it back: the access pin its task carries and the owner whose lane
+/// it waits in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QueuedJob {
+    pub(crate) id: crate::JobId,
+    pub(crate) access_pin: Option<String>,
+    pub(crate) owner: Option<String>,
+}
+
 impl JobStore {
+    /// The queued jobs that still name a workflow, in admission order.
+    ///
+    /// # Errors
+    /// Returns an error when the store cannot be locked or validated.
+    pub(crate) fn queued_for_recovery(&self) -> Result<Vec<QueuedJob>, JobStoreError> {
+        let _local = self.local_guard()?;
+        let _lease = self.kernel_lease()?;
+        let state = self.load_state()?;
+        Ok(state
+            .jobs
+            .iter()
+            .filter(|job| job.record.status == JobStatus::Queued && !job.record.workflow.is_empty())
+            .map(|job| QueuedJob {
+                id: job.record.id.clone(),
+                access_pin: job.record.access_pin.clone(),
+                owner: job.record.owner.clone(),
+            })
+            .collect())
+    }
+
     /// One page of the jobs `filter` keeps, newest first.
     ///
     /// `before` is the ordinal of the last job the previous page served:

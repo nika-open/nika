@@ -185,7 +185,7 @@ enum RequestCommand {
         reply: Reply<String>,
     },
     Queued {
-        reply: Reply<Vec<(JobId, String, Option<String>)>>,
+        reply: Reply<Vec<crate::job::QueuedJob>>,
     },
     List {
         filter: Box<JobListFilter>,
@@ -393,9 +393,7 @@ impl StoreHandle {
         receive(answer).await
     }
 
-    pub(super) async fn queued_jobs(
-        &self,
-    ) -> Result<Vec<(JobId, String, Option<String>)>, ServerError> {
+    pub(super) async fn queued_jobs(&self) -> Result<Vec<crate::job::QueuedJob>, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_request(RequestCommand::Queued { reply })?;
         receive(answer).await
@@ -734,7 +732,7 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
             let _result = reply.send(store.load_world(&id));
         }
         RequestCommand::Queued { reply } => {
-            let _result = reply.send(store.queued_jobs_pinned());
+            let _result = reply.send(store.queued_for_recovery());
         }
         RequestCommand::List {
             filter,

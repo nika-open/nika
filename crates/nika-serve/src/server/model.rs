@@ -167,6 +167,9 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     "jobAttribution",
     // `GET /v1/jobs`: the filtered, paged job list (ADR-155).
     "jobList",
+    // `GET /v1/occupancy`: what the resident holds against its limits, and
+    // `429 owner_queue_full` at an owner's own bound (ADR-155).
+    "occupancy",
     "compile",
     "artifacts",
     "accessServiceTier",

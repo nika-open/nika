@@ -23,8 +23,8 @@ pub use model::{
     MAX_EXECUTION_SNAPSHOT_PATH_BYTES, MAX_JOB_SNAPSHOT_BYTES, RequestDigest, ServerIncarnation,
 };
 pub(crate) use retention::{JobRetention, MIN_JOB_RETENTION};
-pub(crate) use store::STATE_VERSION;
 pub use store::{ApprovalHistory, JobStore};
+pub(crate) use store::{QueuedJob, STATE_VERSION};
 
 #[cfg(test)]
 mod result_tests;

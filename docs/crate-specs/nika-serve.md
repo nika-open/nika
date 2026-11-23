@@ -87,7 +87,8 @@ becomes a child name.
   active-job, queue, connection, SSE-client, header, and durable-job ceilings.
 - `BoundServer::bind` validates and acquires all authority before listening;
   `serve_until` stops admission and gives running and queued jobs one shared
-  grace period (30 seconds by default, with four concurrent workers).
+  grace period (30 seconds by default, with four concurrent workers;
+  `nika serve --shutdown-grace` and `--max-concurrent-jobs` state others).
 - `ExecutionBackend` receives only `ExecutionContext` over the immutable
   world admitted by `ExecutionService`. It is asynchronous, receives the
   run-scoped `CancelCtx` through an additive default method, remains
@@ -383,7 +384,9 @@ drain **all already-admitted work**, including the queue. The default is one
 30-second grace period with four concurrent workers, not 30 seconds per job.
 Thus forty jobs lasting three seconds each can occupy roughly thirty seconds;
 a resident still draining after five seconds has not exceeded this contract.
-Embedders can select another grace with `ServerLimits`; the CLI uses the default.
+`nika serve --shutdown-grace <DURATION>` states another grace (a whole number
+and `s`, `m`, `h` or `d`, at least one second) and `--max-concurrent-jobs`
+another worker count; embedders set both on `ServerLimits`.
 
 If the queue finishes within the grace, the resident exits 0. At grace expiry,
 it aborts the remaining execution futures, records running jobs as `interrupted`
@@ -399,8 +402,8 @@ The grace bounds asynchronous execution draining. It is not a hard deadline
 for process exit: cancellation must yield, scheduler/backend cleanup must join,
 and durable settlement requires filesystem writes. A stuck backend or filesystem
 can delay these steps. Supervisors should allow additional cleanup time beyond
-30 seconds before forcing SIGKILL; the supplied systemd unit uses 45 seconds
-(30 for draining plus 15 for cleanup). This allowance cannot bound a stuck
+the grace before forcing SIGKILL; the supplied systemd unit uses 45 seconds
+(30 for draining plus 15 for cleanup), to raise with `--shutdown-grace`. This allowance cannot bound a stuck
 filesystem; a forced kill may defer settlement to restart.
 
 On Unix, the token file must be opened no-follow/nonblocking as a regular
@@ -1002,3 +1005,83 @@ fire`. This route is not an inbound event door (ADR-136): it takes the
 resident's own Bearer, and a third-party sender never holds it.
 
 No route replays missed slots: schedule backfill stays absent.
+
+## Fair admission and occupancy (ADR-155)
+
+`/health` advertises `occupancy` when the resident serves the queue below.
+The queue is the resident's memory, rebuilt from the durable `queued` jobs at
+every start; it is never a second record of a job.
+
+**Lanes.** An admitted job waits in the lane of the owner it states. Jobs
+that state no owner share one anonymous lane. A lane is first in, first out.
+
+**Turn.** A free worker goes to the owner with the fewest jobs running,
+among the owners that have a job waiting. Among equals it goes in turn: the
+owner served longest ago. So an owner that submits fifty jobs does not delay
+the owner that submits one: that one starts at the next free worker, and
+owners with standing queues share the workers evenly.
+
+**Limits.** All are `nika serve` flags of the persistent resident, never
+members of `nika.yaml`: they describe one process, not the project.
+
+| flag | default | bounds | past it |
+|---|---|---|---|
+| `--max-concurrent-jobs <N>` | 4 | jobs running at once | the others wait |
+| `--queue-capacity <N>` | 64 | jobs waiting, all owners together | `503 queue_full` |
+| `--max-queued-per-owner <N>` | none | jobs one owner has waiting | `429 owner_queue_full` + `Retry-After` |
+| `--max-concurrent-per-owner <N>` | none | jobs one owner runs at once | its others wait; free workers serve other owners |
+| `--max-jobs <N>` | 10,000 | jobs the store keeps | `507 job_capacity` |
+| `--shutdown-grace <DURATION>` | `30s` | the drain at a stop | running jobs settle `interrupted` |
+
+A count is a whole number of at least 1. `429 owner_queue_full` writes
+nothing and leaves the `Idempotency-Key` unbound: the same request is sent
+again after the `Retry-After` seconds (a fixed hint of 5: the resident cannot
+know when one of the owner's jobs will start). It is a `429` and not a `503`
+because the server is available: other owners are still admitted.
+
+**What never takes a place twice.** A place is reserved before the durable
+record and given back if the admission does not land. A replay of a job that
+still waits answers that job and takes no second place. A queued job that is
+cancelled gives its place back at once.
+
+**Scheduled fires.** A run the scheduler fires is durably `running` when it
+reaches the queue. It is bounded by `--queue-capacity` only: a per-owner bound
+never refuses it or holds it back, and it is served before the lanes. It
+counts in its owner's running total, so that owner's manual jobs wait for it
+under `--max-concurrent-per-owner`. The reason is the scheduler's own
+deadline: it watches each fire to its end within a window derived from the
+queue capacity, which a fire parked behind other owners' lanes could outlive.
+
+**Restart.** The jobs that were `queued` when the resident stopped re-enter
+their owner's lane in admission order, past today's bounds: a limit lowered
+across a restart never drops an admitted job. The running counts start at
+zero, as no job runs.
+
+**Occupancy.** `GET /v1/occupancy` (one Bearer) answers what the resident
+holds now:
+
+```json
+{
+  "jobs": {
+    "running": 2, "queued": 47,
+    "max_concurrent": 2, "queue_capacity": 64,
+    "max_concurrent_per_owner": null, "max_queued_per_owner": null
+  },
+  "owners": [
+    {"owner": "user_123", "running": 1, "queued": 47},
+    {"owner": null, "running": 1, "queued": 0}
+  ],
+  "owners_omitted": 0
+}
+```
+
+At most 100 owners are named, busiest first; `owners_omitted` counts the
+rest. `owner` is `null` for the anonymous lane. The object is open: a later
+engine adds members. It is authenticated and absent from `/health` because it
+names owners.
+
+**What this is not.** The owner is what the credential holder states, never
+an authenticated identity (ADR-117): fairness keeps one application's users
+from delaying each other, it does not isolate tenants that hold the same
+Bearer. The limits hold inside one resident; one state root is served by one
+resident.

@@ -12,10 +12,12 @@ mod coordinator;
 mod cost_policy;
 mod cost_review;
 mod error;
+mod fair_queue;
 mod inputs;
 mod job_list;
 mod listen;
 mod model;
+mod occupancy;
 mod openapi;
 mod production;
 mod registry;
@@ -30,7 +32,7 @@ mod sse;
 mod store;
 mod trace_verdict;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -44,7 +46,7 @@ use nika_execution::{ExecutionContext, ExecutionService, SnapshotLimits};
 use nika_fs::OwnedDir;
 use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, Semaphore, mpsc};
+use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -504,8 +506,7 @@ impl ExecutionTask {
 pub struct ResidentAuthority {
     state: Arc<AuthorityState>,
     coordinator: ResidentExecutionCoordinator,
-    jobs: mpsc::Receiver<ExecutionTask>,
-    recovered: VecDeque<ExecutionTask>,
+    jobs: fair_queue::QueueReader<ExecutionTask>,
     store_actor: Option<StoreActor>,
 }
 
@@ -529,17 +530,20 @@ impl ResidentAuthority {
             config.limits().max_connections(),
             control_capacity,
         )?;
-        let (jobs, receiver) = mpsc::channel(config.limits().queue_capacity());
+        let jobs = fair_queue::FairQueue::new(fair_queue::QueueBounds {
+            capacity: config.limits().queue_capacity(),
+            queued_per_owner: config.limits().max_queued_per_owner(),
+            running_per_owner: config.limits().max_concurrent_per_owner(),
+        });
+        let receiver = fair_queue::QueueReader::new(Arc::clone(&jobs));
+        // Jobs queued when the resident last stopped re-enter their owner's
+        // lane first, in admission order, past today's bounds.
         let default_max_cost_usd = config.limits().default_max_cost_usd();
-        let recovered = store_actor
-            .handle()
-            .queued_jobs()
-            .await?
-            .into_iter()
-            .map(|(id, _workflow, access_pin)| {
-                ExecutionTask::new(id, default_max_cost_usd).with_access_pin(access_pin)
-            })
-            .collect();
+        for queued in store_actor.handle().queued_jobs().await? {
+            let task = ExecutionTask::new(queued.id.clone(), default_max_cost_usd)
+                .with_access_pin(queued.access_pin);
+            jobs.recover(queued.owner.as_deref(), queued.id, task);
+        }
         let reviewed = Arc::new(cost_review::Reviewed::default());
         let coordinator = ResidentExecutionCoordinator::new(
             store_actor.handle(),
@@ -584,7 +588,6 @@ impl ResidentAuthority {
             state,
             coordinator,
             jobs: receiver,
-            recovered,
             store_actor: Some(store_actor),
         })
     }
@@ -900,7 +903,7 @@ fn ensure_state_root(path: &Path) -> Result<(), ServerError> {
 }
 
 async fn run_authority_until<F>(
-    mut authority: ResidentAuthority,
+    authority: ResidentAuthority,
     shutdown: F,
 ) -> Result<(), ServerError>
 where
@@ -917,18 +920,12 @@ where
     tokio::pin!(shutdown);
 
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
         tokio::select! {
             () = &mut shutdown => break,
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                if let Some(task) = task {
-                    executions.spawn(run_job(Arc::clone(&authority.state), task));
+                if let Some(dispatched) = dispatched {
+                    executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                 }
             }
             joined = executions.join_next(), if !executions.is_empty() => {
@@ -954,7 +951,7 @@ where
 }
 
 async fn run_authority_with_http<F>(
-    mut authority: ResidentAuthority,
+    authority: ResidentAuthority,
     server: BoundServer,
     shutdown: F,
 ) -> Result<(), ServerError>
@@ -975,12 +972,6 @@ where
     tokio::pin!(shutdown);
 
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
         tokio::select! {
             () = &mut shutdown => break,
             accepted = listener.accept(),
@@ -995,10 +986,10 @@ where
                     }
                 }
             }
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                if let Some(task) = task {
-                    executions.spawn(run_job(Arc::clone(&authority.state), task));
+                if let Some(dispatched) = dispatched {
+                    executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                 }
             }
             joined = executions.join_next(), if !executions.is_empty() => {
@@ -1119,22 +1110,16 @@ async fn drain_authority(
     let mut failure = None;
     let mut queue_drained = false;
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
-        if executions.is_empty() && authority.recovered.is_empty() && queue_drained {
+        if executions.is_empty() && queue_drained {
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if !queue_drained
                     && executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                match task {
-                    Some(task) => {
-                        executions.spawn(run_job(Arc::clone(&authority.state), task));
+                match dispatched {
+                    Some(dispatched) => {
+                        executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                     }
                     None => queue_drained = true,
                 }
@@ -1162,6 +1147,16 @@ async fn serve_connection(stream: TcpStream, state: Arc<AppState>) {
     let _result = builder
         .serve_connection(TokioIo::new(stream), service)
         .await;
+}
+
+/// Run one dispatched job. Its owner's running count is held until the run
+/// ends, however it ends.
+async fn run_dispatched(
+    state: Arc<AuthorityState>,
+    dispatched: fair_queue::Dispatched<ExecutionTask>,
+) -> Result<(), ServerError> {
+    let _running = dispatched.running;
+    Box::pin(run_job(state, dispatched.task)).await
 }
 
 async fn run_job(state: Arc<AuthorityState>, mut task: ExecutionTask) -> Result<(), ServerError> {
@@ -1557,6 +1552,8 @@ mod coordinator_tests;
 mod credential_tests;
 #[cfg(test)]
 mod failure_tests;
+#[cfg(test)]
+mod fair_admission_tests;
 #[cfg(test)]
 mod job_list_tests;
 #[cfg(test)]

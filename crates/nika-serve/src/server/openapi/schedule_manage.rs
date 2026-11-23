@@ -57,6 +57,7 @@ pub(super) fn trigger_path(error: &dyn Fn(&'static str) -> Value, job: &Value) -
                 "409": error("`idempotency_conflict`: the key is bound to another request · `schedule_declared_by_project`: declared in the project file"),
                 "413": error("A trigger carries no body"),
                 "422": error("`invalid_schedule_trigger`: the body is not empty · `schedule.workflow`, `schedule.workflow_outside_registry` or `schedule.inputs`: the schedule's workflow or inputs no longer admit"),
+                "429": super::occupancy::owner_refusal(),
                 "503": error("Execution queue or durable store unavailable"),
                 "507": error("Durable job capacity exhausted")
             }

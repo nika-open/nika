@@ -69,6 +69,8 @@ pub struct ServerLimits {
     max_artifact_bytes: u64,
     job_retention: Option<Duration>,
     unsuccessful_job_retention: Option<Duration>,
+    max_queued_per_owner: Option<usize>,
+    max_concurrent_per_owner: Option<usize>,
 }
 
 /// Concurrent `POST /v1/compile` computations out of the box. Authoring is
@@ -113,7 +115,50 @@ impl ServerLimits {
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
             job_retention: None,
             unsuccessful_job_retention: None,
+            max_queued_per_owner: None,
+            max_concurrent_per_owner: None,
         }
+    }
+
+    /// Run at most this many jobs at once (4 out of the box).
+    #[must_use]
+    pub const fn with_max_concurrent_jobs(mut self, max_concurrent_jobs: usize) -> Self {
+        self.max_concurrent_jobs = max_concurrent_jobs;
+        self
+    }
+
+    /// Hold at most this many jobs waiting for a worker (64 out of the box).
+    /// Past it an admission is refused `queue_full`.
+    #[must_use]
+    pub const fn with_queue_capacity(mut self, queue_capacity: usize) -> Self {
+        self.queue_capacity = queue_capacity;
+        self
+    }
+
+    /// Wait this long at shutdown for running and queued jobs to end
+    /// (30 seconds out of the box). Past it they settle `interrupted`.
+    #[must_use]
+    pub const fn with_shutdown_grace(mut self, shutdown_grace: Duration) -> Self {
+        self.shutdown_grace = shutdown_grace;
+        self
+    }
+
+    /// Let one owner hold at most this many waiting jobs. Past it that
+    /// owner's admission is refused `owner_queue_full`; others are still
+    /// admitted. Jobs that state no owner share one anonymous owner. Absent,
+    /// only the queue capacity bounds an owner.
+    #[must_use]
+    pub const fn with_max_queued_per_owner(mut self, max_queued: usize) -> Self {
+        self.max_queued_per_owner = Some(max_queued);
+        self
+    }
+
+    /// Run at most this many jobs of one owner at once; its other jobs wait
+    /// while other owners run. Absent, only the workers bound an owner.
+    #[must_use]
+    pub const fn with_max_concurrent_per_owner(mut self, max_concurrent: usize) -> Self {
+        self.max_concurrent_per_owner = Some(max_concurrent);
+        self
     }
 
     /// Evict a `succeeded` job once it has been settled this long (at least
@@ -207,6 +252,8 @@ impl ServerLimits {
             && self.max_jobs != 0
             && self.max_sse_clients != 0
             && self.max_compile_requests != 0
+            && !matches!(self.max_queued_per_owner, Some(0))
+            && !matches!(self.max_concurrent_per_owner, Some(0))
             && !self.sse_heartbeat.is_zero()
             && self.sse_reconnect.as_millis() >= 100
             && self.sse_reconnect.as_millis() <= 30_000
@@ -240,6 +287,14 @@ impl ServerLimits {
 
     pub(crate) const fn queue_capacity(self) -> usize {
         self.queue_capacity
+    }
+
+    pub(crate) const fn max_queued_per_owner(self) -> Option<usize> {
+        self.max_queued_per_owner
+    }
+
+    pub(crate) const fn max_concurrent_per_owner(self) -> Option<usize> {
+        self.max_concurrent_per_owner
     }
 
     pub(crate) const fn max_connections(self) -> usize {

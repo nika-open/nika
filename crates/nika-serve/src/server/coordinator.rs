@@ -14,15 +14,18 @@ use crate::{
     Admission, IdempotencyKey, JobId, JobOrigin, JobReceipt, JobRecord, JobStatus, RequestDigest,
 };
 
+use super::fair_queue::{FairQueue, QueueLoad, QueueRefusal, Reservation};
 use super::{ExecutionTask, ServerError, ServerLimits, StoreHandle};
 
-/// A reservation on the execution queue that did not land: a FULL queue is
-/// back-pressure (`ExecutionQueueFull`); a CLOSED one means the authority is
-/// stopping (`Stopping`), which no caller may read as capacity.
-fn queue_refusal<T>(error: &tokio::sync::mpsc::error::TrySendError<T>) -> ServerError {
-    match error {
-        tokio::sync::mpsc::error::TrySendError::Full(_) => ServerError::ExecutionQueueFull,
-        tokio::sync::mpsc::error::TrySendError::Closed(_) => ServerError::Stopping,
+/// A place in the execution queue that was not given: a FULL queue is
+/// back-pressure (`ExecutionQueueFull`), an owner at its own bound is that
+/// owner's to wait out (`OwnerQueueFull`), and a CLOSED queue means the
+/// authority is stopping (`Stopping`), which no caller may read as capacity.
+fn queue_refusal(refusal: QueueRefusal) -> ServerError {
+    match refusal {
+        QueueRefusal::Full => ServerError::ExecutionQueueFull,
+        QueueRefusal::OwnerFull => ServerError::OwnerQueueFull,
+        QueueRefusal::Closed => ServerError::Stopping,
     }
 }
 
@@ -40,7 +43,7 @@ pub(super) const SCHEDULE_KEY_PREFIX: &str = "schedule:";
 #[derive(Clone)]
 pub struct ResidentExecutionCoordinator {
     store: StoreHandle,
-    jobs: tokio::sync::mpsc::Sender<ExecutionTask>,
+    jobs: std::sync::Arc<FairQueue<ExecutionTask>>,
     limits: ServerLimits,
     reviewed: std::sync::Arc<super::cost_review::Reviewed>,
 }
@@ -57,7 +60,7 @@ impl fmt::Debug for ResidentExecutionCoordinator {
 impl ResidentExecutionCoordinator {
     pub(super) fn new(
         store: StoreHandle,
-        jobs: tokio::sync::mpsc::Sender<ExecutionTask>,
+        jobs: std::sync::Arc<FairQueue<ExecutionTask>>,
         limits: ServerLimits,
         reviewed: std::sync::Arc<super::cost_review::Reviewed>,
     ) -> Self {
@@ -69,9 +72,28 @@ impl ResidentExecutionCoordinator {
         }
     }
 
+    /// The resident's ceilings and what its queue holds now, with the `most`
+    /// busiest owners.
+    pub(super) fn occupancy(&self, most: usize) -> (ServerLimits, QueueLoad) {
+        (self.limits, self.jobs.load(most))
+    }
+
+    /// Give back the queue place of a job that left `queued` without
+    /// running.
+    pub(super) fn forget_queued(&self, id: &JobId) {
+        self.jobs.forget(id);
+    }
+
+    /// The task that runs a queued record.
+    fn queued_task(&self, record: &JobRecord) -> ExecutionTask {
+        ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
+            .with_access_pin(record.access_pin().map(str::to_owned))
+    }
+
     /// The job already bound to this key, without capturing anything
     /// (ADR-132 · the freeze audit): a retry replays its record, and a
-    /// queued replay is re-enqueued exactly as `admit_manual` does.
+    /// queued replay is queued again unless it waits already, so a replay
+    /// takes no second place in its owner's lane.
     pub(super) async fn replay_manual(
         &self,
         key: IdempotencyKey,
@@ -83,15 +105,13 @@ impl ResidentExecutionCoordinator {
         if let Admission::Existing(record) = &admission
             && record.status() == JobStatus::Queued
         {
-            let permit = self
-                .jobs
-                .clone()
-                .try_reserve_owned()
-                .map_err(|error| queue_refusal(&error))?;
-            permit.send(
-                ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                    .with_access_pin(record.access_pin().map(str::to_owned)),
-            );
+            self.jobs
+                .requeue(
+                    record.owner(),
+                    record.id().clone(),
+                    self.queued_task(record),
+                )
+                .map_err(queue_refusal)?;
         }
         Ok(Some(admission))
     }
@@ -133,11 +153,12 @@ impl ResidentExecutionCoordinator {
         bindings: JobBindings,
         reviewed: Option<(nika_execution::ExecutionSession, super::CostAuthority)>,
     ) -> Result<Admission, ServerError> {
+        // The place is taken in the owner's lane before the record exists:
+        // an owner at its bound is refused with nothing written.
         let permit = self
             .jobs
-            .clone()
-            .try_reserve_owned()
-            .map_err(|error| queue_refusal(&error))?;
+            .reserve(bindings.attribution.owner())
+            .map_err(queue_refusal)?;
         let admission = self
             .store
             .create_or_replay(
@@ -156,16 +177,10 @@ impl ResidentExecutionCoordinator {
                     self.reviewed
                         .attach(record.id().as_str(), Box::new(reviewed));
                 }
-                permit.send(
-                    ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                        .with_access_pin(record.access_pin().map(str::to_owned)),
-                );
+                permit.send(record.id().clone(), self.queued_task(record));
             }
             Admission::Existing(record) if record.status() == JobStatus::Queued => {
-                permit.send(
-                    ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                        .with_access_pin(record.access_pin().map(str::to_owned)),
-                );
+                permit.send(record.id().clone(), self.queued_task(record));
             }
             Admission::Existing(_) | Admission::Conflict(_) => drop(permit),
         }
@@ -235,11 +250,12 @@ impl ResidentExecutionCoordinator {
         let trace_id = admitted.trace_id().to_string();
         let snapshot_digest = admitted.snapshot().digest().to_owned();
         let event_origin = origin.clone();
+        // A run the resident starts itself is bounded by the whole queue
+        // alone and served before every lane (see `fair_queue`).
         let permit = self
             .jobs
-            .clone()
-            .try_reserve_owned()
-            .map_err(|error| queue_refusal(&error))?;
+            .reserve_started(bindings.attribution.owner())
+            .map_err(queue_refusal)?;
         let admission = self.store.prepare_scheduled_blocking(
             key,
             digest,
@@ -341,7 +357,7 @@ pub struct PreparedScheduledRun {
     coordinator: ResidentExecutionCoordinator,
     record: JobRecord,
     admitted: Option<AdmittedExecution>,
-    permit: Option<tokio::sync::mpsc::OwnedPermit<ExecutionTask>>,
+    permit: Option<Reservation<ExecutionTask>>,
     abort_on_drop: bool,
     max_cost_usd: Option<f64>,
 }
@@ -361,7 +377,7 @@ impl PreparedScheduledRun {
         coordinator: ResidentExecutionCoordinator,
         record: JobRecord,
         admitted: AdmittedExecution,
-        permit: tokio::sync::mpsc::OwnedPermit<ExecutionTask>,
+        permit: Reservation<ExecutionTask>,
         max_cost_usd: Option<f64>,
     ) -> Self {
         Self {
@@ -411,12 +427,15 @@ impl PreparedScheduledRun {
     pub fn execute(mut self) -> Result<JobRecord, ServerError> {
         if let (Some(permit), Some(admitted)) = (self.permit.take(), self.admitted.take()) {
             self.abort_on_drop = false;
-            permit.send(ExecutionTask::scheduled(
+            permit.send(
                 self.record.id().clone(),
-                admitted,
-                self.record.origin().clone(),
-                self.max_cost_usd,
-            ));
+                ExecutionTask::scheduled(
+                    self.record.id().clone(),
+                    admitted,
+                    self.record.origin().clone(),
+                    self.max_cost_usd,
+                ),
+            );
         }
         self.coordinator.observe_terminal(self.record.id())
     }
@@ -455,26 +474,32 @@ fn scheduled_key(origin: &JobOrigin) -> Result<IdempotencyKey, ServerError> {
 
 #[cfg(test)]
 mod queue_refusal_tests {
+    use super::super::fair_queue::QueueBounds;
     use super::*;
 
-    /// A full queue is back-pressure; a closed queue is the authority
-    /// stopping. The two were one error before, and a fire that met the
-    /// closed queue at shutdown ended the resident with « queue full ».
+    /// A full queue is back-pressure; an owner at its bound is that owner's
+    /// refusal; a closed queue is the authority stopping. The first and the
+    /// last were one error before, and a fire that met the closed queue at
+    /// shutdown ended the resident with « queue full ».
     #[test]
     fn a_closed_queue_is_stopping_and_a_full_one_is_capacity() {
-        let (sender, receiver) = tokio::sync::mpsc::channel::<u8>(1);
-        let held = sender.clone().try_reserve_owned().expect("one slot");
-        let full = sender
-            .clone()
-            .try_reserve_owned()
-            .expect_err("no second slot");
+        let queue: std::sync::Arc<FairQueue<u8>> = FairQueue::new(QueueBounds {
+            capacity: 2,
+            queued_per_owner: Some(1),
+            running_per_owner: None,
+        });
+        let held = queue.reserve(Some("a")).expect("one place");
+        let owner = queue.reserve(Some("a")).err().expect("the owner's bound");
+        assert!(matches!(queue_refusal(owner), ServerError::OwnerQueueFull));
+        let other = queue.reserve(Some("b")).expect("another owner's place");
+        let full = queue.reserve(Some("c")).err().expect("no third place");
         assert!(matches!(
-            queue_refusal(&full),
+            queue_refusal(full),
             ServerError::ExecutionQueueFull
         ));
-        drop(held);
-        drop(receiver);
-        let closed = sender.try_reserve_owned().expect_err("closed queue");
-        assert!(matches!(queue_refusal(&closed), ServerError::Stopping));
+        drop((held, other));
+        queue.close();
+        let closed = queue.reserve(None).err().expect("closed queue");
+        assert!(matches!(queue_refusal(closed), ServerError::Stopping));
     }
 }

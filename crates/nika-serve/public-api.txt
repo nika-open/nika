@@ -1621,6 +1621,7 @@ pub nika_serve::server::ServerError::InvalidConfig(&'static str)
 pub nika_serve::server::ServerError::JobStore(nika_serve::JobStoreError)
 pub nika_serve::server::ServerError::Listener(core::io::error::ErrorKind)
 pub nika_serve::server::ServerError::NativeAuthoring(nika_serve::NativeAuthoringError)
+pub nika_serve::server::ServerError::OwnerQueueFull
 pub nika_serve::server::ServerError::ScheduleStore(nika_serve::ScheduleStoreError)
 pub nika_serve::server::ServerError::ScheduledAdmission
 pub nika_serve::server::ServerError::ScheduledIdempotencyConflict
@@ -1672,8 +1673,10 @@ impl<T> typenum::type_operators::Same for nika_serve::ServerError
 pub type nika_serve::ServerError::Output = T
 #[non_exhaustive] pub enum nika_serve::server::ServerLaunchRefuse
 pub nika_serve::server::ServerLaunchRefuse::InvalidBind
+pub nika_serve::server::ServerLaunchRefuse::InvalidJobLimit
 pub nika_serve::server::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::server::ServerLaunchRefuse::InvalidRunCostCeiling
+pub nika_serve::server::ServerLaunchRefuse::InvalidShutdownGrace
 pub nika_serve::server::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::server::ServerLaunchRefuse::MissingTokenFile
 pub nika_serve::server::ServerLaunchRefuse::RehearsalWithListener
@@ -2105,7 +2108,10 @@ impl<T> typenum::type_operators::Same for nika_serve::ResidentExecutionCoordinat
 pub type nika_serve::ResidentExecutionCoordinator::Output = T
 #[non_exhaustive] pub struct nika_serve::server::ResidentOptions
 impl nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::with_job_capacity(self, max_concurrent: core::option::Option<usize>, queue: core::option::Option<usize>, max_jobs: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_owner_limits(self, max_queued: core::option::Option<usize>, max_concurrent: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_shutdown_grace(self, stated: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 impl core::clone::Clone for nika_serve::ResidentOptions
 pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions
 impl core::cmp::PartialEq for nika_serve::ResidentOptions
@@ -2205,8 +2211,13 @@ pub const fn nika_serve::ServerLimits::new(max_body_bytes: usize, request_timeou
 pub const fn nika_serve::ServerLimits::with_default_max_cost_usd(self, ceiling: core::option::Option<f64>) -> Self
 pub const fn nika_serve::ServerLimits::with_job_retention(self, settled_for: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_max_compile_requests(self, max_compile_requests: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_concurrent_jobs(self, max_concurrent_jobs: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_concurrent_per_owner(self, max_concurrent: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_jobs(self, max_jobs: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_queued_per_owner(self, max_queued: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_sse_clients(self, max_sse_clients: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_queue_capacity(self, queue_capacity: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_shutdown_grace(self, shutdown_grace: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_sse_timing(self, heartbeat: core::time::Duration, reconnect: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_unsuccessful_job_retention(self, settled_for: core::time::Duration) -> Self
 impl core::clone::Clone for nika_serve::ServerLimits
@@ -3275,6 +3286,7 @@ pub nika_serve::ServerError::InvalidConfig(&'static str)
 pub nika_serve::ServerError::JobStore(nika_serve::JobStoreError)
 pub nika_serve::ServerError::Listener(core::io::error::ErrorKind)
 pub nika_serve::ServerError::NativeAuthoring(nika_serve::NativeAuthoringError)
+pub nika_serve::ServerError::OwnerQueueFull
 pub nika_serve::ServerError::ScheduleStore(nika_serve::ScheduleStoreError)
 pub nika_serve::ServerError::ScheduledAdmission
 pub nika_serve::ServerError::ScheduledIdempotencyConflict
@@ -3326,8 +3338,10 @@ impl<T> typenum::type_operators::Same for nika_serve::ServerError
 pub type nika_serve::ServerError::Output = T
 #[non_exhaustive] pub enum nika_serve::ServerLaunchRefuse
 pub nika_serve::ServerLaunchRefuse::InvalidBind
+pub nika_serve::ServerLaunchRefuse::InvalidJobLimit
 pub nika_serve::ServerLaunchRefuse::InvalidJobRetention
 pub nika_serve::ServerLaunchRefuse::InvalidRunCostCeiling
+pub nika_serve::ServerLaunchRefuse::InvalidShutdownGrace
 pub nika_serve::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::ServerLaunchRefuse::MissingTokenFile
 pub nika_serve::ServerLaunchRefuse::RehearsalWithListener
@@ -4271,7 +4285,10 @@ impl<T> typenum::type_operators::Same for nika_serve::ResidentExecutionCoordinat
 pub type nika_serve::ResidentExecutionCoordinator::Output = T
 #[non_exhaustive] pub struct nika_serve::ResidentOptions
 impl nika_serve::ResidentOptions
+pub fn nika_serve::ResidentOptions::with_job_capacity(self, max_concurrent: core::option::Option<usize>, queue: core::option::Option<usize>, max_jobs: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 pub fn nika_serve::ResidentOptions::with_job_retention(self, succeeded: core::option::Option<&str>, unsuccessful: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_owner_limits(self, max_queued: core::option::Option<usize>, max_concurrent: core::option::Option<usize>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
+pub fn nika_serve::ResidentOptions::with_shutdown_grace(self, stated: core::option::Option<&str>) -> core::result::Result<Self, nika_serve::ServerLaunchRefuse>
 impl core::clone::Clone for nika_serve::ResidentOptions
 pub fn nika_serve::ResidentOptions::clone(&self) -> nika_serve::ResidentOptions
 impl core::cmp::PartialEq for nika_serve::ResidentOptions
@@ -4485,8 +4502,13 @@ pub const fn nika_serve::ServerLimits::new(max_body_bytes: usize, request_timeou
 pub const fn nika_serve::ServerLimits::with_default_max_cost_usd(self, ceiling: core::option::Option<f64>) -> Self
 pub const fn nika_serve::ServerLimits::with_job_retention(self, settled_for: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_max_compile_requests(self, max_compile_requests: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_concurrent_jobs(self, max_concurrent_jobs: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_concurrent_per_owner(self, max_concurrent: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_jobs(self, max_jobs: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_max_queued_per_owner(self, max_queued: usize) -> Self
 pub const fn nika_serve::ServerLimits::with_max_sse_clients(self, max_sse_clients: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_queue_capacity(self, queue_capacity: usize) -> Self
+pub const fn nika_serve::ServerLimits::with_shutdown_grace(self, shutdown_grace: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_sse_timing(self, heartbeat: core::time::Duration, reconnect: core::time::Duration) -> Self
 pub const fn nika_serve::ServerLimits::with_unsuccessful_job_retention(self, settled_for: core::time::Duration) -> Self
 impl core::clone::Clone for nika_serve::ServerLimits

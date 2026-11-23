@@ -151,6 +151,109 @@ fn job_retention_is_an_explicit_option_of_the_persistent_resident() {
     assert!(message.contains("--job-retention") && message.contains("one minute"));
 }
 
+/// The job limits are explicit options of the persistent resident: each is a
+/// whole number of at least one (the grace a duration of at least a second),
+/// none needs a listener, and none means anything in a rehearsal.
+#[test]
+fn job_limits_are_explicit_options_of_the_persistent_resident() {
+    const COUNTS: [&str; 5] = [
+        "--max-concurrent-jobs",
+        "--queue-capacity",
+        "--max-jobs",
+        "--max-queued-per-owner",
+        "--max-concurrent-per-owner",
+    ];
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    let unset = parse(&["serve"]);
+    assert_eq!(
+        (
+            unset.max_concurrent_jobs,
+            unset.queue_capacity,
+            unset.max_jobs,
+            unset.max_queued_per_owner,
+            unset.max_concurrent_per_owner,
+            unset.shutdown_grace,
+        ),
+        (None, None, None, None, None, None)
+    );
+    let args = parse(&[
+        "serve",
+        "--max-concurrent-jobs",
+        "16",
+        "--queue-capacity",
+        "5000",
+        "--max-jobs",
+        "20000",
+        "--max-queued-per-owner",
+        "50",
+        "--max-concurrent-per-owner",
+        "2",
+        "--shutdown-grace",
+        "5m",
+    ]);
+    assert_eq!(args.max_concurrent_jobs, Some(16));
+    assert_eq!(args.queue_capacity, Some(5_000));
+    assert_eq!(args.max_jobs, Some(20_000));
+    assert_eq!(args.max_queued_per_owner, Some(50));
+    assert_eq!(args.max_concurrent_per_owner, Some(2));
+    assert_eq!(args.shutdown_grace.as_deref(), Some("5m"));
+    for flag in COUNTS {
+        for refused in ["-1", "1.5", "many"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", flag, refused])
+                    .is_err(),
+                "{flag} {refused}"
+            );
+        }
+        for rehearsal in ["--once", "--dry"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", rehearsal, flag, "2"])
+                    .is_err(),
+                "{flag} means nothing with {rehearsal}"
+            );
+        }
+    }
+    assert!(
+        command()
+            .try_get_matches_from(["serve", "--once", "--shutdown-grace", "5m"])
+            .is_err()
+    );
+    let options = nika_serve::ResidentOptions::default;
+    assert!(
+        options()
+            .with_job_capacity(Some(16), Some(5_000), Some(20_000))
+            .and_then(|options| options.with_owner_limits(Some(50), Some(2)))
+            .and_then(|options| options.with_shutdown_grace(Some("5m")))
+            .is_ok()
+    );
+    assert_eq!(
+        options().with_job_capacity(Some(0), None, None).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidJobLimit)
+    );
+    assert_eq!(
+        options().with_owner_limits(None, Some(0)).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidJobLimit)
+    );
+    assert_eq!(
+        options().with_shutdown_grace(Some("0s")).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidShutdownGrace)
+    );
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidJobLimit);
+    for flag in COUNTS {
+        assert!(message.contains(flag), "{flag}: {message}");
+    }
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidShutdownGrace);
+    assert!(message.contains("--shutdown-grace") && message.contains("one second"));
+}
+
 /// `--cost-policy` is an explicit, repeatable listener option: it needs
 /// `--bind`, each occurrence is one rule kept as written, and it never
 /// changes the ceiling or seats the review door. The launch reads every rule

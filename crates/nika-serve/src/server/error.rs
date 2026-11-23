@@ -82,6 +82,10 @@ pub enum ServerError {
     /// The shared HTTP/ARM execution queue has no admission slot.
     #[error("resident execution queue is full")]
     ExecutionQueueFull,
+    /// The job's owner holds every queue place one owner may hold
+    /// (`--max-queued-per-owner`). Other owners are still admitted.
+    #[error("resident execution queue is full for this owner")]
+    OwnerQueueFull,
     /// The authority is stopping: its execution queue is closed. A fire or
     /// an admission that meets it is not the caller's error and never a
     /// full queue; the scheduler ends clean, HTTP answers « stopping ».

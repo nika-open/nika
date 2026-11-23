@@ -22,7 +22,7 @@ use super::{ExecutionBackend, ExecutionDisposition, ExecutionOutcome};
 async fn a_settled_queue_duplicate_does_not_reopen_its_world() {
     let world = TestWorld::new();
     let backend = Arc::new(TestBackend::completes(ExecutionDisposition::Succeeded));
-    let mut authority = super::ResidentAuthority::open(
+    let authority = super::ResidentAuthority::open(
         super::ResidentConfig::new(&world.state).with_limits(limits()),
         backend.clone(),
     )
@@ -116,7 +116,7 @@ async fn a_running_queue_duplicate_keeps_the_owners_cancellation_registration() 
         64,
         32,
     );
-    let mut authority = super::ResidentAuthority::open(
+    let authority = super::ResidentAuthority::open(
         super::ResidentConfig::new(&world.state).with_limits(limits),
         backend.clone(),
     )

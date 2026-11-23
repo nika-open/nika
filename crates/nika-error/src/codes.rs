@@ -524,6 +524,10 @@ pub fn resident_help(code: &str) -> Option<String> {
             "the schedule is a beat of the project's `nika.yaml`, which the HTTP door neither removes nor triggers",
             "edit `nika.yaml` to change or remove it, and run it once by hand with `nika arm fire <label>`",
         ),
+        "owner_queue_full" => (
+            "the job's owner already has as many jobs waiting as the resident lets one owner have (`--max-queued-per-owner`); nothing was written and other owners are still admitted",
+            "send the same request again after the `Retry-After` seconds, once one of the owner's jobs has started; `GET /v1/occupancy` shows what each owner holds",
+        ),
         _ => return None,
     };
     Some(format!(
@@ -1780,6 +1784,7 @@ mod tests {
                 "invalid_job_cursor",
                 "invalid_schedule_trigger",
                 "schedule_declared_by_project",
+                "owner_queue_full",
             ] {
                 let text = super::resident_help(code);
                 assert!(text.is_some(), "{code} is taught");

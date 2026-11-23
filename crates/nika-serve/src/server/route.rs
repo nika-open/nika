@@ -213,6 +213,7 @@ async fn route_authenticated(
     let path = request.uri().path().to_owned();
     match (request.method(), path.as_str()) {
         (&Method::GET, "/v1/jobs") => super::job_list::list(request.uri().query(), &state).await,
+        (&Method::GET, "/v1/occupancy") => super::occupancy::read(&state),
         (&Method::GET, "/v1/schedules") => super::schedule_manage::list(&state).await,
         (&Method::DELETE, path) if path.starts_with("/v1/schedules/") => {
             let Some(id) = schedule_route(path) else {
@@ -693,6 +694,7 @@ pub(super) fn admission_error(error: &super::ServerError) -> Response<ResponseBo
         super::ServerError::JobStore(crate::JobStoreError::Busy)
         | super::ServerError::StoreQueueFull => store_busy(),
         super::ServerError::ExecutionQueueFull => queue_full(),
+        super::ServerError::OwnerQueueFull => super::occupancy::owner_queue_full(),
         super::ServerError::Stopping => stopping(),
         _ => internal_error(),
     }
@@ -848,6 +850,8 @@ async fn cancel_queued_job(
     {
         Ok(cancelled) => {
             state.cancellations.retire(&id);
+            // Its place in its owner's lane is free at once.
+            state.coordinator.forget_queued(&id);
             Ok(json_response(
                 StatusCode::OK,
                 &JobResponse::from(&cancelled),

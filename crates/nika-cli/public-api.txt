@@ -711,6 +711,9 @@ pub fn nika_cli::verbs::list::run(root: &std::path::Path) -> nika_cli_host::outp
 pub mod nika_cli::verbs::mcp_pins
 pub enum nika_cli::verbs::mcp_pins::McpAction
 pub nika_cli::verbs::mcp_pins::McpAction::Approve
+pub nika_cli::verbs::mcp_pins::McpAction::Approve::no_role: alloc::vec::Vec<alloc::string::String>
+pub nika_cli::verbs::mcp_pins::McpAction::Approve::reads_private: alloc::vec::Vec<alloc::string::String>
+pub nika_cli::verbs::mcp_pins::McpAction::Approve::sends_out: alloc::vec::Vec<alloc::string::String>
 pub nika_cli::verbs::mcp_pins::McpAction::Approve::server: alloc::string::String
 impl clap_builder::derive::FromArgMatches for nika_cli::verbs::mcp_pins::McpAction
 pub fn nika_cli::verbs::mcp_pins::McpAction::from_arg_matches(__clap_arg_matches: &clap_builder::parser::matches::arg_matches::ArgMatches) -> core::result::Result<Self, clap_builder::Error>
@@ -815,7 +818,7 @@ impl<T> tracing::instrument::WithSubscriber for nika_cli::verbs::mcp_pins::McpTr
 impl<T> typenum::type_operators::Same for nika_cli::verbs::mcp_pins::McpTransportArg
 pub type nika_cli::verbs::mcp_pins::McpTransportArg::Output = T
 pub const nika_cli::verbs::mcp_pins::OPERATOR_HELP: &str
-pub fn nika_cli::verbs::mcp_pins::approve(server: &str) -> nika_cli_host::output::VerbOutput
+pub fn nika_cli::verbs::mcp_pins::approve(server: &str, declared: &nika_mcp::pin::RoleDeclarations) -> nika_cli_host::output::VerbOutput
 pub fn nika_cli::verbs::mcp_pins::mcp_verb(action: core::option::Option<nika_cli::verbs::mcp_pins::McpAction>, transport: nika_cli::verbs::mcp_pins::McpTransportArg, port: u16, bind: &str) -> u8
 pub mod nika_cli::verbs::model
 pub mod nika_cli::verbs::model::pull

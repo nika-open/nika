@@ -221,6 +221,16 @@ prove those descriptions are truthful, the server is harmless, or an effect
 was delivered. Keep the intended permissions and review the actual result;
 re-pinning is a review decision, not an automatic fix for drift.
 
+A pin also records what each tool does, because `permits:` cannot see an
+effect that happens on the server: `nika mcp approve <server>
+--reads-private <tool> --sends-out <tool> --no-role <tool>`. A tool
+declared `private-read` or `egress` counts as that leg of the trifecta at
+`nika check`. A tool with no declared role is not judged by the TRIFECTA
+row, and the check says so in an `mcp-roles` hint. The role is the
+operator's statement, reviewed like `permits:`: never declare one for the
+user, ask which tools read private data and which send out. A changed
+definition drops the role, so re-approving asks for it again.
+
 ## Observability (the journal is exportable, not captive)
 
 - `nika trace export <trace>` projects the journal to OTLP/JSON

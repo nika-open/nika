@@ -16,6 +16,73 @@ pub use nika_check::static_literal_of
 pub use nika_check::static_read_paths
 pub use nika_check::thinking_findings
 pub use nika_check::with_model_override
+pub mod nika_check::mcp_roles
+#[non_exhaustive] pub struct nika_check::mcp_roles::McpToolRoles
+pub nika_check::mcp_roles::McpToolRoles::egress: bool
+pub nika_check::mcp_roles::McpToolRoles::private_read: bool
+impl nika_check::mcp_roles::McpToolRoles
+pub const nika_check::mcp_roles::McpToolRoles::EGRESS: &'static str
+pub const nika_check::mcp_roles::McpToolRoles::PRIVATE_READ: &'static str
+pub fn nika_check::mcp_roles::McpToolRoles::from_tokens<I, S>(tokens: I) -> core::result::Result<Self, alloc::string::String> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub const fn nika_check::mcp_roles::McpToolRoles::new(private_read: bool, egress: bool) -> Self
+pub fn nika_check::mcp_roles::McpToolRoles::tokens(self) -> alloc::vec::Vec<&'static str>
+pub const fn nika_check::mcp_roles::McpToolRoles::union(self, other: Self) -> Self
+impl core::clone::Clone for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::clone(&self) -> nika_check::mcp_roles::McpToolRoles
+impl core::cmp::Eq for nika_check::mcp_roles::McpToolRoles
+impl core::cmp::Ord for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::cmp(&self, other: &nika_check::mcp_roles::McpToolRoles) -> core::cmp::Ordering
+impl core::cmp::PartialEq for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::eq(&self, other: &nika_check::mcp_roles::McpToolRoles) -> bool
+impl core::cmp::PartialOrd for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::partial_cmp(&self, other: &nika_check::mcp_roles::McpToolRoles) -> core::option::Option<core::cmp::Ordering>
+impl core::default::Default for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::default() -> nika_check::mcp_roles::McpToolRoles
+impl core::fmt::Debug for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_check::mcp_roles::McpToolRoles
+impl core::marker::StructuralPartialEq for nika_check::mcp_roles::McpToolRoles
+impl serde_core::ser::Serialize for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+impl<D> owo_colors::OwoColorize for nika_check::mcp_roles::McpToolRoles
+impl<Q, K> equivalent::Comparable<K> for nika_check::mcp_roles::McpToolRoles where Q: core::cmp::Ord + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::compare(&self, key: &K) -> core::cmp::Ordering
+impl<Q, K> equivalent::Equivalent<K> for nika_check::mcp_roles::McpToolRoles where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_check::mcp_roles::McpToolRoles where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_check::mcp_roles::McpToolRoles where U: core::convert::From<T>
+pub fn nika_check::mcp_roles::McpToolRoles::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_check::mcp_roles::McpToolRoles where U: core::convert::Into<T>
+pub type nika_check::mcp_roles::McpToolRoles::Error = core::convert::Infallible
+pub fn nika_check::mcp_roles::McpToolRoles::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_check::mcp_roles::McpToolRoles where U: core::convert::TryFrom<T>
+pub type nika_check::mcp_roles::McpToolRoles::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_check::mcp_roles::McpToolRoles::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_check::mcp_roles::McpToolRoles where T: core::clone::Clone
+pub type nika_check::mcp_roles::McpToolRoles::Owned = T
+pub fn nika_check::mcp_roles::McpToolRoles::clone_into(&self, target: &mut T)
+pub fn nika_check::mcp_roles::McpToolRoles::to_owned(&self) -> T
+impl<T> core::any::Any for nika_check::mcp_roles::McpToolRoles where T: 'static + ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_check::mcp_roles::McpToolRoles where T: ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_check::mcp_roles::McpToolRoles where T: ?core::marker::Sized
+pub fn nika_check::mcp_roles::McpToolRoles::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_check::mcp_roles::McpToolRoles where T: core::clone::Clone
+pub unsafe fn nika_check::mcp_roles::McpToolRoles::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_check::mcp_roles::McpToolRoles
+pub fn nika_check::mcp_roles::McpToolRoles::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_check::mcp_roles::McpToolRoles where T: core::clone::Clone
+pub fn nika_check::mcp_roles::McpToolRoles::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_check::mcp_roles::McpToolRoles where T: 'static
+pub fn nika_check::mcp_roles::McpToolRoles::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> outref::AsOut<T> for nika_check::mcp_roles::McpToolRoles where T: core::marker::Copy
+pub fn nika_check::mcp_roles::McpToolRoles::as_out(&mut self) -> outref::Out<'_, T>
+impl<T> serde_core::de::DeserializeOwned for nika_check::mcp_roles::McpToolRoles where T: for<'de> serde_core::de::Deserialize<'de>
+pub type nika_check::mcp_roles::McpRoleMap = alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_check::mcp_roles::McpToolRoles>
 pub mod nika_check::native_first
 pub fn nika_check::native_first::classify(command: &nika_schema::raw::action::RawCommand) -> core::option::Option<(&'static str, alloc::string::String)>
 pub fn nika_check::native_first::classify_all(command: &nika_schema::raw::action::RawCommand) -> alloc::vec::Vec<(&'static str, alloc::string::String)>
@@ -124,6 +191,7 @@ pub fn nika_check::slots::scan(wf: &nika_schema::raw::workflow::RawWorkflow) -> 
 pub mod nika_check::trifecta
 pub fn nika_check::trifecta::scan_trifecta(wf: &nika_schema::raw::workflow::RawWorkflow, edges: &[nika_check_analyzer::edges::Edge], topo_waves: &[alloc::vec::Vec<usize>]) -> nika_cap::trifecta::TrifectaVerdict
 pub fn nika_check::trifecta::scan_trifecta_composed(wf: &nika_schema::raw::workflow::RawWorkflow, edges: &[nika_check_analyzer::edges::Edge], topo_waves: &[alloc::vec::Vec<usize>], calls: &[nika_check::ComposedCall]) -> nika_cap::trifecta::TrifectaVerdict
+pub fn nika_check::trifecta::scan_trifecta_declared(wf: &nika_schema::raw::workflow::RawWorkflow, edges: &[nika_check_analyzer::edges::Edge], topo_waves: &[alloc::vec::Vec<usize>], calls: &[nika_check::ComposedCall], roles: &nika_check::mcp_roles::McpRoleMap) -> nika_cap::trifecta::TrifectaVerdict
 #[non_exhaustive] pub enum nika_check::DataClassification
 pub nika_check::DataClassification::Internal
 pub nika_check::DataClassification::Regulated
@@ -832,6 +900,7 @@ pub nika_check::CheckReport::gate_findings: alloc::vec::Vec<nika_check::GateFind
 pub nika_check::CheckReport::hints: alloc::vec::Vec<nika_check::Hint>
 pub nika_check::CheckReport::lift_findings: alloc::vec::Vec<nika_check::LiftFinding>
 pub nika_check::CheckReport::literal_credentials: alloc::vec::Vec<nika_check::LiteralCredential>
+pub nika_check::CheckReport::mcp_tool_roles: nika_check::mcp_roles::McpRoleMap
 pub nika_check::CheckReport::missing_args: alloc::vec::Vec<nika_check::MissingArg>
 pub nika_check::CheckReport::order_findings: alloc::vec::Vec<nika_check::OrderFinding>
 pub nika_check::CheckReport::permit_taints: alloc::vec::Vec<nika_check::PermitTaint>

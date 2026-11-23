@@ -327,10 +327,10 @@ may accept an unknown request field without applying it.
   `crates/nika-providers/src/gate_tests.rs` -- fairness, bounds, the cap across three
   fanned-out jobs, a child run, cancellation
 - `crates/nika-serve/openapi.json` -- the served contract
-- Commits `0584fb445` (format 4), `5ed6aece2` (attribution), `1f300cdad` (list), `c41982f4b`
-  (retention), `cc846d3ae` (schedules), `31285cca9` (fair admission, limit flags, occupancy),
-  `85c005729` (the migration written under the lease, a forgotten queue entry, a slot keeps its
-  job), `46d711ea1` (the provider cap)
+- Commits `17c9ddebf` (format 4), `699fa2a91` (attribution), `4d8edcd68` (list), `4d96f57f9`
+  (retention), `783a61c09` (schedules), `65b7027a0` (fair admission, limit flags, occupancy),
+  `b9e73992e` (the migration written under the lease, a forgotten queue entry, a slot keeps its
+  job), `30f3b3404` (the provider cap)
 
 ## Alternatives considered
 

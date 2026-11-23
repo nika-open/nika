@@ -107,7 +107,7 @@ second consumer. The kernel is not touched.
 
 ## 5. Evidence
 
-### Gates on `9eaa908fb`, the last commit that changes code or a lockfile
+### Gates on `1d70c3b86`, the last commit that changes code or a lockfile
 
 | Gate | Result |
 |---|---|
@@ -163,11 +163,11 @@ was removed, the named test was seen to fail, and the code was restored:
 
 Each was a read-only review by an agent that had not written the code.
 
-- **Of A.** Three defects, fixed in `85c005729`: the migration was written
+- **Of A.** Three defects, fixed in `b9e73992e`: the migration was written
   outside the store's lease; a cancelled queued job kept its place; a
   scheduled slot whose workflow changed after it fired stopped the resident.
 - **Of B.** One contract defect and four smaller ones, fixed in
-  `95e11b1f0`: an approved cost review was spent by a queue refusal that asks
+  `0f2eca070`: an approved cost review was spent by a queue refusal that asks
   for a retry; a replay arriving while a worker held the job could queue it
   twice or be refused; two tests asserted less than they claimed;
   `--max-concurrent-jobs` had no upper bound. The review also asked whether
@@ -222,7 +222,7 @@ turned two rows of the sweep red (`cargo-audit-rustsec` and
 `cargo-deny-policy`) on `main` as on this branch, which had changed no
 manifest and no lockfile.
 
-`9eaa908fb` moves the three lockfiles (the root, `fuzz/` and
+`1d70c3b86` moves the three lockfiles (the root, `fuzz/` and
 `crates/nika-acp/`) to `url` 2.5.9 and the `form_urlencoded` 1.2.3 it
 requires, the way the repository's earlier dependency fix did: lockfiles
 only, the new releases read before the bump, one `security` fragment.
@@ -261,25 +261,25 @@ is 833 lines above that. C was estimated at 1,400 more, which still fits.
 | Commit | What |
 |---|---|
 | `b41df2799` | measure what one job costs the store as it grows |
-| `11fa47cf7` | the plan |
-| `0584fb445` | A1 · attribution, admission instant and rank in store format 4 |
-| `5ed6aece2` | A2 · `owner` and `labels` on the by-name job form |
-| `1f300cdad` | A3 · `GET /v1/jobs` |
-| `c41982f4b` | A4 · retention |
-| `cc846d3ae` | A5 · list, remove and trigger schedules |
-| `93d2d445e` | A6 · ADR-155 |
-| `31285cca9` | B1 · fair queue, per-owner limits, limit flags, occupancy |
-| `85c005729` | review fixes on A |
-| `46d711ea1` | B2 · the provider gate |
-| `a1963ab1c` | B3 · ADR-155 and the plan brought to what is built |
-| `64ca2b1d6` | C0 · ADR-156, proposed |
-| `a59e8d25e` | the SDK follow-up plan and the roadmap line |
-| `95e11b1f0` | review fixes on B |
-| `9eaa908fb` | `url` moved to its patched release |
+| `a4f699901` | the plan |
+| `17c9ddebf` | A1 · attribution, admission instant and rank in store format 4 |
+| `699fa2a91` | A2 · `owner` and `labels` on the by-name job form |
+| `4d8edcd68` | A3 · `GET /v1/jobs` |
+| `4d96f57f9` | A4 · retention |
+| `783a61c09` | A5 · list, remove and trigger schedules |
+| `6e9859c45` | A6 · ADR-155 |
+| `65b7027a0` | B1 · fair queue, per-owner limits, limit flags, occupancy |
+| `b9e73992e` | review fixes on A |
+| `30f3b3404` | B2 · the provider gate |
+| `3318b5f24` | B3 · ADR-155 and the plan brought to what is built |
+| `a770b2a3c` | C0 · ADR-156, proposed |
+| `887846ebb` | the SDK follow-up plan and the roadmap line |
+| `0f2eca070` | review fixes on B |
+| `1d70c3b86` | `url` moved to its patched release |
 
-One pull request per workstream is the natural split: A (`0584fb445` to
-`93d2d445e`, with `85c005729`), then B (`31285cca9`, `46d711ea1`,
-`a1963ab1c`, `95e11b1f0`), the documents last. The dependency fix is
+One pull request per workstream is the natural split: A (`17c9ddebf` to
+`6e9859c45`, with `b9e73992e`), then B (`65b7027a0`, `30f3b3404`,
+`3318b5f24`, `0f2eca070`), the documents last. The dependency fix is
 independent of all of them.
 
 ## 11. Next candidates, not designed

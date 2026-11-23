@@ -486,17 +486,17 @@ crates, the crate's tests):
 4. A4 retention.
 5. A5 schedule attribution, list, delete, trigger.
 6. A6 ADR-155, documentation, OpenAPI text, changelog fragments.
-7. B1 fair queue, per-owner limits, limit flags, occupancy (`31285cca9`).
+7. B1 fair queue, per-owner limits, limit flags, occupancy (`65b7027a0`).
 8. Review fixes on A: the migration written under the lease, a forgotten
-   queue entry, a slot keeps its job (`85c005729`).
-9. B2 provider gate, its flag, `providers` in the occupancy (`46d711ea1`).
-10. B3 ADR-155 and this plan brought to what is built (`a1963ab1c`).
-11. C0 ADR-156, then stop (`64ca2b1d6`).
-12. The SDK follow-up plan and the roadmap line (`a59e8d25e`).
+   queue entry, a slot keeps its job (`b9e73992e`).
+9. B2 provider gate, its flag, `providers` in the occupancy (`30f3b3404`).
+10. B3 ADR-155 and this plan brought to what is built (`3318b5f24`).
+11. C0 ADR-156, then stop (`a770b2a3c`).
+12. The SDK follow-up plan and the roadmap line (`887846ebb`).
 13. Review fixes on B: an approved cost review survives a queue refusal, a
     job a worker holds is not queued again, `--max-concurrent-jobs` stops
-    at 256 (`95e11b1f0`).
-14. `url` moved to its patched release (`9eaa908fb`). It is independent of
+    at 256 (`0f2eca070`).
+14. `url` moved to its patched release (`1d70c3b86`). It is independent of
     the workstreams: an advisory published on 20 November had turned two
     rows of the hygiene sweep red on `main`.
 15. The report, `2026-11-23-serve-production-jobs-report.md`.

@@ -175,12 +175,17 @@ tasks:
         // The tick names the gate it stands on, never « without a human
         // gate » (measured on 0.124.0: a gated file and a two-leg file
         // printed the same line).
+        // It says where the gate sits, never that it « guards »: whether a
+        // « no » stops the effect is the CONSENT lane's verdict, and only for
+        // a confirm gate.
         let tick = out
             .lines()
             .find(|l| l.contains("✔ TRIFECTA"))
             .unwrap_or_default();
-        assert!(
-            tick.contains("`ask` guards `leak`") && !tick.contains("without a human gate"),
+        assert_eq!(
+            tick.trim(),
+            "✔ TRIFECTA no lethal trifecta over the declared permits: a blocking human gate \
+             sits on every path to each egress the untrusted content reaches (`ask` before `leak`)",
             "the credited gate is named on the tick:\n{out}"
         );
     }
@@ -198,7 +203,7 @@ tasks:
             "no legs, no trifecta, no reason to withhold:\n{out}"
         );
         assert!(
-            out.contains("without a human gate") && !out.contains(" guards `"),
+            out.contains("without a human gate") && !out.contains("` before `"),
             "no gate was needed, so none is credited:\n{out}"
         );
     }

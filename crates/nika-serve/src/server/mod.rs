@@ -523,6 +523,13 @@ impl ExecutionTask {
         self
     }
 
+    /// The origin the job's record states: its receipt must state the same,
+    /// and a job a schedule fired runs with the facts of the slot it serves.
+    fn with_origin(mut self, origin: JobOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+
     fn scheduled(
         id: JobId,
         admitted: nika_execution::AdmittedExecution,
@@ -587,7 +594,8 @@ impl ResidentAuthority {
         let default_max_cost_usd = config.limits().default_max_cost_usd();
         for queued in store_actor.handle().queued_jobs().await? {
             let task = ExecutionTask::new(queued.id.clone(), default_max_cost_usd)
-                .with_access_pin(queued.access_pin);
+                .with_access_pin(queued.access_pin)
+                .with_origin(queued.origin);
             jobs.recover(queued.owner.as_deref(), queued.id, task);
         }
         let reviewed = Arc::new(cost_review::Reviewed::default());

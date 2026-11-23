@@ -225,6 +225,8 @@ async fn resumed_by_the_next_resident(world: &TestWorld, id: &str, first_trace: 
         .await
         .json();
     assert_eq!(&earlier["trace_id"], first_trace, "{earlier}");
-    assert_ne!(earlier["verdict"], "unavailable", "{earlier}");
+    // Killed before its end: the chain holds, and its writer is gone.
+    assert_eq!(earlier["verdict"], "incomplete", "{earlier}");
+    assert_eq!(earlier["chain"]["liveness"], "dead", "{earlier}");
     server.stop().await.expect("a clean stop");
 }

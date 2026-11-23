@@ -814,10 +814,13 @@ pub(super) async fn cancel_job(path: &str, state: &AppState) -> Response<Respons
 
 /// Cancel a running job. Durable first: a job its caller cancelled is never
 /// started again, even if the resident dies before the run settles. Then
-/// its run is told.
-async fn cancel_running_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
+/// its run is told. A job that stopped running between the read and the
+/// mark (a stop queued it again for a new attempt) is cancelled as it now
+/// stands.
+pub(super) async fn cancel_running_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
     match state.store.cancel_requested(id.clone()).await {
-        Ok(_) => {}
+        Ok(true) => {}
+        Ok(false) => return cancel_as_it_stands(state, id).await,
         Err(
             super::ServerError::JobStore(crate::JobStoreError::Busy)
             | super::ServerError::StoreQueueFull,
@@ -826,6 +829,28 @@ async fn cancel_running_job(state: &AppState, id: JobId) -> Response<ResponseBod
     }
     state.cancellations.cancel(&id);
     current_job(state, id).await
+}
+
+/// The cancellation of a job the mark found no longer running: queued, it
+/// is cancelled there; settled, it is answered as it stands.
+async fn cancel_as_it_stands(state: &AppState, id: JobId) -> Response<ResponseBody> {
+    match state.store.get(id.clone()).await {
+        // Each turn back here follows a real transition of the job, from
+        // running to queued: boxed, since the two cancellations call each
+        // other.
+        Ok(Some(record)) if record.status() == crate::JobStatus::Queued => {
+            match Box::pin(cancel_queued_job(state, id, record)).await {
+                Ok(response) | Err(response) => response,
+            }
+        }
+        Ok(Some(record)) => json_response(StatusCode::OK, &JobResponse::from(&record)),
+        Ok(None) => job_not_found(),
+        Err(
+            super::ServerError::JobStore(crate::JobStoreError::Busy)
+            | super::ServerError::StoreQueueFull,
+        ) => store_busy(),
+        Err(_) => internal_error(),
+    }
 }
 
 async fn cancel_queued_job(

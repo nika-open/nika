@@ -187,6 +187,48 @@ fn a_task_that_may_have_been_dispatched_counts_at_its_bound() {
 }
 
 #[test]
+fn a_call_in_flight_through_an_agent_application_is_unknown_spend() {
+    let wf = parse(PRICED);
+    let boot = |plan: &str| frame(EventKind::WorkflowStarted, &[("access_plan", text(plan))]);
+    let journal = |plan: &str| {
+        [
+            boot(plan),
+            scheduled("first"),
+            scheduled("second"),
+            scheduled("third"),
+        ]
+    };
+    let api = r#"[{"model":"anthropic/claude-sonnet-4-6","access":"anthropic","chosen":"api"}]"#;
+    let priced = interrupted_spend(&wf, &BTreeMap::new(), &journal(api));
+    assert!(
+        (priced.usd - worst_case(&wf, "first")).abs() < 1e-12,
+        "{priced:?}"
+    );
+    assert!(!priced.unknown, "a plain route is priced at its bound");
+    let harness =
+        r#"[{"model":"anthropic/claude-sonnet-4-6","access":"claude","chosen":"harness"}]"#;
+    let quota = interrupted_spend(&wf, &BTreeMap::new(), &journal(harness));
+    assert!(
+        quota.unknown,
+        "a subscription lane bills no catalog price: {quota:?}"
+    );
+    // Nothing in flight: what settled is all there is to count.
+    let mut settled = journal(harness).to_vec();
+    for task in ["first", "second", "third"] {
+        settled.push(completed(task, &[("cost_usd", FieldValue::Float(0.0))]));
+    }
+    let done = interrupted_spend(&wf, &BTreeMap::new(), &settled);
+    assert_eq!((done.usd, done.unknown), (0.0, false));
+    // A tool in flight calls no model: no route bills it.
+    let tool = parse(
+        "nika: t\npermits: { tools: [\"nika:wait\"] }\ntasks:\n  pause:\n    invoke: { tool: \"nika:wait\", args: { duration: \"1s\" } }\n",
+    );
+    let unstated = frame(EventKind::WorkflowStarted, &[]);
+    let waiting = interrupted_spend(&tool, &BTreeMap::new(), &[unstated, scheduled("pause")]);
+    assert_eq!((waiting.usd, waiting.unknown), (0.0, false));
+}
+
+#[test]
 fn a_route_that_reasons_beyond_its_bound_leaves_its_call_in_flight_unknown() {
     let reasoning = PRICED.replace("anthropic/claude-sonnet-4-6", "xai/grok-4.7");
     let wf = parse(&reasoning);

@@ -11,7 +11,7 @@ use serde::Serialize;
 use super::AppState;
 use super::error::{ApiError, ResponseBody};
 use super::route::{admission_error, json_response};
-use crate::job::{AttemptView, ClosedAttempt, JobAttempts, RetryRefusal, Spend};
+use crate::job::{AttemptView, ClosedAttempt, JobAttempts, RetryRefusal, Spend, retryable};
 use crate::{JobId, JobReceipt, JobRecord, JobStatus};
 
 /// Answer one attempts read.
@@ -128,14 +128,19 @@ impl<'a> AttemptsBody<'a> {
             .limits
             .retry_policy()
             .for_job(read.record.retry.as_ref());
+        let retry_state = read.retry_state.at_bound(
+            retryable(&read.record),
+            read.record.attempt(),
+            policy.max_attempts(),
+        );
         Self {
             job_id: read.record.id().as_str(),
             policy: PolicyBody {
                 on_interrupted: policy.on_interrupted().as_str(),
                 max_attempts: policy.max_attempts(),
             },
-            retry_state: read.retry_state.as_str(),
-            retry_reason: read.retry_state.reason().map(RetryRefusal::code),
+            retry_state: retry_state.as_str(),
+            retry_reason: retry_state.reason().map(RetryRefusal::code),
             attempts: read.attempts.iter().map(AttemptBody::of).collect(),
         }
     }

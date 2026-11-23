@@ -15,12 +15,12 @@ pub(super) fn path(error: &dyn Fn(&'static str) -> Value, job: &Value) -> Value 
         "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobRetryRequest"}}}},
         "responses": {
-            "200": {"description": "The same request already retried this attempt: the job as it stands", "content": job},
+            "200": {"description": "The same request already retried this attempt: the job as it stands. A job still `queued` is put back in its owner's lane unless it waits already", "content": job},
             "202": {"description": "The new attempt is queued", "content": job},
             "401": error("Error envelope"),
             "404": error("`job_not_found`: unknown or forgotten job id"),
             "408": error("Request deadline"),
-            "409": error("`job_not_retryable`: the job did not end `interrupted` or `failed`, a cancellation was accepted on it, its latest attempt never started, or `attempt` is not its latest · `retry_exhausted`: the job reached its bound of attempts · `resume_refused`: the attempt's journal cannot be resumed, or a schedule fired the job · `unknown_spend`: what an attempt spent cannot be read under a ceiling, and the request states no `max_cost_usd` · `budget_exhausted`: nothing is left under the job's ceiling"),
+            "409": error("`job_not_retryable`: the job did not end `interrupted` or `failed`, a cancellation was accepted on it, its latest attempt never started, or `attempt` is not its latest · `retry_exhausted`: the job reached its bound of attempts · `resume_refused`: the attempt's journal cannot be resumed, or a schedule fired the job · `unknown_spend`: what an attempt spent cannot be read, and no `max_cost_usd` is stated · `budget_exhausted`: nothing is left under the job's ceiling"),
             "413": error("`body_too_large`"),
             "422": error("`invalid_job_retry`: the body is not a retry request"),
             "429": super::occupancy::owner_refusal(),
@@ -50,7 +50,7 @@ pub(super) fn retry_state_schema() -> Value {
     json!({
         "type": "string",
         "enum": ["none", "queued", "exhausted", "refused"],
-        "description": "`queued`: a new attempt waits in its owner's lane. `exhausted`: the job took its bound of attempts. `refused`: the resident decided not to start it again, and says why (`retry_reason`, and the code of the job's last event or error). `none`: nothing waits and nothing was refused, including a job whose latest attempt failed for a reason of its own. Open: a later engine may add a word."
+        "description": "`queued`: a new attempt waits in its owner's lane. `exhausted`: the job took its bound of attempts, so a request would be refused. `refused`: the resident decided not to start it again, and says why (`retry_reason`, and the code of the job's last event or error). `none`: nothing waits and nothing was refused, including a job whose latest attempt failed for a reason of its own while its bound leaves room. Open: a later engine may add a word."
     })
 }
 

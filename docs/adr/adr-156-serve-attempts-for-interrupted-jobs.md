@@ -532,8 +532,8 @@ Written for the manual retry route:
     judgment of section 3, then the cost of section 6: no budget makes a journal resumable.
     A job a schedule fired is never resumed; a request may restart it.
 18. **What the retried attempt spent** is read from its journal, as for a lost run. A failed
-    run that left no journal is of unknown spend: under a ceiling, the request states
-    `max_cost_usd`. A request's `max_cost_usd` holds for the attempts after it until another
+    run that left no journal is of unknown spend: the request states `max_cost_usd`, under a
+    ceiling or not (note 25). A request's `max_cost_usd` holds for the attempts after it until another
     request states one; a request that states none leaves the earlier one in force.
 19. **A settled attempt stays bound to its end.** The closed attempt keeps the sequence of its
     terminal event and the request that closed it. That terminal event is hashed from the
@@ -551,7 +551,7 @@ Written for reading attempts:
     `exhausted` and `refused` are read from the code on the `interrupted` event that ended
     the job, or from the error of a re-attempt refused before it ran; `retry_reason` names
     it. A job whose latest attempt failed for a reason of its own is `none`: a request may
-    still retry it.
+    still retry it, unless the job has taken its bound (note 30).
 22. **Spend and instants.** `spend` is on the attempts that were started again: what the
     decision that closed each one counted. The attempt in hand carries its own spend in its
     settlement. `started_at` is the attempt's `execution.started` event; `ended_at` its
@@ -566,6 +566,51 @@ Written for the faults:
     world: it is refused at readmission, as in 0.124.5, and its attempt never started, so a
     request cannot start it again. No frozen format 3 store holds a running job; that case
     is judged by the rules above and is not proved from a fixture.
+
+Written for the reviews of the branch:
+
+25. **Unknown spend refuses with no ceiling as well.** Decision 5 reads "unknown cost refuses
+    unless an explicit budget is stated". The first build refused it under a ceiling only; a
+    resident run with no ceiling at all now refuses it too, for a lost run and for a request.
+26. **The order of the automatic decision.** The cancellation, the policy, the bound of
+    section 8, the consent of section 5, then for `resume` the journal judgment of section 3,
+    then the cost of section 6. A broken journal is also of unknown spend: judged first, it says
+    `resume_refused`, as note 17 orders it for a request.
+27. **A call in flight on an agent application is unknown spend.** Section 6 counts any call on
+    an unpriced route as unknown. A journal names its routes for the run, not for each task:
+    when a run rode an agent application for any model, or names no route, every call it had in
+    flight is unknown spend. It can only overstate.
+28. **A job a schedule fired keeps its origin when a request restarts it.** The new attempt
+    runs with the facts of the slot it serves and its receipt states the schedule, as the
+    record does; the same holds for such an attempt still queued when a resident starts.
+29. **A request that ended before its queue entry.** The store's write and the queue entry are
+    two steps: a request that ends between them (a timeout, a disconnect) leaves the job
+    `queued` with no place in its owner's lane. The same request sent again puts it back, unless
+    it waits already. A request is matched by the attempt it names and what it states, amounts
+    compared as amounts (`1` and `1.0` are one budget), whatever attempts came after it.
+30. **The bound in the retry state.** A job a request could retry and that has taken the bound
+    in force reads `exhausted`, `retry_reason: retry_exhausted`, even when its latest attempt
+    failed for a reason of its own: a request would be refused for that reason. This narrows
+    note 21.
+31. **A cancellation racing a stop.** A cancellation reads the job `running`, then a stop
+    queues it again before the durable mark is written: the mark finds the job `queued`, and
+    the cancellation cancels it there, as for any queued job.
+32. **A store that cannot answer.** A retry request whose captured world cannot be read now
+    because the store is busy answers `503 store_busy`; only a job with no world that can be
+    read is judged without one.
+
+Limits found by the reviews and not closed here:
+
+33. **A worker past its attempt.** A run interrupted while its resident lives (the execution
+    timeout, a stop) is told to stop and dropped; its blocking work can still be running when
+    a request starts the next attempt. Not reproduced; the next attempt has its own execution
+    identity and journal, and the two never share a record.
+34. **The retry request writes through the control lane**, as a cancellation does. The lane is
+    bounded and its send blocks: while it is full, the request holds a runtime thread.
+35. **A journal with only its boot record counts zero** (note 3): every task is scheduled before
+    the first one runs, so such a run sent nothing.
+36. **The warnings of the resume judgment** (an engine or a seat that differs, under an exact
+    declaration) are not shown on the job: the judgment's verdict is.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

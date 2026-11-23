@@ -302,10 +302,10 @@ fn a_spend_nobody_can_read_refuses_under_a_ceiling_and_never_counts_for_zero() {
         judge(restart(3), Some(consented.journals.path())).judge(&consented.job, None),
         LostVerdict::Stay(Some(RetryRefusal::UnknownSpend))
     );
-    // No ceiling bounds the job: there is nothing the unknown could cross.
+    // With no ceiling at all, the unknown still never counts for zero.
     assert_eq!(
         judged(restart(3).with_default_max_cost_usd(None), &silent),
-        queued(Spend::new(0.0, true), 3)
+        LostVerdict::Stay(Some(RetryRefusal::UnknownSpend))
     );
     // A stated budget for the re-attempts accepts the unknown.
     let accepted = lost(
@@ -356,7 +356,11 @@ fn the_attempt_about_to_run_gets_what_its_job_has_left() {
         attempt_ceiling(Some(1.0), &lost.job),
         Err(RetryRefusal::UnknownSpend)
     );
-    assert_eq!(attempt_ceiling(None, &lost.job), Ok(None));
+    // With no ceiling at all the unknown spend still refuses.
+    assert_eq!(
+        attempt_ceiling(None, &lost.job),
+        Err(RetryRefusal::UnknownSpend)
+    );
 }
 
 #[test]
@@ -1071,47 +1075,64 @@ fn a_lost_run_resumes_only_from_a_journal_nika_run_would_resume() {
     );
 }
 
-#[test]
-fn a_broken_chain_leaves_the_job_interrupted_rather_than_run_it_from_the_start() {
-    let project = tempfile::tempdir().expect("project");
-    let settled = frame(
-        EventKind::TaskCompleted,
-        &[
-            ("task", FieldValue::string("value".to_owned())),
-            ("cost_usd", FieldValue::Float(0.0)),
-        ],
-    );
-    let lost_run = lost(
-        JobBindings::default().classed("none"),
-        Some(&[booted_under(this_engine()), settled]),
-    );
+/// Swap the two lines of a lost attempt's journal: the same records in
+/// the other order, and the chain no longer holds.
+fn break_chain(lost: &Lost) {
     let path = nika_dap::store::locate_trace(
-        lost_run.journals.path(),
-        lost_run.job.execution_id().expect("execution"),
-        lost_run.job.trace_id().expect("trace"),
+        lost.journals.path(),
+        lost.job.execution_id().expect("execution"),
+        lost.job.trace_id().expect("trace"),
     )
     .expect("the journal");
-    // The same two lines in the other order: the chain no longer holds.
     let text = std::fs::read_to_string(&path).expect("journal");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 2, "{text}");
     std::fs::write(&path, format!("{}\n{}\n", lines[1], lines[0])).expect("rewrite");
-    // No ceiling: the unknown spend of a broken journal refuses nothing here.
-    let resumed = judged_serving(
-        resume(3).with_default_max_cost_usd(None),
-        &lost_run,
-        Some(project.path()),
+}
+
+#[test]
+fn a_broken_chain_leaves_the_job_interrupted_rather_than_run_it_from_the_start() {
+    let project = tempfile::tempdir().expect("project");
+    let settled = || {
+        frame(
+            EventKind::TaskCompleted,
+            &[
+                ("task", FieldValue::string("value".to_owned())),
+                ("cost_usd", FieldValue::Float(0.0)),
+            ],
+        )
+    };
+    let lost_run = lost(
+        JobBindings::default().classed("none"),
+        Some(&[booted_under(this_engine()), settled()]),
     );
+    break_chain(&lost_run);
+    // A broken journal is also of unknown spend. Under the default ceiling
+    // the journal is judged first: the job says it cannot be resumed.
     assert_eq!(
-        resumed,
+        judged_serving(resume(3), &lost_run, Some(project.path())),
         LostVerdict::Stay(Some(RetryRefusal::ResumeRefused))
     );
-    let restarted = judged_serving(
-        restart(3).with_default_max_cost_usd(None),
-        &lost_run,
-        Some(project.path()),
+    assert_eq!(
+        judged_serving(restart(3), &lost_run, Some(project.path())),
+        LostVerdict::Stay(Some(RetryRefusal::UnknownSpend))
     );
-    assert_eq!(restarted, queued(Spend::new(0.0, true), 3));
+    // A stated budget accepts the unknown spend, never the broken chain.
+    let budgeted = lost(
+        JobBindings::default()
+            .classed("none")
+            .retrying(statement(&json!({"max_cost_usd": 0.5}))),
+        Some(&[booted_under(this_engine()), settled()]),
+    );
+    break_chain(&budgeted);
+    assert_eq!(
+        judged_serving(resume(3), &budgeted, Some(project.path())),
+        LostVerdict::Stay(Some(RetryRefusal::ResumeRefused))
+    );
+    assert_eq!(
+        judged_serving(restart(3), &budgeted, Some(project.path())),
+        queued(Spend::new(0.0, true), 3)
+    );
 }
 
 /// Two tasks in one wave: `first` ends at once, `second` waits long enough

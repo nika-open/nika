@@ -814,3 +814,152 @@ async fn restart_drains_more_queued_jobs_than_live_channel_capacity() {
         );
     }
 }
+
+fn retry_job(id: &str, body: &str) -> String {
+    format!(
+        "POST /v1/jobs/{id}/retry HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}\r\n{body}",
+        body.len(),
+        auth_header()
+    )
+}
+
+/// A job a schedule fired, left `interrupted` by a restart, is started
+/// again by request under its own origin: the receipt of the new attempt
+/// states the schedule, so the store records its result (ADR-156 note 17).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schedule_fired_job_restarted_by_request_settles_under_its_own_origin() {
+    let world = TestWorld::new();
+    let first = world
+        .start(
+            Arc::new(TestBackend::completes(ExecutionDisposition::Succeeded)),
+            limits(),
+        )
+        .await;
+    let origin = scheduled_origin(ScheduleOrigin::Project, "retried", 'a');
+    let prepared = prepare(first.coordinator(), admitted(&world), origin).await;
+    let run_id = prepared.run_id().as_str().to_owned();
+    prepared.abandon_for_restart_test();
+    first.stop().await.expect("clean crash boundary");
+
+    let backend = Arc::new(TestBackend::completes(ExecutionDisposition::Succeeded));
+    let server = world.start(backend.clone(), limits()).await;
+    let lost = server.request(&get_job(&run_id)).await.json();
+    assert_eq!(lost["status"], "interrupted", "{lost}");
+    let resume = r#"{"attempt": 1, "mode": "resume", "max_cost_usd": 0.5}"#;
+    let refused = server.request(&retry_job(&run_id, resume)).await;
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "resume_refused");
+    let restart = r#"{"attempt": 1, "mode": "restart", "max_cost_usd": 0.5}"#;
+    let queued = server.request(&retry_job(&run_id, restart)).await;
+    assert_eq!(queued.status, 202, "{}", queued.body);
+    wait_for_status(&server, &run_id, "succeeded")
+        .await
+        .expect("the new attempt records its result");
+    let settled = server.request(&get_job(&run_id)).await.json();
+    assert_eq!(
+        settled["receipt"]["origin"], lost["receipt"]["origin"],
+        "{settled}"
+    );
+    assert_eq!(settled["receipt"]["origin"]["kind"], "schedule");
+    assert_ne!(settled["execution_id"], lost["execution_id"]);
+    assert_eq!(backend.calls(), 1);
+    server.stop().await.expect("clean stop");
+}
+
+/// The first run fails, the second waits for [`FailThenHold::release`],
+/// every later one succeeds.
+#[derive(Debug)]
+struct FailThenHold {
+    calls: AtomicUsize,
+    held: tokio::sync::Semaphore,
+}
+
+impl FailThenHold {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            held: tokio::sync::Semaphore::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.held.add_permits(1);
+    }
+}
+
+impl ExecutionBackend for FailThenHold {
+    fn execute<'a>(
+        &'a self,
+        _context: nika_execution::ExecutionContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        Box::pin(async move {
+            match self.calls.fetch_add(1, Ordering::SeqCst) {
+                0 => ExecutionDisposition::Failed.into(),
+                1 => {
+                    let permit = self.held.acquire().await.expect("gate remains open");
+                    permit.forget();
+                    ExecutionDisposition::Succeeded.into()
+                }
+                _ => ExecutionDisposition::Succeeded.into(),
+            }
+        })
+    }
+}
+
+async fn submitted(server: &TestServer, key: &str) -> String {
+    let created = server
+        .request(&post_request(
+            &super::retry_tests::named(&serde_json::json!({})),
+            key,
+            &auth_header(),
+        ))
+        .await;
+    assert_eq!(created.status, 202, "{}", created.body);
+    created.json()["id"].as_str().expect("job id").to_owned()
+}
+
+/// A retry request that ended between the store's write and its queue
+/// entry (a timeout, a disconnect) leaves the job `queued` with no place in
+/// its owner's lane. The same request sent again puts it back, once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replayed_retry_puts_back_a_job_its_first_request_left_out_of_the_queue() {
+    let world = TestWorld::new();
+    let backend = Arc::new(FailThenHold::new());
+    let server = world
+        .start(backend.clone(), limits().with_max_concurrent_jobs(1))
+        .await;
+    let failed = submitted(&server, "retried-first").await;
+    wait_for_status(&server, &failed, "failed")
+        .await
+        .expect("the first run fails");
+    let holding = submitted(&server, "holding-the-lane").await;
+    wait_for_status(&server, &holding, "running")
+        .await
+        .expect("the only worker is taken");
+    let ask = r#"{"attempt": 1, "mode": "restart", "max_cost_usd": 0.5}"#;
+    let queued = server.request(&retry_job(&failed, ask)).await;
+    assert_eq!(queued.status, 202, "{}", queued.body);
+    // What a request dropped after the write leaves behind.
+    server
+        .coordinator()
+        .forget_queued(&crate::JobId::parse(&failed).expect("job id"));
+    for _ in 0..2 {
+        let replay = server.request(&retry_job(&failed, ask)).await;
+        assert_eq!(replay.status, 200, "{}", replay.body);
+        assert_eq!(replay.json()["status"], "queued", "{}", replay.body);
+    }
+    backend.release();
+    wait_for_status(&server, &failed, "succeeded")
+        .await
+        .expect("the replay queued the job again");
+    wait_for_status(&server, &holding, "succeeded")
+        .await
+        .expect("the held run ends");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(backend.calls(), 3, "one place, one run of the new attempt");
+    server.stop().await.expect("clean stop");
+}

@@ -243,7 +243,21 @@ pub fn interrupted_spend(
     let unsettled = possibly_dispatched(seated, &report.waves, &settled);
     bound_unsettled(&report, &unsettled, &mut spend);
     spend.unknown |= child_in_flight(seated, &unsettled);
+    // A catalog price is not what a call through an agent application
+    // bills: that lane draws its subscription's quota. Which task rode it
+    // is not in the journal, so any model call in flight is unknown spend.
+    spend.unknown |= model_in_flight(&report, &unsettled) && rode_harness(events);
     spend
+}
+
+/// Whether a task in `unsettled` calls a model. A tool that calls none
+/// bills no route, whichever one the run took.
+fn model_in_flight(report: &CheckReport, unsettled: &BTreeSet<String>) -> bool {
+    report
+        .data_journey
+        .model_endpoints
+        .iter()
+        .any(|endpoint| unsettled.contains(&endpoint.task))
 }
 
 /// Whether a task in `unsettled` calls a child workflow. Only the composed

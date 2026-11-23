@@ -165,8 +165,8 @@ with `resume_refused` instead, without running a task.
   `nika check` gives its task, which prices its declared output, not its
   input. When that spend cannot be known (a model with no price, a task
   with no `max_tokens`, a call in flight on a model that bills reasoning
-  beyond `max_tokens`, a run that left no journal), the job is not started
-  again under a ceiling. `"retry": {"max_cost_usd": 0.5}` is how a caller
+  beyond `max_tokens`, a model call in flight through an agent application,
+  a run that left no journal), the job is not started again. `"retry": {"max_cost_usd": 0.5}` is how a caller
   accepts it: the re-attempts then run under that amount.
 - **Why not.** A job left `interrupted` says why on its last event:
   `retry_exhausted`, `effects_need_consent`, `unknown_spend`,

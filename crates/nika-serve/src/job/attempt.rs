@@ -233,6 +233,13 @@ impl RetryRequest {
     pub(crate) fn budget(&self) -> Option<f64> {
         self.max_cost_usd.as_ref().and_then(Number::as_f64)
     }
+
+    /// Whether two requests state the same thing: amounts compare as
+    /// amounts, so `1` and `1.0` are one budget.
+    pub(crate) fn same_as(&self, other: &Self) -> bool {
+        self.max_cost_usd.is_some() == other.max_cost_usd.is_some()
+            && self.budget() == other.budget()
+    }
 }
 
 /// A retry request, validated (ADR-156 §9).
@@ -438,6 +445,17 @@ impl RetryState {
             other => Self::Refused(other),
         }
     }
+
+    /// The state as the policy in force reads it: a job whose latest
+    /// attempt a request could retry (`retryable`), and that has taken the
+    /// bound of attempts, is `exhausted` even when nothing was decided for
+    /// it: a request would be refused for that reason.
+    pub(crate) const fn at_bound(self, retryable: bool, attempt: u32, bound: u32) -> Self {
+        match self {
+            Self::None if retryable && attempt >= bound => Self::Exhausted,
+            other => other,
+        }
+    }
 }
 
 /// What the attempt after `spent` may spend.
@@ -447,7 +465,7 @@ pub(crate) enum Remaining {
     Unbounded,
     /// This much is left (USD, above zero).
     Usd(f64),
-    /// A ceiling bounds the job and an attempt's spend is unknown.
+    /// An attempt's spend is unknown and nobody stated a budget.
     UnknownSpend,
     /// Nothing is left.
     Exhausted,
@@ -455,16 +473,18 @@ pub(crate) enum Remaining {
 
 /// What is left for a new attempt (ADR-156 §6). `ceiling` covers every
 /// attempt; `budget` is the stated ceiling of the re-attempts alone, and
-/// whoever stated it accepted the unknown spend. `spent` lists every
-/// attempt so far, oldest first; with none so far the new attempt is the
-/// first, which the budget of the re-attempts does not bound.
+/// whoever stated it accepted the unknown spend. Without one an unknown
+/// spend refuses, under a ceiling or not: it never counts for zero.
+/// `spent` lists every attempt so far, oldest first; with none so far the
+/// new attempt is the first, which the budget of the re-attempts does not
+/// bound.
 pub(crate) fn remaining<'s>(
     ceiling: Option<f64>,
     budget: Option<f64>,
     spent: impl Iterator<Item = &'s Spend> + Clone,
 ) -> Remaining {
     let budget = budget.filter(|_| spent.clone().next().is_some());
-    if ceiling.is_some() && budget.is_none() && spent.clone().any(Spend::unknown) {
+    if budget.is_none() && spent.clone().any(Spend::unknown) {
         return Remaining::UnknownSpend;
     }
     let all: f64 = spent.clone().map(Spend::usd).sum();
@@ -502,9 +522,14 @@ pub(crate) struct LostRun<'a> {
 }
 
 /// Decide whether a run that lost its owner is started again (ADR-156
-/// §§2, 4 to 6 and 8). `Err(None)` leaves the job `interrupted` with no
+/// §§2 to 6 and 8). `Err(None)` leaves the job `interrupted` with no
 /// reason to state: the policy is off, or its caller cancelled it.
-pub(crate) fn decide(lost: &LostRun<'_>) -> Result<AttemptMode, Option<RetryRefusal>> {
+/// `resumable` judges the lost attempt's journal, and is asked only for a
+/// `resume`, before the cost: no budget makes a journal resumable.
+pub(crate) fn decide(
+    lost: &LostRun<'_>,
+    resumable: impl FnOnce() -> bool,
+) -> Result<AttemptMode, Option<RetryRefusal>> {
     if lost.cancel_requested {
         return Err(None);
     }
@@ -515,6 +540,10 @@ pub(crate) fn decide(lost: &LostRun<'_>) -> Result<AttemptMode, Option<RetryRefu
     }
     if !lost.contained && !lost.consent {
         return Err(Some(RetryRefusal::EffectsNeedConsent));
+    }
+    // The resident never falls back to `restart` on its own.
+    if mode == AttemptMode::Resume && !resumable() {
+        return Err(Some(RetryRefusal::ResumeRefused));
     }
     match remaining(lost.ceiling, lost.budget, lost.spent.iter()) {
         Remaining::UnknownSpend => Err(Some(RetryRefusal::UnknownSpend)),
@@ -529,6 +558,10 @@ mod tests {
 
     fn spend(usd: f64) -> Spend {
         Spend::new(usd, false)
+    }
+
+    fn decided(lost: &LostRun<'_>) -> Result<AttemptMode, Option<RetryRefusal>> {
+        decide(lost, || true)
     }
 
     fn lost(policy: OnInterrupted, spent: &[Spend]) -> LostRun<'_> {
@@ -625,8 +658,12 @@ mod tests {
         );
         assert_eq!(
             remaining(None, None, unknown.iter()),
-            Remaining::Unbounded,
-            "no ceiling bounds the job: there is nothing the unknown could cross"
+            Remaining::UnknownSpend,
+            "an unknown spend refuses with no ceiling as well"
+        );
+        assert_eq!(
+            remaining(None, Some(0.5), unknown.iter()),
+            Remaining::Usd(0.5)
         );
         // A stated budget bounds the re-attempts alone: the first attempt
         // does not count against it, and it accepts the unknown.
@@ -655,12 +692,12 @@ mod tests {
     fn a_lost_run_is_started_again_only_when_every_rule_allows_it() {
         let one = [spend(0.25)];
         assert_eq!(
-            decide(&lost(OnInterrupted::Restart, &one)),
+            decided(&lost(OnInterrupted::Restart, &one)),
             Ok(AttemptMode::Restart)
         );
-        assert_eq!(decide(&lost(OnInterrupted::Off, &one)), Err(None));
+        assert_eq!(decided(&lost(OnInterrupted::Off, &one)), Err(None));
         assert_eq!(
-            decide(&LostRun {
+            decided(&LostRun {
                 cancel_requested: true,
                 ..lost(OnInterrupted::Restart, &one)
             }),
@@ -669,7 +706,7 @@ mod tests {
         );
         let three = [spend(0.0), spend(0.0), spend(0.0)];
         assert_eq!(
-            decide(&lost(OnInterrupted::Restart, &three)),
+            decided(&lost(OnInterrupted::Restart, &three)),
             Err(Some(RetryRefusal::Exhausted))
         );
         let with_effects = LostRun {
@@ -677,11 +714,11 @@ mod tests {
             ..lost(OnInterrupted::Restart, &one)
         };
         assert_eq!(
-            decide(&with_effects),
+            decided(&with_effects),
             Err(Some(RetryRefusal::EffectsNeedConsent))
         );
         assert_eq!(
-            decide(&LostRun {
+            decided(&LostRun {
                 consent: true,
                 ..with_effects
             }),
@@ -689,11 +726,11 @@ mod tests {
         );
         let unknown = [Spend::new(0.0, true)];
         assert_eq!(
-            decide(&lost(OnInterrupted::Restart, &unknown)),
+            decided(&lost(OnInterrupted::Restart, &unknown)),
             Err(Some(RetryRefusal::UnknownSpend))
         );
         assert_eq!(
-            decide(&LostRun {
+            decided(&LostRun {
                 budget: Some(0.5),
                 ..lost(OnInterrupted::Restart, &unknown)
             }),
@@ -701,7 +738,7 @@ mod tests {
         );
         let spent = [spend(1.0)];
         assert_eq!(
-            decide(&lost(OnInterrupted::Restart, &spent)),
+            decided(&lost(OnInterrupted::Restart, &spent)),
             Err(Some(RetryRefusal::BudgetExhausted))
         );
         // The bound is judged before the consent: an exhausted job says so.
@@ -710,9 +747,33 @@ mod tests {
             ..lost(OnInterrupted::Restart, &three)
         };
         assert_eq!(
-            decide(&exhausted_with_effects),
+            decided(&exhausted_with_effects),
             Err(Some(RetryRefusal::Exhausted))
         );
+    }
+
+    #[test]
+    fn a_journal_that_cannot_be_resumed_refuses_before_its_cost_is_counted() {
+        let unknown = [Spend::new(0.0, true)];
+        let resumed = lost(OnInterrupted::Resume, &unknown);
+        assert_eq!(
+            decide(&resumed, || false),
+            Err(Some(RetryRefusal::ResumeRefused)),
+            "a broken journal is unknown spend too: the journal is judged first"
+        );
+        assert_eq!(
+            decide(&resumed, || true),
+            Err(Some(RetryRefusal::UnknownSpend))
+        );
+        let mut asked = false;
+        assert_eq!(
+            decide(&lost(OnInterrupted::Restart, &[spend(0.0)]), || {
+                asked = true;
+                false
+            }),
+            Ok(AttemptMode::Restart)
+        );
+        assert!(!asked, "a restart reads no journal judgment");
     }
 
     #[test]

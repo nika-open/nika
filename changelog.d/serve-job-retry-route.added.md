@@ -9,7 +9,9 @@
   resume judgment and the job's one cost ceiling hold as for a run
   that lost its resident, and the place in the owner's lane is taken
   before anything is written. The same request sent again answers
-  `200` with the job as it stands and starts nothing. Refusals:
+  `200` with the job as it stands and starts nothing; a job still
+  waiting is put back in its owner's lane, once. A job a schedule
+  fired keeps its origin when it is restarted. Refusals:
   `409 job_not_retryable`, `retry_exhausted`, `resume_refused`,
   `unknown_spend` and `budget_exhausted`, and the queue refusals of an
   admission.

@@ -152,6 +152,26 @@ async fn a_failed_job_is_started_again_by_request_as_a_new_attempt_of_the_same_j
     let reread = job(&server, &id).await;
     assert_eq!(reread["status"], "failed", "{reread}");
     assert_eq!(reread["execution_id"], second["execution_id"]);
+
+    // A later attempt by another request, its budget an integer: the same
+    // amount written as a decimal is the same request.
+    let later = json!({"attempt": 2, "mode": "restart", "max_cost_usd": 1}).to_string();
+    assert_eq!(
+        server.request(&retry_request(&id, &later)).await.status,
+        202
+    );
+    let third = settles_after(&server, &backend, &id, 3).await;
+    let decimal = json!({"attempt": 2, "mode": "restart", "max_cost_usd": 1.0}).to_string();
+    let replay = server.request(&retry_request(&id, &decimal)).await;
+    assert_eq!(replay.status, 200, "{}", replay.body);
+    assert_eq!(replay.json()["execution_id"], third["execution_id"]);
+    // The first request, sent again after that later attempt, still finds
+    // the job as it stands.
+    let first_again = server.request(&retry_request(&id, &ask)).await;
+    assert_eq!(first_again.status, 200, "{}", first_again.body);
+    assert_eq!(first_again.json()["execution_id"], third["execution_id"]);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(backend.calls(), 3, "a replay runs nothing");
     server.stop().await.expect("a clean stop");
 }
 
@@ -316,6 +336,16 @@ async fn a_request_is_held_to_the_bound_and_the_ceiling_of_a_lost_run() {
     assert_eq!(refused.status, 409, "{}", refused.body);
     assert_eq!(refused.json()["error"]["code"], "retry_exhausted");
     assert_eq!(backend.calls(), 2);
+    // The job says so, on its attempts and on the list, though it failed
+    // for a reason of its own.
+    let read = server
+        .request(&get_request(&format!("/v1/jobs/{id}/attempts")))
+        .await
+        .json();
+    assert_eq!(read["retry_state"], "exhausted", "{read}");
+    assert_eq!(read["retry_reason"], "retry_exhausted", "{read}");
+    let listed = server.request(&get_request("/v1/jobs")).await.json();
+    assert_eq!(listed["jobs"][0]["retry_state"], "exhausted", "{listed}");
     server.stop().await.expect("a clean stop");
 }
 
@@ -413,6 +443,8 @@ async fn an_interrupted_job_resumes_by_request_from_its_journal() {
         .await
         .json();
     assert_eq!(earlier["trace_id"], first["trace_id"], "{earlier}");
-    assert_ne!(earlier["verdict"], "unavailable", "{earlier}");
+    // Stopped past its grace, the run was cancelled and its journal closed.
+    assert_eq!(earlier["verdict"], "ok", "{earlier}");
+    assert_eq!(earlier["chain"]["headline"], "intact", "{earlier}");
     server.stop().await.expect("a clean stop");
 }

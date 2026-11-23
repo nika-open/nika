@@ -62,8 +62,13 @@ pub(crate) struct JobSummary {
     pub(crate) error: Option<(String, String)>,
     /// How many attempts the job has taken or holds, the first included.
     pub(crate) attempts: u32,
-    /// Where the job stands about being started again (ADR-156 §10).
+    /// Where the job stands about being started again (ADR-156 §10), as
+    /// the store reads it; the policy in force adds the bound.
     pub(crate) retry_state: super::RetryState,
+    /// The job's own retry statement, which narrows the policy in force.
+    pub(crate) retry: Option<super::RetryStatement>,
+    /// A request could retry the job's latest attempt as it stands.
+    pub(crate) retryable: bool,
     /// Admission rank: what the page cursor names.
     pub(crate) ordinal: u64,
 }

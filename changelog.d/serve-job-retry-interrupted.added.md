@@ -8,7 +8,8 @@
   effects class on its record. `--retry-max-attempts` (default 3,
   at most 16) bounds the attempts, the first included, and one cost
   ceiling covers them all: an attempt whose spend cannot be read is
-  never counted as zero. With `--retry-interrupted resume` the new
+  never counted as zero, and its job is not started again unless a
+  budget is stated. With `--retry-interrupted resume` the new
   attempt serves the tasks the lost one completed from its journal and
   runs the rest; the journal is judged as `nika run --resume` judges
   one, its chain required, and a journal that does not pass leaves the

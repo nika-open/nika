@@ -114,10 +114,11 @@ impl ResidentExecutionCoordinator {
         permit.send(record.id().clone(), self.queued_task(record));
     }
 
-    /// The task that runs a queued record.
+    /// The task that runs a queued record, under the origin it states.
     fn queued_task(&self, record: &JobRecord) -> ExecutionTask {
         ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
             .with_access_pin(record.access_pin().map(str::to_owned))
+            .with_origin(record.origin().clone())
     }
 
     /// The job already bound to this key, without capturing anything
@@ -132,18 +133,30 @@ impl ResidentExecutionCoordinator {
         let Some(admission) = self.store.replay(key, digest).await? else {
             return Ok(None);
         };
-        if let Admission::Existing(record) = &admission
-            && record.status() == JobStatus::Queued
-        {
-            self.jobs
-                .requeue(
-                    record.owner(),
-                    record.id().clone(),
-                    self.queued_task(record),
-                )
-                .map_err(queue_refusal)?;
+        if let Admission::Existing(record) = &admission {
+            self.requeue_replayed(record)?;
         }
         Ok(Some(admission))
+    }
+
+    /// Queue a replayed job again when it is still `queued`, unless it
+    /// waits already. The request that queued it may have ended between
+    /// the store's write and its queue entry (a timeout, a disconnect): its
+    /// replay is what puts the job back in its owner's lane.
+    ///
+    /// # Errors
+    /// The queue's refusal: full, the owner at its bound, or stopping.
+    pub(super) fn requeue_replayed(&self, record: &JobRecord) -> Result<(), ServerError> {
+        if record.status() != JobStatus::Queued {
+            return Ok(());
+        }
+        self.jobs
+            .requeue(
+                record.owner(),
+                record.id().clone(),
+                self.queued_task(record),
+            )
+            .map_err(queue_refusal)
     }
 
     #[cfg(test)]

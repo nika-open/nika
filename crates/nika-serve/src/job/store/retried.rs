@@ -81,17 +81,21 @@ pub(crate) fn retryable(record: &JobRecord) -> bool {
         && !record.cancel_requested
 }
 
-/// Whether the same request already retried the attempt it names: the
-/// attempt after it exists, and the request that created it stated the same
-/// mode and the same budget.
+/// Whether the same request already retried the attempt it names: that
+/// attempt is closed, a request closed it, and that request stated the same
+/// mode and the same budget. Later attempts do not change the answer: a
+/// replay after an automatic re-attempt still finds the job as it stands.
 pub(crate) fn is_replay(record: &JobRecord, ask: &RetryAsk) -> bool {
-    let retried = usize::try_from(ask.attempt)
+    usize::try_from(ask.attempt)
         .ok()
         .and_then(|attempt| attempt.checked_sub(1))
-        .and_then(|index| record.attempts.get(index));
-    record.attempt() == ask.attempt.saturating_add(1)
-        && retried.is_some_and(|closed| {
-            closed.next == ask.mode && closed.requested.as_ref() == Some(&ask.request)
+        .and_then(|index| record.attempts.get(index))
+        .is_some_and(|closed| {
+            closed.next == ask.mode
+                && closed
+                    .requested
+                    .as_ref()
+                    .is_some_and(|requested| requested.same_as(&ask.request))
         })
 }
 

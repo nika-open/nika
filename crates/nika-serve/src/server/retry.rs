@@ -326,11 +326,7 @@ impl LostOwnerJudge for LostRunJudge {
             budget: retry_budget(job),
             spent: &every_attempt,
         };
-        match decide(&lost) {
-            // The resident never falls back to `restart` on its own.
-            Ok(AttemptMode::Resume) if !self.resumable(job, admitted.as_ref()) => {
-                LostVerdict::Stay(Some(RetryRefusal::ResumeRefused))
-            }
+        match decide(&lost, || self.resumable(job, admitted.as_ref())) {
             Ok(mode) => LostVerdict::Queue {
                 mode,
                 spend,

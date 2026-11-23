@@ -1220,13 +1220,15 @@ journal:
   in flight, so every task whose wave had started is counted;
 - a settled call with no price, a task in flight with no bound, a task
   that calls a child workflow and did not settle (the parent's check does
-  not bound the child's calls), or no journal that can be read, make the
-  spend **unknown**. A journal is read only while its chain holds: a torn
+  not bound the child's calls), a model call in flight in a run that rode
+  an agent application or named no route (that lane bills its
+  subscription, not a catalog price), or no journal that can be read, make
+  the spend **unknown**. A journal is read only while its chain holds: a torn
   last line is what a kill leaves, a broken chain is no evidence. A run killed before
   its first event leaves no journal, and so does a run whose journal could
   not be opened; the resident cannot tell them apart and counts neither for
-  zero. Under a ceiling a job of unknown spend is not started again
-  (`unknown_spend`).
+  zero. A job of unknown spend is not started again (`unknown_spend`),
+  under a ceiling or not.
 
 `retry.max_cost_usd` is the caller's answer to an unknown spend: it bounds
 the re-attempts by itself, and stating it accepts that an attempt of unknown
@@ -1268,7 +1270,7 @@ A job that is not started again is `interrupted`, as before, and its
 |---|---|
 | `retry_exhausted` | it has taken its `max_attempts` |
 | `effects_need_consent` | its workflow is not classed free of external effects and it stated no `retry` |
-| `unknown_spend` | an attempt's spend is unknown under a ceiling |
+| `unknown_spend` | an attempt's spend is unknown and no budget was stated |
 | `budget_exhausted` | nothing is left under its ceiling |
 | `resume_refused` | its mode is `resume` and the lost attempt's journal cannot be resumed |
 
@@ -1301,8 +1303,10 @@ bound of attempts in force for the job holds, then, for `resume`, the
 judgment of the attempt's journal (no budget makes a journal resumable),
 then the ceiling over every attempt. What the retried attempt spent is read
 from its journal as for a lost run, so an attempt that left none is of
-unknown spend: under a ceiling the request states `max_cost_usd`. A job a
-schedule fired on its beat is never resumed; it can be restarted.
+unknown spend: the request states `max_cost_usd`. A job a schedule fired on
+its beat is never resumed; it can be restarted, and the new attempt keeps its
+origin: its receipt states the schedule and the run is told the slot it
+serves.
 
 The place in the owner's lane is taken before anything is written: an owner
 at its bound is refused as an admission is (ADR-155), with nothing changed.
@@ -1314,7 +1318,7 @@ sequence of its terminal event and what the request stated.
 | answer | when |
 |---|---|
 | `202` | the new attempt is queued; the job is returned |
-| `200` | the same request already retried this attempt: the job as it stands, nothing written, nothing queued |
+| `200` | the same request already retried this attempt, whatever attempts came after it (amounts compare as amounts: `1` and `1.0` are one budget): the job as it stands, nothing written. A job still `queued` is put back in its owner's lane unless it waits already, for a request that ended before its queue entry |
 | `404 job_not_found` | unknown job, or one retention forgot |
 | `409 job_not_retryable` | another status, a cancellation accepted, an attempt that never started, or `attempt` is not the latest |
 | `409 retry_exhausted` | the job has taken its bound of attempts |
@@ -1336,9 +1340,9 @@ spend in its settlement on `GET /v1/jobs/{id}`.
 
 | `retry_state` | the job |
 |---|---|
-| `none` | ran once, or its latest attempt ended for a reason of its own |
+| `none` | ran once, or its latest attempt ended for a reason of its own and the bound leaves room |
 | `queued` | has a new attempt waiting in its owner's lane |
-| `exhausted` | took its bound of attempts (`retry_reason: retry_exhausted`) |
+| `exhausted` | took its bound of attempts: a request would be refused for it (`retry_reason: retry_exhausted`) |
 | `refused` | was not started again; `retry_reason` says why, as its last event or error does |
 
 Each attempt has its own journal, chain and seal: `GET

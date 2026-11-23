@@ -56,13 +56,13 @@ async fn retry(
         .map_err(|error| store_error(&error))?
         .ok_or_else(|| ApiError::job_not_found().into_response())?;
     if is_replay(&record, &ask) {
-        return Ok(replayed(&record));
+        return Ok(replayed(state, &record));
     }
     if !retryable(&record) || record.attempt() != ask.attempt {
         return Err(not_retryable());
     }
     let owner = record.owner().map(str::to_owned);
-    let world = state.store.load_world(id.clone()).await.ok();
+    let world = captured_world(state, id.clone()).await?;
     let judge = Arc::clone(&state.retry_judge);
     let decided =
         tokio::task::spawn_blocking(move || judge.retried(&record, world.as_deref(), &ask))
@@ -83,8 +83,25 @@ async fn retry(
             state.coordinator.send_queued(place, mutation.record());
             Ok(accepted(mutation.record()))
         }
-        Retried::Replayed(record) => Ok(replayed(&record)),
+        Retried::Replayed(record) => Ok(replayed(state, &record)),
         Retried::NotRetryable => Err(not_retryable()),
+    }
+}
+
+/// The job's captured world, or `None` when it has none that can be read
+/// (a job of an older store, a missing or unreadable file): the judgment
+/// then refuses what it cannot read. A store that cannot answer now is
+/// `503`, never a job without a world.
+async fn captured_world(
+    state: &AppState,
+    id: JobId,
+) -> Result<Option<String>, Response<ResponseBody>> {
+    match state.store.load_world(id).await {
+        Ok(world) => Ok(Some(world)),
+        Err(ServerError::JobStore(
+            JobStoreError::Corrupt(_) | JobStoreError::SnapshotTooLarge { .. },
+        )) => Ok(None),
+        Err(error) => Err(store_error(&error)),
     }
 }
 
@@ -96,8 +113,13 @@ fn accepted(record: &JobRecord) -> Response<ResponseBody> {
     )
 }
 
-/// The job the same request already retried, as it stands.
-fn replayed(record: &JobRecord) -> Response<ResponseBody> {
+/// The job the same request already retried, as it stands. A job still
+/// `queued` is put back in its owner's lane unless it waits already: the
+/// request that queued it may have ended before its queue entry.
+fn replayed(state: &AppState, record: &JobRecord) -> Response<ResponseBody> {
+    if let Err(error) = state.coordinator.requeue_replayed(record) {
+        return admission_error(&error);
+    }
     json_response(StatusCode::OK, &super::model::JobResponse::from(record))
 }
 

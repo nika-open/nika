@@ -310,6 +310,55 @@ async fn a_review_is_one_explicit_decision_for_one_job() {
     server.stop().await.expect("stop");
 }
 
+/// A review prices a run and takes no attribution; the one admission that
+/// consumes it states the owner and labels, which decide no part of the cost.
+#[tokio::test(flavor = "multi_thread")]
+async fn attribution_rides_the_admission_that_consumes_a_review() {
+    let world = world();
+    let backend = Arc::new(ReviewedBackend::default());
+    let (server, _state) = start(&world, backend.clone(), disarmed(), true).await;
+    let owned_review = r#"{"workflow":"review.nika","owner":"user_123"}"#;
+    let refused = server
+        .request(&review_request(owned_review, "review-owned"))
+        .await;
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "malformed_snapshot");
+    assert!(lease_is_free(&world), "a refused review holds nothing");
+
+    let review = open_review(&server, "review-1").await;
+    let id = review["review_id"].as_str().expect("id");
+    let witness = review["witness_sha256"].as_str().expect("witness");
+    let approved = server
+        .request(&decision_request(id, witness, "approve_once"))
+        .await;
+    assert_eq!(approved.status, 200, "{}", approved.body);
+    let body = json!({
+        "workflow": "review.nika",
+        "owner": "user_123",
+        "labels": {"plan": "pro"},
+        "cost_review": {"review_id": id, "witness_sha256": witness},
+    });
+    let job = server
+        .request(&post_request(
+            &body.to_string(),
+            "job-owned",
+            &auth_header(),
+        ))
+        .await;
+    assert_eq!(job.status, 202, "{}", job.body);
+    let job_id = job.json()["id"].as_str().expect("job id").to_owned();
+    wait_for_status(&server, &job_id, "succeeded")
+        .await
+        .expect("the reviewed job settles");
+    let state: Value = serde_json::from_str(
+        &std::fs::read_to_string(world.state.join("jobs/state.json")).expect("job state"),
+    )
+    .expect("job state json");
+    assert_eq!(state["jobs"][0]["record"]["owner"], "user_123");
+    assert_eq!(state["jobs"][0]["record"]["labels"], json!({"plan": "pro"}));
+    server.stop().await.expect("stop");
+}
+
 /// A wrong witness moves nothing; another request than the reviewed one keeps
 /// the approval; a second, different decision refuses; the held lease refuses
 /// a second review; unknown ids and malformed decisions are named; a decline

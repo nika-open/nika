@@ -7,7 +7,7 @@ mod kind;
 mod model;
 mod store;
 
-pub(crate) use attribution::{JobAttribution, JobBindings};
+pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
 pub use model::{

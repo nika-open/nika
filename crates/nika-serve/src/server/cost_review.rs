@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use super::AppState;
 use super::error::{ResponseBody, json_error};
 use super::route::{self, JobByName};
+use crate::job::JobBindings;
 use crate::{Admission, IdempotencyKey, RequestDigest};
 
 const POLICY: &str = "nika serve composition: no monetary policy source is supported by this build";
@@ -229,9 +230,11 @@ async fn open_review(
     version: u64,
 ) -> Result<Result<String, Value>, Response<ResponseBody>> {
     let job = match route::named_job(body) {
-        Ok(Some(job)) if job.cost_review.is_none() => job,
+        // A review prices a run. Who the job is attributed to is stated on
+        // the admission that consumes the review, never silently dropped here.
+        Ok(Some(job)) if job.cost_review.is_none() && job.attribution.is_unattributed() => job,
         Ok(_) => {
-            let why = "a review takes the by-name job form only: workflow with optional literal inputs and access";
+            let why = "a review takes the by-name job form only: workflow with optional literal inputs and access; owner and labels are stated on the job admission";
             return Err(json_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "malformed_snapshot",
@@ -402,6 +405,8 @@ fn frame(
     })
 }
 
+/// What a review binds of its request: what decides the cost. A stated
+/// attribution decides none of it, so it rides the admission, not the review.
 fn request_value(job: &JobByName) -> Value {
     json!({"workflow": job.workflow, "inputs": job.inputs.clone().unwrap_or_default(), "access": job.access})
 }
@@ -595,7 +600,8 @@ pub(super) async fn admit(
     };
     let account = cost.account.clone();
     let authority = (session, CostAuthority { plan, cost });
-    let inputs = job.inputs.unwrap_or_default();
+    let bindings =
+        JobBindings::of(job.inputs.unwrap_or_default(), None).attributed(job.attribution);
     let admitted = state
         .coordinator
         .admit_manual_inputs(
@@ -604,9 +610,8 @@ pub(super) async fn admit(
             job.workflow,
             world,
             job.access,
-            inputs,
+            bindings,
             Some(authority),
-            None,
         )
         .await;
     if let Ok(Admission::Created(record)) = &admitted {

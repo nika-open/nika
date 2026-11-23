@@ -163,6 +163,8 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     "eventStream",
     "cancel",
     "jobInputs",
+    // `owner` and `labels` on the by-name form of `POST /v1/jobs` (ADR-155).
+    "jobAttribution",
     "compile",
     "artifacts",
     "accessServiceTier",

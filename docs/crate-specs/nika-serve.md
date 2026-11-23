@@ -119,6 +119,20 @@ validates literal JSON input bindings. Clients must require this capability
 before sending inputs: older residents may accept unknown request fields
 without applying them. This capability does not authorize snapshot overlays.
 
+`/health` advertises `jobAttribution` when the named job envelope accepts
+`owner` and `labels` (ADR-155). An owner is 1 to 128 bytes of
+`[A-Za-z0-9._:@-]`. Labels are at most 16 pairs: a key of 1 to 64 bytes of
+`[A-Za-z0-9._/-]`, a value of at most 256 bytes without control characters.
+Outside these bounds, or null, the request is refused `422 invalid_job_owner`
+or `422 invalid_job_labels` before a job exists. Both are what the caller
+states so its application can find the job again: attribution inside one
+authority domain, never an authorization boundary, and whoever holds the token
+reads every job. They bind the request identity, so the same `Idempotency-Key`
+under another owner is `409 idempotency_conflict`, and they are hash-bound in
+the durable record from admission. A snapshot body carries none. A cost review
+binds none: they are stated on the admission that consumes it. The published
+`Job` object stays closed and does not carry them.
+
 `/health` advertises `accessServiceTier` when the resident admits a served
 workflow that declares `run.access.service_tier`. The tier is a field of the
 workflow file, never of the request: it rides the source bytes, so the snapshot

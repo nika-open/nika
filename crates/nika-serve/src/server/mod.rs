@@ -3,6 +3,7 @@
 
 mod access_offer;
 mod artifacts;
+mod attribution;
 mod auth;
 mod cancel;
 mod compile;
@@ -1535,6 +1536,8 @@ fn execution_result(
 mod admission_race_tests;
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod attribution_tests;
 #[cfg(test)]
 mod coordinator_tests;
 #[cfg(test)]

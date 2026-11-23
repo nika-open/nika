@@ -857,7 +857,7 @@ mod builder {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions.",
+            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions. Optional `owner` and `labels` (health capability `jobAttribution`) are what the caller states about the job so its application can find it again (GET /v1/jobs): they are attribution inside one authority domain, never an authorization boundary, and whoever holds the token reads every job. They bind the exact request identity like every other member; a snapshot body carries none, and a cost review binds none (they are stated on the admission that consumes it).",
             "required": ["workflow"],
             "properties": {
                 "workflow": {"type": "string", "minLength": 1, "maxLength": 4096},
@@ -871,6 +871,20 @@ mod builder {
                     "minLength": 1,
                     "maxLength": 64,
                     "description": "Access pin, same vocabulary as `--access` (class or harness id). A pin never silently substitutes a metered seat."
+                },
+                "owner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._:@-]+$",
+                    "description": "Who the caller attributes this job to: opaque to the engine. Outside its bounds, or null: 422 invalid_job_owner. Require the `jobAttribution` capability first: a resident without it refuses the member as an unknown field."
+                },
+                "labels": {
+                    "type": "object",
+                    "maxProperties": 16,
+                    "propertyNames": {"minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._/-]+$"},
+                    "additionalProperties": {"type": "string", "maxLength": 256},
+                    "description": "At most 16 caller labels. A key is 1 to 64 bytes of letters, digits and `._/-` (no colon); a value is at most 256 bytes of text without control characters. Outside these bounds, or null: 422 invalid_job_labels."
                 }
             }
         })

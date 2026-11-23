@@ -59,6 +59,10 @@ impl JobAttribution {
         Ok(Self { owner, labels })
     }
 
+    pub(crate) fn is_unattributed(&self) -> bool {
+        self.owner.is_none() && self.labels.is_empty()
+    }
+
     pub(crate) fn into_parts(self) -> (Option<String>, BTreeMap<String, String>) {
         (self.owner, self.labels)
     }
@@ -104,6 +108,12 @@ impl JobBindings {
             max_cost_usd,
             attribution: JobAttribution::default(),
         }
+    }
+
+    /// The same bindings under a stated attribution.
+    pub(crate) fn attributed(mut self, attribution: JobAttribution) -> Self {
+        self.attribution = attribution;
+        self
     }
 }
 

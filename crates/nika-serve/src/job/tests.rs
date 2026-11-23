@@ -300,6 +300,16 @@ fn restart_replays_the_same_job() {
     assert_eq!(replay, Admission::Existing(created));
 }
 
+/// Rewrite the state file at `path` as a format 2 store would have left it.
+fn rewrite_as_v2(path: &std::path::Path) {
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read state")).expect("decode state");
+    downgrade_state_to_v2(&mut state);
+    let mut encoded = serde_json::to_vec(&state).expect("encode v2 state");
+    encoded.push(b'\n');
+    std::fs::write(path, encoded).expect("write v2 state");
+}
+
 #[test]
 fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     let queued_root = tempfile::tempdir().expect("queued root");
@@ -312,13 +322,7 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     stamp_execution(&queued_store, queued_record.id(), 55);
     drop(queued_store);
     let queued_path = queued_root.path().join("jobs/state.json");
-    let mut queued: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&queued_path).expect("read queued state"))
-            .expect("decode queued state");
-    downgrade_state_to_v2(&mut queued);
-    let mut encoded = serde_json::to_vec(&queued).expect("encode v2 queued state");
-    encoded.push(b'\n');
-    std::fs::write(&queued_path, encoded).expect("write v2 queued state");
+    rewrite_as_v2(&queued_path);
 
     let migrated_store = JobStore::open(queued_root.path()).expect("migrate v2 queued state");
     let migrated_record = migrated_store
@@ -374,13 +378,7 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("settle terminal candidate");
     drop(terminal_store);
     let terminal_path = terminal_root.path().join("jobs/state.json");
-    let mut terminal: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&terminal_path).expect("read terminal state"))
-            .expect("decode terminal state");
-    downgrade_state_to_v2(&mut terminal);
-    let mut encoded = serde_json::to_vec(&terminal).expect("encode v2 terminal state");
-    encoded.push(b'\n');
-    std::fs::write(&terminal_path, encoded).expect("write v2 terminal state");
+    rewrite_as_v2(&terminal_path);
 
     let migrated = JobStore::open(terminal_root.path()).expect("migrate v2 terminal state");
     let migrated_record = migrated

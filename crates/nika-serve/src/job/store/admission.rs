@@ -7,8 +7,8 @@ use crate::JobOrigin;
 
 use super::{
     Admission, EventHash, IdempotencyKey, JobBindings, JobId, JobMutation, JobReceipt, JobRecord,
-    JobStatus, JobStore, JobStoreError, MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES, RequestDigest,
-    StoredJob, UNBOUND_CEILING, ValidatedEventBatch, ensure_receipt_matches,
+    JobStatus, JobStore, JobStoreError, MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES, PersistedState,
+    RequestDigest, StoredJob, UNBOUND_CEILING, ValidatedEventBatch, ensure_receipt_matches,
     hash_execution_identity, unique_job_id, validate_snapshot_digest, world_file,
 };
 
@@ -183,18 +183,7 @@ impl JobStore {
         digest.validate()?;
         let _local = self.local_guard()?;
         let _lease = self.kernel_lease()?;
-        let state = self.load_state()?;
-        Ok(state
-            .jobs
-            .iter()
-            .find(|job| job.record.idempotency_key == *key)
-            .map(|existing| {
-                if existing.record.request_digest == *digest {
-                    Admission::Existing(existing.record.clone())
-                } else {
-                    Admission::Conflict(existing.record.clone())
-                }
-            }))
+        Ok(bound_admission(&self.load_state()?, key, digest))
     }
 
     /// The one transaction that creates a manual job, or answers a key that
@@ -215,13 +204,7 @@ impl JobStore {
             attribution,
         } = bindings;
         let (owner, labels) = attribution.into_parts();
-        let max_cost_usd = match max_cost_usd {
-            Some(usd) => Some(
-                (serde_json::Number::from_f64(usd).filter(|_| usd >= 0.0))
-                    .ok_or_else(|| JobStoreError::Corrupt(UNBOUND_CEILING.to_owned()))?,
-            ),
-            None => None,
-        };
+        let max_cost_usd = max_cost_usd.map(ceiling_number).transpose()?;
         key.validate()?;
         digest.validate()?;
         if let Some(world) = world
@@ -239,16 +222,8 @@ impl JobStore {
         // admission is judged: its key is forgotten and its place is free.
         let evicted = self.evict_from(&mut state);
 
-        if let Some(existing) = state
-            .jobs
-            .iter()
-            .find(|job| job.record.idempotency_key == key)
-        {
-            return Ok(if existing.record.request_digest == digest {
-                Admission::Existing(existing.record.clone())
-            } else {
-                Admission::Conflict(existing.record.clone())
-            });
+        if let Some(bound) = bound_admission(&state, &key, &digest) {
+            return Ok(bound);
         }
 
         if state.jobs.len() >= max_jobs {
@@ -352,16 +327,8 @@ impl JobStore {
         // admission is judged: its key is forgotten and its place is free.
         let evicted = self.evict_from(&mut state);
 
-        if let Some(existing) = state
-            .jobs
-            .iter()
-            .find(|job| job.record.idempotency_key == key)
-        {
-            return Ok(if existing.record.request_digest == digest {
-                Admission::Existing(existing.record.clone())
-            } else {
-                Admission::Conflict(existing.record.clone())
-            });
+        if let Some(bound) = bound_admission(&state, &key, &digest) {
+            return Ok(bound);
         }
         if state.jobs.len() >= max_jobs {
             return Err(JobStoreError::CapacityExceeded);
@@ -409,4 +376,30 @@ impl JobStore {
         self.forget_worlds(&evicted);
         Ok(Admission::Created(record))
     }
+}
+
+/// What a key already bound answers: the same request replays its job,
+/// another request conflicts with it. `None` when the key is unbound.
+fn bound_admission(
+    state: &PersistedState,
+    key: &IdempotencyKey,
+    digest: &RequestDigest,
+) -> Option<Admission> {
+    let existing = state
+        .jobs
+        .iter()
+        .find(|job| job.record.idempotency_key == *key)?;
+    Some(if existing.record.request_digest == *digest {
+        Admission::Existing(existing.record.clone())
+    } else {
+        Admission::Conflict(existing.record.clone())
+    })
+}
+
+/// A requested per-job ceiling as the record keeps it: a finite,
+/// non-negative amount, or a refusal.
+fn ceiling_number(usd: f64) -> Result<serde_json::Number, JobStoreError> {
+    serde_json::Number::from_f64(usd)
+        .filter(|_| usd >= 0.0)
+        .ok_or_else(|| JobStoreError::Corrupt(UNBOUND_CEILING.to_owned()))
 }

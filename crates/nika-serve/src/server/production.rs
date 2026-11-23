@@ -581,21 +581,8 @@ fn settle_resident_job(
     let write_origins = Arc::new(nika_runtime::WriteOrigins::new(
         Path::new(nika_dap::store::ORIGINALS_DIR).join(driver.execution_id().to_string()),
     ));
-    let config = if let Some(cost) = &cost {
-        cost.config.clone()
-    } else {
-        let run = driver.workflow().run.as_ref().map(|run| &run.value);
-        nika_runtime::RuntimeConfig::new(None, nika_runtime::RunSeams::of(run).jitter_seed)
-    };
-    // Every call this run and its children send takes a slot on its
-    // provider first: the cap is the resident's, across all its jobs.
-    // A stop of this run withdraws its calls that still wait their turn.
-    let config = match provider_gate {
-        Some(gate) => {
-            config.with_provider_gate(super::provider_gate::for_run(gate, operator_cancel.clone()))
-        }
-        None => config,
-    };
+    let gate = (provider_gate, operator_cancel.as_ref());
+    let config = run_config(cost.as_ref(), &driver, gate);
     let options =
         options.with_runtime_config(config.with_write_origins(Arc::clone(&write_origins)));
     let result = rt.block_on(async {
@@ -647,6 +634,33 @@ fn settle_resident_job(
             journal_guard(&journal).interrupt(driver.execution_id(), operator);
             ExecutionDisposition::Failed.into()
         }
+    }
+}
+
+/// The runtime configuration of one resident run: its account's, or the
+/// workflow's own seams. Every call this run and its children send then
+/// takes a slot on its provider first: the cap is the resident's, across
+/// all its jobs, and a stop of this run withdraws its calls that still wait
+/// their turn.
+fn run_config(
+    cost: Option<&nika_cli_host::run_cost::RunCost>,
+    driver: &ServiceExecutionDriver,
+    (provider_gate, cancel): (
+        Option<Arc<dyn nika_providers::ProviderCallGate>>,
+        Option<&CancelCtx>,
+    ),
+) -> nika_runtime::RuntimeConfig {
+    let config = if let Some(cost) = cost {
+        cost.config.clone()
+    } else {
+        let run = driver.workflow().run.as_ref().map(|run| &run.value);
+        nika_runtime::RuntimeConfig::new(None, nika_runtime::RunSeams::of(run).jitter_seed)
+    };
+    match provider_gate {
+        Some(gate) => {
+            config.with_provider_gate(super::provider_gate::for_run(gate, cancel.cloned()))
+        }
+        None => config,
     }
 }
 

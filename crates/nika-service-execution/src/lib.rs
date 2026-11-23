@@ -396,6 +396,19 @@ impl ServiceExecutionDriver {
     /// `service_runtime` or `production_runtime`, with a host config when one
     /// is bound: the same emitter and sandbox root either way, so an account
     /// never moves where effects land.
+    /// What a child of this Run composes with: the parent Run's account,
+    /// never a fresh one, so its uncertainty stays; and its host's provider
+    /// gate, so a child's calls count against the same cap as its parent's.
+    /// `None` when the parent holds neither.
+    fn child_config(&self, run: Option<&nika_schema::types::RunDecl>) -> Option<RuntimeConfig> {
+        (self.child_account.is_some() || self.child_gate.is_some()).then(|| {
+            let mut config = RuntimeConfig::new(None, RunSeams::of(run).jitter_seed);
+            config.inference_admission.clone_from(&self.child_account);
+            config.provider_gate.clone_from(&self.child_gate);
+            config
+        })
+    }
+
     fn base_runtime(
         &self,
         default_model: &str,
@@ -1278,18 +1291,8 @@ impl ChildRunner for ServiceExecutionDriver {
                 .as_ref()
                 .map_or("", |model| model.value.as_str());
             let run = workflow.run.as_ref().map(|run| &run.value);
-            // The parent Run's account, never a fresh one: its uncertainty stays.
-            // Its host's provider gate too: a child's calls count against the
-            // same cap as its parent's.
-            let inherited = self.child_account.is_some() || self.child_gate.is_some();
-            let account = inherited.then(|| {
-                let mut config = RuntimeConfig::new(None, RunSeams::of(run).jitter_seed);
-                config.inference_admission.clone_from(&self.child_account);
-                config.provider_gate.clone_from(&self.child_gate);
-                config
-            });
             let runtime = self
-                .base_runtime(model, caps, run, account)
+                .base_runtime(model, caps, run, self.child_config(run))
                 .map_err(|error| refusal("NIKA-COMP-001", format!("child runtime: {error}")))?
                 .with_var_overrides(call.args.clone().into_iter().collect())
                 .with_max_cost_usd(call.remaining_budget_usd)

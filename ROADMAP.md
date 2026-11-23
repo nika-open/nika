@@ -18,7 +18,7 @@
   the owner and labels their caller states and can be listed, the queue is
   shared fairly between owners, and the model calls in flight are capped per
   provider ([ADR-155](docs/adr/adr-155-serve-job-attribution-listing-and-fair-admission.md)).
-  Re-attempting a job a restart interrupted is proposed, not decided
+  Re-attempting a job a restart interrupted is decided and not built yet
   ([ADR-156](docs/adr/adr-156-serve-attempts-for-interrupted-jobs.md)).
 - **Not planned:** a hosted service or SaaS, a 1.0 launch, and new features
   outside that focus. The forward items in the historical plan below are

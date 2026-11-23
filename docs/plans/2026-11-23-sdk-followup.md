@@ -99,14 +99,14 @@ provider cap.
 
 ### 3.6 `retryJob` and attempts: not yet
 
-Re-attempting an interrupted job is proposed in ADR-156 and not decided.
+Re-attempting an interrupted job is decided in ADR-156 and not built yet.
 Nothing of it is served. `retryJob`, an attempts reader and a `retry`
-member on a submission wait for that decision; this plan only reserves the
-names.
+member on a submission wait for the engine to serve them behind the
+capability `jobRetry`; this plan only reserves the names.
 
-One consequence to prepare for if ADR-156 is accepted as written: a job's
-`execution_id` and `trace_id` would change when it is re-attempted. A
-client that caches them from an early read would hold an earlier attempt's.
+One consequence to prepare for: a job's
+`execution_id` and `trace_id` change when it is re-attempted. A client
+that caches them from an early read holds an earlier attempt's.
 
 ## 4. Tests
 
@@ -125,7 +125,7 @@ client that caches them from an early read would hold an earlier attempt's.
 3. `listJobs`.
 4. `listSchedules`, `deleteSchedule`, `triggerSchedule`.
 5. `occupancy`.
-6. After ADR-156 is decided: `retryJob` and attempts.
+6. Once the engine serves `jobRetry`: `retryJob` and attempts.
 
 ## 6. Next engine candidates this plan does not cover
 

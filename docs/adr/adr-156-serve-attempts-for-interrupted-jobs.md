@@ -1,7 +1,7 @@
 ---
 id: ADR-156
 title: "Re-attempt an interrupted Serve job as a new attempt of the same job"
-status: proposed
+status: accepted
 date: 2026-11-23
 phase: ""
 deciders: ["@ThibautMelen"]
@@ -51,8 +51,8 @@ Three facts of 0.124.5 frame the decision:
 Retry ownership is also settled (ADR-019): the transport never re-sends, and a task's `retry:`
 belongs to the verb layer. Nothing owns what happens after the process itself is lost.
 
-This ADR decides that. It is `proposed`: it touches the run and proof vocabulary, retry
-ownership and a closed DTO, so nothing of it is implemented before it is accepted.
+This ADR decides that. It touches the run and proof vocabulary, retry ownership and a closed
+DTO, so it was written and accepted before any of it was implemented.
 
 ## Decision
 
@@ -396,7 +396,7 @@ Rejected: the effects of an interrupted attempt are unknown by definition.
 
 ## Notes
 
-Decisions asked of the decider before any code:
+Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 
 1. One job with attempts (section 1) rather than a job per retry (Alt A).
 2. The resident as a retry owner for lost ownership only (section 2).

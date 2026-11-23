@@ -1,10 +1,10 @@
 # `nika serve` ready for production jobs · plan
 
 > Status: A and B are built on `feat/serve-production-jobs`, branched from
-> `main` at `8b640a9b7` (0.124.5). C (retry interrupted jobs) is stopped at
-> ADR-156, which is proposed; none of it is built until that ADR is
-> ratified. Three workstreams in order: A (list a user's jobs), B
-> (concurrency and fairness), C. The report is
+> `main` at `8b640a9b7` (0.124.5). C (retry interrupted jobs) stopped at
+> ADR-156 until that ADR was accepted, on 23 November; it is built on a
+> branch stacked on this one. Three workstreams in order: A (list a user's
+> jobs), B (concurrency and fairness), C. The report is
 > `2026-11-23-serve-production-jobs-report.md`.
 
 ## 1. Goal
@@ -383,10 +383,11 @@ stop) and the matching test failed each time.
 
 ## 5. Workstream C · retry interrupted jobs
 
-**Blocked on ADR-156.** It decides the attempt model, the event vocabulary
-of a retry, the resident's retry authority beside ADR-019, and the budget
-rule across attempts. Those four points touch contracts this work may not
-change without ratification, so implementation stops there.
+**Stopped at ADR-156 until it was accepted, on 23 November.** It decides the
+attempt model, the event vocabulary of a retry, the resident's retry
+authority beside ADR-019, and the budget rule across attempts. Those four
+points touch contracts this work may not change without ratification, so
+nothing was implemented before the acceptance.
 
 What the ADR proposes, in short: one job, several attempts; an interrupted
 attempt stays `interrupted` for ever with its own journal and receipt; a
@@ -411,8 +412,8 @@ One C item does not depend on the ADR and ships with B: `--shutdown-grace`.
 
 | Decision | Record | Blocks |
 |---|---|---|
-| `owner` is attribution inside one authority domain, not tenancy; listing, retention, schedule management, fair admission, provider cap | ADR-155, proposed | nothing: it is documented and executed |
-| attempts for interrupted and failed jobs | ADR-156, proposed | all of workstream C |
+| `owner` is attribution inside one authority domain, not tenancy; listing, retention, schedule management, fair admission, provider cap | ADR-155, accepted | nothing: it is documented and executed |
+| attempts for interrupted and failed jobs | ADR-156, accepted | all of workstream C |
 
 ## 7. Store throughput and the acceptance scenario
 

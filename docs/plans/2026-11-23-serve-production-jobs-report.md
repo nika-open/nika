@@ -4,18 +4,23 @@
 > branched from `main` at `8b640a9b7` (0.124.5). Sixteen commits before this report, not pushed.
 > The plan is `2026-11-23-serve-production-jobs.md`; this report says what was
 > built, what was proved, and what waits for a decision.
+>
+> Update, same day: the decider accepted ADR-155 and ADR-156 as written.
+> Sections 1 and 4 say so. Workstream C starts on a branch stacked on this
+> one.
 
 ## 1. Where the three workstreams stand
 
 | Workstream | State | Record |
 |---|---|---|
-| A · attribute, list and retain jobs; manage schedules | built, tested, reviewed | ADR-155 (proposed) |
-| B · share the workers fairly; cap the calls per provider | built, tested, reviewed | ADR-155 (proposed) |
-| C · re-attempt interrupted jobs | **stopped at its ADR, as the protocol requires** | ADR-156 (proposed) |
+| A · attribute, list and retain jobs; manage schedules | built, tested, reviewed | ADR-155 (accepted) |
+| B · share the workers fairly; cap the calls per provider | built, tested, reviewed | ADR-155 (accepted) |
+| C · re-attempt interrupted jobs | **not built on this branch**; it stopped at its ADR until the acceptance | ADR-156 (accepted) |
 
 Workstream C touches the run and proof vocabulary, retry ownership and a
-closed DTO. No line of it is written. One item of C needed no decision and
-shipped with B: `--shutdown-grace`.
+closed DTO. No line of it was written before ADR-156 was accepted, and none
+is on this branch. One item of C needed no decision and shipped with B:
+`--shutdown-grace`.
 
 ## 2. The acceptance scenario
 
@@ -25,7 +30,7 @@ shipped with B: `--shutdown-grace`.
 | A user who submits 50 jobs does not delay the others | yes | owner `a` queues 50, `b` and `c` submit one each and start at the next free workers (`a_burst_from_one_owner_does_not_delay_another`) |
 | Never more than N calls in flight on a provider | yes, for the model calls of `infer` and `agent` tasks | three fanned-out jobs on a cap of 2: 2 in flight, 10 waiting, peak 2 (`three_fanned_out_jobs_share_the_provider_slots`) |
 | 5,000 jobs in an hour | only with a short retention | the store rewrites one snapshot per operation; see section 6 |
-| A deploy restarts the resident during a long job, and the job resumes | **no** | the job becomes `interrupted` and is not retried; ADR-156 proposes the re-attempt |
+| A deploy restarts the resident during a long job, and the job resumes | **no** | the job becomes `interrupted` and is not retried; ADR-156 decides the re-attempt, which is not built here |
 | Support lists `user_123`'s failed jobs of the last seven days | yes, within what retention keeps | `GET /v1/jobs?owner=user_123&status=failed&created_after=…`, with `--job-retention-unsuccessful 7d` |
 | Support retries one of them | **no** | ADR-156; until then the caller submits the work again under a new idempotency key |
 
@@ -77,18 +82,17 @@ provider round-trip) and one implementor (a host that already depends on
 `nika-providers`), and a kernel trait would add a sealed contract with no
 second consumer. The kernel is not touched.
 
-## 4. Decisions that wait
+## 4. Decisions
 
-1. **ADR-155** is `proposed`. It is documented and executed; accepting it
-   closes A and B.
-2. **ADR-156** is `proposed` and blocks all of C. Its notes list eight
-   points to rule on. The three that shape everything else:
+1. **ADR-155** was accepted on 23 November. It is documented and executed.
+2. **ADR-156** was accepted on 23 November as written, with the eight
+   points its notes list. The three that shape everything else:
    - one job with numbered attempts, rather than a new job per retry;
    - the resident re-attempts for lost ownership only, never for a failure;
    - no status, event kind, trace field or closed key is added: a job that
      will be re-attempted goes back to `queued` and the existing
      `execution.requeued` says so.
-3. **Three behaviours this branch changed** and that deserve a look:
+3. **Three behaviours this branch changed** and that still deserve a look:
    - jobs recovered at a restart now count against `--queue-capacity`.
      A resident that restarts with a full queue refuses new admissions
      until the backlog drains. Before, a restart could hold twice the

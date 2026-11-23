@@ -1943,7 +1943,7 @@
     {
       "id": "ADR-155",
       "title": "Attribute, list, forget and fairly admit Serve jobs inside one authority domain",
-      "status": "proposed",
+      "status": "accepted",
       "date": "2026-11-23",
       "filename": "adr-155-serve-job-attribution-listing-and-fair-admission.md",
       "tags": ["architecture","serve","jobs","schedules","admission"],
@@ -1960,7 +1960,7 @@
     {
       "id": "ADR-156",
       "title": "Re-attempt an interrupted Serve job as a new attempt of the same job",
-      "status": "proposed",
+      "status": "accepted",
       "date": "2026-11-23",
       "filename": "adr-156-serve-attempts-for-interrupted-jobs.md",
       "tags": ["architecture","serve","jobs","retry","resume","cost"],

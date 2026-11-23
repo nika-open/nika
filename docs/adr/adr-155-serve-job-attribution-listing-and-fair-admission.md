@@ -1,7 +1,7 @@
 ---
 id: ADR-155
 title: "Attribute, list, forget and fairly admit Serve jobs inside one authority domain"
-status: proposed
+status: accepted
 date: 2026-11-23
 phase: ""
 deciders: ["@ThibautMelen"]

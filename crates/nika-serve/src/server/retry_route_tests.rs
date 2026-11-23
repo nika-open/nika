@@ -156,6 +156,83 @@ async fn a_failed_job_is_started_again_by_request_as_a_new_attempt_of_the_same_j
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn each_attempt_of_a_job_is_read_and_its_trace_named() {
+    let world = TestWorld::new();
+    let backend = Arc::new(TestBackend::completes(ExecutionDisposition::Failed));
+    let server = world.start(backend.clone(), limits()).await;
+    let (id, first) = settled_job(&server, "failed-read", "failed").await;
+    let ask = json!({"attempt": 1, "mode": "restart", "max_cost_usd": 0.5}).to_string();
+    assert_eq!(server.request(&retry_request(&id, &ask)).await.status, 202);
+    let second = settles_after(&server, &backend, &id, 2).await;
+
+    let read = server
+        .request(&get_request(&format!("/v1/jobs/{id}/attempts")))
+        .await;
+    assert_eq!(read.status, 200, "{}", read.body);
+    let read = read.json();
+    assert_eq!(read["job_id"], id.as_str());
+    assert_eq!(
+        read["policy"],
+        json!({"on_interrupted": "off", "max_attempts": 3})
+    );
+    assert_eq!(read["retry_state"], "none", "{read}");
+    assert!(read.get("retry_reason").is_none(), "{read}");
+    let attempts = read["attempts"].as_array().expect("attempts");
+    assert_eq!(attempts.len(), 2, "{read}");
+    assert_eq!(attempts[0]["attempt"], 1);
+    assert_eq!(attempts[0]["status"], "failed");
+    assert_eq!(attempts[0]["execution_id"], first["execution_id"]);
+    assert_eq!(
+        attempts[0]["receipt"]["execution_id"],
+        first["execution_id"]
+    );
+    assert_eq!(attempts[0]["spend"], json!({"usd": 0.0, "unknown": true}));
+    assert!(attempts[0].get("mode").is_none(), "{read}");
+    assert!(attempts[0]["started_at"].is_string() && attempts[0]["ended_at"].is_string());
+    assert_eq!(attempts[1]["attempt"], 2);
+    assert_eq!(attempts[1]["mode"], "restart");
+    assert_eq!(attempts[1]["execution_id"], second["execution_id"]);
+    assert!(attempts[1].get("spend").is_none(), "{read}");
+    assert!(attempts[1].get("resumed_from").is_none(), "{read}");
+
+    // The list says how many attempts each job took.
+    let listed = server.request(&get_request("/v1/jobs")).await.json();
+    assert_eq!(listed["jobs"][0]["attempts"], 2, "{listed}");
+    assert_eq!(listed["jobs"][0]["retry_state"], "none", "{listed}");
+
+    // Each attempt has its own journal: the verification names the one asked.
+    let verify = |query: &str| get_request(&format!("/v1/jobs/{id}/trace/verify{query}"));
+    let earlier = server.request(&verify("?attempt=1")).await;
+    assert_eq!(earlier.status, 200, "{}", earlier.body);
+    assert_eq!(earlier.json()["trace_id"], first["trace_id"]);
+    assert_eq!(earlier.json()["reason"], "trace_journal_unavailable");
+    for latest in ["", "?attempt=2"] {
+        let answer = server.request(&verify(latest)).await;
+        assert_eq!(answer.json()["trace_id"], second["trace_id"], "{latest:?}");
+    }
+    let beyond = server.request(&verify("?attempt=3")).await;
+    assert_eq!(beyond.status, 404, "{}", beyond.body);
+    assert_eq!(beyond.json()["error"]["code"], "attempt_not_found");
+    for malformed in [
+        "?attempt=0",
+        "?attempt=",
+        "?attempt=x",
+        "?attempt=+1",
+        "?attempt=1&attempt=1",
+        "?tier=sealed",
+    ] {
+        let refused = server.request(&verify(malformed)).await;
+        assert_eq!(refused.status, 400, "{malformed}: {}", refused.body);
+        assert_eq!(refused.json()["error"]["code"], "invalid_trace_query");
+    }
+    let unknown = "/v1/jobs/1b4e28ba-2fa1-41d2-883f-0016d3cca427/attempts";
+    let missing = server.request(&get_request(unknown)).await;
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], "job_not_found");
+    server.stop().await.expect("a clean stop");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_retry_request_names_the_latest_settled_attempt_and_nothing_else() {
     let world = TestWorld::new();
     let failing = Arc::new(TestBackend::completes(ExecutionDisposition::Failed));
@@ -316,5 +393,26 @@ async fn an_interrupted_job_resumes_by_request_from_its_journal() {
     let attempt = &stored[0]["record"]["attempts"][0];
     assert_eq!(attempt["status"], "interrupted", "{attempt}");
     assert_eq!(attempt["next"], "resume", "{attempt}");
+
+    // The attempts route names the trace the new attempt continued, and the
+    // lost attempt's own journal is still verified on its own.
+    let read = server
+        .request(&get_request(&format!("/v1/jobs/{id}/attempts")))
+        .await
+        .json();
+    assert_eq!(read["attempts"][1]["mode"], "resume", "{read}");
+    assert_eq!(
+        read["attempts"][1]["resumed_from"], first["trace_id"],
+        "{read}"
+    );
+    assert_eq!(read["attempts"][0]["status"], "interrupted", "{read}");
+    let earlier = server
+        .request(&get_request(&format!(
+            "/v1/jobs/{id}/trace/verify?attempt=1"
+        )))
+        .await
+        .json();
+    assert_eq!(earlier["trace_id"], first["trace_id"], "{earlier}");
+    assert_ne!(earlier["verdict"], "unavailable", "{earlier}");
     server.stop().await.expect("a clean stop");
 }

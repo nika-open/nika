@@ -60,6 +60,10 @@ pub(crate) struct JobSummary {
     pub(crate) trace_id: Option<String>,
     /// The redacted diagnosis, on a failed job only.
     pub(crate) error: Option<(String, String)>,
+    /// How many attempts the job has taken or holds, the first included.
+    pub(crate) attempts: u32,
+    /// Where the job stands about being started again (ADR-156 §10).
+    pub(crate) retry_state: super::RetryState,
     /// Admission rank: what the page cursor names.
     pub(crate) ordinal: u64,
 }

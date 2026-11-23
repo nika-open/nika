@@ -357,6 +357,19 @@ pub(crate) enum RetryRefusal {
 }
 
 impl RetryRefusal {
+    /// Read the word an event or an error carries.
+    pub(crate) fn parse(code: &str) -> Option<Self> {
+        [
+            Self::Exhausted,
+            Self::EffectsNeedConsent,
+            Self::UnknownSpend,
+            Self::BudgetExhausted,
+            Self::ResumeRefused,
+        ]
+        .into_iter()
+        .find(|refusal| refusal.code() == code)
+    }
+
     pub(crate) const fn code(self) -> &'static str {
         match self {
             Self::Exhausted => "retry_exhausted",
@@ -380,6 +393,49 @@ impl RetryRefusal {
             Self::ResumeRefused => {
                 "the interrupted attempt's journal cannot be resumed: its chain, its project, its workflow or its engine is not the one this resident runs; the resident never starts it again from the first task on its own"
             }
+        }
+    }
+}
+
+/// Where a job stands about being started again (ADR-156 §10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryState {
+    /// Nothing waits and nothing was refused: the job ran once, or its
+    /// latest attempt ended for a reason of its own.
+    None,
+    /// A new attempt waits in its owner's lane.
+    Queued,
+    /// The job took its bound of attempts.
+    Exhausted,
+    /// The resident decided not to start it again, for this reason.
+    Refused(RetryRefusal),
+}
+
+impl RetryState {
+    /// The word the list and the attempts route show.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Queued => "queued",
+            Self::Exhausted => "exhausted",
+            Self::Refused(_) => "refused",
+        }
+    }
+
+    /// Why the job was not started again, when the resident said why.
+    pub(crate) const fn reason(self) -> Option<RetryRefusal> {
+        match self {
+            Self::Refused(refusal) => Some(refusal),
+            Self::Exhausted => Some(RetryRefusal::Exhausted),
+            Self::None | Self::Queued => None,
+        }
+    }
+
+    /// The state a refusal word puts a job in.
+    pub(crate) const fn refused(refusal: RetryRefusal) -> Self {
+        match refusal {
+            RetryRefusal::Exhausted => Self::Exhausted,
+            other => Self::Refused(other),
         }
     }
 }

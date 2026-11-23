@@ -190,11 +190,15 @@ async fn a_summary_is_the_light_projection_with_the_job_s_own_redacted_error() {
     );
     let created = summary["created_at"].as_str().expect("admission date");
     assert!(created.parse::<jiff::Timestamp>().is_ok(), "{created}");
+    // One attempt, and a failure of its own is no refusal (ADR-156).
+    assert_eq!(summary["attempts"], 1);
+    assert_eq!(summary["retry_state"], "none");
     let mut members: Vec<&str> = summary.keys().map(String::as_str).collect();
     members.sort_unstable();
     assert_eq!(
         members,
         [
+            "attempts",
             "created_at",
             "error",
             "execution_id",
@@ -202,6 +206,7 @@ async fn a_summary_is_the_light_projection_with_the_job_s_own_redacted_error() {
             "labels",
             "origin",
             "owner",
+            "retry_state",
             "status",
             "trace_id",
             "workflow"

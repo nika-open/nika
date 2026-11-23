@@ -12,7 +12,9 @@ use std::sync::atomic::AtomicU8;
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
-use crate::job::{JobBindings, JobListFilter, JobPage, LostOwnerJudge, Retried, RetriedAttempt};
+use crate::job::{
+    JobAttempts, JobBindings, JobListFilter, JobPage, LostOwnerJudge, Retried, RetriedAttempt,
+};
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -180,6 +182,10 @@ enum RequestCommand {
     Get {
         id: JobId,
         reply: Reply<Option<JobRecord>>,
+    },
+    Attempts {
+        id: JobId,
+        reply: Reply<Option<JobAttempts>>,
     },
     LoadWorld {
         id: JobId,
@@ -418,6 +424,13 @@ impl StoreHandle {
     pub(super) async fn get(&self, id: JobId) -> Result<Option<JobRecord>, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_request(RequestCommand::Get { id, reply })?;
+        receive(answer).await
+    }
+
+    /// A job's attempts, read from one validated snapshot (ADR-156 §10).
+    pub(super) async fn attempts(&self, id: JobId) -> Result<Option<JobAttempts>, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        self.send_request(RequestCommand::Attempts { id, reply })?;
         receive(answer).await
     }
 
@@ -787,6 +800,9 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
         }
         RequestCommand::Get { id, reply } => {
             let _result = reply.send(store.get(&id));
+        }
+        RequestCommand::Attempts { id, reply } => {
+            let _result = reply.send(store.attempts(&id));
         }
         RequestCommand::LoadWorld { id, reply } => {
             let _result = reply.send(store.load_world(&id));

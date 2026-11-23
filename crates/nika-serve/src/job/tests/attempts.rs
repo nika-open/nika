@@ -10,7 +10,7 @@
 use super::*;
 use crate::job::{
     AttemptMode, JobBindings, LostOwnerJudge, LostVerdict, Retried, RetriedAttempt, RetryAsk,
-    RetryRefusal, RetryStatement, Spend,
+    RetryRefusal, RetryState, RetryStatement, Spend,
 };
 
 /// A judge that answers what a test tells it to.
@@ -625,4 +625,119 @@ fn a_request_retries_neither_a_success_nor_a_cancelled_job() {
         Ok(Retried::NotRetryable)
     ));
     assert_eq!(events(&store, &cancelled).len(), 2, "nothing written");
+}
+
+#[test]
+fn a_job_shows_each_attempt_it_took_and_where_it_stands() {
+    let root = tempfile::tempdir().expect("root");
+    let id = lost_run(root.path(), JobBindings::default());
+    let store = JobStore::open(root.path()).expect("reopen");
+    let second = store
+        .claim_server_incarnation()
+        .expect("second incarnation");
+    store
+        .settle_lost_jobs(&second, &again(0.5))
+        .expect("settle");
+    let read = store.attempts(&id).expect("read").expect("the job");
+    assert_eq!(read.retry_state, RetryState::Queued);
+    assert_eq!(read.attempts.len(), 2, "{:?}", read.attempts);
+    let (first, waiting) = (&read.attempts[0], &read.attempts[1]);
+    assert_eq!(first.attempt, 1);
+    assert_eq!(first.status, JobStatus::Interrupted);
+    assert_eq!(first.execution_id.as_deref(), Some("execution-21"));
+    assert_eq!(first.mode, None, "the first attempt was not started again");
+    assert!(first.receipt.is_some());
+    assert_eq!(first.spend, Some(Spend::new(0.5, false)));
+    assert!(
+        first.started_at.is_some() && first.ended_at.is_some(),
+        "{first:?}"
+    );
+    assert_eq!(waiting.attempt, 2);
+    assert_eq!(waiting.status, JobStatus::Queued);
+    assert_eq!(waiting.execution_id, None);
+    assert_eq!(waiting.mode, Some(AttemptMode::Restart));
+    assert_eq!(waiting.resumed_from, None);
+    assert_eq!(
+        (waiting.started_at.as_deref(), waiting.spend.as_ref()),
+        (None, None)
+    );
+
+    // The second attempt runs and fails; a request resumes it.
+    start(&store, &id, 22);
+    let receipt = JobReceipt::new(
+        id.clone(),
+        "execution-22",
+        "trace-22",
+        digest(22).as_str(),
+        None,
+    )
+    .expect("receipt");
+    store
+        .settle_with_events(
+            &id,
+            JobStatus::Failed,
+            &[json!({"kind": "execution.settled", "status": "failed"})],
+            None,
+            Some(receipt),
+        )
+        .expect("failed");
+    assert_eq!(
+        store.attempts(&id).expect("read").expect("job").retry_state,
+        RetryState::None,
+        "a failure of its own is no refusal"
+    );
+    assert!(matches!(
+        store.retry_settled(&id, &retried(2, "resume", 0.0)),
+        Ok(Retried::Queued(_))
+    ));
+    let read = store.attempts(&id).expect("read").expect("the job");
+    let views = &read.attempts;
+    assert_eq!(views.len(), 3);
+    assert_eq!(views[1].status, JobStatus::Failed);
+    assert_eq!(views[1].mode, Some(AttemptMode::Restart));
+    assert!(views[1].started_at.is_some() && views[1].ended_at.is_some());
+    assert_eq!(views[2].mode, Some(AttemptMode::Resume));
+    assert_eq!(views[2].resumed_from.as_deref(), Some("trace-22"));
+    assert_eq!(read.retry_state, RetryState::Queued);
+    assert!(store.attempts(&JobId::random()).expect("read").is_none());
+}
+
+#[test]
+fn a_job_the_resident_did_not_start_again_says_why() {
+    for (verdict, state) in [
+        (LostVerdict::Stay(None), RetryState::None),
+        (
+            LostVerdict::Stay(Some(RetryRefusal::Exhausted)),
+            RetryState::Exhausted,
+        ),
+        (
+            LostVerdict::Stay(Some(RetryRefusal::UnknownSpend)),
+            RetryState::Refused(RetryRefusal::UnknownSpend),
+        ),
+        (
+            LostVerdict::Stay(Some(RetryRefusal::EffectsNeedConsent)),
+            RetryState::Refused(RetryRefusal::EffectsNeedConsent),
+        ),
+    ] {
+        let root = tempfile::tempdir().expect("root");
+        let id = lost_run(root.path(), JobBindings::default());
+        let store = JobStore::open(root.path()).expect("reopen");
+        let second = store
+            .claim_server_incarnation()
+            .expect("second incarnation");
+        store
+            .settle_lost_jobs(&second, &Fixed(verdict.clone()))
+            .expect("settle");
+        let read = store.attempts(&id).expect("read").expect("the job");
+        assert_eq!(read.retry_state, state, "{verdict:?}");
+        assert_eq!(read.attempts.len(), 1);
+        assert_eq!(
+            read.retry_state.reason(),
+            match state {
+                RetryState::Refused(reason) => Some(reason),
+                RetryState::Exhausted => Some(RetryRefusal::Exhausted),
+                RetryState::None | RetryState::Queued => None,
+            }
+        );
+    }
 }

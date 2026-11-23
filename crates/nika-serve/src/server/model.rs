@@ -106,6 +106,16 @@ impl<'a> TraceVerificationResponse<'a> {
             trace_id: record.trace_id(),
         }
     }
+
+    /// A closed attempt left no journal to verify: it is settled, and its
+    /// trace is named.
+    pub(crate) const fn unavailable_for(trace_id: &'a str) -> Self {
+        Self {
+            verdict: "unavailable",
+            reason: "trace_journal_unavailable",
+            trace_id: Some(trace_id),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

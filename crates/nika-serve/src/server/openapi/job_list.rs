@@ -91,7 +91,9 @@ pub(super) fn schemas() -> [(&'static str, Value); 2] {
                         "description": "On a failed job only: the redacted diagnosis GET /v1/jobs/{id} carries.",
                         "required": ["code", "message"],
                         "properties": {"code": {"type": "string"}, "message": {"type": "string"}}
-                    }
+                    },
+                    "attempts": {"type": "integer", "minimum": 1, "description": "How many attempts the job took or holds, the first included (ADR-156); `GET /v1/jobs/{id}/attempts` lists them."},
+                    "retry_state": super::job_retry::retry_state_schema()
                 }
             }),
         ),

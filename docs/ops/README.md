@@ -200,6 +200,12 @@ succeeded, or whose latest attempt is not the one named answers
 `409 job_not_retryable`. To find what to retry, list one owner's jobs of
 the last week that did not succeed:
 `GET /v1/jobs?owner=<owner>&status=failed,interrupted&created_after=2026-11-17T00:00:00Z`.
+Each summary says how many `attempts` the job took and its `retry_state`
+(`none`, `queued`, `exhausted`, `refused`). `GET /v1/jobs/<id>/attempts`
+lists the attempts with their identity, receipt, spend and instants, and
+says why a job was not started again (`retry_reason`).
+`GET /v1/jobs/<id>/trace/verify?attempt=1` verifies the first attempt's
+journal; each attempt has its own.
 
 ## Keeping the job store bounded
 

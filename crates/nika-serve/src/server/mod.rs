@@ -3,6 +3,7 @@
 
 mod access_offer;
 mod artifacts;
+mod attempts_route;
 mod attribution;
 mod auth;
 mod cancel;

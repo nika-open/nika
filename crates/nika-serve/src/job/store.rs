@@ -17,6 +17,8 @@ use serde_json::Value;
 mod admission;
 mod binding;
 mod format;
+mod history;
+pub(crate) use history::{AttemptView, JobAttempts};
 mod list;
 pub(crate) use list::QueuedJob;
 mod lost;

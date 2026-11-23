@@ -375,10 +375,19 @@ Written for the manual retry route:
 - `crates/nika-serve/src/job/tests/attempts.rs`,
   `crates/nika-serve/src/server/retry_route_tests.rs`
 
+Written for reading attempts:
+
+- `crates/nika-serve/src/job/store/history.rs` -- each attempt's view and the retry state,
+  read from one snapshot
+- `crates/nika-serve/src/server/attempts_route.rs` -- `GET /v1/jobs/{id}/attempts` and the
+  attempt a trace query names; `crates/nika-serve/src/server/job_list.rs` -- the two summary
+  members
+- `crates/nika-serve/src/server/openapi/job_retry.rs`, `crates/nika-serve/openapi.json`
+- `crates/nika-serve/src/job/tests/attempts.rs`,
+  `crates/nika-serve/src/server/retry_route_tests.rs`
+
 Planned:
 
-- `crates/nika-serve/src/server/` -- the attempts route
-- `crates/nika-serve/openapi.json` -- the attempts route
 - Fault-injection tests beside `server/tests/shutdown/process.rs`: a kill in the middle of a
   mock workflow then a restart (two attempts, completed tasks skipped in the journal, total
   spend under the ceiling); a stop with a grace shorter than the job; a poisoned job; a
@@ -464,8 +473,7 @@ point narrows or corrects a sentence of it.
    `interrupted` with `effects_need_consent`. An accepted cancellation is made durable on the job
    before the run is told, so no later incarnation starts it again; that mark is not part of the
    event chain.
-6. **Not yet delivered**: the attempts route and the members of section 10, a `retry`
-   member on a schedule declared over HTTP.
+6. **Not yet delivered**: a `retry` member on a schedule declared over HTTP.
 7. **The class is read twice.** The word kept on the job at admission enters the job's event
    chain only when the job starts. The resident reads the class again from the captured
    workflow, whose digest the job's identity binds, and the stricter of the two holds. A world
@@ -532,6 +540,20 @@ Written for the manual retry route:
     decision and before the store writes, so an owner at its bound is refused with nothing
     changed. The store checks again under its lease that the request names the latest
     attempt: of two different requests racing for one attempt, the first written wins.
+
+Written for reading attempts:
+
+21. **Where the retry state comes from.** `queued` is a queued job with a closed attempt.
+    `exhausted` and `refused` are read from the code on the `interrupted` event that ended
+    the job, or from the error of a re-attempt refused before it ran; `retry_reason` names
+    it. A job whose latest attempt failed for a reason of its own is `none`: a request may
+    still retry it.
+22. **Spend and instants.** `spend` is on the attempts that were started again: what the
+    decision that closed each one counted. The attempt in hand carries its own spend in its
+    settlement. `started_at` is the attempt's `execution.started` event; `ended_at` its
+    terminal event, or for a lost attempt queued again the requeue event.
+23. **The trace query** takes one member, `attempt=N`. Anything else is
+    `400 invalid_trace_query`; a number the job has not reached is `404 attempt_not_found`.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

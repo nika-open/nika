@@ -112,7 +112,9 @@ No public job mutation accepts a filesystem path. Startup paths live only in
 | `GET` | `/v1/jobs/{id}/status` | exactly one Bearer | status only · diagnosis lives on GET job and SSE |
 | `GET` | `/v1/jobs/{id}/events` | exactly one Bearer | SSE `text/event-stream`; `id:` sequence; `data:` `{sequence,kind,status}` plus optional redacted `{code,message}` |
 | `POST` | `/v1/jobs/{id}/cancel` | exactly one Bearer | idempotent terminal job result; active runs receive the engine cancellation token before durable `cancelled` settlement |
-| `GET` | `/v1/jobs/{id}/trace/verify` | exactly one Bearer | typed `unavailable` verdict; no path or invented verification while the remote trace-journal authority is absent |
+| `POST` | `/v1/jobs/{id}/retry` | exactly one Bearer | a new attempt of a job that ended `interrupted` or `failed` (ADR-156, below) · 202 queued · 200 the same request again · 404 · 409 · 422 `invalid_job_retry` · 429 · 503 |
+| `GET` | `/v1/jobs/{id}/attempts` | exactly one Bearer | the policy in force, the retry state and every attempt of the job, oldest first (ADR-156, below) · 404 · 503 |
+| `GET` | `/v1/jobs/{id}/trace/verify` | exactly one Bearer | typed `unavailable` verdict; no path or invented verification while the remote trace-journal authority is absent · `?attempt=N` names one attempt's journal (400 `invalid_trace_query` · 404 `attempt_not_found`) |
 | `POST` | `/v1/compile` | exactly one Bearer | the Compile core's machine document (`compile_version` 1; 2 when a native call happened) as authoring DATA: 200 for `ready`, `incomplete` and `refused` · 422 typed protocol refusals · also 408/413/415/500/503 · 409 on a native server (below) |
 | `GET` | `/v1/openapi.json` | exactly one Bearer | OpenAPI 3.1 document of the live routes (a native server's adds the compile generation-2 contract) |
 
@@ -152,7 +154,8 @@ summary repeats and none is skipped. The store answers a page from one
 snapshot read.
 
 A summary carries `id`, `status`, `workflow`, `origin`, `owner`, `labels`,
-`created_at`, `execution_id`, `trace_id` and, on a failed job, the same
+`created_at`, `execution_id`, `trace_id`, `attempts` (how many the job took
+or holds), `retry_state` (ADR-156, below) and, on a failed job, the same
 redacted `error` as `GET /v1/jobs/{id}`. It never carries inputs, outputs, a
 receipt or a settlement. A job admitted before the resident dated admissions
 shows the date of its first dated event, and is left out of a dated listing
@@ -1318,6 +1321,30 @@ sequence of its terminal event and what the request stated.
 | `409 resume_refused` | the attempt's journal cannot be resumed, or a schedule fired the job |
 | `409 unknown_spend` · `409 budget_exhausted` | as for a lost run |
 | `429 owner_queue_full` · `503 queue_full` · `503 store_busy` · `503 stopping` | as for an admission |
+
+**Reading attempts.** `GET /v1/jobs/{id}/attempts` answers an open object:
+`job_id`, `policy` (`on_interrupted` and `max_attempts` in force for the job:
+the resident's flags as its own `retry` narrows them), `retry_state`,
+`retry_reason` when there is one, and `attempts`, oldest first. Each attempt
+carries `attempt`, `status`, `execution_id` and `trace_id` once it started,
+`mode` (`restart` or `resume`, absent on the first), `resumed_from` (the trace
+it continues, for a resume), its `receipt` once it ended, `spend` on an
+attempt that was started again (what the decision counted, `unknown` when
+some of it could not be read), `started_at` and `ended_at`. A lost attempt
+queued again ended when it was queued again. The attempt in hand carries its
+spend in its settlement on `GET /v1/jobs/{id}`.
+
+| `retry_state` | the job |
+|---|---|
+| `none` | ran once, or its latest attempt ended for a reason of its own |
+| `queued` | has a new attempt waiting in its owner's lane |
+| `exhausted` | took its bound of attempts (`retry_reason: retry_exhausted`) |
+| `refused` | was not started again; `retry_reason` says why, as its last event or error does |
+
+Each attempt has its own journal, chain and seal: `GET
+/v1/jobs/{id}/trace/verify?attempt=N` verifies attempt `N`, and the route
+without a query verifies the latest. `nika trace verify` works on each
+journal unchanged.
 
 **Limits of this version.**
 

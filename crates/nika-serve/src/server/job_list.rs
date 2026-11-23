@@ -271,6 +271,8 @@ struct JobSummaryBody<'a> {
     trace_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<ErrorBody<'a>>,
+    attempts: u32,
+    retry_state: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -304,6 +306,8 @@ impl<'a> JobSummaryBody<'a> {
                 .error
                 .as_ref()
                 .map(|(code, message)| ErrorBody { code, message }),
+            attempts: job.attempts,
+            retry_state: job.retry_state.as_str(),
         }
     }
 }

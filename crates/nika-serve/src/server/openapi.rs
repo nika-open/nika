@@ -713,6 +713,7 @@ mod builder {
             "/v1/jobs/{id}/events": job_events_path(),
             "/v1/jobs/{id}/cancel": job_cancel_path(),
             "/v1/jobs/{id}/retry": super::job_retry::path(&error_named, &json_job()),
+            "/v1/jobs/{id}/attempts": super::job_retry::attempts_path(&error_named),
             "/v1/jobs/{id}/trace/verify": job_trace_verify_path(),
             "/v1/jobs/{id}/artifacts": job_artifacts_path(),
             "/v1/jobs/{id}/artifacts/{name}": job_artifact_path(),
@@ -1038,8 +1039,8 @@ mod builder {
         json!({"get": {
             "summary": "Verify the job's trace journal",
             "description": "Locates the journal the resident wrote for this job under the project it serves (by the job's execution and trace identity) and verifies it through the same verifier `nika trace verify` runs; the vocabulary is the CLI's. `unavailable` is the honest refusal when no journal exists. The response never exposes a filesystem path.",
-            "parameters": [job_id_param()],
-            "responses": {"200": {"description": "Typed trace verdict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceVerification"}}}}, "401": error_ref(), "404": error_ref()}
+            "parameters": [job_id_param(), {"name": "attempt", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1}, "description": "The attempt whose journal is verified (ADR-156); the latest when absent. Each attempt has its own journal, chain and seal."}],
+            "responses": {"200": {"description": "Typed trace verdict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceVerification"}}}}, "400": error_named("`invalid_trace_query`: a query member other than one `attempt=N`"), "401": error_ref(), "404": error_named("`job_not_found` · `attempt_not_found`: the job has not taken this attempt")}
         }})
     }
 
@@ -1171,6 +1172,7 @@ mod tests {
         "/v1/jobs/{id}/events",
         "/v1/jobs/{id}/cancel",
         "/v1/jobs/{id}/retry",
+        "/v1/jobs/{id}/attempts",
         "/v1/jobs/{id}/trace/verify",
         "/v1/jobs/{id}/artifacts",
         "/v1/jobs/{id}/artifacts/{name}",

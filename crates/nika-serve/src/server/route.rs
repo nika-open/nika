@@ -276,7 +276,15 @@ async fn route_authenticated(
             };
             super::schedule_http::get(id.to_owned(), &state).await
         }
-        (&Method::GET, path) if path.ends_with("/trace/verify") => verify_trace(path, &state).await,
+        (&Method::GET, path) if path.ends_with("/trace/verify") => {
+            verify_trace(path, request.uri().query(), &state).await
+        }
+        (&Method::GET, path) if path.starts_with("/v1/jobs/") && path.ends_with("/attempts") => {
+            match job_action_id(path, "/attempts") {
+                Some(id) => super::attempts_route::read(id, &state).await,
+                None => ApiError::route_not_found().into_response(),
+            }
+        }
         (&Method::GET, path) if super::artifacts::is_manifest(path) => {
             super::artifacts::list(path, &state).await
         }
@@ -916,7 +924,7 @@ async fn current_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
     }
 }
 
-async fn verify_trace(path: &str, state: &AppState) -> Response<ResponseBody> {
+async fn verify_trace(path: &str, query: Option<&str>, state: &AppState) -> Response<ResponseBody> {
     let Some(raw_id) = job_action_id(path, "/trace/verify") else {
         return job_not_found();
     };
@@ -932,31 +940,39 @@ async fn verify_trace(path: &str, state: &AppState) -> Response<ResponseBody> {
         ) => return store_busy(),
         Err(_) => return internal_error(),
     };
-    // The journal the resident wrote for this job, under the backend's own
-    // journal directory, verified through the ONE verifier `nika trace
+    // `?attempt=N` names one closed attempt (ADR-156 §10): each attempt has
+    // its own journal, chain and seal.
+    let closed = match super::attempts_route::named_attempt(query, &record) {
+        Ok(closed) => closed,
+        Err(refused) => return refused.into_response(),
+    };
+    let unavailable = match closed {
+        Some(closed) => TraceVerificationResponse::unavailable_for(&closed.trace_id),
+        None => TraceVerificationResponse::unavailable(&record),
+    };
+    // The journal the resident wrote for this attempt, under the backend's
+    // own journal directory, verified through the ONE verifier `nika trace
     // verify` runs; `unavailable` only when no journal exists (a job refused
     // before its first event · a queued job · a backend keeping none).
-    let Some(key) = state
-        .journal_dir
-        .as_deref()
-        .and_then(|dir| super::trace_verdict::JournalKey::of(dir, &record))
-    else {
-        return json_response(
-            StatusCode::OK,
-            &TraceVerificationResponse::unavailable(&record),
-        );
+    let key = state.journal_dir.as_deref().and_then(|dir| match closed {
+        Some(closed) => Some(super::trace_verdict::JournalKey::named(
+            dir,
+            &closed.execution_id,
+            &closed.trace_id,
+        )),
+        None => super::trace_verdict::JournalKey::of(dir, &record),
+    });
+    let Some(key) = key else {
+        return json_response(StatusCode::OK, &unavailable);
     };
     match tokio::task::spawn_blocking(move || key.verify()).await {
         Ok(Some(verdict)) => json_response(StatusCode::OK, &verdict),
-        Ok(None) => json_response(
-            StatusCode::OK,
-            &TraceVerificationResponse::unavailable(&record),
-        ),
+        Ok(None) => json_response(StatusCode::OK, &unavailable),
         Err(_) => internal_error(),
     }
 }
 
-fn job_action_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+pub(super) fn job_action_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
     let tail = path.strip_prefix("/v1/jobs/")?;
     let id = tail.strip_suffix(suffix)?;
     (!id.is_empty() && !id.contains('/')).then_some(id)

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! The retry part of the contract source (ADR-156 section 9):
-//! `POST /v1/jobs/{id}/retry` and the request it reads.
+//! The attempts part of the contract source (ADR-156 sections 9 and 10):
+//! `POST /v1/jobs/{id}/retry` and the request it reads, and
+//! `GET /v1/jobs/{id}/attempts` and what it answers.
 
 use serde_json::{Value, json};
 
@@ -28,9 +29,92 @@ pub(super) fn path(error: &dyn Fn(&'static str) -> Value, job: &Value) -> Value 
     }})
 }
 
-/// `JobRetryRequest`. Closed: a member it does not know is refused.
-pub(super) fn schemas() -> [(&'static str, Value); 1] {
-    [(
+/// `/v1/jobs/{id}/attempts`.
+pub(super) fn attempts_path(error: &dyn Fn(&'static str) -> Value) -> Value {
+    json!({"get": {
+        "summary": "Read every attempt of a job",
+        "description": "Health capability `jobRetry`. The policy in force for the job (the resident's `--retry-interrupted` and `--retry-max-attempts`, as the job's own `retry` narrows them), where it stands about being started again, and each attempt oldest first. An attempt that was started again keeps its identity, its receipt, how it ended and what the decision that closed it counted; the attempt in hand carries its spend in its own settlement on `GET /v1/jobs/{id}`. Each attempt has its own journal: `GET /v1/jobs/{id}/trace/verify?attempt=N` verifies one.",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {
+            "200": {"description": "The job's attempts", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobAttempts"}}}},
+            "401": error("Error envelope"),
+            "404": error("`job_not_found`: unknown or forgotten job id"),
+            "408": error("Request deadline"),
+            "503": error("`store_busy`: durable job state unavailable")
+        }
+    }})
+}
+
+/// The retry states a job shows on the list and on its attempts.
+pub(super) fn retry_state_schema() -> Value {
+    json!({
+        "type": "string",
+        "enum": ["none", "queued", "exhausted", "refused"],
+        "description": "`queued`: a new attempt waits in its owner's lane. `exhausted`: the job took its bound of attempts. `refused`: the resident decided not to start it again, and says why (`retry_reason`, and the code of the job's last event or error). `none`: nothing waits and nothing was refused, including a job whose latest attempt failed for a reason of its own. Open: a later engine may add a word."
+    })
+}
+
+/// `JobRetryRequest`, closed: a member it does not know is refused.
+/// `JobAttempts` and `JobAttempt`, open.
+pub(super) fn schemas() -> [(&'static str, Value); 3] {
+    [
+        retry_request_schema(),
+        ("JobAttempts", attempts_schema()),
+        ("JobAttempt", attempt_schema()),
+    ]
+}
+
+fn attempts_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["job_id", "policy", "retry_state", "attempts"],
+        "properties": {
+            "job_id": {"type": "string", "format": "uuid"},
+            "policy": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": ["on_interrupted", "max_attempts"],
+                "properties": {
+                    "on_interrupted": {"type": "string", "enum": ["off", "restart", "resume"]},
+                    "max_attempts": {"type": "integer", "minimum": 1, "maximum": 16}
+                }
+            },
+            "retry_state": retry_state_schema(),
+            "retry_reason": {"type": "string", "enum": ["retry_exhausted", "effects_need_consent", "unknown_spend", "budget_exhausted", "resume_refused"], "description": "Present when `retry_state` is `exhausted` or `refused`."},
+            "attempts": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/JobAttempt"}}
+        }
+    })
+}
+
+fn attempt_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["attempt", "status"],
+        "properties": {
+            "attempt": {"type": "integer", "minimum": 1},
+            "status": {"$ref": "#/components/schemas/JobStatus"},
+            "execution_id": {"type": "string", "description": "Absent on an attempt that waits and has not started."},
+            "trace_id": {"type": "string"},
+            "mode": {"type": "string", "enum": ["restart", "resume"], "description": "How this attempt was started again; absent on the first."},
+            "resumed_from": {"type": "string", "description": "The trace this attempt continues, when it resumed the one before it."},
+            "receipt": {"$ref": "#/components/schemas/JobReceipt"},
+            "spend": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["usd"],
+                "description": "On an attempt that was started again: what the decision counted against the job's ceiling. `unknown` is present when some of it could not be read; it never counts for zero.",
+                "properties": {"usd": {"type": "number", "minimum": 0}, "unknown": {"type": "boolean", "const": true}}
+            },
+            "started_at": {"type": "string", "format": "date-time"},
+            "ended_at": {"type": "string", "format": "date-time", "description": "For an attempt queued again after losing its resident, when it was queued again."}
+        }
+    })
+}
+
+fn retry_request_schema() -> (&'static str, Value) {
+    (
         "JobRetryRequest",
         json!({
             "type": "object",
@@ -55,5 +139,5 @@ pub(super) fn schemas() -> [(&'static str, Value); 1] {
                 }
             }
         }),
-    )]
+    )
 }

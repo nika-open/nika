@@ -139,6 +139,8 @@ fn summary(job: &StoredJob) -> JobSummary {
         execution_id: record.execution_id().map(str::to_owned),
         trace_id: record.trace_id().map(str::to_owned),
         error,
+        attempts: record.attempt(),
+        retry_state: job.retry_state(),
         ordinal: record.ordinal,
     }
 }

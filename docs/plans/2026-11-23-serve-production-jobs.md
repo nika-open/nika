@@ -395,6 +395,15 @@ the policy is opt-in (`--retry-interrupted off|resume|restart`, `off` by
 default) with a per-job request bounded by the server; a workflow with
 external effects needs explicit consent; the ceiling counts every attempt.
 
+What reading the code added to it: a call in flight at the interruption
+counts at the static bound of its task, because the reserved amount died
+with the process; an unpriced route keeps the custody it already has; an
+engine upgrade between two attempts refuses the resume, since the resident
+never declares a version compatibility on its own; the judgments of a resume
+are composed in the CLI today and move to one place both doors call. No
+event kind, status, trace field or closed key is added: the existing
+`execution.requeued` carries the re-attempt.
+
 One C item does not depend on the ADR and ships with B: `--shutdown-grace`.
 
 ## 6. Decisions and their records

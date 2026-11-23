@@ -1956,5 +1956,22 @@
       "enables": [],
       "amends": []
     }
+    ,
+    {
+      "id": "ADR-156",
+      "title": "Re-attempt an interrupted Serve job as a new attempt of the same job",
+      "status": "proposed",
+      "date": "2026-11-23",
+      "filename": "adr-156-serve-attempts-for-interrupted-jobs.md",
+      "tags": ["architecture","serve","jobs","retry","resume","cost"],
+      "affects_crates": ["nika-serve","nika-cli-host","nika-cli","nika-service-execution"],
+      "affects_layers": ["L3","L4"],
+      "supersedes": [],
+      "superseded_by": [],
+      "related": ["ADR-019","ADR-128","ADR-130","ADR-132","ADR-155"],
+      "requires": ["ADR-099","ADR-117","ADR-119","ADR-129"],
+      "enables": [],
+      "amends": []
+    }
   ]
 }

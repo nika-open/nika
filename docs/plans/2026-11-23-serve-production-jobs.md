@@ -289,18 +289,27 @@ carries attribution, consumes no slot).
   `429 owner_queue_full` with `Retry-After`.
 - `--max-concurrent-per-owner N`: an owner never has more than N jobs
   running; the rest wait.
-- Dispatch is round-robin across the owners that have a waiting job, first
-  in, first out inside one owner. Unattributed jobs share one anonymous
-  bucket, with the same two limits.
+- A free worker goes to the owner with the fewest jobs running, among the
+  owners that have a job waiting; in turn among equals; first in, first out
+  inside one owner. Unattributed jobs share one anonymous lane, with the
+  same two limits. (As built: plain round-robin over waiting owners would
+  let an owner that already holds workers take the next one before a
+  newcomer. Counting the running jobs is what makes owner B start at the
+  next free worker.)
 
 The `mpsc` channel and its permit give way to one bounded fair queue
 (`server/fair_queue.rs`): a lane per owner, a ring of owners, the global
 capacity and the two per-owner bounds, behind one mutex with a wake signal.
 A reservation is taken before the durable record is created and released if
 admission fails, exactly as the permit was. Jobs recovered at restart
-re-enter their lane without being refused. A scheduled fire keeps its
-existing behaviour (one global slot, no wait for a worker) and counts in its
-owner's running total.
+re-enter their lane without being refused. A scheduled fire is durably
+`running` when it reaches the queue: it takes one global place, is served
+before the lanes, is never refused or held back by a per-owner bound, and
+counts in its owner's running total. The scheduler watches a fire within a
+window derived from the queue capacity, which a fire parked behind other
+owners could outlive. A queued job that is cancelled gives its place back
+at once, and a replay takes no second place. `Retry-After` on
+`429 owner_queue_full` is a fixed hint of 5 seconds.
 
 The same commit exposes the limits the resident already had but could not
 set: `--max-concurrent-jobs`, `--queue-capacity`, `--max-jobs`,
@@ -316,11 +325,16 @@ change the project file's language and need its own decision.
 job waits for one of the provider's N tokens and returns it when the call
 returns.
 
-- **Seam.** One kernel trait, `ProviderCallGate` (`nika-kernel-ai`), with
-  an owned permit. The gate travels the route the cost admission already
-  travels: `RuntimeConfig` → the provider registry → each resolved provider,
-  and is taken in `ResolvedProvider::infer_reported`, the one point every
-  `infer` and `agent` call crosses. Child workflows receive it too.
+- **Seam.** One trait, `ProviderCallGate`, with an owned slot. As built it
+  lives in `nika-providers`, beside `InferenceAdmission`, and not in
+  `nika-kernel-ai` as first planned: its only caller is the provider
+  round-trip and its only implementor is a host that already depends on
+  `nika-providers`, so a kernel trait would add a sealed contract (ADR-014)
+  with no second consumer. The gate travels the route the cost admission
+  already travels: `RuntimeConfig` → the provider registry → each resolved
+  provider, and is taken in `ResolvedProvider::infer_reported`, the one
+  point every `infer` and `agent` call crosses, and kept by a stream until
+  it is dropped. Child workflows receive it too.
 - **Implementation.** `nika-serve` holds one semaphore per provider for the
   process and implements the trait. `nika run` sets none: unlimited, as
   today.
@@ -329,8 +343,12 @@ returns.
   sleep and taken again for the next attempt.
 - **`for_each`.** Iterations past the available tokens wait at the gate, so
   the effective width is the smaller of `max_parallel` and the free tokens.
-- **Cancellation.** A waiter observes the job's cancel and its dropped
-  future; it holds nothing while it waits.
+- **Cancellation.** A waiter holds nothing while it waits and leaves the
+  line when its future is dropped. A job's operator cancel is a flag
+  without a waker, so the resident wraps the gate per run and reads the
+  flag every 25 ms: a cancelled job's waiting calls are withdrawn, nothing
+  is sent, and the failure is not one a verb retries.
+- **Timeouts.** The wait counts inside a task's `timeout:`.
 - **Not covered:** harness and ACP seats, the image and speech builtins
   (they post directly), and the resident's own authoring and Session seats.
   Recorded as remaining limits.
@@ -352,6 +370,15 @@ nothing deadlocks; three concurrent `for_each` jobs never exceed the
 provider cap, proven with a gate that counts and releases; restart recovers
 lanes. Loom (ADR-013) binds at the crate's admission; the queue is plain
 data behind one mutex, so the deterministic tests are the evidence here.
+
+As built, the provider cap is proven at two levels. In `nika-providers`,
+real round-trips run against a transport that answers on command and counts
+the posts inside it, below the gate: five calls on two slots never show
+three in flight. In `nika-serve`, three fanned-out jobs, a child workflow
+and a cancelled job run through the real resident backend on the `mock`
+provider. Each wiring point was removed in turn (the slot in the registry,
+the gate in the composed registry, the child's gate, the withdrawal at a
+stop) and the matching test failed each time.
 
 ## 5. Workstream C · retry interrupted jobs
 
@@ -433,9 +460,9 @@ No descent is needed. New files: `job/attribution.rs`, `job/listing.rs`,
 `server/schedule_manage.rs`, `server/fair_queue.rs`,
 `server/provider_gate.rs`, `server/occupancy.rs`. The OpenAPI builder lives
 under `#[cfg(test)]` and does not count. Other crates move by tens of lines:
-`nika-cadence` (schedule attribution), `nika-kernel-ai`, `nika-providers`,
-`nika-runtime`, `nika-service-execution` (the provider gate),
-`nika-cli-host` (flags).
+`nika-cadence` (schedule attribution), `nika-providers`, `nika-runtime`,
+`nika-service-execution` (the provider gate), `nika-cli-host` (flags). The
+kernel is not touched.
 
 ## 9. Commits
 
@@ -448,10 +475,12 @@ crates, the crate's tests):
 4. A4 retention.
 5. A5 schedule attribution, list, delete, trigger.
 6. A6 ADR-155, documentation, OpenAPI text, changelog fragments.
-7. B1 fair queue, per-owner limits, limit flags.
-8. B2 provider gate.
-9. B3 occupancy and documentation.
-10. C0 ADR-156, then stop.
+7. B1 fair queue, per-owner limits, limit flags, occupancy (`31285cca9`).
+8. Review fixes on A: the migration written under the lease, a forgotten
+   queue entry, a slot keeps its job (`85c005729`).
+9. B2 provider gate, its flag, `providers` in the occupancy (`46d711ea1`).
+10. B3 ADR-155 and this plan brought to what is built.
+11. C0 ADR-156, then stop.
 
 One pull request per workstream is the natural split for review; they stack
 on this branch in that order.

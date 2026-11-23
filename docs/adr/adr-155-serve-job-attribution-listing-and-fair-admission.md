@@ -6,8 +6,8 @@ date: 2026-11-23
 phase: ""
 deciders: ["@ThibautMelen"]
 tags: ["architecture", "serve", "jobs", "schedules", "admission"]
-affects_crates: ["nika-serve", "nika-cadence", "nika-cli-host", "nika-cli"]
-affects_layers: ["L0", "L4"]
+affects_crates: ["nika-serve", "nika-cadence", "nika-cli-host", "nika-cli", "nika-providers", "nika-runtime", "nika-service-execution"]
+affects_layers: ["L0", "L1.5", "L3", "L4"]
 supersedes: []
 superseded_by: []
 related: []
@@ -163,20 +163,67 @@ resident's own Bearer and is not an inbound event door.
 
 ### 6. Fair admission and one cap per provider
 
+**Per owner.**
+
 - `--max-queued-per-owner N`: an owner with N jobs waiting is refused `429 owner_queue_full`
-  with `Retry-After`. `--max-concurrent-per-owner N`: an owner never has more than N jobs
-  running; the rest wait.
-- Dispatch is round-robin across the owners that have a waiting job, first in first out inside
-  one owner. Unattributed jobs share one anonymous bucket under the same two limits.
-- `--provider-concurrency PROVIDER=N`: every model call of every job waits for one of the
-  provider's N tokens and returns it when the call returns. The gate is one kernel trait, set
-  by the resident and absent under `nika run`. Retry ownership (ADR-019) is unchanged: the
-  transport never re-sends, an authored `retry:` belongs to the runtime, and the token is
-  released before a backoff and taken again for the next attempt.
+  with `Retry-After`. Nothing is written and the idempotency key stays unbound, so the same
+  request is sent again. `Retry-After` is a fixed hint of 5 seconds: the resident cannot know
+  when one of the owner's jobs will start. `--max-concurrent-per-owner N`: an owner never has
+  more than N jobs running; the rest wait while free workers serve other owners.
+- A job waits in the lane of the owner it states, first in first out. Unattributed jobs share
+  one anonymous lane under the same two limits.
+- A free worker goes to the owner with the fewest jobs running, among the owners that have a
+  job waiting and are under their running bound. Among equals it goes in turn: the owner
+  served longest ago. Plain round-robin over waiting owners is this rule when no job runs; the
+  running count is what makes a second owner start at the next free worker while the first
+  already holds workers.
+- `--max-concurrent-jobs` and `--queue-capacity` keep their meaning. They, `--max-jobs` and
+  `--shutdown-grace` become flags; their defaults are the former constants.
+- A place in the queue is reserved before the durable record and given back if the admission
+  does not land. A replay of a waiting job takes no second place. A queued job that is
+  cancelled gives its place back at once.
+- A scheduled fire is durably `running` when it reaches the queue. It is bounded by
+  `--queue-capacity` only and served before the lanes: the scheduler watches a fire to its end
+  within a window derived from the queue capacity, which a fire parked behind other owners
+  could outlive. It counts in its owner's running total.
+- Jobs that were `queued` at a stop re-enter their lanes in admission order at the next start,
+  past the bounds of that start: a lowered limit never drops an admitted job.
+
+**Per provider.**
+
+- `--provider-concurrency PROVIDER=N`, repeatable: every model call of every job takes one of
+  the provider's N slots before it is sent and returns it when the call returns. A provider
+  that is not named is not bounded.
+- The seam is `nika_providers::ProviderCallGate`, taken by the provider registry around each
+  round-trip (`infer_reported`; a stream keeps its slot until it is dropped). The resident
+  implements it with one semaphore per provider and hands it to each run through
+  `RuntimeConfig::provider_gate`; child runs compose with the same gate. It is absent under
+  `nika run`.
+- The trait lives in `nika-providers`, beside `InferenceAdmission`, not in the kernel. Its
+  only caller is that crate's round-trip and its only implementor is a host that already
+  depends on that crate, so a kernel trait would add a sealed contract (ADR-014) with no
+  second consumer.
+- Retry ownership (ADR-019) is unchanged. The gate re-sends nothing. A call that ends in a
+  transient rejection has returned its slot before its verb backs off, and the next attempt
+  waits its turn like any call.
+- A `for_each` starts its items as before, up to `max_parallel`. Each item's call waits for a
+  slot, so the calls in flight are the smaller of `max_parallel` and the free slots. The
+  fan-out does not read the slot count: a snapshot would be stale at once and would slow the
+  items that make no model call.
+- The wait for a slot counts inside a task's `timeout:`.
+- A job cancelled while its calls wait leaves the line: the resident withdraws those calls,
+  nothing is sent, and the failure is not one a verb retries. The run then reaches its wave
+  boundary and settles `cancelled`. A call already sent is unchanged: it finishes inside the
+  cancel grace or is dropped with the run.
+
+**Both.**
+
 - These are operator settings of one resident: flags, like `--run-cost-ceiling`, never
-  `nika.yaml` keys.
-- `GET /v1/occupancy`, authenticated, reports running and queued jobs against their limits, by
-  owner and by provider.
+  `nika.yaml` keys. They describe a process, not the project.
+- `GET /v1/occupancy`, authenticated, reports running and queued jobs against their limits,
+  the busiest owners (at most 100, the rest counted), and for each capped provider its cap,
+  the calls in flight and the calls waiting. It is not on the public `/health`: it names
+  owners.
 
 ### 7. Capabilities
 
@@ -218,6 +265,17 @@ may accept an unknown request field without applying it.
   attributing a schedule means removing the attribution first.
 - Listing reads the whole snapshot for each page (one read, then filter). Its cost is the read
   column of the table.
+- **The provider cap does not cover every call.** Calls an agent harness makes through its own
+  client (ACP), the image and speech tools, and the authoring door (`POST /v1/compile`) do not
+  pass the gate. A deployment that relies on them for volume is not bounded by it.
+- **A cap far under the demand becomes task timeouts.** The wait for a slot counts inside a
+  task's `timeout:`. The operator sizes the cap from the provider's limit and
+  `--max-concurrent-jobs` from the cap; `providers[].waiting` in the occupancy shows the
+  pressure.
+- A cancelled job's waiting calls notice the stop by reading the run's cancel flag every
+  25 ms: the flag has no waker. The cost is one timer per waiting call.
+- The queue and the provider slots are one resident's memory. Two residents on one state root
+  are still refused, so the limits are never split across processes.
 
 ### Neutral
 
@@ -226,6 +284,11 @@ may accept an unknown request field without applying it.
 - The trace journal of an evicted job stays on disk until its own retention removes it.
 - A triggered job is manual: `${{ run.scheduled_for }}` reads its own start, and the cadence
   shows no decision for it.
+- `nika-providers` (L1.5) gains a `gate` module and `ProviderRegistry::with_call_gate`;
+  `RuntimeConfig` (L3) gains one optional member. Without a gate both behave as before.
+- The fair queue keeps all its state under one mutex. Loom (ADR-013) covers the lock-free
+  cancel token of `nika-types` in this repository; it is not applied to a mutex-held queue,
+  whose invariants are held by unit tests over every transition instead.
 
 ## Evidence / Affected code
 
@@ -239,9 +302,25 @@ may accept an unknown request field without applying it.
 - `crates/nika-serve/src/schedule/store.rs` -- `overview`, `remove`, the row's optional members
 - `crates/nika-serve/src/server/schedule_manage.rs` -- list, removal, trigger
 - `crates/nika-serve/src/job/tests/throughput.rs` -- the measurement in Context
+- `crates/nika-serve/src/server/fair_queue.rs` -- the lanes, the turn, the bounds
+- `crates/nika-serve/src/server/occupancy.rs` -- `GET /v1/occupancy`, `429 owner_queue_full`
+- `crates/nika-serve/src/server/resident_options.rs` -- the limit flags
+- `crates/nika-providers/src/gate.rs` -- `ProviderCallGate`, `ProviderCallSlot`
+- `crates/nika-providers/src/registry.rs` -- the slot around a round-trip and a stream
+- `crates/nika-runtime/src/config.rs`, `crates/nika-runtime/src/compose.rs` -- the gate carried
+  into the composed registry
+- `crates/nika-service-execution/src/lib.rs` -- a child run composes with its parent's gate
+- `crates/nika-serve/src/server/provider_gate.rs` -- the resident's semaphores, the per-run
+  withdrawal, the load
+- `crates/nika-serve/src/server/fair_admission_tests.rs`,
+  `crates/nika-serve/src/server/provider_gate/resident_tests.rs`,
+  `crates/nika-providers/src/gate_tests.rs` -- fairness, bounds, the cap across three
+  fanned-out jobs, a child run, cancellation
 - `crates/nika-serve/openapi.json` -- the served contract
 - Commits `0584fb445` (format 4), `5ed6aece2` (attribution), `1f300cdad` (list), `c41982f4b`
-  (retention), `cc846d3ae` (schedules)
+  (retention), `cc846d3ae` (schedules), `31285cca9` (fair admission, limit flags, occupancy),
+  `85c005729` (the migration written under the lease, a forgotten queue entry, a slot keeps its
+  job), `46d711ea1` (the provider cap)
 
 ## Alternatives considered
 
@@ -279,8 +358,28 @@ cadence and compete with the scheduler for "one slot, one firer".
 
 ### Alt F -- weighted or priority queues
 
-Round-robin across owners with two bounds answers the scenario. Weights need a notion of who
-deserves more, which only real tenancy (Alt A) can state.
+Fewest-running-first across owners, in turn among equals, with two bounds answers the
+scenario. Weights need a notion of who deserves more, which only real tenancy (Alt A) can
+state.
+
+### Alt G -- the provider gate as a kernel trait
+
+Rejected. A kernel trait is a sealed contract every layer can see (ADR-014). The gate has one
+caller, the provider round-trip, and one implementor, a host above it; both already meet in
+`nika-providers`, where `InferenceAdmission` set the precedent for a host-supplied object the
+registry consults. Moving it to the kernel later stays possible if a second transport needs it.
+
+### Alt H -- the fan-out reads the free slots
+
+Rejected. Making `for_each` start only as many items as slots are free needs a count that is
+stale as soon as it is read, shared across runs, and it would hold back items that call no
+model. Taking the slot around each call gives the same bound on calls in flight with no
+change to the runtime's fan-out.
+
+### Alt I -- provider caps in `nika.yaml`
+
+Rejected. The project file describes the project and travels with it; a cap describes one
+process and the account behind it. A block there would also be a new project-file contract.
 
 ## Related
 
@@ -289,6 +388,8 @@ deserves more, which only real tenancy (Alt A) can state.
 - ADR-132 -- identity and idempotency: the request digest now binds attribution
 - ADR-136 -- inbound event bindings: the trigger here is the operator gesture it set aside
 - ADR-019 -- retry ownership: unchanged by the provider gate
+- ADR-014 -- sealed kernel traits: untouched, the gate is not one (Alt G)
+- ADR-013 -- loom: where it applies in this repository (Neutral)
 - ADR-156 -- attempts for interrupted jobs
 - `docs/crate-specs/nika-serve.md`, `docs/ops/README.md`
 

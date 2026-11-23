@@ -1137,6 +1137,6 @@ status = "proposed"
 date = "2026-11-23"
 filename = "adr-155-serve-job-attribution-listing-and-fair-admission.md"
 tags = ["architecture", "serve", "jobs", "schedules", "admission"]
-affects_crates = ["nika-serve", "nika-cadence", "nika-cli-host", "nika-cli"]
-affects_layers = ["L0", "L4"]
+affects_crates = ["nika-serve", "nika-cadence", "nika-cli-host", "nika-cli", "nika-providers", "nika-runtime", "nika-service-execution"]
+affects_layers = ["L0", "L1.5", "L3", "L4"]
 

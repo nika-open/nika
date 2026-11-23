@@ -1939,5 +1939,22 @@
       "enables": [],
       "amends": ["ADR-004","ADR-023","ADR-143"]
     }
+    ,
+    {
+      "id": "ADR-155",
+      "title": "Attribute, list, forget and fairly admit Serve jobs inside one authority domain",
+      "status": "proposed",
+      "date": "2026-11-23",
+      "filename": "adr-155-serve-job-attribution-listing-and-fair-admission.md",
+      "tags": ["architecture","serve","jobs","schedules","admission"],
+      "affects_crates": ["nika-serve","nika-cadence","nika-cli-host","nika-cli"],
+      "affects_layers": ["L0","L4"],
+      "supersedes": [],
+      "superseded_by": [],
+      "related": [],
+      "requires": ["ADR-117","ADR-119","ADR-132"],
+      "enables": [],
+      "amends": []
+    }
   ]
 }

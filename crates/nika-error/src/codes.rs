@@ -500,6 +500,30 @@ pub fn resident_help(code: &str) -> Option<String> {
             "no route, job or served workflow by that name",
             "GET /v1/workflows lists the names this resident admits (project-root-relative · `.nika`)",
         ),
+        "invalid_job_owner" => (
+            "the job's `owner` is null, empty, longer than 128 bytes, or holds a character outside `[A-Za-z0-9._:@-]`",
+            "send an identifier your application already has (`user_123` · `org:42`), or omit the member",
+        ),
+        "invalid_job_labels" => (
+            "the job's `labels` are not an object of at most 16 string pairs: a key of 1 to 64 bytes of `[A-Za-z0-9._/-]`, a value of at most 256 bytes without control characters",
+            "shorten or rename the label named in the message, or omit the member; nothing is truncated for you",
+        ),
+        "invalid_job_query" => (
+            "a `GET /v1/jobs` query member is unknown, repeated, or outside its bounds; a filter is never ignored, so a typo cannot answer every job",
+            "use `owner` · `status` · `workflow` · `origin` · `label=key:value` · `created_after` · `created_before` (RFC 3339) · `limit` (1 to 200) · `cursor`",
+        ),
+        "invalid_job_cursor" => (
+            "the `cursor` is not one this list returned",
+            "pass `next_cursor` from the previous page unchanged, or drop it to start from the newest job",
+        ),
+        "invalid_schedule_trigger" => (
+            "a trigger carried a body member; it runs what the schedule declares and overrides nothing",
+            "send no body (or `{}`); to run the workflow under other inputs, POST /v1/jobs",
+        ),
+        "schedule_declared_by_project" => (
+            "the schedule is a beat of the project's `nika.yaml`, which the HTTP door neither removes nor triggers",
+            "edit `nika.yaml` to change or remove it, and run it once by hand with `nika arm fire <label>`",
+        ),
         _ => return None,
     };
     Some(format!(
@@ -1750,6 +1774,12 @@ mod tests {
                 "snapshot_unit_count_limit",
                 "admission_refused",
                 "not_found",
+                "invalid_job_owner",
+                "invalid_job_labels",
+                "invalid_job_query",
+                "invalid_job_cursor",
+                "invalid_schedule_trigger",
+                "schedule_declared_by_project",
             ] {
                 let text = super::resident_help(code);
                 assert!(text.is_some(), "{code} is taught");

@@ -789,7 +789,7 @@ pub(crate) fn check_calls(
     let cost = cost::ceiling(wf);
     let (schema_findings, unverifiable_output_refs) = schema_typing::scan_types(wf);
     let schema_findings = drop_refs_the_coded_walk_refused(schema_findings, &conformance);
-    let mut report = CheckReport {
+    let report = CheckReport {
         report_version: REPORT_VERSION,
         conformance,
         energy: energy::reading(&cost),
@@ -847,8 +847,12 @@ pub(crate) fn check_calls(
         failure_plan: Vec::new(),
         workflow_semantic: None,
     };
-    // The class-erased list folds the FINISHED report (one truth, read
-    // back) — every consumer (CLI --json · MCP nika_check) gets it free.
+    with_findings(wf, report)
+}
+
+/// The class-erased list folds the FINISHED report (one truth, read back):
+/// every consumer (CLI `--json` · MCP `nika_check`) gets it free.
+fn with_findings(wf: &RawWorkflow, mut report: CheckReport) -> CheckReport {
     report.findings = findings::collect(&report);
     report.failure_plan = failure_plan::collect(wf, &report);
     report

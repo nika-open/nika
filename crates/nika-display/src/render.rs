@@ -762,6 +762,13 @@ fn append_paused_card(lines: &mut Vec<String>, view: &RunView, theme: &Theme) {
             &format!("paused · awaiting an answer for `{task}`")
         ),
     ));
+    let question = view.paused_message.as_deref().map(printable_question);
+    if let Some(question) = question.filter(|q| !q.is_empty()) {
+        lines.push(format!(
+            "    {}",
+            crate::vocab::hint(*theme, "question", &format!("\"{question}\""))
+        ));
+    }
     lines.push(format!(
         "    {}",
         crate::vocab::hint(
@@ -772,15 +779,56 @@ fn append_paused_card(lines: &mut Vec<String>, view: &RunView, theme: &Theme) {
     ));
 }
 
-/// Confirm (stdlib default) takes a boolean. Input/choice take a string —
-/// teaching `=true` / « not yes » on those modes burns the ticket (P11).
+/// Confirm (stdlib default) takes a boolean, and the resume line binds
+/// `yes`/`no` to it as the TTY does. Input/choice take a string — teaching
+/// `=true` on those modes burns the ticket (P11).
 fn pause_answer_hint(task: &str, mode: Option<&str>) -> String {
     match mode {
         Some("input" | "choice") => {
             format!("nika run --answer {task}=\"your answer\" FILE")
         }
-        _ => format!("nika run --answer {task}=true FILE  (boolean true/false, not yes)"),
+        _ => format!("nika run --answer {task}=true FILE  (true or yes · false or no)"),
     }
+}
+
+/// The longest question the paused card prints, in characters.
+const QUESTION_MAX_CHARS: usize = 160;
+
+/// A paused gate's question made safe for one terminal line. The text can
+/// carry content the run fetched, so a control character (an escape
+/// sequence's lead byte, a newline, a bell) or a bidirectional override
+/// becomes a space, runs of blanks fold to one, and a long question is
+/// clipped with `…`.
+fn printable_question(message: &str) -> String {
+    let mut out = String::new();
+    let mut blank = true;
+    for c in message.chars() {
+        if c.is_control() || c.is_whitespace() || is_bidi_control(c) {
+            if !blank {
+                out.push(' ');
+            }
+            blank = true;
+        } else {
+            out.push(c);
+            blank = false;
+        }
+    }
+    let out = out.trim_end();
+    if out.chars().count() <= QUESTION_MAX_CHARS {
+        return out.to_owned();
+    }
+    let mut clipped: String = out.chars().take(QUESTION_MAX_CHARS).collect();
+    clipped.push('…');
+    clipped
+}
+
+/// The Unicode bidirectional controls: they reorder what a terminal shows
+/// without being control characters.
+fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 // `&Theme` (not by-value) to match the `frame`/`verdict_frame` borrow that

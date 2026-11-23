@@ -153,7 +153,7 @@ fn golden_paused_frame_names_the_awaiting_gate() {
     );
     assert!(
         !joined.contains("=yes"),
-        "boolean true/false, not yes: {joined}"
+        "the command line teaches the boolean, the note names yes: {joined}"
     );
     assert!(!joined.contains('✖'), "never red: {joined}");
     assert!(
@@ -168,7 +168,7 @@ fn golden_paused_frame_names_the_awaiting_gate() {
     );
 }
 
-/// P11 · an input gate's card must not teach `=true` / « not yes ».
+/// P11 · an input gate's card must not teach `=true` or the confirm answers.
 #[test]
 fn pause_card_input_mode_teaches_a_string() {
     let joined = frame(&fold(&demo::paused_input()), &UNICODE, 0).join("\n");
@@ -177,9 +177,66 @@ fn pause_card_input_mode_teaches_a_string() {
         "input teaches a string: {joined}"
     );
     assert!(
-        !joined.contains("=true") && !joined.contains("not yes"),
+        !joined.contains("=true") && !joined.contains("true or yes"),
         "confirm copy must not ride an input gate: {joined}"
     );
+}
+
+/// NIK-326 · the paused card shows the question the gate asks, so whoever
+/// reads the frame (a person, an agent) knows what is asked without opening
+/// the trace. Confirm teaches every answer the resume line binds: `true`
+/// and `yes`, `false` and `no` (the TTY prints `[yes/no]`).
+#[test]
+fn pause_card_shows_the_question_and_the_confirm_answers() {
+    let joined = frame(&fold(&demo::paused()), &UNICODE, 0).join("\n");
+    assert!(
+        joined.contains("question: \"send the digest?\""),
+        "the card shows the question: {joined}"
+    );
+    assert!(
+        joined.contains("nika run --answer summarize=true FILE  (true or yes · false or no)"),
+        "confirm names the answers it binds: {joined}"
+    );
+    assert!(!joined.contains("not yes"), "yes binds true: {joined}");
+    let question = joined.find("question:");
+    let answer = joined.find("answer:");
+    assert!(question < answer, "the question comes first: {joined}");
+    let close = stream_summary(&fold(&demo::paused()), &UNICODE, &[]).join("\n");
+    assert!(close.contains("question: \"send the digest?\""), "{close}");
+}
+
+/// The question can carry content the run fetched: it prints on one line,
+/// with no terminal control character and no bidirectional override, and a
+/// long one is clipped.
+#[test]
+fn pause_card_question_is_one_printable_line() {
+    use nika_types::resource::{KeyValue, Value};
+    let hostile = format!(
+        "send\n\u{1b}[2Jthe \u{202e}digest?\r\u{7}{}",
+        "x".repeat(400)
+    );
+    let mut events = demo::paused();
+    events.pop();
+    events.push(
+        demo::bare_event(nika_event::EventKind::WorkflowPaused, 4400)
+            .with_field(KeyValue::new("task", Value::String("summarize".to_owned())))
+            .with_field(KeyValue::new("mode", Value::String("confirm".to_owned())))
+            .with_field(KeyValue::new("message", Value::String(hostile))),
+    );
+    let lines = frame(&fold(&events), &UNICODE, 0);
+    let question: Vec<&String> = lines.iter().filter(|l| l.contains("question:")).collect();
+    assert_eq!(question.len(), 1, "one question line: {lines:?}");
+    let line = question[0];
+    assert!(
+        line.contains("question: \"send [2Jthe digest? x"),
+        "controls become one space, the text stays readable: {line}"
+    );
+    assert!(
+        !line.chars().any(|c| c.is_control() || c == '\u{202e}'),
+        "no control or bidi character reaches the terminal: {line:?}"
+    );
+    assert!(line.ends_with("…\""), "a long question is clipped: {line}");
+    assert!(line.chars().count() < 200, "clipped to one line: {line}");
 }
 
 /// #393 sibling — fallout beside the root cause: cancelled rows earn

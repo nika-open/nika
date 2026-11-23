@@ -108,7 +108,9 @@ impl ProviderCallGate for SlowProvider {
             if let Ok(answer) = self.answer.acquire().await {
                 answer.forget();
             }
-            Ok(ProviderCallSlot::holding((slot, keeping)))
+            // The count falls before the real slot returns: the next call
+            // is admitted only after this one stopped counting.
+            Ok(ProviderCallSlot::holding((keeping, slot)))
         })
     }
 }

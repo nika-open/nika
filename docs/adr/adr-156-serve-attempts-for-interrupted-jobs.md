@@ -405,3 +405,7 @@ Decisions asked of the decider before any code:
 5. A call in flight counts at its static bound; unknown cost refuses unless an explicit
    budget is stated; an unpriced route keeps its existing custody (section 6).
 6. The attempt history inside store format 4 (section 11).
+7. The durable mark is a queued attempt: a job waiting for its re-attempt reads `queued`,
+   and only a job nobody will re-attempt reads `interrupted` (section 7).
+8. An engine upgrade between two attempts refuses the resume instead of declaring a version
+   compatibility for the operator (section 3).

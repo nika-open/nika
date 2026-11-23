@@ -661,7 +661,7 @@ pub(super) async fn admit_job(
 ) -> Response<ResponseBody> {
     match state
         .coordinator
-        .admit_manual_inputs(key, digest, workflow, world, access_pin, bindings, None)
+        .admit_manual_inputs(key, digest, workflow, world, access_pin, bindings)
         .await
     {
         Ok(admission) => admission_response(admission),

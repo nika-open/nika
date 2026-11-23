@@ -576,6 +576,10 @@ pub(super) async fn decide(
 /// one; the world is captured again by name and must be the reviewed bytes;
 /// the host confirms after re-observing everything the review bound. Any
 /// refusal after the review was taken spends it: nothing is ever refunded.
+///
+/// The queue place is taken first, so a full queue or an owner at its bound
+/// answers its refusal with the review still approved: that refusal asks the
+/// caller to send the same request again, and the review must still be there.
 pub(super) async fn admit(
     state: Arc<AppState>,
     key: IdempotencyKey,
@@ -585,6 +589,10 @@ pub(super) async fn admit(
 ) -> Response<ResponseBody> {
     let Some(door) = state.cost_review.clone() else {
         return unavailable();
+    };
+    let place = match state.coordinator.place(job.attribution.owner()) {
+        Ok(place) => place,
+        Err(error) => return route::admission_error(&error),
     };
     let now = door.now();
     let taken = door.store().take(&id, &witness, &request_value(&job), now);
@@ -604,12 +612,10 @@ pub(super) async fn admit(
         JobBindings::of(job.inputs.unwrap_or_default(), None).attributed(job.attribution);
     let admitted = state
         .coordinator
-        .admit_manual_inputs(
-            key,
-            digest,
-            job.workflow,
-            world,
-            job.access,
+        .admit_placed(
+            place,
+            (key, digest),
+            (job.workflow, world, job.access),
             bindings,
             Some(authority),
         )

@@ -18,6 +18,9 @@ use super::fair_queue::{FairQueue, QueueLoad, QueueRefusal, Reservation};
 use super::provider_gate::{ProviderGates, ProviderLoad};
 use super::{ExecutionTask, ServerError, ServerLimits, StoreHandle};
 
+/// One place in the job queue, taken before its job is admitted.
+pub(super) type Place = Reservation<ExecutionTask>;
+
 /// A place in the execution queue that was not given: a FULL queue is
 /// back-pressure (`ExecutionQueueFull`), an owner at its own bound is that
 /// owner's to wait out (`OwnerQueueFull`), and a CLOSED queue means the
@@ -153,17 +156,12 @@ impl ResidentExecutionCoordinator {
             world,
             access_pin,
             JobBindings::default(),
-            None,
         )
         .await
     }
 
-    /// A reviewed admission (`reviewed`) attaches its captured world and cost
-    /// authority to the created job before its task is queued; any other
-    /// outcome drops it, which settles its account with nothing sent. A
-    /// ceiling in `bindings` (a Session's run) is kept with the job: it
+    /// A ceiling in `bindings` (a Session's run) is kept with the job: it
     /// restricts the server's at every run of it, never widens it.
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn admit_manual_inputs(
         &self,
         key: IdempotencyKey,
@@ -172,14 +170,41 @@ impl ResidentExecutionCoordinator {
         world: String,
         access_pin: Option<String>,
         bindings: JobBindings,
-        reviewed: Option<(nika_execution::ExecutionSession, super::CostAuthority)>,
     ) -> Result<Admission, ServerError> {
         // The place is taken in the owner's lane before the record exists:
         // an owner at its bound is refused with nothing written.
-        let permit = self
-            .jobs
-            .reserve(bindings.attribution.owner())
-            .map_err(queue_refusal)?;
+        let place = self.place(bindings.attribution.owner())?;
+        self.admit_placed(
+            place,
+            (key, digest),
+            (workflow, world, access_pin),
+            bindings,
+            None,
+        )
+        .await
+    }
+
+    /// One place in `owner`'s lane, for an admission that must know it has
+    /// one before it spends anything: a cost review is taken only after it.
+    ///
+    /// # Errors
+    /// The queue, or this owner's part of it, is full.
+    pub(super) fn place(&self, owner: Option<&str>) -> Result<Place, ServerError> {
+        self.jobs.reserve(owner).map_err(queue_refusal)
+    }
+
+    /// Admit under a place already taken. A reviewed admission (`reviewed`)
+    /// attaches its captured world and cost authority to the created job
+    /// before its task is queued; any other outcome drops it, which settles
+    /// its account with nothing sent.
+    pub(super) async fn admit_placed(
+        &self,
+        permit: Place,
+        (key, digest): (IdempotencyKey, RequestDigest),
+        (workflow, world, access_pin): (String, String, Option<String>),
+        bindings: JobBindings,
+        reviewed: Option<(nika_execution::ExecutionSession, super::CostAuthority)>,
+    ) -> Result<Admission, ServerError> {
         let admission = self
             .store
             .create_or_replay(

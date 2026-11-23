@@ -179,15 +179,25 @@ resident's own Bearer and is not an inbound event door.
   already holds workers.
 - `--max-concurrent-jobs` and `--queue-capacity` keep their meaning. They, `--max-jobs` and
   `--shutdown-grace` become flags; their defaults are the former constants.
+  `--max-concurrent-jobs` stops at 256: a running job holds one thread of the resident's
+  blocking pool, which its routes share.
 - A place in the queue is reserved before the durable record and given back if the admission
-  does not land. A replay of a waiting job takes no second place. A queued job that is
-  cancelled gives its place back at once.
+  does not land. A replay of a job that waits, or that a worker has taken and not yet marked
+  `running`, takes no second place and is not refused for the one its job has. A queued job
+  that is cancelled gives its place back at once.
+- A job that carries an approved cost review takes its place before the review is taken. A
+  refusal for lack of a place asks the caller to send the same request again, so it must
+  leave the review approved. This also changes the older `503 queue_full`, which used to
+  spend the review.
 - A scheduled fire is durably `running` when it reaches the queue. It is bounded by
   `--queue-capacity` only and served before the lanes: the scheduler watches a fire to its end
   within a window derived from the queue capacity, which a fire parked behind other owners
   could outlive. It counts in its owner's running total.
 - Jobs that were `queued` at a stop re-enter their lanes in admission order at the next start,
-  past the bounds of that start: a lowered limit never drops an admitted job.
+  past the bounds of that start: a lowered limit never drops an admitted job. They hold their
+  places, so a resident that restarts with a full queue refuses new admissions until the
+  backlog drains. Before this decision the recovered jobs were held outside the queue's
+  count, and a restart could briefly hold twice the capacity.
 
 **Per provider.**
 

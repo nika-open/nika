@@ -58,7 +58,7 @@ impl ResidentOptions {
     /// many the store keeps. Absent, each keeps its default.
     ///
     /// # Errors
-    /// A count of zero.
+    /// A count of zero, or more than 256 jobs at once.
     pub fn with_job_capacity(
         mut self,
         max_concurrent: Option<usize>,
@@ -66,6 +66,9 @@ impl ResidentOptions {
         max_jobs: Option<usize>,
     ) -> Result<Self, ServerLaunchRefuse> {
         if let Some(workers) = stated_count(max_concurrent)? {
+            if workers > MAX_CONCURRENT_JOBS {
+                return Err(ServerLaunchRefuse::TooManyConcurrentJobs);
+            }
             self.limits = self.limits.with_max_concurrent_jobs(workers);
         }
         if let Some(waiting) = stated_count(queue)? {
@@ -165,6 +168,12 @@ fn stated_provider_limit(value: &str) -> Option<(&'static str, usize)> {
     let limit = count.parse::<usize>().ok().filter(|_| canonical_count)?;
     (limit <= MAX_PROVIDER_CONCURRENCY).then_some((*provider, limit))
 }
+
+/// The most jobs one resident runs at once. A running job holds one thread
+/// of the runtime's blocking pool for its whole run, and the routes take
+/// theirs from the same pool (512 threads by default): past this bound a
+/// busy resident would stop answering.
+const MAX_CONCURRENT_JOBS: usize = 256;
 
 /// One count as an operator states it on a limit flag: at least one.
 fn stated_count(stated: Option<usize>) -> Result<Option<usize>, ServerLaunchRefuse> {
@@ -272,6 +281,11 @@ mod tests {
         ] {
             assert_eq!(refused, Err(ServerLaunchRefuse::InvalidJobLimit));
         }
+        assert!(options().with_job_capacity(Some(256), None, None).is_ok());
+        assert_eq!(
+            options().with_job_capacity(Some(257), None, None),
+            Err(ServerLaunchRefuse::TooManyConcurrentJobs)
+        );
         for grace in ["0s", "30", "soon", "1.5m", ""] {
             assert_eq!(
                 options().with_shutdown_grace(Some(grace)),

@@ -778,6 +778,11 @@ pub enum ServerLaunchRefuse {
         "serve · --max-concurrent-jobs, --queue-capacity, --max-jobs, --max-queued-per-owner and --max-concurrent-per-owner take a whole number of at least 1"
     )]
     InvalidJobLimit,
+    /// `--max-concurrent-jobs` is above what one resident runs at once.
+    #[error(
+        "serve · --max-concurrent-jobs takes at most 256: each running job holds one thread of the resident, and the same threads serve its routes"
+    )]
+    TooManyConcurrentJobs,
     /// `--shutdown-grace` is not a duration of at least one second.
     #[error(
         "serve · --shutdown-grace takes a duration of at least one second: a whole number and a unit, s, m, h or d (30s, 5m)"

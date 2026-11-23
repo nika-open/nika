@@ -1682,6 +1682,7 @@ pub nika_serve::server::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::server::ServerLaunchRefuse::MissingTokenFile
 pub nika_serve::server::ServerLaunchRefuse::RehearsalWithListener
 pub nika_serve::server::ServerLaunchRefuse::ScriptedClockWithListener
+pub nika_serve::server::ServerLaunchRefuse::TooManyConcurrentJobs
 impl core::clone::Clone for nika_serve::ServerLaunchRefuse
 pub fn nika_serve::ServerLaunchRefuse::clone(&self) -> nika_serve::ServerLaunchRefuse
 impl core::cmp::Eq for nika_serve::ServerLaunchRefuse
@@ -3349,6 +3350,7 @@ pub nika_serve::ServerLaunchRefuse::MissingBindOrWorkflows
 pub nika_serve::ServerLaunchRefuse::MissingTokenFile
 pub nika_serve::ServerLaunchRefuse::RehearsalWithListener
 pub nika_serve::ServerLaunchRefuse::ScriptedClockWithListener
+pub nika_serve::ServerLaunchRefuse::TooManyConcurrentJobs
 impl core::clone::Clone for nika_serve::ServerLaunchRefuse
 pub fn nika_serve::ServerLaunchRefuse::clone(&self) -> nika_serve::ServerLaunchRefuse
 impl core::cmp::Eq for nika_serve::ServerLaunchRefuse

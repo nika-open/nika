@@ -175,6 +175,13 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
   `--max-jobs` the jobs the store keeps (`507 job_capacity`). Every job
   operation rewrites the whole store, so prefer a retention window to a
   larger `--max-jobs`.
+- `--max-concurrent-jobs` takes at most 256.
+- After a restart the jobs that were waiting hold their places again. A
+  resident that restarts with a full queue answers `503 queue_full` to new
+  jobs until the backlog drains below `--queue-capacity`.
+- With `--cost-review`, a job refused by a full queue or by its owner's bound
+  keeps its approved review: send the same request again while the review
+  lives.
 - `--shutdown-grace` is how long a stop waits for running and queued jobs
   (`30s` by default). Give your supervisor a longer kill timeout: with
   systemd, `TimeoutStopSec` of the grace plus 15 seconds.
@@ -185,7 +192,9 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
   `for_each` still fans out, its calls go as slots free. Retries are
   unchanged, and a retry waits its turn like any call. The wait counts in a
   task's `timeout:`, so a cap far under the demand shows as task timeouts.
-  Calls an agent harness makes through its own client are not counted.
+  Only the model calls of `infer` and `agent` tasks are counted: calls an
+  agent harness makes through its own client, and the image and speech
+  tools, are not.
 
 Read what the resident holds at any time:
 

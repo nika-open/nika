@@ -1034,7 +1034,7 @@ members of `nika.yaml`: they describe one process, not the project.
 
 | flag | default | bounds | past it |
 |---|---|---|---|
-| `--max-concurrent-jobs <N>` | 4 | jobs running at once | the others wait |
+| `--max-concurrent-jobs <N>` | 4 | jobs running at once, at most 256 | the others wait |
 | `--queue-capacity <N>` | 64 | jobs waiting, all owners together | `503 queue_full` |
 | `--max-queued-per-owner <N>` | none | jobs one owner has waiting | `429 owner_queue_full` + `Retry-After` |
 | `--max-concurrent-per-owner <N>` | none | jobs one owner runs at once | its others wait; free workers serve other owners |
@@ -1042,16 +1042,25 @@ members of `nika.yaml`: they describe one process, not the project.
 | `--shutdown-grace <DURATION>` | `30s` | the drain at a stop | running jobs settle `interrupted` |
 | `--provider-concurrency <PROVIDER=N>` | none | model calls in flight on one provider, all jobs together | the others wait their turn |
 
-A count is a whole number of at least 1. `429 owner_queue_full` writes
+A count is a whole number of at least 1. `--max-concurrent-jobs` stops at
+256: a running job holds one thread of the resident for its whole run, and
+the routes take theirs from the same pool. `429 owner_queue_full` writes
 nothing and leaves the `Idempotency-Key` unbound: the same request is sent
 again after the `Retry-After` seconds (a fixed hint of 5: the resident cannot
 know when one of the owner's jobs will start). It is a `429` and not a `503`
 because the server is available: other owners are still admitted.
 
+A job that carries an approved cost review takes its queue place before the
+review is taken. `429 owner_queue_full` and `503 queue_full` therefore leave
+the review approved, and the same request is admitted once there is a place,
+within the review's lifetime. Every refusal after the review is taken still
+spends it.
+
 **What never takes a place twice.** A place is reserved before the durable
 record and given back if the admission does not land. A replay of a job that
-still waits answers that job and takes no second place. A queued job that is
-cancelled gives its place back at once.
+still waits, or that a worker has just taken and not yet marked `running`,
+answers that job: it takes no second place and is never refused for the one
+its job has. A queued job that is cancelled gives its place back at once.
 
 **Scheduled fires.** A run the scheduler fires is durably `running` when it
 reaches the queue. It is bounded by `--queue-capacity` only: a per-owner bound
@@ -1063,8 +1072,11 @@ queue capacity, which a fire parked behind other owners' lanes could outlive.
 
 **Restart.** The jobs that were `queued` when the resident stopped re-enter
 their owner's lane in admission order, past today's bounds: a limit lowered
-across a restart never drops an admitted job. The running counts start at
-zero, as no job runs.
+across a restart never drops an admitted job. They hold their places like any
+waiting job, so a resident that restarts with a full queue answers
+`503 queue_full` to new admissions, and defers scheduled fires, until the
+backlog drains below `--queue-capacity`. The running counts start at zero, as
+no job runs.
 
 **Provider calls.** A provider's rate limit belongs to the account every job
 shares, so the resident bounds calls per provider, across jobs.

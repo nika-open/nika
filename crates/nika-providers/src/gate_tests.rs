@@ -306,8 +306,14 @@ async fn a_withdrawn_call_sends_nothing_and_is_not_retried() {
         .expect("the call in flight answers");
     assert_eq!(transport.answered(), 1, "one request reached the provider");
 
+    // The test transport opens no stream at all, so only the words tell a
+    // stream the gate withdrew from one the transport refused.
     let stream = provider.infer_stream(request()).await;
-    assert!(stream.is_err(), "a withdrawn stream never opens");
+    assert_eq!(
+        stream.err().map(|refused| refused.to_string()).as_deref(),
+        Some("provider error: no request was sent to groq: the run was stopped"),
+        "a withdrawn stream never reaches the transport"
+    );
     assert_eq!(transport.answered(), 1);
 }
 
@@ -325,13 +331,14 @@ async fn only_the_bounded_provider_waits() {
         .with_call_gate(shared)
         .resolve("mock/echo")
         .expect("mock resolves");
-    let answer = mock
-        .infer(InferRequest::new(
-            "echo",
-            vec![Message::text(Role::User, "hello")],
-        ))
+    let asked = mock.infer(InferRequest::new(
+        "echo",
+        vec![Message::text(Role::User, "hello")],
+    ));
+    let answer = tokio::time::timeout(Duration::from_secs(5), asked)
         .await
-        .expect("another provider does not wait");
+        .expect("another provider does not wait")
+        .expect("the mock answers");
     assert!(!answer.content.is_empty());
     drop(held);
 

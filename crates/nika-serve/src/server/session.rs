@@ -177,7 +177,6 @@ impl Resident {
                 world,
                 access,
                 JobBindings::of(inputs, ceiling),
-                None,
             )
             .await;
         let response = match admission {

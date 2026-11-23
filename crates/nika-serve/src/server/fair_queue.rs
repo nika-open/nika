@@ -85,6 +85,9 @@ struct Inner<T> {
     ring: VecDeque<Owner>,
     /// Every job that waits, so a replay never queues it twice.
     waiting: BTreeSet<JobId>,
+    /// Every job a worker holds. The store says `queued` until the worker
+    /// has claimed it, and a replay in between must queue nothing.
+    in_hand: BTreeSet<JobId>,
 }
 
 struct Lane<T> {
@@ -120,12 +123,13 @@ impl<T> Inner<T> {
     /// fewest jobs running among those that may run one more, the earliest
     /// in turn among equals. The served owner goes to the back; an owner
     /// passed over keeps its turn.
-    fn pick(&mut self, bounds: QueueBounds) -> Option<(Owner, T)> {
+    fn pick(&mut self, bounds: QueueBounds) -> Option<(Owner, JobId, T)> {
         if let Some((owner, id, task)) = self.started.pop_front() {
             self.waiting.remove(&id);
+            self.in_hand.insert(id.clone());
             self.held = self.held.saturating_sub(1);
             self.lanes.entry(owner.clone()).or_default().running += 1;
-            return Some((owner, task));
+            return Some((owner, id, task));
         }
         let (_, turn) = self
             .ring
@@ -147,8 +151,9 @@ impl<T> Inner<T> {
             self.ring.push_back(owner.clone());
         }
         self.waiting.remove(&id);
+        self.in_hand.insert(id.clone());
         self.held = self.held.saturating_sub(1);
-        Some((owner, task))
+        Some((owner, id, task))
     }
 }
 
@@ -163,6 +168,7 @@ impl<T> FairQueue<T> {
                 lanes: BTreeMap::new(),
                 ring: VecDeque::new(),
                 waiting: BTreeSet::new(),
+                in_hand: BTreeSet::new(),
             }),
             wake: Notify::new(),
         })
@@ -224,15 +230,19 @@ impl<T> FairQueue<T> {
     }
 
     /// Queue a job the store already holds as `queued`, unless it waits
-    /// already. A replay of a waiting job takes no second place.
+    /// already or a worker holds it. A replay takes no second place, and it
+    /// is never refused for a place its job already has.
     pub(super) fn requeue(
         self: &Arc<Self>,
         owner: Option<&str>,
         id: JobId,
         task: T,
     ) -> Result<(), QueueRefusal> {
-        if self.lock().waiting.contains(&id) {
-            return Ok(());
+        {
+            let inner = self.lock();
+            if inner.waiting.contains(&id) || inner.in_hand.contains(&id) {
+                return Ok(());
+            }
         }
         self.reserve(owner)?.send(id, task);
         Ok(())
@@ -299,12 +309,13 @@ impl<T> FairQueue<T> {
         loop {
             {
                 let mut inner = self.lock();
-                if let Some((owner, task)) = inner.pick(self.bounds) {
+                if let Some((owner, id, task)) = inner.pick(self.bounds) {
                     return Some(Dispatched {
                         task,
                         running: Running {
                             queue: Arc::clone(self),
                             owner,
+                            id,
                         },
                     });
                 }
@@ -412,11 +423,13 @@ pub(super) struct Dispatched<T> {
 pub(super) struct Running<T> {
     queue: Arc<FairQueue<T>>,
     owner: Owner,
+    id: JobId,
 }
 
 impl<T> Drop for Running<T> {
     fn drop(&mut self) {
         let mut inner = self.queue.lock();
+        inner.in_hand.remove(&self.id);
         if let Some(lane) = inner.lanes.get_mut(&self.owner) {
             lane.running = lane.running.saturating_sub(1);
         }
@@ -718,6 +731,29 @@ mod tests {
         // the store, not the queue, says whether it may still run.
         queue.requeue(Some("a"), id, "a1-again").expect("a place");
         assert_eq!(queue.next().await.expect("again").task, "a1-again");
+    }
+
+    /// Between the moment a worker takes a job and the moment the store says
+    /// `running`, a replay still reads `queued`: it queues nothing, and it is
+    /// not refused for the place its job already had.
+    #[tokio::test]
+    async fn a_job_a_worker_holds_is_not_queued_again() {
+        let queue = FairQueue::new(QueueBounds {
+            capacity: 1,
+            queued_per_owner: Some(1),
+            running_per_owner: None,
+        });
+        let id = put(&queue, Some("a"), "a1");
+        let held = queue.next().await.expect("a1");
+        // The owner's next job takes the only place.
+        put(&queue, Some("a"), "a2");
+        queue
+            .requeue(Some("a"), id, "a1-replayed")
+            .expect("a replay is not refused for a job a worker holds");
+        assert_eq!(queue.load(8).queued, 1, "only a2 waits");
+        drop(held);
+        assert_eq!(queue.next().await.expect("a2").task, "a2");
+        assert!(nothing_to_serve(&queue).await);
     }
 
     /// A job queued when the resident stopped re-enters its lane past every

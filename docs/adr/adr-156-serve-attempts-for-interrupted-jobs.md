@@ -347,17 +347,24 @@ Written for the `restart` mode of the automatic re-attempt (the first delivery):
 - `crates/nika-cli-host/src/serve_args.rs`, `crates/nika-cli/src/verbs/serve.rs` --
   `--retry-interrupted off|restart`, `--retry-max-attempts`
 - `crates/nika-serve/src/job/tests/attempts.rs`, `crates/nika-serve/src/server/retry_tests.rs`,
-  `crates/nika-dap/src/attempt_tests.rs`
+  `crates/nika-dap/src/attempt/tests.rs`
+
+Written for the `resume` mode:
+
+- `crates/nika-dap/src/continuation.rs` -- the one resume judgment `nika run --resume` and the
+  resident call; `crates/nika-cli/src/verbs/run/resume_setup.rs` now calls it
+- `crates/nika-serve/src/server/retry.rs` -- the judgment when the resident decides
+- `crates/nika-serve/src/server/production.rs` -- the judgment when the new attempt starts,
+  and the plan handed to the run
+- `crates/nika-service-execution/src/lib.rs` -- `ServiceExecutionOptions::with_resume`
+- `crates/nika-serve/src/server/mod.rs` -- `ExecutionBackend::execute_resumed`, whose default
+  refuses
+- `crates/nika-dap/src/continuation/tests.rs`, `crates/nika-serve/src/server/retry_tests.rs`
 
 Planned:
 
-- `crates/nika-serve/src/job/` -- the attempt history, the counter, the reasons
-- `crates/nika-serve/src/job/store.rs` -- `settle_interrupted_jobs` creates the next attempt
-- `crates/nika-serve/src/server/` -- the policy, the classification, the budget fold, the
-  retry route, the attempts route
-- `crates/nika-service-execution` -- a resume plan given by the resident
-- `crates/nika-cli-host`, `crates/nika-cli` -- `--retry-interrupted`, `--retry-max-attempts`
-- `crates/nika-serve/openapi.json`, `docs/security/nika-serve-threat-model.md`
+- `crates/nika-serve/src/server/` -- the retry route, the attempts route
+- `crates/nika-serve/openapi.json` -- the two routes
 - Fault-injection tests beside `server/tests/shutdown/process.rs`: a kill in the middle of a
   mock workflow then a restart (two attempts, completed tasks skipped in the journal, total
   spend under the ceiling); a stop with a grace shorter than the job; a poisoned job; a
@@ -443,8 +450,8 @@ point narrows or corrects a sentence of it.
    `interrupted` with `effects_need_consent`. An accepted cancellation is made durable on the job
    before the run is told, so no later incarnation starts it again; that mark is not part of the
    event chain.
-6. **Not yet delivered**: the `resume` mode, the manual retry route, the attempts route and the
-   members of section 10, a `retry` member on a schedule declared over HTTP.
+6. **Not yet delivered**: the manual retry route, the attempts route and the members of
+   section 10, a `retry` member on a schedule declared over HTTP.
 7. **The class is read twice.** The word kept on the job at admission enters the job's event
    chain only when the job starts. The resident reads the class again from the captured
    workflow, whose digest the job's identity binds, and the stricter of the two holds. A world
@@ -461,6 +468,28 @@ point narrows or corrects a sentence of it.
     Under `off` no decision changes; the record gains that one optional member.
 11. **A cancellation racing a worker.** A cancellation accepted while a worker claims the
     job is made durable as for a running job before the run is told.
+
+Written for the `resume` mode:
+
+12. **One judgment, two moments.** The composition section 3 asks for is
+    `nika_dap::continuation`; `nika run --resume` and the resident both call it. The resident
+    judges when it decides (chain required, project, workflow, engine; no access, since the
+    lanes are resolved only by a run) and again when the new attempt starts, with the lanes
+    that run resolved, before its cost judgment. The second judgment ends the job `failed`
+    (`resume_refused`), with no task run, as a queued attempt its ceiling no longer covers
+    does. It is reached when the journal changed after the decision, when the access moved,
+    and when the engine that starts the attempt is not the one that decided: a stop past its
+    grace decides in the stopping resident, so a deploy that upgrades the engine then fails
+    the queued attempt rather than leave the job `interrupted`. A start after a kill decides
+    in the new resident and leaves the job `interrupted`, as section 3 states.
+13. **No leftovers settled** (third open point). The resident neither settles a crashed
+    run's leftovers nor puts back what a failed run moved aside before a resume, as
+    `nika run --resume` does; it never did for a restart either. A served run that is killed
+    moves no file (quarantine happens at a failed settlement), and a workflow that writes is
+    resumed only when its job stated `retry`.
+14. **What a resumed attempt continues.** The facts the lost attempt recorded on its first
+    manifest (a scheduled slot) are carried on; a gate the journal holds as paused asks
+    again.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

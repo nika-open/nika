@@ -212,6 +212,17 @@ billing cannot be proven stopped by a local deadline.
   lost attempt's journal is read only while its chain holds; an edited or
   reordered journal counts as unknown spend. A cancelled job is never run
   again: the accepted cancellation is written before the run is told.
+- A `resume` serves the tasks a lost attempt's journal records as completed
+  without running them again, so the journal is a claim of work done. The
+  resident judges it with the code `nika run --resume` uses and requires its
+  chain: an unchained or broken journal, or one recorded by another project,
+  workflow, engine version, model seat or access, refuses the resume
+  (`resume_refused`). It never resumes an unverified journal and never
+  falls back to a restart on its own. It judges again when the new attempt
+  starts, so a journal edited after the decision fails the attempt before
+  any task runs. The chain is unkeyed: whoever can write the project's
+  journal directory can forge a consistent journal, as for `nika run
+  --resume` (ADR-099).
 - A retry is bounded three ways: `max_attempts` (1 to 16, counted before an
   attempt runs, so a job that kills the resident each time is counted each
   time), one cost ceiling over all attempts, and the queue bounds of

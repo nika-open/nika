@@ -135,6 +135,16 @@ as a new attempt of the same job: same id, same `Idempotency-Key`, a new
 execution and trace identity. The attempt that was interrupted is kept as
 it was, with its receipt. `/health` advertises `jobRetry`.
 
+With `resume`, the new attempt does not pay twice for the tasks the lost
+one completed: they are served from its journal and the others run. The
+journal must hold its chain and match the project, the workflow, the engine
+version, the model and the access it recorded, as for `nika run --resume`.
+When it does not, the job stays `interrupted` (`resume_refused`); use
+`restart` if running it from its first task is what you want. A deploy that
+upgrades the engine refuses the resume of the jobs it interrupted: when the
+stopping resident had already queued the new attempt, that attempt fails
+with `resume_refused` instead, without running a task.
+
 - **What counts.** Only a run that lost its resident: a kill, or a stop
   whose `--shutdown-grace` ended first. A cancelled job, a job that failed
   or timed out, and a job a schedule fired on its beat are never started
@@ -147,8 +157,8 @@ it was, with its receipt. `/health` advertises `jobRetry`.
   the caller's consent to run those effects twice. Killing a process does
   not prove that an effect did not happen.
 - **Per job.** `"retry": {"on_interrupted": "restart", "max_attempts": 2}`
-  asks for a restart whatever the flag says, or `"off"` refuses one. A job
-  lowers `--retry-max-attempts`, never raises it.
+  asks for a restart whatever the flag says, `"resume"` for a resume, or
+  `"off"` refuses one. A job lowers `--retry-max-attempts`, never raises it.
 - **Cost.** `--run-cost-ceiling` (or the lower ceiling a job bound) covers
   all the attempts of a job together. What the lost attempt spent is read
   from its journal; a call that may have been sent counts at the bound
@@ -159,8 +169,8 @@ it was, with its receipt. `/health` advertises `jobRetry`.
   again under a ceiling. `"retry": {"max_cost_usd": 0.5}` is how a caller
   accepts it: the re-attempts then run under that amount.
 - **Why not.** A job left `interrupted` says why on its last event:
-  `retry_exhausted`, `effects_need_consent`, `unknown_spend` or
-  `budget_exhausted`.
+  `retry_exhausted`, `effects_need_consent`, `unknown_spend`,
+  `budget_exhausted` or `resume_refused`.
 - **Clients.** A job that is started again shows `queued` then `running`
   again, and its event stream gains one `execution.requeued` frame; it
   never shows `interrupted` in between. A client that waits for a terminal

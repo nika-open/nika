@@ -304,15 +304,15 @@ fn a_lost_run_s_policy_is_an_option_of_the_persistent_resident() {
         (None, None),
         (Some("off"), Some(1)),
         (Some("restart"), Some(16)),
+        (Some("resume"), Some(3)),
     ] {
         assert!(
             options().with_retry_interrupted(mode, bound).is_ok(),
             "{mode:?} {bound:?}"
         );
     }
-    // `resume` is a mode of a later version: today it is refused, not read
-    // as another.
-    for word in ["resume", "Restart", ""] {
+    // A word that is not a mode is refused, not read as another.
+    for word in ["Resume", "Restart", "resume ", ""] {
         assert_eq!(
             options().with_retry_interrupted(Some(word), None).err(),
             Some(nika_serve::ServerLaunchRefuse::InvalidRetryInterrupted),

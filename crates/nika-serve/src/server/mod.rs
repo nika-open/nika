@@ -381,6 +381,35 @@ pub trait ExecutionBackend: Send + Sync + 'static {
         None
     }
 
+    /// The project root this backend runs jobs under, when it has one. A
+    /// job's interrupted attempt is resumed only against the project its
+    /// journal recorded (ADR-156 §3); `None` (the default) resumes none.
+    fn project_root(&self) -> Option<PathBuf> {
+        None
+    }
+
+    /// Execute a new attempt of a job that resumes its interrupted attempt
+    /// (ADR-156 §3): the tasks that attempt's journal completed are served
+    /// from it and the others run. `interrupted` names that attempt's
+    /// execution and trace. A backend must explicitly support it: the
+    /// default refuses `resume_refused`, and never runs the workflow from
+    /// its first task in its place.
+    fn execute_resumed<'a>(
+        &'a self,
+        _context: ExecutionContext<'a>,
+        _run: (Option<f64>, Option<&str>),
+        _inputs: &BTreeMap<String, serde_json::Value>,
+        _cancel: nika_types::cancel::CancelCtx,
+        _interrupted: (&str, &str),
+    ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        Box::pin(async {
+            ExecutionOutcome::failed(
+                "resume_refused",
+                "this execution backend does not resume an interrupted attempt",
+            )
+        })
+    }
+
     /// The operator's standing cost policy this backend enforces, when it holds
     /// one: the server then advertises health `costStandingPolicyV1`. `None`
     /// (the default) says the backend admits no Run under a standing rule.
@@ -528,7 +557,7 @@ impl ResidentAuthority {
         // this start for the incarnation before, and at this one's stop.
         let judge = Arc::new(retry::LostRunJudge::new(
             config.limits(),
-            backend.trace_journal_dir(),
+            (backend.trace_journal_dir(), backend.project_root()),
             config.snapshot_limits(),
         ));
         let prepared = prepare_authority(&config, Arc::clone(&judge)).await?;
@@ -1236,6 +1265,7 @@ async fn run_claimed(
         Ok(ceiling) => ceiling,
         Err(refusal) => return retry::refuse_attempt(state, task, refusal).await,
     };
+    let resumes = retry::resumes(&record);
     let inputs = record.inputs;
     let mut guard = RunningGuard::new(state.store.clone(), task.id.clone(), task.prestarted);
     if !task.prestarted && !start_running(&mut guard, session.context()).await? {
@@ -1251,7 +1281,7 @@ async fn run_claimed(
         (session, authority),
         task.origin.clone(),
         max_cost_usd,
-        task.access_pin.take(),
+        (task.access_pin.take(), resumes),
         inputs,
         cancel,
     )
@@ -1374,30 +1404,47 @@ async fn admit_workflow(
 const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The backend's future for one run: a reviewed job under its authority (C6),
-/// a scheduled fire told its slot, any other job with its literal inputs and
-/// pin under the run's ceiling.
+/// a scheduled fire told its slot, a new attempt resuming the interrupted
+/// one (ADR-156 §3), any other job with its literal inputs and pin under the
+/// run's ceiling.
 fn execution<'a>(
     backend: &'a dyn ExecutionBackend,
     context: ExecutionContext<'a>,
     (authority, max_cost_usd, access_pin): (Option<CostAuthority>, Option<f64>, Option<&str>),
     inputs: &BTreeMap<String, serde_json::Value>,
-    (cancel, facts): (
+    (cancel, facts, resumes): (
         &nika_types::cancel::CancelCtx,
         Option<nika_runtime::RunFacts>,
+        Option<(&str, &str)>,
     ),
 ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
-    match (authority, facts) {
-        (Some(authority), _) => {
+    match (authority, facts, resumes) {
+        (None, None, Some(interrupted)) => backend.execute_resumed(
+            context,
+            (max_cost_usd, access_pin),
+            inputs,
+            cancel.clone(),
+            interrupted,
+        ),
+        // Neither a reviewed job nor a fire is ever started again: a resume
+        // of one refuses rather than run it from its first task.
+        (_, _, Some(_)) => Box::pin(async {
+            ExecutionOutcome::failed(
+                "resume_refused",
+                "a job admitted through a cost review or fired by a schedule is never resumed",
+            )
+        }),
+        (Some(authority), _, None) => {
             backend.execute_reviewed(context, inputs, cancel.clone(), authority)
         }
-        (None, Some(facts)) => backend.execute_scheduled(
+        (None, Some(facts), None) => backend.execute_scheduled(
             context,
             (max_cost_usd, access_pin),
             inputs,
             cancel.clone(),
             facts,
         ),
-        (None, None) => {
+        (None, None, None) => {
             backend.execute_with_inputs(context, max_cost_usd, access_pin, inputs, cancel.clone())
         }
     }
@@ -1409,17 +1456,20 @@ async fn settle_disposition(
     (session, authority): (nika_execution::ExecutionSession, Option<CostAuthority>),
     origin: JobOrigin,
     max_cost_usd: Option<f64>,
-    access_pin: Option<String>,
+    (access_pin, resumes): (Option<String>, Option<(String, String)>),
     inputs: BTreeMap<String, serde_json::Value>,
     cancel: nika_types::cancel::CancelCtx,
 ) -> Result<(), ServerError> {
     let run = (authority, max_cost_usd, access_pin.as_deref());
+    let interrupted = resumes
+        .as_ref()
+        .map(|(execution, trace)| (execution.as_str(), trace.as_str()));
     let execute = execution(
         state.backend.as_ref(),
         session.context(),
         run,
         &inputs,
-        (&cancel, origin.run_facts()),
+        (&cancel, origin.run_facts(), interrupted),
     );
     // A cancel signal gives the runtime a grace to reach its next wave
     // boundary and return its result. A signal requests action; only the

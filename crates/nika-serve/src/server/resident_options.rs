@@ -123,7 +123,8 @@ impl ResidentOptions {
     /// when it is submitted; it lowers this bound and never raises it.
     ///
     /// # Errors
-    /// A mode that is not `off` or `restart`, or a bound outside 1 to 16.
+    /// A mode that is not `off`, `restart` or `resume`, or a bound outside
+    /// 1 to 16.
     pub fn with_retry_interrupted(
         mut self,
         mode: Option<&str>,
@@ -448,13 +449,17 @@ mod tests {
             policy(Some("off"), Some(1)),
             Ok(RetryPolicy::new(OnInterrupted::Off, 1))
         );
+        assert_eq!(
+            policy(Some("resume"), None),
+            Ok(RetryPolicy::new(OnInterrupted::Resume, 3))
+        );
         // The bound alone is kept: a job may still state its own mode.
         assert_eq!(
             policy(None, Some(2)),
             Ok(RetryPolicy::new(OnInterrupted::Off, 2))
         );
 
-        for mode in ["", "on", "Restart", "always", "restart "] {
+        for mode in ["", "on", "Restart", "Resume", "always", "restart "] {
             assert_eq!(
                 policy(Some(mode), None),
                 Err(ServerLaunchRefuse::InvalidRetryInterrupted),

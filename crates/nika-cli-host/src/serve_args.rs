@@ -157,7 +157,8 @@ pub struct ServeArgs {
     /// What becomes of a job whose run was lost to a crash, a kill or a stop past its grace:
     /// `off` (default) leaves it interrupted; `restart` runs its captured workflow again from
     /// the first task, as a new attempt of the same job, under what is left of its cost
-    /// ceiling. A workflow that can repeat an effect outside the engine is started again only
+    /// ceiling; `resume` serves the tasks the lost attempt's journal completed and runs the
+    /// rest, once the journal is judged as `nika run --resume` judges one. A workflow that can repeat an effect outside the engine is started again only
     /// if its job stated `retry` when it was submitted. A job may state its own mode.
     #[arg(long, value_name = "MODE", conflicts_with_all = ["once", "dry"])]
     pub retry_interrupted: Option<String>,

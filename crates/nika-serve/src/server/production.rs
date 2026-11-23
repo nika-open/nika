@@ -8,6 +8,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use nika_dap::continuation::{Continuation, ResumeAsk, ResumeRefusal};
 use nika_dap::journal::TraceFileSink;
 use nika_error::prelude::{NikaCode, NikaErrorCode, codes};
 use nika_service_execution::{
@@ -99,18 +100,19 @@ impl ResidentExecutionBackend {
         pair: (BTreeMap<String, serde_json::Value>, Option<CancelCtx>),
         authority: Option<CostAuthority>,
     ) -> std::pin::Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
-        self.drive_told(context, (max_cost_usd, access_pin), pair, authority, None)
+        let fresh = Continues::Fresh;
+        self.drive_told(context, (max_cost_usd, access_pin), pair, authority, fresh)
     }
 
-    /// [`Self::drive`] with a scheduled run told the instant it serves (spec 04
-    /// §`run`); `None`: a job no schedule fired.
+    /// [`Self::drive`] with what the run continues: a scheduled fire told the
+    /// instant it serves (spec 04 §`run`), or an interrupted attempt resumed.
     fn drive_told<'a>(
         &'a self,
         context: nika_execution::ExecutionContext<'a>,
         (max_cost_usd, access_pin): (Option<f64>, Option<&str>),
         (inputs, cancel): (BTreeMap<String, serde_json::Value>, Option<CancelCtx>),
         authority: Option<CostAuthority>,
-        told: Option<nika_runtime::RunFacts>,
+        continues: Continues,
     ) -> std::pin::Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
         let host = Host {
             display_root: self.display_root.clone(),
@@ -126,7 +128,7 @@ impl ResidentExecutionBackend {
                 host,
                 context,
                 (max_cost_usd, access_pin.as_deref()),
-                (inputs, cancel, told),
+                (inputs, cancel, continues),
                 authority,
             )
             .await
@@ -142,6 +144,27 @@ struct Host {
     provider_gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
     #[cfg(test)]
     plan: Option<nika_service_execution::ExecutionAccessPlan>,
+}
+
+/// What a run continues beside its own captured world.
+enum Continues {
+    /// Nothing: a job's first attempt, or one that restarts.
+    Fresh,
+    /// A scheduled fire, told the instant it serves (spec 04 §`run`).
+    Slot(nika_runtime::RunFacts),
+    /// The interrupted attempt it resumes, by execution and trace (ADR-156 §3).
+    Attempt(String, String),
+}
+
+impl Continues {
+    /// The slot a fire serves, and the attempt a resume continues.
+    fn split(self) -> (Option<nika_runtime::RunFacts>, Option<(String, String)>) {
+        match self {
+            Self::Fresh => (None, None),
+            Self::Slot(facts) => (Some(facts), None),
+            Self::Attempt(execution, trace) => (None, Some((execution, trace))),
+        }
+    }
 }
 
 /// The run journal's seal at settlement — the custody seam as a trait, so
@@ -263,7 +286,25 @@ impl ExecutionBackend for ResidentExecutionBackend {
         facts: nika_runtime::RunFacts,
     ) -> std::pin::Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
         let pair = (inputs.clone(), Some(cancel));
-        self.drive_told(context, (max_cost_usd, access_pin), pair, None, Some(facts))
+        let slot = Continues::Slot(facts);
+        self.drive_told(context, (max_cost_usd, access_pin), pair, None, slot)
+    }
+
+    fn project_root(&self) -> Option<PathBuf> {
+        Some(self.display_root.clone())
+    }
+
+    fn execute_resumed<'a>(
+        &'a self,
+        context: nika_execution::ExecutionContext<'a>,
+        run: (Option<f64>, Option<&str>),
+        inputs: &BTreeMap<String, serde_json::Value>,
+        cancel: CancelCtx,
+        (execution, trace): (&str, &str),
+    ) -> std::pin::Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        let pair = (inputs.clone(), Some(cancel));
+        let resumes = Continues::Attempt(execution.to_owned(), trace.to_owned());
+        self.drive_told(context, run, pair, None, resumes)
     }
 
     fn trace_journal_dir(&self) -> Option<PathBuf> {
@@ -311,10 +352,10 @@ async fn drive_resident_execution(
     host: Host,
     context: nika_execution::ExecutionContext<'_>,
     (max_cost_usd, access_pin): (Option<f64>, Option<&str>),
-    (inputs, operator_cancel, told): (
+    (inputs, operator_cancel, continues): (
         BTreeMap<String, serde_json::Value>,
         Option<CancelCtx>,
-        Option<nika_runtime::RunFacts>,
+        Continues,
     ),
     authority: Option<CostAuthority>,
 ) -> ExecutionOutcome {
@@ -326,6 +367,8 @@ async fn drive_resident_execution(
         #[cfg(test)]
             plan: forced,
     } = host;
+    let (told, resumes) = continues.split();
+    let mut continuation = None;
     // The journal a `nika run` would leave, under the project the resident
     // serves: the trace the receipt names exists on disk (#1381). The sink
     // stays with the resident — the driver mirrors into a lane on it — so
@@ -358,6 +401,12 @@ async fn drive_resident_execution(
         let plan = forced.unwrap_or_else(|| driver.resolve_access_plan(None, access_pin));
         #[cfg(not(test))]
         let plan = driver.resolve_access_plan(None, access_pin);
+        if let Some(interrupted) = &resumes {
+            match resumed_plan(&display_root, &driver, (&plan, access_pin), interrupted) {
+                Ok(judged) => continuation = Some(judged),
+                Err(why) => return ExecutionOutcome::failed("resume_refused", why),
+            }
+        }
         let ceiling = (max_cost_usd, told.is_some());
         let judged =
             judge_unreviewed(&display_root, &driver, &plan, &inputs, (&standing, ceiling)).await;
@@ -374,6 +423,7 @@ async fn drive_resident_execution(
     let max_cost_usd = max_cost_usd.filter(|_| !reviewed);
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
     let _cancel = CancelOnDrop(Some(cancel_tx));
+    let (run_facts, resume) = carried(told, continuation);
     let job = ResidentJob {
         driver,
         cost,
@@ -386,7 +436,8 @@ async fn drive_resident_execution(
         operator_cancel,
         max_cost_usd,
         inputs,
-        run_facts: told.unwrap_or_default(),
+        run_facts,
+        resume,
         standing,
         provider_gate,
     };
@@ -500,6 +551,81 @@ fn unreviewed_cost(
     }
 }
 
+/// What a resumed attempt carries into its run.
+type Resume = (nika_runtime::resume::ResumePlan, Option<String>);
+
+/// The slot a run serves and what it resumes: a fire's own slot, else the
+/// one the resumed journal recorded.
+fn carried(
+    told: Option<nika_runtime::RunFacts>,
+    continuation: Option<Continuation>,
+) -> (nika_runtime::RunFacts, Option<Resume>) {
+    match continuation {
+        Some(judged) => (
+            told.or(judged.run_facts).unwrap_or_default(),
+            Some((judged.plan, judged.resumed_from)),
+        ),
+        None => (told.unwrap_or_default(), None),
+    }
+}
+
+/// `options`, resuming what `resume` holds when the attempt resumes.
+fn resumed(options: ServiceExecutionOptions, resume: Option<Resume>) -> ServiceExecutionOptions {
+    match resume {
+        Some((plan, from)) => options.with_resume(plan, from),
+        None => options,
+    }
+}
+
+/// The plan a resumed attempt continues (ADR-156 §3): the interrupted
+/// attempt's journal, judged as `nika run --resume` judges one with a chain
+/// required, against this project and the lanes this run resolved. It is
+/// judged before any cost account opens: a refused resume spends nothing. The
+/// message of a refusal names the journal inside the project, never a path
+/// of this machine. A paused gate the journal holds asks again.
+fn resumed_plan(
+    display_root: &Path,
+    driver: &ServiceExecutionDriver,
+    (plan, access_pin): (&nika_service_execution::ExecutionAccessPlan, Option<&str>),
+    (execution, trace): &(String, String),
+) -> Result<Continuation, String> {
+    let dir = display_root.join(nika_dap::store::TRACE_DIR);
+    let path = nika_dap::store::locate_trace(&dir, execution, trace)
+        .ok_or_else(|| "the interrupted attempt left no journal to resume".to_owned())?;
+    let label = path
+        .strip_prefix(display_root)
+        .unwrap_or(&path)
+        .display()
+        .to_string();
+    let raw = nika_dap::continuation::read_journal(&path, &label).map_err(refusal_text)?;
+    let here = nika_runtime::project_root_fingerprint(display_root);
+    let live = nika_dap::continuation::live_lanes(plan);
+    let engine = nika_runtime::engine_identity().engine_version();
+    let ask = ResumeAsk::new(
+        &path,
+        &label,
+        driver.workflow(),
+        driver.root_source(),
+        engine,
+    )
+    .with_project(here.as_deref())
+    .requiring_a_chain()
+    .with_access(&live, access_pin);
+    nika_dap::continuation::continue_from(&ask, &raw, &mut |_| {}).map_err(refusal_text)
+}
+
+/// What a refused resume says on its job.
+fn refusal_text(refusal: ResumeRefusal) -> String {
+    match refusal {
+        ResumeRefusal::BrokenChain { finding } => {
+            format!("the interrupted attempt's journal is not intact: {finding}")
+        }
+        ResumeRefusal::AccessMoved(message) | ResumeRefusal::Refused(message) => message,
+        // A refusal newer than this resident still refuses.
+        other => format!("{other:?}"),
+    }
+}
+
 const UNREVIEWED: &str = "price unknown: this Run's exact route needs a fresh one-time cost review, which a job without one never obtains (a server started with --cost-review admits POST /v1/cost-reviews, then one job carrying that review); scheduled occurrences stay refused";
 
 /// Everything the blocking worker holds for one admitted job.
@@ -518,6 +644,9 @@ struct ResidentJob {
     inputs: BTreeMap<String, serde_json::Value>,
     /// The slot a scheduled fire serves (spec 04 §`run`); the default otherwise.
     run_facts: nika_runtime::RunFacts,
+    /// What a resumed attempt serves from the interrupted one's journal, and
+    /// that attempt's trace (ADR-156 §3).
+    resume: Option<Resume>,
     /// Set for a Run a standing rule admitted ([`StandingRun`]).
     standing: Option<StandingRun>,
     /// The resident's caps on provider calls, shared with every other job.
@@ -562,6 +691,7 @@ fn settle_resident_job(
         max_cost_usd,
         inputs,
         run_facts,
+        resume,
         standing: _,
         provider_gate,
     } = job;
@@ -576,6 +706,7 @@ fn settle_resident_job(
         .with_mirror(mirror)
         .with_cancel_option(operator_cancel.clone())
         .with_run_facts(run_facts);
+    let options = resumed(options, resume);
     // The run's write-origins ledger, staged under the display root where a
     // served run's writes land: a failed run moves only what it created.
     let write_origins = Arc::new(nika_runtime::WriteOrigins::new(
@@ -809,7 +940,7 @@ pub enum ServerLaunchRefuse {
     InvalidProviderConcurrency,
     /// `--retry-interrupted` names no known mode.
     #[error(
-        "serve · --retry-interrupted takes off or restart: off leaves a job whose run was lost interrupted, restart runs its captured workflow again from the first task"
+        "serve · --retry-interrupted takes off, restart or resume: off leaves a job whose run was lost interrupted, restart runs its captured workflow again from the first task, resume serves the tasks its journal completed and runs the rest"
     )]
     InvalidRetryInterrupted,
     /// `--retry-max-attempts` is outside its range.

@@ -391,6 +391,16 @@ pub fn live_lanes(plan: &nika_providers::ExecutionAccessPlan) -> BTreeMap<String
         .collect()
 }
 
+/// The text of the journal at `path`, for a door with no reader of its
+/// own: a resident resuming an interrupted attempt.
+///
+/// # Errors
+/// [`ResumeRefusal::Refused`]: the journal cannot be read.
+pub fn read_journal(path: &Path, label: &str) -> Result<String, ResumeRefusal> {
+    let read = std::fs::read_to_string(path); // seam-bypass-ok: L4 reading an interrupted run's journal, as `attempt::lost_journal` does
+    read.map_err(|error| ResumeRefusal::Refused(format!("cannot read {label}: {error}")))
+}
+
 /// The facts the continued run recorded on its first manifest (spec 04 and
 /// 17): value facts, never execution, cost or approval authority. A journal
 /// that records none answers `None`; a partial or malformed fact refuses

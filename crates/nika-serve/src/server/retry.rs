@@ -15,14 +15,15 @@ use std::path::PathBuf;
 
 use hyper::StatusCode;
 use nika_dap::attempt::{EffectsClass, effects_class, interrupted_spend, rode_harness};
+use nika_dap::continuation::ResumeAsk;
 use nika_execution::{AdmittedExecution, ExecutionService, ExecutionSnapshot, SnapshotLimits};
 use serde_json::Value;
 
 use super::error::ApiError;
 use super::{AuthorityState, ExecutionTask, ServerError, ServerLimits};
 use crate::job::{
-    LostOwnerJudge, LostRun, LostVerdict, Remaining, RetryPolicy, RetryRefusal, RetryStatement,
-    Spend, decide, remaining,
+    AttemptMode, LostOwnerJudge, LostRun, LostVerdict, Remaining, RetryPolicy, RetryRefusal,
+    RetryStatement, Spend, decide, remaining,
 };
 use crate::{JobOrigin, JobRecord};
 
@@ -40,7 +41,7 @@ fn invalid_retry() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         "invalid_job_retry",
-        "retry must be an object of on_interrupted (off or restart), max_attempts (1 to 16) and max_cost_usd (a non-negative amount), each optional",
+        "retry must be an object of on_interrupted (off, restart or resume), max_attempts (1 to 16) and max_cost_usd (a non-negative amount), each optional",
     )
 }
 
@@ -118,6 +119,8 @@ pub(super) struct LostRunJudge {
     ceiling: Option<f64>,
     /// Where the backend leaves a job's journal, when it leaves one.
     journals: Option<PathBuf>,
+    /// The project the backend runs jobs under: a resume is judged against it.
+    project: Option<PathBuf>,
     service: ExecutionService,
     snapshots: SnapshotLimits,
 }
@@ -125,13 +128,14 @@ pub(super) struct LostRunJudge {
 impl LostRunJudge {
     pub(super) fn new(
         limits: ServerLimits,
-        journals: Option<PathBuf>,
+        (journals, project): (Option<PathBuf>, Option<PathBuf>),
         snapshots: SnapshotLimits,
     ) -> Self {
         Self {
             policy: limits.retry_policy(),
             ceiling: limits.default_max_cost_usd(),
             journals,
+            project,
             service: ExecutionService::new(snapshots),
             snapshots,
         }
@@ -139,16 +143,13 @@ impl LostRunJudge {
 
     /// What the lost attempt of `job` committed, and whether running its
     /// workflow again can repeat an effect outside the engine.
-    fn lost_attempt(&self, job: &JobRecord, world: Option<&str>) -> (Spend, bool) {
-        let admitted = self.workflow(job, world);
+    fn lost_attempt(&self, job: &JobRecord, admitted: Option<&AdmittedExecution>) -> (Spend, bool) {
         // The word kept at admission is bound to the job's chain only once
         // it started. The class is read again from the captured workflow,
         // which the job's identity binds by its digest, and the stricter of
         // the two holds: neither alone can make a job contained.
         let stored = job.effects.as_deref().and_then(EffectsClass::parse);
-        let read = admitted
-            .as_ref()
-            .map(|admitted| effects_class(admitted.workflow(), admitted.check()));
+        let read = admitted.map(|admitted| effects_class(admitted.workflow(), admitted.check()));
         let class = stored
             .zip(read)
             .map(|(stored, read)| stricter(stored, read));
@@ -163,7 +164,7 @@ impl LostRunJudge {
         // event leaves none, and so does a run whose journal could not be
         // opened: the two cannot be told apart, so neither counts for zero.
         let known = events.and_then(|events| {
-            let admitted = admitted.as_ref()?;
+            let admitted = admitted?;
             let spend = interrupted_spend(admitted.workflow(), &job.inputs, &events);
             Some(Spend::new(spend.usd, spend.unknown))
         });
@@ -181,6 +182,35 @@ impl LostRunJudge {
         nika_dap::attempt::lost_journal(&path)
     }
 
+    /// Whether the lost attempt's journal can be resumed: judged as `nika
+    /// run --resume` judges one, with a chain required, against this
+    /// project. Its access is judged when the new attempt starts, against
+    /// the lanes that run resolves.
+    fn resumable(&self, job: &JobRecord, admitted: Option<&AdmittedExecution>) -> bool {
+        self.resume_judged(job, admitted).is_some()
+    }
+
+    fn resume_judged(&self, job: &JobRecord, admitted: Option<&AdmittedExecution>) -> Option<()> {
+        let admitted = admitted?;
+        let snapshot = admitted.snapshot();
+        let source = snapshot.text(snapshot.root())?;
+        let path = nika_dap::store::locate_trace(
+            self.journals.as_deref()?,
+            job.execution_id()?,
+            job.trace_id()?,
+        )?;
+        let label = path.file_name()?.to_string_lossy().into_owned();
+        let raw = nika_dap::continuation::read_journal(&path, &label).ok()?;
+        let here = nika_runtime::project_root_fingerprint(self.project.as_deref()?);
+        let engine = nika_runtime::engine_identity().engine_version();
+        let ask = ResumeAsk::new(&path, &label, admitted.workflow(), source, engine)
+            .with_project(here.as_deref())
+            .requiring_a_chain();
+        nika_dap::continuation::continue_from(&ask, &raw, &mut |_| {})
+            .ok()
+            .map(|_| ())
+    }
+
     /// The workflow the job ran, readmitted from its captured world. A world
     /// whose digest is not the one the job's identity bound is not its own.
     fn workflow(&self, job: &JobRecord, world: Option<&str>) -> Option<AdmittedExecution> {
@@ -192,6 +222,15 @@ impl LostRunJudge {
             .readmit_snapshot_with_model_override_over(snapshot, None, &super::admission_probes())
             .ok()
     }
+}
+
+/// The interrupted attempt a queued one resumes, by its execution and
+/// trace, when the decision that queued it chose `resume`.
+pub(super) fn resumes(job: &JobRecord) -> Option<(String, String)> {
+    job.attempts
+        .last()
+        .filter(|closed| closed.next == AttemptMode::Resume)
+        .map(|closed| (closed.execution_id.clone(), closed.trace_id.clone()))
 }
 
 /// The class of the two that lets less run again on its own.
@@ -216,7 +255,8 @@ impl LostOwnerJudge for LostRunJudge {
         if job.cancel_requested || policy.on_interrupted().mode().is_none() {
             return LostVerdict::Stay(None);
         }
-        let (spend, contained) = self.lost_attempt(job, world);
+        let admitted = self.workflow(job, world);
+        let (spend, contained) = self.lost_attempt(job, admitted.as_ref());
         let mut every_attempt: Vec<Spend> = job
             .attempts
             .iter()
@@ -233,6 +273,10 @@ impl LostOwnerJudge for LostRunJudge {
             spent: &every_attempt,
         };
         match decide(&lost) {
+            // The resident never falls back to `restart` on its own.
+            Ok(AttemptMode::Resume) if !self.resumable(job, admitted.as_ref()) => {
+                LostVerdict::Stay(Some(RetryRefusal::ResumeRefused))
+            }
             Ok(mode) => LostVerdict::Queue {
                 mode,
                 spend,

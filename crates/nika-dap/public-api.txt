@@ -1470,6 +1470,7 @@ impl<T> typenum::type_operators::Same for nika_dap::continuation::ResumeAsk<'a>
 pub type nika_dap::continuation::ResumeAsk<'a>::Output = T
 pub fn nika_dap::continuation::continue_from(ask: &nika_dap::continuation::ResumeAsk<'_>, raw: &str, notice: &mut dyn core::ops::function::FnMut(nika_dap::continuation::ResumeNotice)) -> core::result::Result<nika_dap::continuation::Continuation, nika_dap::continuation::ResumeRefusal>
 pub fn nika_dap::continuation::live_lanes(plan: &nika_providers::plan::ExecutionAccessPlan) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dap::resume::LaneCarry>
+pub fn nika_dap::continuation::read_journal(path: &std::path::Path, label: &str) -> core::result::Result<alloc::string::String, nika_dap::continuation::ResumeRefusal>
 pub fn nika_dap::continuation::recorded_facts(events: &[nika_event::event::Event]) -> core::result::Result<core::option::Option<nika_runtime::run_facts::RunFacts>, alloc::string::String>
 pub mod nika_dap::cost_journal
 pub mod nika_dap::cost_journal::reconcile

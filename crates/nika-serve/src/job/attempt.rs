@@ -35,6 +35,9 @@ pub(crate) const DEFAULT_RETRY_ATTEMPTS: u32 = 3;
 pub(crate) enum AttemptMode {
     /// The captured world again, from its first task.
     Restart,
+    /// The captured world again, serving the tasks the interrupted
+    /// attempt's journal completed (ADR-099).
+    Resume,
 }
 
 impl AttemptMode {
@@ -42,6 +45,7 @@ impl AttemptMode {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Restart => "restart",
+            Self::Resume => "resume",
         }
     }
 }
@@ -56,12 +60,15 @@ pub(crate) enum OnInterrupted {
     Off,
     /// A new attempt runs the captured world from its first task.
     Restart,
+    /// A new attempt serves what the interrupted attempt's journal
+    /// completed and runs the rest.
+    Resume,
 }
 
 impl OnInterrupted {
     /// Read the word of `--retry-interrupted` or of a job's statement.
     pub(crate) fn parse(word: &str) -> Option<Self> {
-        [Self::Off, Self::Restart]
+        [Self::Off, Self::Restart, Self::Resume]
             .into_iter()
             .find(|policy| policy.as_str() == word)
     }
@@ -71,6 +78,7 @@ impl OnInterrupted {
         match self {
             Self::Off => "off",
             Self::Restart => "restart",
+            Self::Resume => "resume",
         }
     }
 
@@ -79,6 +87,7 @@ impl OnInterrupted {
         match self {
             Self::Off => None,
             Self::Restart => Some(AttemptMode::Restart),
+            Self::Resume => Some(AttemptMode::Resume),
         }
     }
 }
@@ -269,6 +278,9 @@ pub(crate) enum RetryRefusal {
     UnknownSpend,
     /// Nothing is left under the job's ceiling.
     BudgetExhausted,
+    /// The interrupted attempt's journal cannot be resumed the way `nika
+    /// run --resume` would judge it.
+    ResumeRefused,
 }
 
 impl RetryRefusal {
@@ -278,6 +290,7 @@ impl RetryRefusal {
             Self::EffectsNeedConsent => "effects_need_consent",
             Self::UnknownSpend => "unknown_spend",
             Self::BudgetExhausted => "budget_exhausted",
+            Self::ResumeRefused => "resume_refused",
         }
     }
 
@@ -291,6 +304,9 @@ impl RetryRefusal {
                 "an earlier attempt's spend cannot be bounded; a retry request that states max_cost_usd accepts it"
             }
             Self::BudgetExhausted => "nothing is left under the job's cost ceiling",
+            Self::ResumeRefused => {
+                "the interrupted attempt's journal cannot be resumed: its chain, its project, its workflow or its engine is not the one this resident runs; the resident never starts it again from the first task on its own"
+            }
         }
     }
 }
@@ -577,6 +593,7 @@ mod tests {
             RetryRefusal::EffectsNeedConsent,
             RetryRefusal::UnknownSpend,
             RetryRefusal::BudgetExhausted,
+            RetryRefusal::ResumeRefused,
         ]
         .map(RetryRefusal::code);
         assert_eq!(
@@ -585,8 +602,30 @@ mod tests {
                 "retry_exhausted",
                 "effects_need_consent",
                 "unknown_spend",
-                "budget_exhausted"
+                "budget_exhausted",
+                "resume_refused"
             ]
         );
+    }
+
+    #[test]
+    fn resume_is_a_mode_of_its_own() {
+        assert_eq!(OnInterrupted::parse("resume"), Some(OnInterrupted::Resume));
+        assert_eq!(OnInterrupted::Resume.mode(), Some(AttemptMode::Resume));
+        assert_eq!(OnInterrupted::Resume.as_str(), "resume");
+        assert_eq!(AttemptMode::Resume.as_str(), "resume");
+        assert_eq!(
+            serde_json::to_value(AttemptMode::Resume).ok(),
+            Some(serde_json::json!("resume")),
+            "the word the store keeps"
+        );
+        let stated = RetryStatement::stated(&serde_json::json!({"on_interrupted": "resume"}));
+        assert_eq!(
+            stated.and_then(|stated| stated.on_interrupted),
+            Some(OnInterrupted::Resume)
+        );
+        for word in ["Resume", "resume ", "resumed"] {
+            assert_eq!(OnInterrupted::parse(word), None, "{word:?}");
+        }
     }
 }

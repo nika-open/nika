@@ -917,8 +917,8 @@ mod builder {
                     "properties": {
                         "on_interrupted": {
                             "type": "string",
-                            "enum": ["off", "restart"],
-                            "description": "`restart` runs the whole workflow again as a new attempt of the same job, with its own execution and trace identity. `off` leaves the job `interrupted`. Absent: the resident's `--retry-interrupted`."
+                            "enum": ["off", "restart", "resume"],
+                            "description": "`resume` serves the tasks the interrupted attempt's journal completed and runs the rest, once the journal is judged as `nika run --resume` judges one; a journal that does not pass leaves the job `interrupted` (`resume_refused`). `restart` runs the whole workflow again as a new attempt of the same job, with its own execution and trace identity. `off` leaves the job `interrupted`. Absent: the resident's `--retry-interrupted`."
                         },
                         "max_attempts": {
                             "type": "integer",

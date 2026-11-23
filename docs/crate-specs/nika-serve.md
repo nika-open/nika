@@ -1167,7 +1167,7 @@ with its `interrupted` receipt and what it spent.
 
 | flag | default | meaning |
 |---|---|---|
-| `--retry-interrupted <off\|restart>` | `off` | `restart` runs the workflow again from its first task |
+| `--retry-interrupted <off\|restart\|resume>` | `off` | `restart` runs the workflow again from its first task; `resume` serves the tasks the lost attempt completed and runs the rest |
 | `--retry-max-attempts <N>` | 3 | attempts a job may take, the first included; 1 to 16 |
 
 **Per job.** The by-name form of `POST /v1/jobs` takes an optional `retry`
@@ -1176,7 +1176,7 @@ outside its bounds is refused `422 invalid_job_retry` before a job exists.
 
 | member | meaning |
 |---|---|
-| `on_interrupted` | `off` or `restart`; replaces the resident's mode for this job |
+| `on_interrupted` | `off`, `restart` or `resume`; replaces the resident's mode for this job |
 | `max_attempts` | 1 to 16; lowers the resident's bound, never raises it |
 | `max_cost_usd` | a ceiling for the re-attempts alone (see Cost) |
 
@@ -1235,6 +1235,20 @@ had in flight; the next attempt's own calls are metered as any run's are.
 A route that bills reasoning beyond the declared output has no bound in
 this sense: a call in flight on it makes the spend unknown.
 
+**Resume.** Under `resume` the new attempt continues the lost attempt's
+journal (ADR-099): a task the journal records as completed is served from
+it (`task.cache_hit`) and the others run. The new journal attests
+`resumed_from`, the lost attempt's trace. The resident judges the journal
+with the code `nika run --resume` uses: its chain must hold (the resident
+never resumes an unverified journal), and the project, the workflow, the
+engine version, the model seat and the access must be those the journal
+recorded. It judges twice: when it decides, without the access, and when
+the new attempt starts, with the lanes that run resolves, before any cost is
+committed. A journal that does not pass when the resident decides leaves
+the job `interrupted` with `resume_refused`; the resident never falls back
+to `restart` on its own. A task that was in flight runs again: a resume is
+at least once per task.
+
 **What is written.** The store makes the decision durable in the write that
 records the loss. A job that is started again goes from `running` to
 `queued` in that one write: its event stream gains one
@@ -1253,6 +1267,7 @@ A job that is not started again is `interrupted`, as before, and its
 | `effects_need_consent` | its workflow is not classed free of external effects and it stated no `retry` |
 | `unknown_spend` | an attempt's spend is unknown under a ceiling |
 | `budget_exhausted` | nothing is left under its ceiling |
+| `resume_refused` | its mode is `resume` and the lost attempt's journal cannot be resumed |
 
 No `code` means no policy asked for another attempt.
 
@@ -1274,6 +1289,20 @@ effects class; it stays `interrupted` with `effects_need_consent`.
 - A queued attempt its ceiling no longer covers (the resident restarted
   under a lower one) does not run: the job fails with `budget_exhausted` or
   `unknown_spend`.
+- A resume refused when the new attempt starts fails the job with
+  `resume_refused`, and the attempt runs no task. That happens when the
+  journal changed after the decision, when the access moved, and when the
+  resident that decided ran another engine version than the one that starts
+  the attempt: a deploy that upgrades the engine after a stop past its grace.
+  A resident that decides at its start (its predecessor was killed) refuses
+  such a resume at the decision and the job stays `interrupted`.
+- A task served from the journal is not run again even when a file it read
+  has changed since: the resume key covers the task as written and the
+  values its references rendered (ADR-099).
+- Before a resume, the resident neither settles a crashed run's leftovers
+  nor puts back what a failed run moved aside, as `nika run --resume` does.
+  A workflow classed free of effects writes no file; one that writes is
+  resumed only when its job stated `retry`.
 - The durable cancellation mark is not part of the event chain.
 - A journal whose writes failed during the run (a full disk) stops early.
   The spend read from it is short, and one that stops after its first

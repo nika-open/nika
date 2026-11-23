@@ -140,7 +140,7 @@ fn contained(bindings: JobBindings) -> Lost {
 fn judge(limits: ServerLimits, journals: Option<&Path>) -> LostRunJudge {
     LostRunJudge::new(
         limits,
-        journals.map(Path::to_path_buf),
+        (journals.map(Path::to_path_buf), None),
         SnapshotLimits::default(),
     )
 }
@@ -973,4 +973,331 @@ async fn a_retry_statement_is_judged_at_the_door_and_bound_to_the_key() {
         .await;
     assert_eq!(conflict.status, 409, "{}", conflict.body);
     server.stop().await.expect("a clean stop");
+}
+
+// --------------------------------------------------------------- the resume
+
+fn resume(bound: u32) -> ServerLimits {
+    limits().with_retry_policy(RetryPolicy::new(OnInterrupted::Resume, bound))
+}
+
+fn this_engine() -> &'static str {
+    nika_runtime::engine_identity().engine_version()
+}
+
+/// The boot record a run of the test world writes under `engine`.
+fn booted_under(engine: &str) -> Event {
+    frame(
+        EventKind::WorkflowStarted,
+        &[
+            ("workflow", FieldValue::string("root".to_owned())),
+            (
+                "workflow_sha256",
+                FieldValue::string(nika_event::source_id::sha256_hex(WORKFLOW.as_bytes())),
+            ),
+            ("engine_version", FieldValue::string(engine.to_owned())),
+        ],
+    )
+}
+
+/// The decision of a resident that serves the project at `project`.
+fn judged_serving(limits: ServerLimits, lost: &Lost, project: Option<&Path>) -> LostVerdict {
+    LostRunJudge::new(
+        limits,
+        (
+            Some(lost.journals.path().to_path_buf()),
+            project.map(Path::to_path_buf),
+        ),
+        SnapshotLimits::default(),
+    )
+    .judge(&lost.job, Some(&snapshot_body(WORKFLOW)))
+}
+
+#[test]
+fn a_lost_run_resumes_only_from_a_journal_nika_run_would_resume() {
+    let project = tempfile::tempdir().expect("project");
+    let resumed = LostVerdict::Queue {
+        mode: AttemptMode::Resume,
+        spend: Spend::new(0.0, false),
+        bound: 3,
+    };
+    let refused = LostVerdict::Stay(Some(RetryRefusal::ResumeRefused));
+    let classed = || JobBindings::default().classed("none");
+    let here = lost(classed(), Some(&[booted_under(this_engine())]));
+    assert_eq!(
+        judged_serving(resume(3), &here, Some(project.path())),
+        resumed
+    );
+    // A backend that serves no project resumes nothing.
+    assert_eq!(judged_serving(resume(3), &here, None), refused);
+    // Another engine wrote the journal, or it names none: the resident
+    // declares no compatibility on its own, and never falls back to a
+    // restart in its place.
+    for engine in [Some("0.1.0"), None] {
+        let boot = engine.map_or_else(boot, booted_under);
+        let other = lost(classed(), Some(&[boot]));
+        assert_eq!(
+            judged_serving(resume(3), &other, Some(project.path())),
+            refused,
+            "{engine:?}"
+        );
+    }
+    // Another project's journal.
+    let elsewhere = booted_under(this_engine()).with_field(KeyValue::new(
+        "project_root_fingerprint",
+        FieldValue::string("another project".to_owned()),
+    ));
+    let foreign = lost(classed(), Some(&[elsewhere]));
+    assert_eq!(
+        judged_serving(resume(3), &foreign, Some(project.path())),
+        refused
+    );
+    // The job states the mode under a resident that restarts.
+    let stated = lost(
+        classed().retrying(statement(&json!({"on_interrupted": "resume"}))),
+        Some(&[booted_under(this_engine())]),
+    );
+    assert_eq!(
+        judged_serving(restart(3), &stated, Some(project.path())),
+        resumed
+    );
+}
+
+#[test]
+fn a_broken_chain_leaves_the_job_interrupted_rather_than_run_it_from_the_start() {
+    let project = tempfile::tempdir().expect("project");
+    let settled = frame(
+        EventKind::TaskCompleted,
+        &[
+            ("task", FieldValue::string("value".to_owned())),
+            ("cost_usd", FieldValue::Float(0.0)),
+        ],
+    );
+    let lost_run = lost(
+        JobBindings::default().classed("none"),
+        Some(&[booted_under(this_engine()), settled]),
+    );
+    let path = nika_dap::store::locate_trace(
+        lost_run.journals.path(),
+        lost_run.job.execution_id().expect("execution"),
+        lost_run.job.trace_id().expect("trace"),
+    )
+    .expect("the journal");
+    // The same two lines in the other order: the chain no longer holds.
+    let text = std::fs::read_to_string(&path).expect("journal");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    std::fs::write(&path, format!("{}\n{}\n", lines[1], lines[0])).expect("rewrite");
+    // No ceiling: the unknown spend of a broken journal refuses nothing here.
+    let resumed = judged_serving(
+        resume(3).with_default_max_cost_usd(None),
+        &lost_run,
+        Some(project.path()),
+    );
+    assert_eq!(
+        resumed,
+        LostVerdict::Stay(Some(RetryRefusal::ResumeRefused))
+    );
+    let restarted = judged_serving(
+        restart(3).with_default_max_cost_usd(None),
+        &lost_run,
+        Some(project.path()),
+    );
+    assert_eq!(restarted, queued(Spend::new(0.0, true), 3));
+}
+
+/// Two tasks in one wave: `first` ends at once, `second` waits long enough
+/// for the resident to be stopped while it runs.
+const TWO_TASKS: &str = "nika: two-tasks\npermits:\n  tools: [\"nika:jq\", \"nika:wait\"]\ntasks:\n  first:\n    invoke:\n      tool: nika:jq\n      args: { input: 1, expression: \".\" }\n  second:\n    invoke:\n      tool: nika:wait\n      args: { duration: \"3s\" }\n";
+
+fn journal_lines(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// One field of a journal record, as the record keeps it.
+fn field<'a>(line: &'a Value, key: &str) -> Option<&'a Value> {
+    line["fields"]
+        .as_array()?
+        .iter()
+        .find(|entry| entry["key"] == key)
+        .map(|entry| &entry["value"])
+}
+
+fn names_task(lines: &[Value], kind: &str, task: &str) -> bool {
+    lines
+        .iter()
+        .any(|line| line["kind"] == kind && field(line, "task").is_some_and(|named| named == task))
+}
+
+fn journal_of(dir: &Path, job: &Value) -> Option<PathBuf> {
+    nika_dap::store::locate_trace(
+        dir,
+        job["execution_id"].as_str()?,
+        job["trace_id"].as_str()?,
+    )
+}
+
+/// A job of [`TWO_TASKS`] that states `resume`, lost by a resident stopped
+/// past its grace once `first` completed: its id and its lost attempt.
+async fn lost_after_its_first_task(world: &TestWorld, journals: &Path) -> (String, Value) {
+    use crate::server::production::ResidentExecutionBackend;
+
+    std::fs::write(world.workflows.join("two.nika"), TWO_TASKS).expect("workflow");
+    let backend = Arc::new(ResidentExecutionBackend::new(&world.workflows));
+    let server = world.start(backend, dropping(OnInterrupted::Off)).await;
+    let body = json!({"workflow": "two.nika", "retry": {"on_interrupted": "resume"}});
+    let (id, first) = running_job(&server, &body.to_string(), "resume-1").await;
+    let mut seen = Vec::new();
+    for _ in 0..500 {
+        seen = journal_of(journals, &first).map_or_else(Vec::new, |path| journal_lines(&path));
+        if names_task(&seen, "task_completed", "first") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        names_task(&seen, "task_completed", "first"),
+        "the first task completed before the stop: {first} {seen:?}"
+    );
+    // The stop outlives its grace while `second` waits: the run is lost.
+    let _stopped = server.stop().await;
+    let stored = stored_jobs(world);
+    let record = &stored[0]["record"];
+    assert_eq!(record["status"], "queued", "{record}");
+    assert_eq!(record["attempts"][0]["next"], "resume", "{record}");
+    (id, first)
+}
+
+/// Start the next resident and wait until the job leaves `queued` and
+/// `running`: a resumed attempt still waits out `second`, longer than the
+/// shared five-second wait allows, and longer still under a loaded test run.
+/// The job, and its new attempt's journal.
+async fn next_resident_settles(
+    world: &TestWorld,
+    journals: &Path,
+    id: &str,
+) -> (Value, Vec<Value>) {
+    use crate::server::production::ResidentExecutionBackend;
+
+    let backend = Arc::new(ResidentExecutionBackend::new(&world.workflows));
+    let server = world.start(backend, dropping(OnInterrupted::Off)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let mut job = Value::Null;
+    while tokio::time::Instant::now() < deadline {
+        job = server
+            .request(&get_request(&format!("/v1/jobs/{id}")))
+            .await
+            .json();
+        if job["status"] != "running" && job["status"] != "queued" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let lines = journal_of(journals, &job).map_or_else(Vec::new, |path| journal_lines(&path));
+    assert!(
+        job["status"] != "running" && job["status"] != "queued",
+        "the new attempt settled within a minute: {job} {lines:?}"
+    );
+    server.stop().await.expect("a clean stop");
+    (job, lines)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_attempt_serves_what_the_lost_one_completed_and_runs_the_rest() {
+    let world = TestWorld::new();
+    let journals = world.workflows.join(nika_dap::store::TRACE_DIR);
+    let (id, first) = lost_after_its_first_task(&world, &journals).await;
+    let (job, lines) = next_resident_settles(&world, &journals, &id).await;
+    assert_eq!(job["status"], "succeeded", "{job} {lines:?}");
+    assert_ne!(job["execution_id"], first["execution_id"]);
+    let boot = lines
+        .iter()
+        .find(|line| line["kind"] == "workflow_started")
+        .expect("the boot record");
+    assert_eq!(
+        field(boot, "resumed_from"),
+        Some(&first["trace_id"]),
+        "{boot}"
+    );
+    assert!(names_task(&lines, "task_cache_hit", "first"), "{lines:?}");
+    assert!(
+        !names_task(&lines, "task_completed", "first"),
+        "served from the journal, never run again"
+    );
+    assert!(names_task(&lines, "task_completed", "second"), "{lines:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_journal_changed_after_the_decision_fails_the_attempt_rather_than_restart_it() {
+    let world = TestWorld::new();
+    let journals = world.workflows.join(nika_dap::store::TRACE_DIR);
+    let (id, first) = lost_after_its_first_task(&world, &journals).await;
+    // Between the decision and the next resident, the journal loses a line
+    // from its middle: its chain no longer holds.
+    let path = journal_of(&journals, &first).expect("the lost journal");
+    let text = std::fs::read_to_string(&path).expect("journal");
+    let mut lines: Vec<&str> = text.lines().collect();
+    assert!(lines.len() > 2, "{text}");
+    lines.remove(1);
+    std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("rewrite");
+    let (job, _) = next_resident_settles(&world, &journals, &id).await;
+    assert_eq!(job["status"], "failed", "{job}");
+    assert_eq!(job["error"]["code"], "resume_refused", "{job}");
+    let attempt = journal_of(&journals, &job).map(|path| journal_lines(&path));
+    assert!(
+        attempt.is_none_or(|lines| !names_task(&lines, "task_completed", "first")),
+        "a refused resume never runs the workflow from its first task"
+    );
+}
+
+/// The test world's workflow, admitted from its captured world.
+fn admitted_world() -> nika_execution::ExecutionSession {
+    let body = snapshot_body(WORKFLOW);
+    let snapshot =
+        nika_execution::ExecutionSnapshot::decode_with_limits(&body, SnapshotLimits::default())
+            .expect("the captured world");
+    let service = nika_execution::ExecutionService::new(SnapshotLimits::default());
+    let admitted = service.readmit_snapshot(snapshot).expect("readmitted");
+    service.begin(admitted)
+}
+
+#[tokio::test]
+async fn a_backend_resumes_nothing_unless_it_says_how() {
+    let session = admitted_world();
+    let backend = TestBackend::completes(ExecutionDisposition::Succeeded);
+    let inputs = std::collections::BTreeMap::new();
+    let cancel = nika_types::cancel::CancelCtx::new();
+    let outcome = backend
+        .execute_resumed(
+            session.context(),
+            (None, None),
+            &inputs,
+            cancel.clone(),
+            ("exe-x", "trace-x"),
+        )
+        .await;
+    assert_eq!(
+        outcome.error().map(|(code, _)| code),
+        Some("resume_refused")
+    );
+    // Neither a fire nor a reviewed job resumes: the dispatch refuses it
+    // rather than run either from its first task.
+    let fire = super::execution(
+        &backend,
+        session.context(),
+        (None, None, None),
+        &inputs,
+        (
+            &cancel,
+            Some(nika_runtime::RunFacts::default()),
+            Some(("exe-x", "trace-x")),
+        ),
+    )
+    .await;
+    assert_eq!(fire.error().map(|(code, _)| code), Some("resume_refused"));
+    assert_eq!(backend.calls(), 0, "the workflow never ran");
 }

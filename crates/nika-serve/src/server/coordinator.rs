@@ -203,6 +203,23 @@ impl ResidentExecutionCoordinator {
         max_cost_usd: Option<f64>,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<PreparedScheduledRun, ServerError> {
+        self.prepare_scheduled_bound(
+            admitted,
+            origin,
+            max_cost_usd,
+            JobBindings::of(inputs, None),
+        )
+    }
+
+    /// [`Self::prepare_scheduled_with_max_cost`] under everything the
+    /// schedule binds onto its run: the inputs and the attribution it states.
+    pub(crate) fn prepare_scheduled_bound(
+        &self,
+        admitted: AdmittedExecution,
+        origin: JobOrigin,
+        max_cost_usd: Option<f64>,
+        bindings: JobBindings,
+    ) -> Result<PreparedScheduledRun, ServerError> {
         if max_cost_usd.is_some_and(|cost| !cost.is_finite() || cost <= 0.0) {
             return Err(ServerError::ScheduledAdmission);
         }
@@ -233,7 +250,7 @@ impl ResidentExecutionCoordinator {
             execution_id,
             trace_id,
             snapshot_digest,
-            JobBindings::of(inputs, None),
+            bindings,
             json!({
                 "kind": crate::JobEventKind::Prepared,
                 "origin": event_origin,

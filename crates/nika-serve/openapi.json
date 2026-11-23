@@ -1585,6 +1585,28 @@
         ],
         "type": "object"
       },
+      "ScheduleList": {
+        "additionalProperties": true,
+        "description": "Every schedule the resident holds: API schedules by id, then project beats by id. Open by contract: a later engine may add a member.",
+        "properties": {
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleStatus"
+            },
+            "maxItems": 320,
+            "type": "array"
+          },
+          "truncated": {
+            "description": "True when the resident holds more schedules than one list answers.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schedules",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "SchedulePreconditionFailed": {
         "additionalProperties": false,
         "properties": {
@@ -1659,6 +1681,20 @@
             ],
             "type": "string"
           },
+          "labels": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "description": "The labels every job this schedule starts carries, under the law of `labels` on POST /v1/jobs. Part of the schedule revision only when stated.",
+            "maxProperties": 16,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._/-]+$"
+            },
+            "type": "object"
+          },
           "maxCostUsd": {
             "exclusiveMinimum": 0,
             "type": "number"
@@ -1681,6 +1717,13 @@
               "queue",
               "replace"
             ],
+            "type": "string"
+          },
+          "owner": {
+            "description": "Health capability `scheduleManage`. Who the jobs this schedule starts are attributed to: every job it fires or a trigger admits carries it (GET /v1/jobs?owner=). The same law as `owner` on POST /v1/jobs: attribution inside one authority domain, never an authorization boundary. Part of the schedule revision only when stated, so a schedule that states none keeps its revision.",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:@-]+$",
             "type": "string"
           },
           "pauseReason": {
@@ -1743,6 +1786,31 @@
           "when",
           "maxCostUsd",
           "missed"
+        ],
+        "type": "object"
+      },
+      "ScheduleRemoved": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "removed": {
+            "const": true,
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "The revision that was removed.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "removed",
+          "id",
+          "revision"
         ],
         "type": "object"
       },
@@ -1933,7 +2001,7 @@
     }
   },
   "info": {
-    "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule list/delete/trigger/backfill, /v1/arm, and POST /v1/run are absent.",
+    "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule backfill, /v1/arm, and POST /v1/run are absent.",
     "title": "nika serve",
     "version": "0.124.5"
   },
@@ -3067,7 +3135,150 @@
         "summary": "This document"
       }
     },
+    "/v1/schedules": {
+      "get": {
+        "description": "Health capability `scheduleManage`. The schedules this door created, by id, then the beats the project's `nika.yaml` declares, by id. Each entry is the status GET /v1/schedules/{id} answers, planned now, with one next slot. A project beat is read here: GET /v1/schedules/{id} answers an API schedule, or a project beat that carries a finding. `truncated` is true when the resident holds more schedules than one list answers.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleList"
+                }
+              }
+            },
+            "description": "Every schedule, planned now"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error envelope"
+          },
+          "408": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Request deadline"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_store_corrupt`: durable schedule state failed integrity validation"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_store_unavailable`: durable schedule state unavailable"
+          }
+        },
+        "summary": "List the schedules this resident holds"
+      }
+    },
     "/v1/schedules/{id}": {
+      "delete": {
+        "description": "Health capability `scheduleManage`. Requires If-Match: the exact current ETag, or `*` for whichever revision is current. Removes the definition and its last-slot decision in one durable replacement; a schedule declared again under the same id starts with no history. A job the schedule already fired is untouched and settles on its own. A beat the project's `nika.yaml` declares is not this door's to remove and answers 409.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "maxLength": 96,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRemoved"
+                }
+              }
+            },
+            "description": "Removed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_not_found`"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_declared_by_project`: declared in the project file"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulePreconditionFailed"
+                }
+              }
+            },
+            "description": "Precondition refused; carries the current revision",
+            "headers": {
+              "ETag": {
+                "description": "The current revision, when one exists",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_store_unavailable`: durable schedule state unavailable"
+          }
+        },
+        "summary": "Remove one schedule this door created"
+      },
       "get": {
         "responses": {
           "200": {
@@ -3247,6 +3458,141 @@
           }
         },
         "summary": "Create or revision-conditionally update one resident schedule"
+      }
+    },
+    "/v1/schedules/{id}/trigger": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Health capability `scheduleManage`. Admits ONE manual job that runs the schedule's workflow as it admits now, under the inputs, cost ceiling, owner and labels the schedule declares (the declared ceiling restricts the resident's, never widens it). The request carries no body, or an empty JSON object. The trigger consumes no slot and records no schedule decision: the cadence is unmoved and the next slot fires as planned. A paused schedule can be triggered: a pause holds the cadence, not the operator. The job's origin is `manual`; find it by the schedule's owner and labels. The `Idempotency-Key` binds to the schedule id: a retry under the same key answers the same job, even after the schedule changed, and the same key on another schedule or on POST /v1/jobs answers 409. This is an operator gesture behind the one bearer credential, never an inbound event door for a third party. A beat the project's `nika.yaml` declares is not this door's to trigger and answers 409.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "Idempotent replay"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid idempotency key"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error envelope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`schedule_not_found`"
+          },
+          "408": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Request deadline"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`: the key is bound to another request · `schedule_declared_by_project`: declared in the project file"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A trigger carries no body"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`invalid_schedule_trigger`: the body is not empty · `schedule.workflow`, `schedule.workflow_outside_registry` or `schedule.inputs`: the schedule's workflow or inputs no longer admit"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Execution queue or durable store unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Durable job capacity exhausted"
+          }
+        },
+        "summary": "Run one schedule now, as a manual job"
       }
     },
     "/v1/workflows": {

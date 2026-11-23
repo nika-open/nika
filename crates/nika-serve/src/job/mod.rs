@@ -9,9 +9,7 @@ mod model;
 mod retention;
 mod store;
 
-pub(crate) use attribution::{
-    AttributionError, JobAttribution, JobBindings, valid_label_key, valid_label_value, valid_owner,
-};
+pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
 pub(crate) use listing::{

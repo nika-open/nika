@@ -104,6 +104,12 @@ pub struct ScheduleDraft {
     /// fire binds, one scalar text per key, key-sorted. Empty when the
     /// declaration carries none.
     pub inputs: BTreeMap<String, String>,
+    /// Who the jobs this schedule fires are attributed to
+    /// ([`crate::attribution`]). `None` when the declaration states nobody.
+    pub owner: Option<String>,
+    /// The labels every job this schedule fires carries, key-sorted. Empty
+    /// when the declaration states none.
+    pub labels: BTreeMap<String, String>,
 }
 
 impl ScheduleDraft {
@@ -134,6 +140,8 @@ impl ScheduleDraft {
             pause_reason: None,
             pause_until: None,
             inputs: BTreeMap::new(),
+            owner: None,
+            labels: BTreeMap::new(),
         }
     }
 
@@ -187,6 +195,10 @@ impl ScheduleDraft {
             pause_reason: beat.raison.clone(),
             pause_until: beat.jusqu_au.clone(),
             inputs: beat.inputs.clone(),
+            // A project beat states no attribution: the project grammar has
+            // no key for it.
+            owner: None,
+            labels: BTreeMap::new(),
         })
     }
 
@@ -225,6 +237,7 @@ impl ScheduleDraft {
             self.pause_until.as_deref(),
         )?;
         validate_inputs(&self.inputs)?;
+        validate_attribution(self.owner.as_deref(), &self.labels)?;
         Ok(ScheduleDefinition {
             id: self.id,
             workflow: self.workflow,
@@ -240,6 +253,8 @@ impl ScheduleDraft {
             pause_reason: self.pause_reason,
             pause_until: self.pause_until,
             inputs: self.inputs,
+            owner: self.owner,
+            labels: self.labels,
         })
     }
 }
@@ -261,6 +276,8 @@ pub struct ScheduleDefinition {
     pause_reason: Option<String>,
     pause_until: Option<String>,
     inputs: BTreeMap<String, String>,
+    owner: Option<String>,
+    labels: BTreeMap<String, String>,
 }
 
 impl ScheduleDefinition {
@@ -324,6 +341,19 @@ impl ScheduleDefinition {
             .map(|(key, value)| (key.as_str(), value.as_str()))
     }
 
+    /// Who the jobs this schedule fires are attributed to.
+    #[must_use]
+    pub fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    /// The labels every job this schedule fires carries, key-sorted.
+    pub fn labels(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.labels
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+    }
+
     #[must_use]
     pub fn revision(&self) -> ScheduleRevision {
         ScheduleRevision::compute(self)
@@ -377,6 +407,20 @@ impl ScheduleDefinition {
                 .collect();
             lines.push(format!("inputs={}", pairs.join(",")));
         }
+        // The same law for attribution: a line only for what is stated, so a
+        // declaration that states nobody keeps the revision it had before
+        // the members existed.
+        if let Some(owner) = self.owner.as_deref() {
+            lines.push(format!("owner={}", quoted(owner)));
+        }
+        if !self.labels.is_empty() {
+            let pairs: Vec<String> = self
+                .labels
+                .iter()
+                .map(|(key, value)| format!("{}={}", quoted(key), quoted(value)))
+                .collect();
+            lines.push(format!("labels={}", pairs.join(",")));
+        }
         lines.join("\n")
     }
 }
@@ -422,6 +466,8 @@ pub enum ScheduleFindingKind {
     Pause,
     UnsupportedLocus,
     Inputs,
+    Owner,
+    Labels,
 }
 
 impl ScheduleFindingKind {
@@ -440,6 +486,8 @@ impl ScheduleFindingKind {
             Self::Pause => "schedule.pause",
             Self::UnsupportedLocus => "schedule.unsupported-locus",
             Self::Inputs => "schedule.inputs",
+            Self::Owner => "schedule.owner",
+            Self::Labels => "schedule.labels",
         }
     }
 }
@@ -579,6 +627,27 @@ fn validate_inputs(inputs: &BTreeMap<String, String>) -> Result<(), ScheduleFind
     Ok(())
 }
 
+/// The attribution law ([`crate::attribution`]): the one a resident applies
+/// to the jobs it admits, so a schedule never carries what a job may not.
+fn validate_attribution(
+    owner: Option<&str>,
+    labels: &BTreeMap<String, String>,
+) -> Result<(), ScheduleFinding> {
+    if owner.is_some_and(|owner| !crate::attribution::valid_owner(owner)) {
+        return Err(ScheduleFinding::new(
+            ScheduleFindingKind::Owner,
+            "owner is 1 to 128 bytes of letters, digits and `._:@-`",
+        ));
+    }
+    if !crate::attribution::valid_labels(labels) {
+        return Err(ScheduleFinding::new(
+            ScheduleFindingKind::Labels,
+            "labels are at most 16 pairs: a key of 1 to 64 bytes of letters, digits and `._/-`, a value of at most 256 bytes without a control character",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_when(when: ScheduleWhenDraft) -> Result<ScheduleWhen, ScheduleFinding> {
     match when {
         ScheduleWhenDraft::Once { at } => at
@@ -679,6 +748,8 @@ mod tests {
             pause_reason: None,
             pause_until: None,
             inputs: BTreeMap::new(),
+            owner: None,
+            labels: BTreeMap::new(),
         }
     }
 
@@ -775,6 +846,87 @@ mod tests {
             );
         }
         assert_eq!(ScheduleFindingKind::Inputs.spec_code(), "schedule.inputs");
+    }
+
+    /// Attribution rides the definition and enters the revision only when
+    /// stated: a schedule that states nobody keeps its historical revision,
+    /// and a project beat never states any.
+    #[test]
+    fn attribution_enters_the_revision_only_when_stated() {
+        let cadence = || ScheduleWhenDraft::Cadence {
+            expression: "TZ=UTC 0 9 * * *".into(),
+        };
+        let plain = draft(cadence()).validate().expect("lawful");
+        assert!(plain.owner().is_none() && plain.labels().next().is_none());
+        assert!(!plain.canonical().contains("owner="));
+        assert!(!plain.canonical().contains("labels="));
+
+        let mut owned = draft(cadence());
+        owned.owner = Some("user_123".into());
+        let owned = owned.validate().expect("lawful");
+        assert_eq!(owned.owner(), Some("user_123"));
+        assert!(owned.canonical().ends_with("\nowner=\"user_123\""));
+        assert_ne!(owned.revision(), plain.revision());
+
+        let mut labelled = draft(cadence());
+        labelled.owner = Some("user_123".into());
+        labelled.labels = BTreeMap::from([
+            ("plan".to_owned(), "pro".to_owned()),
+            ("app".to_owned(), "translation".to_owned()),
+        ]);
+        let labelled = labelled.validate().expect("lawful");
+        let pairs: Vec<(&str, &str)> = labelled.labels().collect();
+        assert_eq!(pairs, [("app", "translation"), ("plan", "pro")]);
+        assert!(
+            labelled
+                .canonical()
+                .ends_with("\nowner=\"user_123\"\nlabels=\"app\"=\"translation\",\"plan\"=\"pro\""),
+            "{}",
+            labelled.canonical()
+        );
+        assert_ne!(labelled.revision(), owned.revision());
+
+        let registry = crate::parse_registry(
+            "nika: proj\narm:\n  - workflow: workflows/report.nika\n    cadence: \"TZ=UTC 0 9 * * *\"\n    plafond: 0.25\n    manqué: sauter\n",
+        )
+        .expect("registry");
+        let beat = registry.beats().next().expect("beat");
+        let project = ScheduleDraft::from_project("report", beat).expect("draft");
+        assert!(project.owner.is_none() && project.labels.is_empty());
+    }
+
+    /// The attribution law refuses by kind, with the bounds a resident
+    /// applies to the jobs it admits.
+    #[test]
+    fn attribution_outside_its_bounds_refuses_by_kind() {
+        for owner in ["", "user 123", "user/123", &"a".repeat(129)] {
+            let mut bad = draft(ScheduleWhenDraft::Webhook);
+            bad.owner = Some(owner.to_owned());
+            assert_eq!(
+                bad.validate().expect_err(owner).kind(),
+                ScheduleFindingKind::Owner,
+                "{owner:?}"
+            );
+        }
+        for (key, value) in [("app:eu", "x"), ("", "x"), ("app", "a\nb")] {
+            let mut bad = draft(ScheduleWhenDraft::Webhook);
+            bad.labels.insert(key.to_owned(), value.to_owned());
+            assert_eq!(
+                bad.validate().expect_err(key).kind(),
+                ScheduleFindingKind::Labels,
+                "{key:?}"
+            );
+        }
+        let mut crowded = draft(ScheduleWhenDraft::Webhook);
+        crowded.labels = (0..17)
+            .map(|index| (format!("k{index}"), String::new()))
+            .collect();
+        assert_eq!(
+            crowded.validate().expect_err("seventeen").kind(),
+            ScheduleFindingKind::Labels
+        );
+        assert_eq!(ScheduleFindingKind::Owner.spec_code(), "schedule.owner");
+        assert_eq!(ScheduleFindingKind::Labels.spec_code(), "schedule.labels");
     }
 
     #[test]

@@ -43,6 +43,23 @@ pub(super) fn stated(
     })
 }
 
+/// What a schedule states, as the attribution of the jobs it starts.
+///
+/// # Errors
+/// Never for a definition the canonical model validated: both are judged by
+/// the one law of `nika_cadence::attribution`.
+pub(super) fn of_schedule(
+    definition: &nika_cadence::ScheduleDefinition,
+) -> Result<JobAttribution, AttributionError> {
+    JobAttribution::new(
+        definition.owner().map(str::to_owned),
+        definition
+            .labels()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
+    )
+}
+
 fn invalid_owner() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,

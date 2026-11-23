@@ -465,6 +465,20 @@ the [machine-verifiable manifest](../testimonials/arm-w7-ledger-salvage/manifest
 binds it to the raw artifact hash, full accounting, invocation, tools,
 inputs, and clean tested tree.
 
+## Attribution law
+
+`attribution::{valid_owner, valid_label_key, valid_label_value, valid_labels}`
+and their four bounds are the one law of who a job is attributed to: an owner
+of 1 to 128 bytes of `[A-Za-z0-9._:@-]`, at most 16 labels, a key of 1 to 64
+bytes of `[A-Za-z0-9._/-]`, a value of at most 256 bytes without control
+characters. They are pure predicates. The law lives here, below Serve, because
+two declarations are judged by it: a schedule (`ScheduleDraft::{owner, labels}`,
+refused by `ScheduleFindingKind::{Owner, Labels}`) and a job admitted by name.
+The pair enters `ScheduleRevision` only when stated, after `inputs`, so a
+schedule that states nothing keeps its historical identity. A project beat
+cannot state any: `ScheduleDraft::from_project` leaves both empty and
+`nika.yaml` gains no key.
+
 ## Schedule value projections
 
 `schedule::when_json` and `schedule_plan::{due_json, slot_json}` project the

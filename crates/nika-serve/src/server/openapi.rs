@@ -116,6 +116,8 @@ pub(crate) fn under_cost_policy(mut document: Value, reviewed: bool) -> Value {
 
 #[cfg(test)]
 mod job_list;
+#[cfg(test)]
+mod schedule_manage;
 
 /// The document's source: the builder the committed file is generated from.
 #[cfg(test)]
@@ -131,7 +133,7 @@ mod builder {
             "info": {
                 "title": "nika serve",
                 "version": env!("CARGO_PKG_VERSION"),
-                "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule list/delete/trigger/backfill, /v1/arm, and POST /v1/run are absent."
+                "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule backfill, /v1/arm, and POST /v1/run are absent."
             },
             "servers": [{"url": "http://127.0.0.1"}],
             "security": [{"bearerAuth": []}],
@@ -232,7 +234,8 @@ mod builder {
                 "SchedulePreconditionFailed".to_owned(),
                 schedule_precondition_schema(),
             );
-            for (name, schema) in super::job_list::schemas() {
+            let listed = super::job_list::schemas().into_iter();
+            for (name, schema) in listed.chain(super::schedule_manage::schemas()) {
                 named.insert(name.to_owned(), schema);
             }
         }
@@ -705,7 +708,9 @@ mod builder {
             "/v1/jobs/{id}/trace/verify": job_trace_verify_path(),
             "/v1/jobs/{id}/artifacts": job_artifacts_path(),
             "/v1/jobs/{id}/artifacts/{name}": job_artifact_path(),
-            "/v1/schedules/{id}": schedule_path()
+            "/v1/schedules": super::schedule_manage::list_path(&error_named),
+            "/v1/schedules/{id}": schedule_path(),
+            "/v1/schedules/{id}/trigger": super::schedule_manage::trigger_path(&error_named, &json_job())
         })
     }
 
@@ -723,6 +728,14 @@ mod builder {
     }
 
     fn schedule_put_schema() -> Value {
+        let mut schema = schedule_put_base();
+        for (name, member) in super::schedule_manage::put_members() {
+            schema["properties"][name] = member;
+        }
+        schema
+    }
+
+    fn schedule_put_base() -> Value {
         json!({
             "type": "object", "additionalProperties": false,
             "required": ["workflow", "when", "maxCostUsd", "missed"],
@@ -760,6 +773,7 @@ mod builder {
                 "summary": "Read one declarative resident schedule",
                 "responses": {"200": {"description": "Fresh planned status", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScheduleStatus"}}}}, "401": error_ref(), "404": error_ref()}
             },
+            "delete": super::schedule_manage::delete_operation(&error_named),
             "put": {
                 "summary": "Create or revision-conditionally update one resident schedule",
                 "description": "Create requires If-None-Match: *. Update requires the exact ETag in If-Match. Identical lost-response retries are unchanged and retain the revision. A refused precondition answers 412 with the schedule's current revision (null when none exists). A definition the planner or the schedule validator refuses answers 422 with its findings; a malformed body, refused inputs or a refused workflow answer 422 with the error envelope.",
@@ -1126,17 +1140,13 @@ mod tests {
         "/v1/jobs/{id}/trace/verify",
         "/v1/jobs/{id}/artifacts",
         "/v1/jobs/{id}/artifacts/{name}",
+        "/v1/schedules",
         "/v1/schedules/{id}",
+        "/v1/schedules/{id}/trigger",
         "/v1/openapi.json",
     ];
 
-    const ABSENT_PATHS: &[&str] = &[
-        "/v1/run",
-        "/v1/schedules",
-        "/v1/schedules/{id}/trigger",
-        "/v1/schedules/{id}/backfill",
-        "/v1/arm",
-    ];
+    const ABSENT_PATHS: &[&str] = &["/v1/run", "/v1/schedules/{id}/backfill", "/v1/arm"];
 
     #[test]
     fn document_is_openapi_31_and_lists_only_live_paths() {

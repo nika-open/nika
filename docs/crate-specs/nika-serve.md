@@ -930,3 +930,75 @@ overlap law (`chevauchement`) judges on-time slots only. `PUT /v1/schedules`
 declares the three closed words; `GET /v1/schedules/{id}` renders a bounded
 beat as `missed: catch-up` plus `missedLatest: N`. `nika arm fire` refuses
 both catch-up forms by name (`policy_unsupported`): catch-up is served.
+
+## Schedule management (ADR-155)
+
+`/health` advertises `scheduleManage` when the resident's scheduler is live
+and the three routes below answer. They complete the schedule door:
+
+| method | route | authority | response |
+|---|---|---|---|
+| `PUT` | `/v1/schedules/{id}` | one Bearer + `If-None-Match: *` or `If-Match` | the schedule's status and `changed` · 412 `schedule_precondition_failed` · 422 findings |
+| `GET` | `/v1/schedules/{id}` | one Bearer | one API schedule's status, with its `ETag` |
+| `GET` | `/v1/schedules` | one Bearer | `{ "schedules": [...], "truncated": bool }` |
+| `DELETE` | `/v1/schedules/{id}` | one Bearer + `If-Match` | `{ "removed": true, "id", "revision" }` · 404 · 409 `schedule_declared_by_project` · 412 |
+| `POST` | `/v1/schedules/{id}/trigger` | one Bearer + `Idempotency-Key` | the job, `202` created or `200` replayed · 404 · 409 · 422 |
+
+**Attribution.** A schedule may state `owner` and `labels`, under the same
+law as `POST /v1/jobs` (`nika_cadence::attribution` is that law's one home, so
+the two doors cannot drift). Outside the law the declaration is refused with
+the finding `schedule.owner` or `schedule.labels` and nothing is stored. The
+statement is part of the declaration: it enters the schedule's revision, so
+stating or changing it is an update under `If-Match`. Every job the schedule
+fires, and every job a trigger admits, carries exactly what the schedule
+states. A schedule that states nothing keeps the revision, the stored row and
+the integrity it had before attribution existed: a resident that upgrades
+reads its schedules unchanged, and the schedule store stays at format 1. A row
+that does state them is refused whole by an engine older than this one,
+never read with the statement dropped. A project beat cannot state any:
+`nika.yaml` has no key for it.
+
+**List.** `GET /v1/schedules` answers the schedules this door created, by id,
+then the project's beats, by id. Each entry is the status
+`GET /v1/schedules/{id}` answers, with one next slot instead of five, and an
+`origin` of `api` or `project`. A beat the project file declares but the
+resident refused appears with its `finding`. The list is how a project beat is
+read over HTTP: `GET /v1/schedules/{id}` still answers a healthy project beat
+`404`. `truncated` is true when more than 320 schedules exist; the API side
+alone is bounded at 64.
+
+**Removal.** `DELETE /v1/schedules/{id}` removes a schedule this door created.
+It needs `If-Match`: the exact `ETag` a read returned, or `*` for whichever
+revision is current. Without it, or under a stale tag, the answer is
+`412 schedule_precondition_failed` with `currentRevision`, and nothing changes.
+A removal takes the schedule's last-slot decision with it, so a schedule
+declared again under the same id starts with no history. A job the schedule
+already fired is untouched: cancel it through `POST /v1/jobs/{id}/cancel`. A
+slot the scheduler was preparing when the removal landed is dropped by the
+revision check every claim already makes. A project beat is declared in the
+project's file and is not this door's to remove: `409
+schedule_declared_by_project`.
+
+**Trigger.** `POST /v1/schedules/{id}/trigger` is the operator's gesture: run
+this schedule's workflow once, now, under everything the schedule declares
+(inputs, ceiling, owner, labels). It admits a **manual** job through the same
+admission as `POST /v1/jobs`: the same queue, the same limits, the same
+`Idempotency-Key` table. It consumes no slot, writes no decision and no
+firing-ledger entry, and leaves the cadence exactly where it was, so the next
+slot still fires. A paused schedule can be triggered: a pause holds the
+cadence, not the operator. The body is empty or `{}`: a trigger overrides
+nothing, and any member is refused `422 invalid_schedule_trigger`. To run the
+workflow under other inputs, use `POST /v1/jobs`. The run is told no slot:
+`${{ run.scheduled_for }}` reads its own start, as under `POST /v1/jobs`.
+
+The request identity of a trigger is the schedule id alone. Under one key, a
+retry answers the same job even after the schedule changed or was removed; the
+same key on another schedule, or on `POST /v1/jobs`, is
+`409 idempotency_conflict`. The job runs the workflow as it is at admission and
+the inputs are judged then: a schedule whose inputs the workflow no longer
+admits answers `422 schedule.inputs` and admits nothing. A project beat
+answers `409 schedule_declared_by_project`: the gesture for it is `nika arm
+fire`. This route is not an inbound event door (ADR-136): it takes the
+resident's own Bearer, and a third-party sender never holds it.
+
+No route replays missed slots: schedule backfill stays absent.

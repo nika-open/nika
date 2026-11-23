@@ -23,6 +23,7 @@ mod resident_options;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
+mod schedule_manage;
 mod scheduler;
 mod session;
 mod sse;
@@ -1566,6 +1567,8 @@ mod result_tests;
 mod retention_tests;
 #[cfg(test)]
 mod schedule_inputs_tests;
+#[cfg(test)]
+mod schedule_manage_tests;
 #[cfg(test)]
 mod schedule_tests;
 #[cfg(test)]

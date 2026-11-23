@@ -149,6 +149,38 @@ nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
 
 Both flags work without `--bind`: scheduled runs fill the same store.
 
+## Managing schedules over HTTP
+
+A resident whose `/health` lists `scheduleManage` lets an operator see,
+remove and run the schedules without touching its files:
+
+```sh
+TOKEN="Authorization: Bearer $(cat .nika/serve.token)"
+# Every schedule: the ones this door created, then the project's beats.
+curl -s http://127.0.0.1:8787/v1/schedules -H "$TOKEN"
+# Run one now, once. The cadence does not move.
+curl -s -X POST http://127.0.0.1:8787/v1/schedules/nightly/trigger \
+  -H "$TOKEN" -H 'Idempotency-Key: nightly-by-hand-1'
+# Remove one, whichever revision is current.
+curl -s -X DELETE http://127.0.0.1:8787/v1/schedules/nightly \
+  -H "$TOKEN" -H 'If-Match: *'
+```
+
+A trigger admits an ordinary job: it waits in the same queue, counts
+against the same limits, and shows in `GET /v1/jobs` with
+`"origin":{"kind":"manual"}`. It runs under what the schedule declares,
+including its `owner` and `labels`, and takes no body. Send the same
+`Idempotency-Key` again and the answer is the same job, never a second
+run.
+
+Removing a schedule does not stop a job it already fired: cancel that job
+by its id. To remove only if nobody changed the schedule since you read
+it, send the `ETag` of that read in `If-Match` instead of `*`; a changed
+schedule answers `412` and stays. The project's beats are declared in
+`nika.yaml`: remove or change them there, and run one by hand with
+`nika arm fire`. Over HTTP both gestures answer
+`409 schedule_declared_by_project`.
+
 ## Runs on a route the catalog does not price
 
 A workflow whose model the engine's catalog does not price (an API route

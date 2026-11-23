@@ -213,6 +213,17 @@ async fn route_authenticated(
     let path = request.uri().path().to_owned();
     match (request.method(), path.as_str()) {
         (&Method::GET, "/v1/jobs") => super::job_list::list(request.uri().query(), &state).await,
+        (&Method::GET, "/v1/schedules") => super::schedule_manage::list(&state).await,
+        (&Method::DELETE, path) if path.starts_with("/v1/schedules/") => {
+            let Some(id) = schedule_route(path) else {
+                return ApiError::route_not_found().into_response();
+            };
+            super::schedule_manage::delete(request.headers(), id.to_owned(), &state).await
+        }
+        (&Method::POST, path) if schedule_trigger_route(path).is_some() => {
+            let id = schedule_trigger_route(path).unwrap_or_default().to_owned();
+            super::schedule_manage::trigger(request, id, state).await
+        }
         (&Method::PUT, path) if path.starts_with("/v1/schedules/") => {
             let Some(id) = schedule_route(path) else {
                 return ApiError::route_not_found().into_response();
@@ -293,6 +304,11 @@ fn review_route(path: &str) -> Option<(u64, &str, Option<&str>)> {
 fn schedule_route(path: &str) -> Option<&str> {
     let id = path.strip_prefix("/v1/schedules/")?;
     (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+/// `/v1/schedules/{id}/trigger`.
+fn schedule_trigger_route(path: &str) -> Option<&str> {
+    schedule_route(path.strip_suffix("/trigger")?)
 }
 
 async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Response<ResponseBody> {
@@ -633,7 +649,7 @@ fn snapshot_metadata_limit() -> ApiError {
     )
 }
 
-async fn admit_job(
+pub(super) async fn admit_job(
     state: Arc<AppState>,
     key: IdempotencyKey,
     digest: RequestDigest,

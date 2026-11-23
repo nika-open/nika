@@ -7,19 +7,15 @@
 //! application can find the job again. They are opaque to the engine and
 //! never an authorization boundary: one bearer credential is one authority
 //! domain (ADR-117), and whoever holds it reads every job.
+//!
+//! Their shape is the one law of `nika_cadence::attribution`, which a
+//! schedule declaration is judged by too: a job a schedule fires carries
+//! exactly what its schedule states.
 
 use std::collections::BTreeMap;
 
+use nika_cadence::attribution::{valid_labels, valid_owner};
 use serde_json::Value;
-
-/// Longest stated owner, in bytes.
-pub(crate) const MAX_OWNER_BYTES: usize = 128;
-/// Most labels one job carries.
-pub(crate) const MAX_LABELS: usize = 16;
-/// Longest label key, in bytes.
-pub(crate) const MAX_LABEL_KEY_BYTES: usize = 64;
-/// Longest label value, in bytes.
-pub(crate) const MAX_LABEL_VALUE_BYTES: usize = 256;
 
 /// Which stated member a request got wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,11 +45,7 @@ impl JobAttribution {
         if owner.as_deref().is_some_and(|owner| !valid_owner(owner)) {
             return Err(AttributionError::Owner);
         }
-        if labels.len() > MAX_LABELS
-            || !labels
-                .iter()
-                .all(|(key, value)| valid_label_key(key) && valid_label_value(value))
-        {
+        if !valid_labels(&labels) {
             return Err(AttributionError::Labels);
         }
         Ok(Self { owner, labels })
@@ -117,30 +109,6 @@ impl JobBindings {
     }
 }
 
-/// 1 to 128 bytes of `[A-Za-z0-9._:@-]`.
-pub(crate) fn valid_owner(owner: &str) -> bool {
-    !owner.is_empty()
-        && owner.len() <= MAX_OWNER_BYTES
-        && owner.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'@' | b'-')
-        })
-}
-
-/// 1 to 64 bytes of `[A-Za-z0-9._/-]`: no colon, so a `key:value` filter
-/// splits on its first colon.
-pub(crate) fn valid_label_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= MAX_LABEL_KEY_BYTES
-        && key
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-'))
-}
-
-/// At most 256 bytes without a control character.
-pub(crate) fn valid_label_value(value: &str) -> bool {
-    value.len() <= MAX_LABEL_VALUE_BYTES && !value.chars().any(char::is_control)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,36 +118,6 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect()
-    }
-
-    #[test]
-    fn an_owner_is_one_to_128_bytes_of_its_alphabet() {
-        for owner in ["u", "user_123", "org:acme@eu-west.1", &"a".repeat(128)] {
-            assert!(valid_owner(owner), "{owner} is a legal owner");
-        }
-        for owner in ["", "user 123", "user/123", "üser", "a\n", &"a".repeat(129)] {
-            assert!(!valid_owner(owner), "{owner:?} is refused");
-        }
-    }
-
-    #[test]
-    fn a_label_key_never_carries_the_filter_separator() {
-        for key in ["app", "billing/plan", "tier.v2", "a-b_c", &"k".repeat(64)] {
-            assert!(valid_label_key(key), "{key} is a legal key");
-        }
-        for key in ["", "app:eu", "a b", "clé", &"k".repeat(65)] {
-            assert!(!valid_label_key(key), "{key:?} is refused");
-        }
-    }
-
-    #[test]
-    fn a_label_value_is_bounded_text_without_control_characters() {
-        for value in ["", "pro", "été 2026: bêta", &"v".repeat(256)] {
-            assert!(valid_label_value(value), "{value} is a legal value");
-        }
-        for value in ["line\nbreak", "tab\there", "nul\0", &"v".repeat(257)] {
-            assert!(!valid_label_value(value), "{value:?} is refused");
-        }
     }
 
     #[test]

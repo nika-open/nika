@@ -1,4 +1,13 @@
 pub mod nika_cadence
+pub mod nika_cadence::attribution
+pub const nika_cadence::attribution::MAX_LABELS: usize
+pub const nika_cadence::attribution::MAX_LABEL_KEY_BYTES: usize
+pub const nika_cadence::attribution::MAX_LABEL_VALUE_BYTES: usize
+pub const nika_cadence::attribution::MAX_OWNER_BYTES: usize
+pub fn nika_cadence::attribution::valid_label_key(key: &str) -> bool
+pub fn nika_cadence::attribution::valid_label_value(value: &str) -> bool
+pub fn nika_cadence::attribution::valid_labels(labels: &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> bool
+pub fn nika_cadence::attribution::valid_owner(owner: &str) -> bool
 pub mod nika_cadence::cron
 #[non_exhaustive] pub struct nika_cadence::cron::CronSpec
 impl nika_cadence::cron::CronSpec
@@ -1856,7 +1865,9 @@ pub nika_cadence::schedule::ScheduleFindingKind::Cost
 pub nika_cadence::schedule::ScheduleFindingKind::Id
 pub nika_cadence::schedule::ScheduleFindingKind::Inputs
 pub nika_cadence::schedule::ScheduleFindingKind::Jitter
+pub nika_cadence::schedule::ScheduleFindingKind::Labels
 pub nika_cadence::schedule::ScheduleFindingKind::Missed
+pub nika_cadence::schedule::ScheduleFindingKind::Owner
 pub nika_cadence::schedule::ScheduleFindingKind::Pause
 pub nika_cadence::schedule::ScheduleFindingKind::Tolerance
 pub nika_cadence::schedule::ScheduleFindingKind::UnsupportedLocus
@@ -2099,10 +2110,12 @@ pub fn nika_cadence::schedule::ScheduleDefinition::id(&self) -> &str
 pub fn nika_cadence::schedule::ScheduleDefinition::inputs(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub const fn nika_cadence::schedule::ScheduleDefinition::is_active(&self) -> bool
 pub const fn nika_cadence::schedule::ScheduleDefinition::jitter(&self) -> core::option::Option<nika_cadence::schedule::ScheduleJitter>
+pub fn nika_cadence::schedule::ScheduleDefinition::labels(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub const fn nika_cadence::schedule::ScheduleDefinition::max_cost_usd(&self) -> f64
 pub const fn nika_cadence::schedule::ScheduleDefinition::max_lateness_seconds(&self) -> core::option::Option<u64>
 pub const fn nika_cadence::schedule::ScheduleDefinition::missed(&self) -> nika_cadence::registry::MissPolicy
 pub const fn nika_cadence::schedule::ScheduleDefinition::overlap(&self) -> nika_cadence::registry::Overlap
+pub fn nika_cadence::schedule::ScheduleDefinition::owner(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::pause_reason(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::pause_until(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::revision(&self) -> nika_cadence::schedule::ScheduleRevision
@@ -2149,10 +2162,12 @@ pub nika_cadence::schedule::ScheduleDraft::after_skip: core::option::Option<nika
 pub nika_cadence::schedule::ScheduleDraft::id: alloc::string::String
 pub nika_cadence::schedule::ScheduleDraft::inputs: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub nika_cadence::schedule::ScheduleDraft::jitter: core::option::Option<nika_cadence::schedule::ScheduleJitter>
+pub nika_cadence::schedule::ScheduleDraft::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub nika_cadence::schedule::ScheduleDraft::max_cost_usd: f64
 pub nika_cadence::schedule::ScheduleDraft::max_lateness_seconds: core::option::Option<u64>
 pub nika_cadence::schedule::ScheduleDraft::missed: nika_cadence::registry::MissPolicy
 pub nika_cadence::schedule::ScheduleDraft::overlap: core::option::Option<nika_cadence::registry::Overlap>
+pub nika_cadence::schedule::ScheduleDraft::owner: core::option::Option<alloc::string::String>
 pub nika_cadence::schedule::ScheduleDraft::pause_reason: core::option::Option<alloc::string::String>
 pub nika_cadence::schedule::ScheduleDraft::pause_until: core::option::Option<alloc::string::String>
 pub nika_cadence::schedule::ScheduleDraft::tolerance: core::option::Option<alloc::string::String>
@@ -3429,7 +3444,9 @@ pub nika_cadence::ScheduleFindingKind::Cost
 pub nika_cadence::ScheduleFindingKind::Id
 pub nika_cadence::ScheduleFindingKind::Inputs
 pub nika_cadence::ScheduleFindingKind::Jitter
+pub nika_cadence::ScheduleFindingKind::Labels
 pub nika_cadence::ScheduleFindingKind::Missed
+pub nika_cadence::ScheduleFindingKind::Owner
 pub nika_cadence::ScheduleFindingKind::Pause
 pub nika_cadence::ScheduleFindingKind::Tolerance
 pub nika_cadence::ScheduleFindingKind::UnsupportedLocus
@@ -4533,10 +4550,12 @@ pub fn nika_cadence::schedule::ScheduleDefinition::id(&self) -> &str
 pub fn nika_cadence::schedule::ScheduleDefinition::inputs(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub const fn nika_cadence::schedule::ScheduleDefinition::is_active(&self) -> bool
 pub const fn nika_cadence::schedule::ScheduleDefinition::jitter(&self) -> core::option::Option<nika_cadence::schedule::ScheduleJitter>
+pub fn nika_cadence::schedule::ScheduleDefinition::labels(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub const fn nika_cadence::schedule::ScheduleDefinition::max_cost_usd(&self) -> f64
 pub const fn nika_cadence::schedule::ScheduleDefinition::max_lateness_seconds(&self) -> core::option::Option<u64>
 pub const fn nika_cadence::schedule::ScheduleDefinition::missed(&self) -> nika_cadence::registry::MissPolicy
 pub const fn nika_cadence::schedule::ScheduleDefinition::overlap(&self) -> nika_cadence::registry::Overlap
+pub fn nika_cadence::schedule::ScheduleDefinition::owner(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::pause_reason(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::pause_until(&self) -> core::option::Option<&str>
 pub fn nika_cadence::schedule::ScheduleDefinition::revision(&self) -> nika_cadence::schedule::ScheduleRevision
@@ -4583,10 +4602,12 @@ pub nika_cadence::ScheduleDraft::after_skip: core::option::Option<nika_cadence::
 pub nika_cadence::ScheduleDraft::id: alloc::string::String
 pub nika_cadence::ScheduleDraft::inputs: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub nika_cadence::ScheduleDraft::jitter: core::option::Option<nika_cadence::schedule::ScheduleJitter>
+pub nika_cadence::ScheduleDraft::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub nika_cadence::ScheduleDraft::max_cost_usd: f64
 pub nika_cadence::ScheduleDraft::max_lateness_seconds: core::option::Option<u64>
 pub nika_cadence::ScheduleDraft::missed: nika_cadence::registry::MissPolicy
 pub nika_cadence::ScheduleDraft::overlap: core::option::Option<nika_cadence::registry::Overlap>
+pub nika_cadence::ScheduleDraft::owner: core::option::Option<alloc::string::String>
 pub nika_cadence::ScheduleDraft::pause_reason: core::option::Option<alloc::string::String>
 pub nika_cadence::ScheduleDraft::pause_until: core::option::Option<alloc::string::String>
 pub nika_cadence::ScheduleDraft::tolerance: core::option::Option<alloc::string::String>

@@ -599,8 +599,9 @@ pub struct JobRecord {
     /// Literal API input overrides, separate from the immutable workflow world.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) inputs: BTreeMap<String, Value>,
-    /// The per-job ceiling its requester bound (a Session's run, USD): it restricts the
-    /// resident's per-run ceiling, never widens it. Absent on other jobs and older records.
+    /// The per-job ceiling its requester bound (a Session's run, a triggered schedule's
+    /// declared ceiling, USD): it restricts the resident's per-run ceiling, never widens it.
+    /// Absent on other jobs and older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_cost_usd: Option<serde_json::Number>,
     /// The owner its requester stated (ADR-155): attribution, never an

@@ -39,6 +39,8 @@ fn draft(when: ScheduleWhenDraft, missed: MissPolicy) -> ScheduleDraft {
         pause_reason: None,
         pause_until: None,
         inputs: std::collections::BTreeMap::new(),
+        owner: None,
+        labels: std::collections::BTreeMap::new(),
     }
 }
 

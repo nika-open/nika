@@ -13,6 +13,8 @@ use nika_error::NikaErrorCode;
 
 use super::*;
 
+mod manage;
+
 fn draft(id: impl Into<String>, workflow: impl Into<String>) -> ScheduleDraft {
     let registry = parse_registry(
         "nika: store-tests\narm:\n  - workflow: base.nika\n    cadence: on-webhook\n    plafond: 0.25\n    manqué: rattraper-une-fois\n",

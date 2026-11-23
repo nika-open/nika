@@ -17,10 +17,9 @@ use serde_json::Value;
 use super::AppState;
 use super::error::{ApiError, ResponseBody, ServerError};
 use super::route::json_response;
-use crate::job::{
-    DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind,
-    valid_label_key, valid_label_value, valid_owner,
-};
+use nika_cadence::attribution::{valid_label_key, valid_label_value, valid_owner};
+
+use crate::job::{DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind};
 use crate::{JobOrigin, JobStatus, JobStoreError};
 
 /// Longest query string the list reads, in bytes.

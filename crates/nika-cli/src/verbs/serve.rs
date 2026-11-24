@@ -75,6 +75,21 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
         .map(|config| config.with_sessions(args.sessions));
     let http = nika_serve::server::seat_cost_policy(http, &args.cost_policy)
         .map_err(|error| fail(format!("serve · {error}")))?;
+    let options = nika_serve::ResidentOptions::default()
+        .with_job_retention(
+            args.job_retention.as_deref(),
+            args.job_retention_unsuccessful.as_deref(),
+        )
+        .and_then(|options| {
+            options.with_job_capacity(args.max_concurrent_jobs, args.queue_capacity, args.max_jobs)
+        })
+        .and_then(|options| {
+            options.with_owner_limits(args.max_queued_per_owner, args.max_concurrent_per_owner)
+        })
+        .and_then(|options| options.with_shutdown_grace(args.shutdown_grace.as_deref()))
+        .and_then(|options| options.with_provider_concurrency(&args.provider_concurrency))
+        .map_err(nika_serve::launch_operator_message)
+        .map_err(&fail)?;
     let now = instant(args.now.as_deref()).map_err(&fail)?;
     let until = instant(args.until.as_deref()).map_err(&fail)?;
     if now.is_some() && !args.once && until.is_none() {
@@ -116,7 +131,7 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
             .state_root
             .clone()
             .unwrap_or_else(|| cwd.join(".nika/serve"));
-        nika_serve::serve_resident_process(&root, state_root, http).map_err(fail)?;
+        nika_serve::serve_resident_process_with(&root, state_root, http, &options).map_err(fail)?;
     }
     Ok(VerbOutput::ok(String::new()))
 }
@@ -580,6 +595,9 @@ mod tests {
             "SIGINT",
             "SIGTERM",
             "30 seconds",
+            "--shutdown-grace",
+            "--provider-concurrency",
+            "--max-concurrent-jobs",
             "queued",
             "interrupted",
             "SIGKILL",

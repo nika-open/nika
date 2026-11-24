@@ -82,6 +82,10 @@ pub enum ServerError {
     /// The shared HTTP/ARM execution queue has no admission slot.
     #[error("resident execution queue is full")]
     ExecutionQueueFull,
+    /// The job's owner holds every queue place one owner may hold
+    /// (`--max-queued-per-owner`). Other owners are still admitted.
+    #[error("resident execution queue is full for this owner")]
+    OwnerQueueFull,
     /// The authority is stopping: its execution queue is closed. A fire or
     /// an admission that meets it is not the caller's error and never a
     /// full queue; the scheduler ends clean, HTTP answers « stopping ».
@@ -96,7 +100,10 @@ pub enum ServerError {
         "serve · the slot is answered or held by the CLI edge in the ARM ledger — one slot, one firer"
     )]
     SlotOwnedElsewhere,
-    /// A slot replay resolved to different immutable snapshot bytes.
+    /// A slot replay resolved to different immutable snapshot bytes. No
+    /// longer returned: a slot that already has its job is consumed against
+    /// that job, whatever the workflow has become since. Kept so a match on
+    /// it still compiles.
     #[error("scheduled execution idempotency key conflicts with another snapshot")]
     ScheduledIdempotencyConflict,
     /// A scheduled run did not reach durable terminal observation in bounds.

@@ -16,7 +16,11 @@ use serde_json::Value;
 
 mod admission;
 mod binding;
+mod format;
+mod list;
+pub(crate) use list::QueuedJob;
 mod migration;
+mod retention;
 mod stored_job;
 
 #[cfg(test)]
@@ -31,10 +35,10 @@ use migration::decode_state;
 
 use super::model::{EventHash, EventInstant, IncarnationGeneration};
 use super::{
-    Admission, ApprovalHistoryError, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobMutation,
-    JobReceipt, JobRecord, JobStatus, JobStoreError, MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES,
-    MAX_EVENT_BATCH_LEN, MAX_EVENT_PAYLOAD_BYTES, MAX_JOB_SNAPSHOT_BYTES, RequestDigest,
-    ServerIncarnation,
+    Admission, ApprovalHistoryError, EventPageLimit, IdempotencyKey, JobBindings, JobEvent, JobId,
+    JobMutation, JobReceipt, JobRecord, JobStatus, JobStoreError,
+    MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES, MAX_EVENT_BATCH_LEN, MAX_EVENT_PAYLOAD_BYTES,
+    MAX_JOB_SNAPSHOT_BYTES, RequestDigest, ServerIncarnation,
 };
 use crate::ResidentClock;
 use crate::server::bound_message;
@@ -46,7 +50,10 @@ const LOCK_FILE: &str = "store.lock";
 const SERVER_LOCK_FILE: &str = "server.lock";
 const STATE_FILE: &str = "state.json";
 const LEGACY_STATE_VERSION: u32 = 2;
-pub(crate) const STATE_VERSION: u32 = 3;
+/// Format 3 knew no attribution, admission date or ordinal: it is read once,
+/// ranked in stored order and persisted as format 4 with every hash intact.
+const PREVIOUS_STATE_VERSION: u32 = 3;
+pub(crate) const STATE_VERSION: u32 = 4;
 const EVENT_HASH_DOMAIN: &[u8] = b"nika.job-event.chain\0v1\0";
 /// A requested per-job ceiling is a finite, non-negative USD amount (zero binds).
 const UNBOUND_CEILING: &str = "a requested per-job ceiling must be a finite, non-negative amount";
@@ -93,6 +100,8 @@ pub struct JobStore {
     fail_fast_lease: bool,
     /// The clock every appended event's `at` reads (#1463).
     clock: Arc<dyn ResidentClock>,
+    /// The windows after which a settled job leaves the store (ADR-155).
+    retention: crate::job::JobRetention,
     #[cfg(test)]
     fail_next_persist: AtomicBool,
 }
@@ -158,6 +167,7 @@ impl JobStore {
             local: Mutex::new(()),
             fail_fast_lease,
             clock: Arc::new(crate::SystemResidentClock),
+            retention: crate::job::JobRetention::default(),
             #[cfg(test)]
             fail_next_persist: AtomicBool::new(false),
         };
@@ -257,7 +267,7 @@ impl JobStore {
         max_jobs: usize,
         workflow: String,
     ) -> Result<Admission, JobStoreError> {
-        let unbound = (BTreeMap::new(), None);
+        let unbound = JobBindings::default();
         self.create_or_replay_inner(key, digest, max_jobs, workflow, None, None, unbound)
     }
 
@@ -284,7 +294,7 @@ impl JobStore {
             workflow,
             Some(world),
             None,
-            (BTreeMap::new(), None),
+            JobBindings::default(),
         )
     }
 
@@ -308,7 +318,7 @@ impl JobStore {
             workflow,
             Some(world),
             access_pin,
-            (BTreeMap::new(), None),
+            JobBindings::default(),
         )
     }
 
@@ -320,7 +330,7 @@ impl JobStore {
         workflow: String,
         world: &str,
         access_pin: Option<String>,
-        (inputs, max_cost_usd): (BTreeMap<String, Value>, Option<f64>),
+        bindings: JobBindings,
     ) -> Result<Admission, JobStoreError> {
         self.create_or_replay_inner(
             key,
@@ -329,100 +339,8 @@ impl JobStore {
             workflow,
             Some(world),
             access_pin,
-            (inputs, max_cost_usd),
+            bindings,
         )
-    }
-
-    fn create_or_replay_inner(
-        &self,
-        key: IdempotencyKey,
-        digest: RequestDigest,
-        max_jobs: usize,
-        workflow: String,
-        world: Option<&str>,
-        access_pin: Option<String>,
-        (inputs, max_cost_usd): (BTreeMap<String, Value>, Option<f64>),
-    ) -> Result<Admission, JobStoreError> {
-        let max_cost_usd = match max_cost_usd {
-            Some(usd) => Some(
-                (serde_json::Number::from_f64(usd).filter(|_| usd >= 0.0))
-                    .ok_or_else(|| JobStoreError::Corrupt(UNBOUND_CEILING.to_owned()))?,
-            ),
-            None => None,
-        };
-        key.validate()?;
-        digest.validate()?;
-        if let Some(world) = world
-            && world.len() > MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES
-        {
-            return Err(JobStoreError::SnapshotTooLarge {
-                bytes: world.len() as u64,
-                maximum: MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES,
-            });
-        }
-        let _local = self.local_guard()?;
-        let _lease = self.kernel_lease()?;
-        let mut state = self.load_state()?;
-
-        if let Some(existing) = state
-            .jobs
-            .iter()
-            .find(|job| job.record.idempotency_key == key)
-        {
-            return Ok(if existing.record.request_digest == digest {
-                Admission::Existing(existing.record.clone())
-            } else {
-                Admission::Conflict(existing.record.clone())
-            });
-        }
-
-        if state.jobs.len() >= max_jobs {
-            return Err(JobStoreError::CapacityExceeded);
-        }
-
-        let record = JobRecord {
-            id: unique_job_id(&state),
-            idempotency_key: key,
-            request_digest: digest,
-            status: JobStatus::Queued,
-            origin: crate::JobOrigin::Manual,
-            workflow,
-            access_pin,
-            inputs,
-            max_cost_usd,
-            execution_id: String::new(),
-            trace_id: String::new(),
-            snapshot_digest: String::new(),
-            error_code: String::new(),
-            error_message: String::new(),
-            outputs: None,
-            receipt: None,
-            settlement: None,
-            evidence: None,
-            paused_outputs: None,
-            paused_receipt: None,
-        };
-        if let Some(world) = world {
-            self.dir.write_atomic(&world_file(&record.id), world)?;
-        }
-        let mut stored = StoredJob {
-            record: record.clone(),
-            events: Vec::new(),
-            event_count: 0,
-            event_head: None,
-            identity_digest: None,
-            terminal_sequence: None,
-        };
-        // Bind caller values and a requested ceiling before execution, including during durable
-        // queue recovery. The payload carries no values; the event preimage binds them.
-        if !record.inputs.is_empty() || record.max_cost_usd.is_some() {
-            let queued = serde_json::json!({"kind": crate::JobEventKind::Queued, "status": JobStatus::Queued});
-            let batch = ValidatedEventBatch::for_transition(std::slice::from_ref(&queued))?;
-            stored.append_payloads(&batch, &self.now())?;
-        }
-        state.jobs.push(stored);
-        self.persist(&state)?;
-        Ok(Admission::Created(record))
     }
 
     /// Load the POST-time execution world for one job.
@@ -826,11 +744,10 @@ impl JobStore {
             }
             (Some(marker), Some(state)) => {
                 validate_initialization_marker(marker)?;
-                let decoded = decode_state(state)?;
-                self.verify_approval_history(&decoded.state)?;
-                if decoded.migrated {
-                    self.persist(&decoded.state)?;
-                }
+                // Validated, never rewritten: an older format is stored by
+                // the first writer, which a resident is only once it holds
+                // the server lease.
+                self.verify_approval_history(&decode_state(state)?)?;
                 Ok(())
             }
             (Some(marker), None) => {
@@ -995,7 +912,7 @@ impl JobStore {
         let text = self
             .read_state_optional()?
             .ok_or_else(missing_state_error)?;
-        let mut state = decode_state(&text)?.state;
+        let mut state = decode_state(&text)?;
         self.verify_approval_history(&state)?;
         for job in &mut state.jobs {
             job.project_settlement()?;
@@ -1088,6 +1005,10 @@ pub(super) struct PersistedState {
     version: u32,
     incarnation: IncarnationLedger,
     pub(super) jobs: Vec<StoredJob>,
+    /// The ordinal the next admitted job takes (format 4). Ordinals are never
+    /// reused, so a page cursor stays meaningful after an eviction.
+    #[serde(default)]
+    next_ordinal: u64,
     /// The engine that last wrote this store (ADR-132 · #1352) — absent on
     /// a store written before the stamp existed.
     #[serde(default)]
@@ -1100,6 +1021,7 @@ impl PersistedState {
             version: STATE_VERSION,
             incarnation: IncarnationLedger::new(),
             jobs: Vec::new(),
+            next_ordinal: 1,
             writer: Some(crate::writer::WriterStamp::this_engine()),
         }
     }
@@ -1120,6 +1042,7 @@ impl PersistedState {
             return Err(JobStoreError::WrittenByNewerEngine(reason));
         }
         self.incarnation.validate()?;
+        self.validate_format()?;
         let mut ids = BTreeSet::new();
         let mut keys = BTreeSet::new();
         let mut approval_claims = BTreeSet::new();
@@ -1226,10 +1149,10 @@ fn validate_events(job: &StoredJob) -> Result<(), JobStoreError> {
     if job.record.max_cost_usd().is_some_and(|usd| usd < 0.0) {
         return Err(JobStoreError::Corrupt(UNBOUND_CEILING.to_owned()));
     }
-    if (!job.record.inputs.is_empty() || job.record.max_cost_usd.is_some()) && job.events.is_empty()
-    {
+    if job.record.binds_admission() && job.events.is_empty() {
         return Err(JobStoreError::Corrupt(
-            "input bindings and a requested ceiling require an admission event".to_owned(),
+            "input bindings, a requested ceiling and an attribution require an admission event"
+                .to_owned(),
         ));
     }
     if usize::try_from(job.event_count).ok() != Some(job.events.len())

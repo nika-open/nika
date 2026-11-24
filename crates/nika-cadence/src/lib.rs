@@ -76,6 +76,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attribution;
 pub mod cron;
 pub mod due;
 pub mod emit;

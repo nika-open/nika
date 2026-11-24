@@ -765,7 +765,7 @@ async fn a_queued_jobs_requested_ceiling_is_hash_bound_and_survives_a_restart() 
             "root.nika".to_owned(),
             &admitted.snapshot().encode().expect("world"),
             None,
-            (BTreeMap::new(), Some(0.25)),
+            crate::job::JobBindings::of(BTreeMap::new(), Some(0.25)),
         )
         .expect("queued");
     let id = admission.record().id().as_str().to_owned();

@@ -102,6 +102,221 @@ fn cost_review_and_run_cost_ceiling_are_explicit_listener_options() {
     ));
 }
 
+/// Job retention is an explicit option of the persistent resident: it needs
+/// no listener (scheduled runs fill the store too), means nothing in a
+/// rehearsal, and takes a duration of at least one minute.
+#[test]
+fn job_retention_is_an_explicit_option_of_the_persistent_resident() {
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    let unset = parse(&["serve"]);
+    assert!(unset.job_retention.is_none() && unset.job_retention_unsuccessful.is_none());
+    let args = parse(&[
+        "serve",
+        "--job-retention",
+        "24h",
+        "--job-retention-unsuccessful",
+        "7d",
+    ]);
+    assert_eq!(args.job_retention.as_deref(), Some("24h"));
+    assert_eq!(args.job_retention_unsuccessful.as_deref(), Some("7d"));
+    for rehearsal in ["--once", "--dry"] {
+        for flag in ["--job-retention", "--job-retention-unsuccessful"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", rehearsal, flag, "24h"])
+                    .is_err(),
+                "{flag} means nothing with {rehearsal}"
+            );
+        }
+    }
+    let options = |succeeded, unsuccessful| {
+        nika_serve::ResidentOptions::default().with_job_retention(succeeded, unsuccessful)
+    };
+    assert!(options(Some("24h"), Some("7d")).is_ok());
+    assert!(options(None, None).is_ok());
+    for refused in ["59s", "0d", "7", "1.5h", "a week", ""] {
+        let outcome = options(Some(refused), None);
+        assert_eq!(
+            outcome.err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidJobRetention),
+            "{refused}"
+        );
+    }
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidJobRetention);
+    assert!(message.contains("--job-retention") && message.contains("one minute"));
+}
+
+/// The job limits are explicit options of the persistent resident: each is a
+/// whole number of at least one (the grace a duration of at least a second),
+/// none needs a listener, and none means anything in a rehearsal.
+#[test]
+fn job_limits_are_explicit_options_of_the_persistent_resident() {
+    const COUNTS: [&str; 5] = [
+        "--max-concurrent-jobs",
+        "--queue-capacity",
+        "--max-jobs",
+        "--max-queued-per-owner",
+        "--max-concurrent-per-owner",
+    ];
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    let unset = parse(&["serve"]);
+    assert_eq!(
+        (
+            unset.max_concurrent_jobs,
+            unset.queue_capacity,
+            unset.max_jobs,
+            unset.max_queued_per_owner,
+            unset.max_concurrent_per_owner,
+            unset.shutdown_grace,
+        ),
+        (None, None, None, None, None, None)
+    );
+    let args = parse(&[
+        "serve",
+        "--max-concurrent-jobs",
+        "16",
+        "--queue-capacity",
+        "5000",
+        "--max-jobs",
+        "20000",
+        "--max-queued-per-owner",
+        "50",
+        "--max-concurrent-per-owner",
+        "2",
+        "--shutdown-grace",
+        "5m",
+    ]);
+    assert_eq!(args.max_concurrent_jobs, Some(16));
+    assert_eq!(args.queue_capacity, Some(5_000));
+    assert_eq!(args.max_jobs, Some(20_000));
+    assert_eq!(args.max_queued_per_owner, Some(50));
+    assert_eq!(args.max_concurrent_per_owner, Some(2));
+    assert_eq!(args.shutdown_grace.as_deref(), Some("5m"));
+    for flag in COUNTS {
+        for refused in ["-1", "1.5", "many"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", flag, refused])
+                    .is_err(),
+                "{flag} {refused}"
+            );
+        }
+        for rehearsal in ["--once", "--dry"] {
+            assert!(
+                command()
+                    .try_get_matches_from(["serve", rehearsal, flag, "2"])
+                    .is_err(),
+                "{flag} means nothing with {rehearsal}"
+            );
+        }
+    }
+    assert!(
+        command()
+            .try_get_matches_from(["serve", "--once", "--shutdown-grace", "5m"])
+            .is_err()
+    );
+    let options = nika_serve::ResidentOptions::default;
+    assert!(
+        options()
+            .with_job_capacity(Some(16), Some(5_000), Some(20_000))
+            .and_then(|options| options.with_owner_limits(Some(50), Some(2)))
+            .and_then(|options| options.with_shutdown_grace(Some("5m")))
+            .is_ok()
+    );
+    assert_eq!(
+        options().with_job_capacity(Some(0), None, None).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidJobLimit)
+    );
+    assert_eq!(
+        options().with_owner_limits(None, Some(0)).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidJobLimit)
+    );
+    assert_eq!(
+        options().with_shutdown_grace(Some("0s")).err(),
+        Some(nika_serve::ServerLaunchRefuse::InvalidShutdownGrace)
+    );
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidJobLimit);
+    for flag in COUNTS {
+        assert!(message.contains(flag), "{flag}: {message}");
+    }
+    let message =
+        nika_serve::launch_operator_message(nika_serve::ServerLaunchRefuse::InvalidShutdownGrace);
+    assert!(message.contains("--shutdown-grace") && message.contains("one second"));
+}
+
+/// `--provider-concurrency PROVIDER=N` is a repeatable option of the
+/// persistent resident: one cap per provider, a provider the engine knows,
+/// and a count of at least one. A rehearsal has no jobs to bound.
+#[test]
+fn provider_concurrency_is_a_repeatable_option_of_the_persistent_resident() {
+    let command = || <ServeArgs as clap::Args>::augment_args(clap::Command::new("serve"));
+    let parse = |argv: &[&str]| {
+        let matches = command().try_get_matches_from(argv).expect("flags");
+        <ServeArgs as clap::FromArgMatches>::from_arg_matches(&matches).expect("args")
+    };
+    assert!(parse(&["serve"]).provider_concurrency.is_empty());
+    let args = parse(&[
+        "serve",
+        "--provider-concurrency",
+        "openai=16",
+        "--provider-concurrency",
+        "anthropic=8",
+    ]);
+    assert_eq!(args.provider_concurrency, ["openai=16", "anthropic=8"]);
+    for rehearsal in ["--once", "--dry"] {
+        assert!(
+            command()
+                .try_get_matches_from(["serve", rehearsal, "--provider-concurrency", "openai=16"])
+                .is_err(),
+            "a cap means nothing with {rehearsal}"
+        );
+    }
+    let stated = |values: &[&str]| {
+        let values: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
+        nika_serve::ResidentOptions::default().with_provider_concurrency(&values)
+    };
+    assert!(stated(&["openai=16", "anthropic=8", "mock=1"]).is_ok());
+    assert_eq!(
+        stated(&[]).ok(),
+        Some(nika_serve::ResidentOptions::default()),
+        "no cap changes nothing"
+    );
+    for refused in [
+        &["openai"][..],
+        &["openai=0"],
+        &["openai=-1"],
+        &["openai=016"],
+        &["openai=many"],
+        &["openai=65536"],
+        &["=4"],
+        &["nobody=4"],
+        &["openai=4", "openai=8"],
+    ] {
+        assert_eq!(
+            stated(refused).err(),
+            Some(nika_serve::ServerLaunchRefuse::InvalidProviderConcurrency),
+            "{refused:?}"
+        );
+    }
+    let message = nika_serve::launch_operator_message(
+        nika_serve::ServerLaunchRefuse::InvalidProviderConcurrency,
+    );
+    assert!(
+        message.contains("--provider-concurrency") && message.contains("PROVIDER=N"),
+        "{message}"
+    );
+}
+
 /// `--cost-policy` is an explicit, repeatable listener option: it needs
 /// `--bind`, each occurrence is one rule kept as written, and it never
 /// changes the ceiling or seats the review door. The launch reads every rule

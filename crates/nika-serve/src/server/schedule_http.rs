@@ -60,6 +60,12 @@ struct SchedulePutBody {
     /// declares a scalar and parses it inside.
     #[serde(default)]
     inputs: Option<BTreeMap<String, ScheduleInputBody>>,
+    /// Who the jobs this schedule starts are attributed to (ADR-155), under
+    /// the law `POST /v1/jobs` applies. The canonical model judges both.
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    labels: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +157,8 @@ impl SchedulePutBody {
             .into_iter()
             .map(|(key, value)| (key, value.into_text()))
             .collect();
+        draft.owner = self.owner;
+        draft.labels = self.labels.unwrap_or_default();
         draft
     }
 }
@@ -301,9 +309,14 @@ async fn status_response(
     let id = definition.id().to_owned();
     let now = state.clock.now();
     let status = tokio::task::spawn_blocking(move || {
-        let prior = schedules.decision_state(ScheduleOrigin::Api, &id)?;
         let last = schedules.last_decision(ScheduleOrigin::Api, &id)?;
-        Ok::<_, ScheduleStoreError>(schedule_status(&definition, &now, &prior, last.as_ref()))
+        Ok::<_, ScheduleStoreError>(schedule_status(
+            ScheduleOrigin::Api,
+            &definition,
+            &now,
+            last.as_ref(),
+            STATUS_SLOT_LIMIT,
+        ))
     })
     .await;
     let mut status = match status {
@@ -323,7 +336,7 @@ async fn status_response(
     with_etag(json_response(StatusCode::OK, &body), &revision)
 }
 
-async fn validate_workflow(
+pub(super) async fn validate_workflow(
     definition: &ScheduleDefinition,
     state: &AppState,
 ) -> Result<nika_execution::AdmittedExecution, Response<ResponseBody>> {
@@ -390,7 +403,7 @@ fn precondition(
     }
 }
 
-fn single_header(
+pub(super) fn single_header(
     headers: &hyper::HeaderMap,
     name: hyper::header::HeaderName,
 ) -> Result<Option<&str>, PreconditionError> {
@@ -404,24 +417,32 @@ fn single_header(
     value.to_str().map(Some).map_err(|_| PreconditionError)
 }
 
-struct PreconditionError;
+pub(super) struct PreconditionError;
 
-fn parse_etag(value: &str) -> Option<ScheduleRevision> {
+pub(super) fn parse_etag(value: &str) -> Option<ScheduleRevision> {
     let inner = value.strip_prefix('"')?.strip_suffix('"')?;
     ScheduleRevision::from_wire(inner)
 }
 
-fn schedule_status(
+/// The status projection of one schedule of either origin, planned now from
+/// its last durable decision, with at most `slots` next slots.
+pub(super) fn schedule_status(
+    origin: ScheduleOrigin,
     definition: &ScheduleDefinition,
     now: &Zoned,
-    prior: &nika_cadence::ScheduleDecisionState,
     last: Option<&ScheduleDecisionRecord>,
+    slots: usize,
 ) -> Value {
     let definition_body = definition_json(definition);
-    match plan_schedule(definition, now, prior, STATUS_SLOT_LIMIT) {
+    let prior = ScheduleDecisionState::new(last.map(|decision| decision.slot().clone()));
+    let origin = match origin {
+        ScheduleOrigin::Project => "project",
+        _ => "api",
+    };
+    match plan_schedule(definition, now, &prior, slots) {
         Ok(plan) => json!({
             "definition": definition_body,
-            "origin": "api",
+            "origin": origin,
             "revision": definition.revision().as_str(),
             "active": definition.is_active(),
             "pause": pause_json(definition),
@@ -432,7 +453,7 @@ fn schedule_status(
         }),
         Err(error) => json!({
             "definition": definition_body,
-            "origin": "api",
+            "origin": origin,
             "revision": definition.revision().as_str(),
             "active": definition.is_active(),
             "pause": pause_json(definition),
@@ -462,6 +483,11 @@ fn definition_json(definition: &ScheduleDefinition) -> Value {
         "inputs": definition
             .inputs()
             .map(|(key, text)| (key.to_owned(), Value::String(text.to_owned())))
+            .collect::<serde_json::Map<String, Value>>(),
+        "owner": definition.owner(),
+        "labels": definition
+            .labels()
+            .map(|(key, value)| (key.to_owned(), Value::String(value.to_owned())))
             .collect::<serde_json::Map<String, Value>>(),
     });
     // A project's bounded catch-up keeps `missed` a closed word and names its
@@ -570,7 +596,7 @@ fn finding_response(finding: &ScheduleFinding) -> Response<ResponseBody> {
     json_response(StatusCode::UNPROCESSABLE_ENTITY, &body)
 }
 
-fn store_error_response(error: &ScheduleStoreError) -> Response<ResponseBody> {
+pub(super) fn store_error_response(error: &ScheduleStoreError) -> Response<ResponseBody> {
     match error {
         ScheduleStoreError::InvalidSchedule(finding) => finding_response(finding),
         ScheduleStoreError::ScheduleTooLarge { .. }
@@ -626,7 +652,7 @@ fn precondition_failed(current: Option<&ScheduleRevision>) -> Response<ResponseB
     json_response(StatusCode::PRECONDITION_FAILED, &body)
 }
 
-fn schedule_not_found() -> Response<ResponseBody> {
+pub(super) fn schedule_not_found() -> Response<ResponseBody> {
     json_error(
         StatusCode::NOT_FOUND,
         "schedule_not_found",
@@ -642,7 +668,7 @@ fn with_etag(
     response
 }
 
-fn insert_etag(response: &mut Response<ResponseBody>, revision: &ScheduleRevision) {
+pub(super) fn insert_etag(response: &mut Response<ResponseBody>, revision: &ScheduleRevision) {
     if let Ok(value) = HeaderValue::from_str(&format!("\"{}\"", revision.as_str())) {
         response.headers_mut().insert(ETAG, value);
     }

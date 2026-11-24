@@ -87,7 +87,8 @@ becomes a child name.
   active-job, queue, connection, SSE-client, header, and durable-job ceilings.
 - `BoundServer::bind` validates and acquires all authority before listening;
   `serve_until` stops admission and gives running and queued jobs one shared
-  grace period (30 seconds by default, with four concurrent workers).
+  grace period (30 seconds by default, with four concurrent workers;
+  `nika serve --shutdown-grace` and `--max-concurrent-jobs` state others).
 - `ExecutionBackend` receives only `ExecutionContext` over the immutable
   world admitted by `ExecutionService`. It is asynchronous, receives the
   run-scoped `CancelCtx` through an additive default method, remains
@@ -106,6 +107,7 @@ No public job mutation accepts a filesystem path. Startup paths live only in
 | `GET` | `/v1/workflows/{name}` | exactly one Bearer | `{ "workflow": "<contained name>" }` |
 | `GET` | `/v1/access-offers/{name}` | exactly one Bearer | the `nika/access-offer@1` document: the file's declared route, then one row per session shape and model with bounded tokens only (models, reasoning efforts, service tiers, adapter name and release) · 404 unknown name · 422 a workflow the job door would refuse · 408 · 503 `access_offer_busy` |
 | `POST` | `/v1/jobs` | exactly one Bearer + `Idempotency-Key` | opaque id + status · 422 `{error:{code,message}}` names the capture NIKA code when stamped · also 400/408/409/413/415/503/507 |
+| `GET` | `/v1/jobs` | exactly one Bearer | one page of light job summaries, newest first, and `next_cursor` while an older match exists · 400 `invalid_job_query` / `invalid_job_cursor` · also 408/503 |
 | `GET` | `/v1/jobs/{id}` | exactly one Bearer | opaque id + status · optional `{error:{code,message}}` on `failed` |
 | `GET` | `/v1/jobs/{id}/status` | exactly one Bearer | status only · diagnosis lives on GET job and SSE |
 | `GET` | `/v1/jobs/{id}/events` | exactly one Bearer | SSE `text/event-stream`; `id:` sequence; `data:` `{sequence,kind,status}` plus optional redacted `{code,message}` |
@@ -118,6 +120,48 @@ No public job mutation accepts a filesystem path. Startup paths live only in
 validates literal JSON input bindings. Clients must require this capability
 before sending inputs: older residents may accept unknown request fields
 without applying them. This capability does not authorize snapshot overlays.
+
+`/health` advertises `jobAttribution` when the named job envelope accepts
+`owner` and `labels` (ADR-155). An owner is 1 to 128 bytes of
+`[A-Za-z0-9._:@-]`. Labels are at most 16 pairs: a key of 1 to 64 bytes of
+`[A-Za-z0-9._/-]`, a value of at most 256 bytes without control characters.
+Outside these bounds, or null, the request is refused `422 invalid_job_owner`
+or `422 invalid_job_labels` before a job exists. Both are what the caller
+states so its application can find the job again: attribution inside one
+authority domain, never an authorization boundary, and whoever holds the token
+reads every job. They bind the request identity, so the same `Idempotency-Key`
+under another owner is `409 idempotency_conflict`, and they are hash-bound in
+the durable record from admission. A snapshot body carries none. A cost review
+binds none: they are stated on the admission that consumes it. The published
+`Job` object stays closed and does not carry them.
+
+`/health` advertises `jobList` when `GET /v1/jobs` answers (ADR-155). The list
+is how an application finds its jobs again. Every query member is optional and
+they combine with AND: `owner`, `status` (repeat it or separate values with
+commas), `workflow`, `origin` (`manual` or `schedule`), `label=key:value`
+(repeatable, at most 16), `created_after` and `created_before` (RFC 3339,
+exclusive), `limit` (1 to 200, default 50) and `cursor`. An unknown member, a
+repeated single member or a value outside its bounds is refused
+`400 invalid_job_query`, never ignored; a cursor this list did not write is
+`400 invalid_job_cursor`.
+
+The order is newest admission first, by the rank the store gives each job and
+never reuses. `next_cursor` names the rank of the last summary served, so a job
+admitted while a caller pages is newer than every page still to come: no
+summary repeats and none is skipped. The store answers a page from one
+snapshot read.
+
+A summary carries `id`, `status`, `workflow`, `origin`, `owner`, `labels`,
+`created_at`, `execution_id`, `trace_id` and, on a failed job, the same
+redacted `error` as `GET /v1/jobs/{id}`. It never carries inputs, outputs, a
+receipt or a settlement. A job admitted before the resident dated admissions
+shows the date of its first dated event, and is left out of a dated listing
+when it has none. `JobList` and `JobSummary` are open by contract: a later
+engine may add a member and a client ignores what it does not know.
+
+Filtering by `owner` is not an authorization boundary. One bearer credential is
+one authority domain (ADR-117): whoever holds it lists every job. An
+application that serves several users filters on its own side of the token.
 
 `/health` advertises `accessServiceTier` when the resident admits a served
 workflow that declares `run.access.service_tier`. The tier is a field of the
@@ -340,7 +384,9 @@ drain **all already-admitted work**, including the queue. The default is one
 30-second grace period with four concurrent workers, not 30 seconds per job.
 Thus forty jobs lasting three seconds each can occupy roughly thirty seconds;
 a resident still draining after five seconds has not exceeded this contract.
-Embedders can select another grace with `ServerLimits`; the CLI uses the default.
+`nika serve --shutdown-grace <DURATION>` states another grace (a whole number
+and `s`, `m`, `h` or `d`, at least one second) and `--max-concurrent-jobs`
+another worker count; embedders set both on `ServerLimits`.
 
 If the queue finishes within the grace, the resident exits 0. At grace expiry,
 it aborts the remaining execution futures, records running jobs as `interrupted`
@@ -356,8 +402,8 @@ The grace bounds asynchronous execution draining. It is not a hard deadline
 for process exit: cancellation must yield, scheduler/backend cleanup must join,
 and durable settlement requires filesystem writes. A stuck backend or filesystem
 can delay these steps. Supervisors should allow additional cleanup time beyond
-30 seconds before forcing SIGKILL; the supplied systemd unit uses 45 seconds
-(30 for draining plus 15 for cleanup). This allowance cannot bound a stuck
+the grace before forcing SIGKILL; the supplied systemd unit uses 45 seconds
+(30 for draining plus 15 for cleanup), to raise with `--shutdown-grace`. This allowance cannot bound a stuck
 filesystem; a forced kill may defer settlement to restart.
 
 On Unix, the token file must be opened no-follow/nonblocking as a regular
@@ -382,6 +428,10 @@ fixed-size constant-time equality. Compressed request bodies are refused.
 4. Startup and every later operation reject malformed JSON, an unknown state
    version, invalid identifiers, duplicate ids or keys, and non-contiguous
    event sequences. Corrupt state is never interpreted partially.
+   An older supported format is lifted in memory at every load and stored by
+   the first writer. Opening alone never rewrites the file: a start that
+   loses the server lease leaves a live older resident's store in the format
+   that resident reads.
 5. The same idempotency key plus the same digest returns the same record. The
    same key plus another digest returns `Conflict` without mutation.
 6. A new record starts `queued`. Legal edges are:
@@ -426,6 +476,24 @@ fixed-size constant-time equality. Compressed request bodies are refused.
     the real adapter and durable anchor; until then approval operations fail
     closed.
 11. `Debug` for `JobStore` is opaque and cannot expose its held root.
+12. Retention is opt-in (ADR-155). Without a window the store keeps every job
+    and, at its record ceiling (10,000), refuses every admission
+    `507 job_capacity`. `--job-retention <DURATION>` makes a `succeeded` job
+    leave once its settlement is that old; `--job-retention-unsuccessful` sets
+    the window of `failed`, `cancelled` and `interrupted` jobs, which otherwise
+    follow the first. A duration is a whole number and one unit (`s`, `m`, `h`,
+    `d`), at least one minute. Eviction runs inside every admission, before the
+    idempotency lookup and the capacity check, and once at startup after
+    ownerless runs are settled. It removes the record, its events and its
+    captured world: the record and events in the same atomic replacement as
+    the admission, the world file after it. `queued`, `running` and `paused`
+    jobs never leave, and a settlement that carries no date is never aged. An
+    evicted job's idempotency key is forgotten, so the same key and bytes
+    create a new job: a window must outlive the caller's retries. Its rank is
+    never given again, so a list cursor stays valid across an eviction. Its
+    trace journal under `.nika/traces` stays: the store row is an index of a
+    run, never its evidence, and its artifacts are no longer served over HTTP
+    once the row is gone. A start also removes the captured worlds no job owns.
 
 ## 4. W05 + W06 verification
 
@@ -869,3 +937,208 @@ overlap law (`chevauchement`) judges on-time slots only. `PUT /v1/schedules`
 declares the three closed words; `GET /v1/schedules/{id}` renders a bounded
 beat as `missed: catch-up` plus `missedLatest: N`. `nika arm fire` refuses
 both catch-up forms by name (`policy_unsupported`): catch-up is served.
+
+## Schedule management (ADR-155)
+
+`/health` advertises `scheduleManage` when the resident's scheduler is live
+and the three routes below answer. They complete the schedule door:
+
+| method | route | authority | response |
+|---|---|---|---|
+| `PUT` | `/v1/schedules/{id}` | one Bearer + `If-None-Match: *` or `If-Match` | the schedule's status and `changed` · 412 `schedule_precondition_failed` · 422 findings |
+| `GET` | `/v1/schedules/{id}` | one Bearer | one API schedule's status, with its `ETag` |
+| `GET` | `/v1/schedules` | one Bearer | `{ "schedules": [...], "truncated": bool }` |
+| `DELETE` | `/v1/schedules/{id}` | one Bearer + `If-Match` | `{ "removed": true, "id", "revision" }` · 404 · 409 `schedule_declared_by_project` · 412 |
+| `POST` | `/v1/schedules/{id}/trigger` | one Bearer + `Idempotency-Key` | the job, `202` created or `200` replayed · 404 · 409 · 422 |
+
+**Attribution.** A schedule may state `owner` and `labels`, under the same
+law as `POST /v1/jobs` (`nika_cadence::attribution` is that law's one home, so
+the two doors cannot drift). Outside the law the declaration is refused with
+the finding `schedule.owner` or `schedule.labels` and nothing is stored. The
+statement is part of the declaration: it enters the schedule's revision, so
+stating or changing it is an update under `If-Match`. Every job the schedule
+fires, and every job a trigger admits, carries exactly what the schedule
+states. A schedule that states nothing keeps the revision, the stored row and
+the integrity it had before attribution existed: a resident that upgrades
+reads its schedules unchanged, and the schedule store stays at format 1. A row
+that does state them is refused whole by an engine older than this one,
+never read with the statement dropped. A project beat cannot state any:
+`nika.yaml` has no key for it.
+
+**List.** `GET /v1/schedules` answers the schedules this door created, by id,
+then the project's beats, by id. Each entry is the status
+`GET /v1/schedules/{id}` answers, with one next slot instead of five, and an
+`origin` of `api` or `project`. A beat the project file declares but the
+resident refused appears with its `finding`. The list is how a project beat is
+read over HTTP: `GET /v1/schedules/{id}` still answers a healthy project beat
+`404`. `truncated` is true when more than 320 schedules exist; the API side
+alone is bounded at 64.
+
+**Removal.** `DELETE /v1/schedules/{id}` removes a schedule this door created.
+It needs `If-Match`: the exact `ETag` a read returned, or `*` for whichever
+revision is current. Without it, or under a stale tag, the answer is
+`412 schedule_precondition_failed` with `currentRevision`, and nothing changes.
+A removal takes the schedule's last-slot decision with it, so a schedule
+declared again under the same id starts with no history. A job the schedule
+already fired is untouched: cancel it through `POST /v1/jobs/{id}/cancel`. A
+slot keeps the one job it fired for as long as the store holds that job: if
+the schedule declared again offers that slot while it is still on time, the
+slot is consumed against that job, whatever the workflow has become since,
+and nothing fires twice. A
+slot the scheduler was preparing when the removal landed is dropped by the
+revision check every claim already makes. A project beat is declared in the
+project's file and is not this door's to remove: `409
+schedule_declared_by_project`.
+
+**Trigger.** `POST /v1/schedules/{id}/trigger` is the operator's gesture: run
+this schedule's workflow once, now, under everything the schedule declares
+(inputs, ceiling, owner, labels). It admits a **manual** job through the same
+admission as `POST /v1/jobs`: the same queue, the same limits, the same
+`Idempotency-Key` table. It consumes no slot, writes no decision and no
+firing-ledger entry, and leaves the cadence exactly where it was, so the next
+slot still fires. A paused schedule can be triggered: a pause holds the
+cadence, not the operator. The body is empty or `{}`: a trigger overrides
+nothing, and any member is refused `422 invalid_schedule_trigger`. To run the
+workflow under other inputs, use `POST /v1/jobs`. The run is told no slot:
+`${{ run.scheduled_for }}` reads its own start, as under `POST /v1/jobs`.
+
+The request identity of a trigger is the schedule id alone. Under one key, a
+retry answers the same job even after the schedule changed or was removed; the
+same key on another schedule, or on `POST /v1/jobs`, is
+`409 idempotency_conflict`. The job runs the workflow as it is at admission and
+the inputs are judged then: a schedule whose inputs the workflow no longer
+admits answers `422 schedule.inputs` and admits nothing. A project beat
+answers `409 schedule_declared_by_project`: the gesture for it is `nika arm
+fire`. This route is not an inbound event door (ADR-136): it takes the
+resident's own Bearer, and a third-party sender never holds it.
+
+No route replays missed slots: schedule backfill stays absent.
+
+## Fair admission and occupancy (ADR-155)
+
+`/health` advertises `occupancy` when the resident serves the queue below.
+The queue is the resident's memory, rebuilt from the durable `queued` jobs at
+every start; it is never a second record of a job.
+
+**Lanes.** An admitted job waits in the lane of the owner it states. Jobs
+that state no owner share one anonymous lane. A lane is first in, first out.
+
+**Turn.** A free worker goes to the owner with the fewest jobs running,
+among the owners that have a job waiting. Among equals it goes in turn: the
+owner served longest ago. So an owner that submits fifty jobs does not delay
+the owner that submits one: that one starts at the next free worker, and
+owners with standing queues share the workers evenly.
+
+**Limits.** All are `nika serve` flags of the persistent resident, never
+members of `nika.yaml`: they describe one process, not the project.
+
+| flag | default | bounds | past it |
+|---|---|---|---|
+| `--max-concurrent-jobs <N>` | 4 | jobs running at once, at most 256 | the others wait |
+| `--queue-capacity <N>` | 64 | jobs waiting, all owners together | `503 queue_full` |
+| `--max-queued-per-owner <N>` | none | jobs one owner has waiting | `429 owner_queue_full` + `Retry-After` |
+| `--max-concurrent-per-owner <N>` | none | jobs one owner runs at once | its others wait; free workers serve other owners |
+| `--max-jobs <N>` | 10,000 | jobs the store keeps | `507 job_capacity` |
+| `--shutdown-grace <DURATION>` | `30s` | the drain at a stop | running jobs settle `interrupted` |
+| `--provider-concurrency <PROVIDER=N>` | none | model calls in flight on one provider, all jobs together | the others wait their turn |
+
+A count is a whole number of at least 1. `--max-concurrent-jobs` stops at
+256: a running job holds one thread of the resident for its whole run, and
+the routes take theirs from the same pool. `429 owner_queue_full` writes
+nothing and leaves the `Idempotency-Key` unbound: the same request is sent
+again after the `Retry-After` seconds (a fixed hint of 5: the resident cannot
+know when one of the owner's jobs will start). It is a `429` and not a `503`
+because the server is available: other owners are still admitted.
+
+A job that carries an approved cost review takes its queue place before the
+review is taken. `429 owner_queue_full` and `503 queue_full` therefore leave
+the review approved, and the same request is admitted once there is a place,
+within the review's lifetime. Every refusal after the review is taken still
+spends it.
+
+**What never takes a place twice.** A place is reserved before the durable
+record and given back if the admission does not land. A replay of a job that
+still waits, or that a worker has just taken and not yet marked `running`,
+answers that job: it takes no second place and is never refused for the one
+its job has. A queued job that is cancelled gives its place back at once.
+
+**Scheduled fires.** A run the scheduler fires is durably `running` when it
+reaches the queue. It is bounded by `--queue-capacity` only: a per-owner bound
+never refuses it or holds it back, and it is served before the lanes. It
+counts in its owner's running total, so that owner's manual jobs wait for it
+under `--max-concurrent-per-owner`. The reason is the scheduler's own
+deadline: it watches each fire to its end within a window derived from the
+queue capacity, which a fire parked behind other owners' lanes could outlive.
+
+**Restart.** The jobs that were `queued` when the resident stopped re-enter
+their owner's lane in admission order, past today's bounds: a limit lowered
+across a restart never drops an admitted job. They hold their places like any
+waiting job, so a resident that restarts with a full queue answers
+`503 queue_full` to new admissions, and defers scheduled fires, until the
+backlog drains below `--queue-capacity`. The running counts start at zero, as
+no job runs.
+
+**Provider calls.** A provider's rate limit belongs to the account every job
+shares, so the resident bounds calls per provider, across jobs.
+`--provider-concurrency openai=16 --provider-concurrency anthropic=8` keeps
+at most sixteen OpenAI calls and eight Anthropic calls in flight, whichever
+jobs send them. The provider is a canonical id or an alias of one; the count
+is 1 to 65535; a provider is named once. A provider that is not named is not
+bounded.
+
+- **Where.** One slot is taken around each round-trip a job's provider
+  sends, in `nika-providers`, and given back when it returns
+  (`ProviderCallGate`, handed to each run through
+  `RuntimeConfig::provider_gate`). A run's child workflows take their slots
+  from the same gate. A stream keeps its slot until it is dropped.
+- **Fan-out.** A `for_each` still starts up to `max_parallel` items. Each
+  item's call waits for a slot, so the calls in flight are the smaller of
+  `max_parallel` and the slots that are free. Items that make no model call
+  are not slowed.
+- **Retries.** Unchanged (ADR-019). The gate re-sends nothing. A call its
+  task will retry gave its slot back when it returned, so a backoff holds no
+  slot, and the retry waits its turn like any call.
+- **Timeouts.** The wait for a slot counts inside a task's own `timeout:`.
+  A cap far under the demand turns into task timeouts, not into a longer
+  queue: size the cap from the provider's limit, and `--max-concurrent-jobs`
+  from the cap.
+- **Cancel.** A job cancelled while its calls wait leaves the line at once:
+  those calls are never sent, and their places go to the next jobs. A call
+  already sent finishes or is dropped with the job, as before.
+- **Not bounded.** Calls an agent harness makes through its own client
+  (ACP), image and speech tools, and the authoring door (`POST /v1/compile`)
+  do not pass this gate.
+
+**Occupancy.** `GET /v1/occupancy` (one Bearer) answers what the resident
+holds now:
+
+```json
+{
+  "jobs": {
+    "running": 2, "queued": 47,
+    "max_concurrent": 2, "queue_capacity": 64,
+    "max_concurrent_per_owner": null, "max_queued_per_owner": null
+  },
+  "owners": [
+    {"owner": "user_123", "running": 1, "queued": 47},
+    {"owner": null, "running": 1, "queued": 0}
+  ],
+  "owners_omitted": 0,
+  "providers": [
+    {"provider": "openai", "max_concurrent": 16, "in_flight": 16, "waiting": 5}
+  ]
+}
+```
+
+At most 100 owners are named, busiest first; `owners_omitted` counts the
+rest. `owner` is `null` for the anonymous lane. `providers` lists the capped
+providers only: `in_flight` calls hold a slot, `waiting` calls wait for one.
+A provider with `waiting` above zero for long is the bottleneck. The object
+is open: a later engine adds members. It is authenticated and absent from `/health` because it
+names owners.
+
+**What this is not.** The owner is what the credential holder states, never
+an authenticated identity (ADR-117): fairness keeps one application's users
+from delaying each other, it does not isolate tenants that hold the same
+Bearer. The limits hold inside one resident; one state root is served by one
+resident.

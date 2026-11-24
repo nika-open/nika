@@ -25,6 +25,7 @@ use super::model::{
 };
 use super::registry::{list_workflows_under, valid_workflow_name, within_scope, workflow_exists};
 use super::sse;
+use crate::job::{JobAttribution, JobBindings};
 
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
 /// The by-name form of the job door (ADR-131 · #1441): the world lives in
@@ -44,6 +45,25 @@ pub(super) struct JobByName {
     /// One approved cost review this admission consumes (C6); never null.
     #[serde(default, deserialize_with = "present_review")]
     pub(super) cost_review: Option<ReviewReference>,
+    /// Who the caller attributes the job to (ADR-155), as written: judged
+    /// by [`named_job`], which refuses a null, a wrong type or a bound.
+    #[serde(default, deserialize_with = "present_value")]
+    owner: Option<serde_json::Value>,
+    /// The caller's labels, as written and judged the same way.
+    #[serde(default, deserialize_with = "present_value")]
+    labels: Option<serde_json::Value>,
+    /// The validated attribution: never read from the wire.
+    #[serde(skip)]
+    pub(super) attribution: JobAttribution,
+}
+
+/// A present member keeps its JSON value, null included, so the judge that
+/// reads it can name the member it refuses.
+fn present_value<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <serde_json::Value as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 /// `{"review_id", "witness_sha256"}`: which review, and proof its caller saw it.
@@ -192,6 +212,19 @@ async fn route_authenticated(
     }
     let path = request.uri().path().to_owned();
     match (request.method(), path.as_str()) {
+        (&Method::GET, "/v1/jobs") => super::job_list::list(request.uri().query(), &state).await,
+        (&Method::GET, "/v1/occupancy") => super::occupancy::read(&state),
+        (&Method::GET, "/v1/schedules") => super::schedule_manage::list(&state).await,
+        (&Method::DELETE, path) if path.starts_with("/v1/schedules/") => {
+            let Some(id) = schedule_route(path) else {
+                return ApiError::route_not_found().into_response();
+            };
+            super::schedule_manage::delete(request.headers(), id.to_owned(), &state).await
+        }
+        (&Method::POST, path) if schedule_trigger_route(path).is_some() => {
+            let id = schedule_trigger_route(path).unwrap_or_default().to_owned();
+            super::schedule_manage::trigger(request, id, state).await
+        }
         (&Method::PUT, path) if path.starts_with("/v1/schedules/") => {
             let Some(id) = schedule_route(path) else {
                 return ApiError::route_not_found().into_response();
@@ -274,6 +307,11 @@ fn schedule_route(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+/// `/v1/schedules/{id}/trigger`.
+fn schedule_trigger_route(path: &str) -> Option<&str> {
+    schedule_route(path.strip_suffix("/trigger")?)
+}
+
 async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Response<ResponseBody> {
     let (key, digest, body) = match intake(request, &state, idempotency_key).await {
         Ok(parts) => parts,
@@ -318,7 +356,17 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
             let Ok(world) = admitted.snapshot().encode() else {
                 return admission_refused().into_response();
             };
-            return admit_job(state, key, digest, job.workflow, world, job.access, inputs).await;
+            let bindings = JobBindings::of(inputs, None).attributed(job.attribution);
+            return admit_job(
+                state,
+                key,
+                digest,
+                job.workflow,
+                world,
+                job.access,
+                bindings,
+            )
+            .await;
         }
         Ok(None) => {}
         Err(error) => return error.into_response(),
@@ -336,7 +384,17 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
     let Ok(world) = admitted.snapshot().encode() else {
         return admission_refused().into_response();
     };
-    admit_job(state, key, digest, workflow, world, None, BTreeMap::new()).await
+    // A frozen world carries no request overlay: a snapshot job is unattributed.
+    admit_job(
+        state,
+        key,
+        digest,
+        workflow,
+        world,
+        None,
+        JobBindings::default(),
+    )
+    .await
 }
 
 /// The preamble of a POST that admits a job or a review, in this order: the
@@ -377,10 +435,11 @@ pub(super) fn named_job(body: &[u8]) -> Result<Option<JobByName>, ApiError> {
         }
         return Ok(None);
     }
-    let job: JobByName = serde_json::from_slice(body).map_err(|_| invalid_job_envelope())?;
+    let mut job: JobByName = serde_json::from_slice(body).map_err(|_| invalid_job_envelope())?;
     if job.access.as_ref().is_some_and(|pin| pin.trim().is_empty()) {
         return Err(empty_access_pin());
     }
+    job.attribution = super::attribution::stated(job.owner.as_ref(), job.labels.as_ref())?;
     Ok(Some(job))
 }
 
@@ -388,7 +447,7 @@ fn invalid_job_envelope() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         "malformed_snapshot",
-        "use workflow with optional literal inputs and access; unknown fields, null inputs/pins and snapshot overlays are refused",
+        "use workflow with optional literal inputs, access, owner and labels; unknown fields, null inputs/pins and snapshot overlays are refused",
     )
 }
 
@@ -591,18 +650,18 @@ fn snapshot_metadata_limit() -> ApiError {
     )
 }
 
-async fn admit_job(
+pub(super) async fn admit_job(
     state: Arc<AppState>,
     key: IdempotencyKey,
     digest: RequestDigest,
     workflow: String,
     world: String,
     access_pin: Option<String>,
-    inputs: BTreeMap<String, serde_json::Value>,
+    bindings: JobBindings,
 ) -> Response<ResponseBody> {
     match state
         .coordinator
-        .admit_manual_inputs(key, digest, workflow, world, access_pin, inputs, None, None)
+        .admit_manual_inputs(key, digest, workflow, world, access_pin, bindings)
         .await
     {
         Ok(admission) => admission_response(admission),
@@ -635,6 +694,7 @@ pub(super) fn admission_error(error: &super::ServerError) -> Response<ResponseBo
         super::ServerError::JobStore(crate::JobStoreError::Busy)
         | super::ServerError::StoreQueueFull => store_busy(),
         super::ServerError::ExecutionQueueFull => queue_full(),
+        super::ServerError::OwnerQueueFull => super::occupancy::owner_queue_full(),
         super::ServerError::Stopping => stopping(),
         _ => internal_error(),
     }
@@ -790,6 +850,8 @@ async fn cancel_queued_job(
     {
         Ok(cancelled) => {
             state.cancellations.retire(&id);
+            // Its place in its owner's lane is free at once.
+            state.coordinator.forget_queued(&id);
             Ok(json_response(
                 StatusCode::OK,
                 &JobResponse::from(&cancelled),

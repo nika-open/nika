@@ -12,6 +12,7 @@ use std::time::Duration;
 use jiff::Zoned;
 use nika_execution::SnapshotLimits;
 
+use super::provider_gate::ProviderGates;
 use crate::MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES;
 
 /// Injected time and wait authority for the resident schedule planner.
@@ -67,6 +68,10 @@ pub struct ServerLimits {
     default_max_cost_usd: Option<f64>,
     max_compile_requests: usize,
     max_artifact_bytes: u64,
+    job_retention: Option<Duration>,
+    unsuccessful_job_retention: Option<Duration>,
+    max_queued_per_owner: Option<usize>,
+    max_concurrent_per_owner: Option<usize>,
 }
 
 /// Concurrent `POST /v1/compile` computations out of the box. Authoring is
@@ -109,6 +114,82 @@ impl ServerLimits {
             default_max_cost_usd: Some(DEFAULT_MAX_COST_USD),
             max_compile_requests: DEFAULT_MAX_COMPILE_REQUESTS,
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
+            job_retention: None,
+            unsuccessful_job_retention: None,
+            max_queued_per_owner: None,
+            max_concurrent_per_owner: None,
+        }
+    }
+
+    /// Run at most this many jobs at once (4 out of the box).
+    #[must_use]
+    pub const fn with_max_concurrent_jobs(mut self, max_concurrent_jobs: usize) -> Self {
+        self.max_concurrent_jobs = max_concurrent_jobs;
+        self
+    }
+
+    /// Hold at most this many jobs waiting for a worker (64 out of the box).
+    /// Past it an admission is refused `queue_full`.
+    #[must_use]
+    pub const fn with_queue_capacity(mut self, queue_capacity: usize) -> Self {
+        self.queue_capacity = queue_capacity;
+        self
+    }
+
+    /// Wait this long at shutdown for running and queued jobs to end
+    /// (30 seconds out of the box). Past it they settle `interrupted`.
+    #[must_use]
+    pub const fn with_shutdown_grace(mut self, shutdown_grace: Duration) -> Self {
+        self.shutdown_grace = shutdown_grace;
+        self
+    }
+
+    /// Let one owner hold at most this many waiting jobs. Past it that
+    /// owner's admission is refused `owner_queue_full`; others are still
+    /// admitted. Jobs that state no owner share one anonymous owner. Absent,
+    /// only the queue capacity bounds an owner.
+    #[must_use]
+    pub const fn with_max_queued_per_owner(mut self, max_queued: usize) -> Self {
+        self.max_queued_per_owner = Some(max_queued);
+        self
+    }
+
+    /// Run at most this many jobs of one owner at once; its other jobs wait
+    /// while other owners run. Absent, only the workers bound an owner.
+    #[must_use]
+    pub const fn with_max_concurrent_per_owner(mut self, max_concurrent: usize) -> Self {
+        self.max_concurrent_per_owner = Some(max_concurrent);
+        self
+    }
+
+    /// Evict a `succeeded` job once it has been settled this long (at least
+    /// one minute). Absent, the store keeps every job, and at its record
+    /// ceiling it refuses every admission. An evicted job's idempotency key
+    /// is forgotten, its trace journal stays. Unsuccessful jobs follow this
+    /// window unless [`Self::with_unsuccessful_job_retention`] sets theirs.
+    #[must_use]
+    pub const fn with_job_retention(mut self, settled_for: Duration) -> Self {
+        self.job_retention = Some(settled_for);
+        self
+    }
+
+    /// Evict a `failed`, `cancelled` or `interrupted` job once it has been
+    /// settled this long (at least one minute).
+    #[must_use]
+    pub const fn with_unsuccessful_job_retention(mut self, settled_for: Duration) -> Self {
+        self.unsuccessful_job_retention = Some(settled_for);
+        self
+    }
+
+    /// The windows the store evicts by: an unsuccessful job follows the
+    /// succeeded window when the operator named none for it.
+    pub(crate) const fn job_retention(self) -> crate::job::JobRetention {
+        crate::job::JobRetention {
+            succeeded: self.job_retention,
+            unsuccessful: match self.unsuccessful_job_retention {
+                Some(window) => Some(window),
+                None => self.job_retention,
+            },
         }
     }
 
@@ -172,6 +253,8 @@ impl ServerLimits {
             && self.max_jobs != 0
             && self.max_sse_clients != 0
             && self.max_compile_requests != 0
+            && !matches!(self.max_queued_per_owner, Some(0))
+            && !matches!(self.max_concurrent_per_owner, Some(0))
             && !self.sse_heartbeat.is_zero()
             && self.sse_reconnect.as_millis() >= 100
             && self.sse_reconnect.as_millis() <= 30_000
@@ -205,6 +288,14 @@ impl ServerLimits {
 
     pub(crate) const fn queue_capacity(self) -> usize {
         self.queue_capacity
+    }
+
+    pub(crate) const fn max_queued_per_owner(self) -> Option<usize> {
+        self.max_queued_per_owner
+    }
+
+    pub(crate) const fn max_concurrent_per_owner(self) -> Option<usize> {
+        self.max_concurrent_per_owner
     }
 
     pub(crate) const fn max_connections(self) -> usize {
@@ -281,6 +372,7 @@ pub struct ResidentConfig {
     limits: ServerLimits,
     snapshot_limits: SnapshotLimits,
     clock: Arc<dyn ResidentClock>,
+    provider_gates: Option<Arc<ProviderGates>>,
 }
 
 impl ResidentConfig {
@@ -293,6 +385,7 @@ impl ResidentConfig {
             limits: ServerLimits::default(),
             snapshot_limits: SnapshotLimits::default(),
             clock: Arc::new(SystemResidentClock),
+            provider_gates: None,
         }
     }
 
@@ -342,6 +435,17 @@ impl ResidentConfig {
 
     pub(crate) fn clock(&self) -> &Arc<dyn ResidentClock> {
         &self.clock
+    }
+
+    /// Report the provider caps the backend's jobs run under: the same
+    /// gates the backend was given, so occupancy reads what the calls take.
+    pub(crate) fn with_provider_gates(mut self, gates: Option<Arc<ProviderGates>>) -> Self {
+        self.provider_gates = gates;
+        self
+    }
+
+    pub(crate) fn provider_gates(&self) -> Option<Arc<ProviderGates>> {
+        self.provider_gates.clone()
     }
 }
 

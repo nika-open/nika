@@ -310,6 +310,170 @@ async fn a_review_is_one_explicit_decision_for_one_job() {
     server.stop().await.expect("stop");
 }
 
+/// A review prices a run and takes no attribution; the one admission that
+/// consumes it states the owner and labels, which decide no part of the cost.
+#[tokio::test(flavor = "multi_thread")]
+async fn attribution_rides_the_admission_that_consumes_a_review() {
+    let world = world();
+    let backend = Arc::new(ReviewedBackend::default());
+    let (server, _state) = start(&world, backend.clone(), disarmed(), true).await;
+    let owned_review = r#"{"workflow":"review.nika","owner":"user_123"}"#;
+    let refused = server
+        .request(&review_request(owned_review, "review-owned"))
+        .await;
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "malformed_snapshot");
+    assert!(lease_is_free(&world), "a refused review holds nothing");
+
+    let review = open_review(&server, "review-1").await;
+    let id = review["review_id"].as_str().expect("id");
+    let witness = review["witness_sha256"].as_str().expect("witness");
+    let approved = server
+        .request(&decision_request(id, witness, "approve_once"))
+        .await;
+    assert_eq!(approved.status, 200, "{}", approved.body);
+    let body = json!({
+        "workflow": "review.nika",
+        "owner": "user_123",
+        "labels": {"plan": "pro"},
+        "cost_review": {"review_id": id, "witness_sha256": witness},
+    });
+    let job = server
+        .request(&post_request(
+            &body.to_string(),
+            "job-owned",
+            &auth_header(),
+        ))
+        .await;
+    assert_eq!(job.status, 202, "{}", job.body);
+    let job_id = job.json()["id"].as_str().expect("job id").to_owned();
+    wait_for_status(&server, &job_id, "succeeded")
+        .await
+        .expect("the reviewed job settles");
+    let state: Value = serde_json::from_str(
+        &std::fs::read_to_string(world.state.join("jobs/state.json")).expect("job state"),
+    )
+    .expect("job state json");
+    assert_eq!(state["jobs"][0]["record"]["owner"], "user_123");
+    assert_eq!(state["jobs"][0]["record"]["labels"], json!({"plan": "pro"}));
+    server.stop().await.expect("stop");
+}
+
+/// Holds every job that needs no review until it is released; a reviewed job
+/// settles as [`ReviewedBackend`] settles it.
+struct Holding {
+    reviewed: ReviewedBackend,
+    release: tokio::sync::watch::Sender<bool>,
+}
+
+impl ExecutionBackend for Holding {
+    fn execute<'a>(
+        &'a self,
+        _context: nika_execution::ExecutionContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        let mut released = self.release.subscribe();
+        Box::pin(async move {
+            let _open = released.wait_for(|open| *open).await;
+            ExecutionOutcome::from(ExecutionDisposition::Succeeded)
+        })
+    }
+
+    fn execute_reviewed<'a>(
+        &'a self,
+        context: nika_execution::ExecutionContext<'a>,
+        inputs: &BTreeMap<String, Value>,
+        cancel: nika_types::cancel::CancelCtx,
+        authority: CostAuthority,
+    ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        self.reviewed
+            .execute_reviewed(context, inputs, cancel, authority)
+    }
+}
+
+/// `429 owner_queue_full` asks the caller to send the same request again, so
+/// it must leave an approved review approved: the queue place is taken before
+/// the review is. The same request is admitted once the owner has a place.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owner_at_its_queue_bound_keeps_its_approved_review() {
+    let world = world();
+    let (release, _held) = tokio::sync::watch::channel(false);
+    let backend = Arc::new(Holding {
+        reviewed: ReviewedBackend::default(),
+        release,
+    });
+    let limits = disarmed()
+        .with_max_concurrent_jobs(1)
+        .with_max_queued_per_owner(1);
+    let (server, state) = start(&world, backend.clone(), limits, true).await;
+    let door = state.cost_review.as_ref().expect("door");
+
+    // Two jobs that need no review: one runs and is held, one fills the
+    // owner's only waiting place.
+    *door.plan.lock().expect("plan") = None;
+    let mut plain = Vec::new();
+    for key in ["plain-0", "plain-1"] {
+        let body = r#"{"workflow":"root.nika","owner":"user_123"}"#;
+        let job = server
+            .request(&post_request(body, key, &auth_header()))
+            .await;
+        assert_eq!(job.status, 202, "{}", job.body);
+        let id = job.json()["id"].as_str().expect("id").to_owned();
+        if plain.is_empty() {
+            wait_for_status(&server, &id, "running")
+                .await
+                .expect("the first job holds the worker");
+        }
+        plain.push(id);
+    }
+
+    *door.plan.lock().expect("plan") = Some(unpriced_plan());
+    let review = open_review(&server, "review-1").await;
+    let id = review["review_id"].as_str().expect("id");
+    let witness = review["witness_sha256"].as_str().expect("witness");
+    let approved = server
+        .request(&decision_request(id, witness, "approve_once"))
+        .await;
+    assert_eq!(approved.status, 200, "{}", approved.body);
+    let reviewed = json!({
+        "workflow": "review.nika",
+        "owner": "user_123",
+        "cost_review": {"review_id": id, "witness_sha256": witness},
+    })
+    .to_string();
+
+    let refused = server
+        .request(&post_request(&reviewed, "job-reviewed", &auth_header()))
+        .await;
+    assert_eq!(refused.status, 429, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "owner_queue_full");
+    let kept = server
+        .request(&get_request(&format!("/v1/cost-reviews/{id}")))
+        .await
+        .json();
+    assert_eq!(kept["state"], "approved", "the refusal spent the review");
+
+    backend.release.send_replace(true);
+    for id in &plain {
+        wait_for_status(&server, id, "succeeded")
+            .await
+            .expect("the held jobs end");
+    }
+    let admitted = server
+        .request(&post_request(&reviewed, "job-reviewed", &auth_header()))
+        .await;
+    assert_eq!(admitted.status, 202, "{}", admitted.body);
+    let job = admitted.json()["id"].as_str().expect("job id").to_owned();
+    wait_for_status(&server, &job, "succeeded")
+        .await
+        .expect("the reviewed job settles");
+    let spent = server
+        .request(&get_request(&format!("/v1/cost-reviews/{id}")))
+        .await
+        .json();
+    assert_eq!(spent["state"], "consumed");
+    server.stop().await.expect("stop");
+}
+
 /// A wrong witness moves nothing; another request than the reviewed one keeps
 /// the approval; a second, different decision refuses; the held lease refuses
 /// a second review; unknown ids and malformed decisions are named; a decline

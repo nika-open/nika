@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
+mod attribution;
 mod evidence;
 mod kind;
+mod listing;
 mod model;
+mod retention;
 mod store;
 
+pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
+pub(crate) use listing::{
+    DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind,
+};
 pub use model::{
     Admission, ApprovalHistoryError, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobMutation,
     JobOrigin, JobReceipt, JobRecord, JobStatus, JobStoreError,
@@ -15,8 +22,9 @@ pub use model::{
     MAX_EVENT_PAYLOAD_BYTES, MAX_EXECUTION_SNAPSHOT_METADATA_BYTES,
     MAX_EXECUTION_SNAPSHOT_PATH_BYTES, MAX_JOB_SNAPSHOT_BYTES, RequestDigest, ServerIncarnation,
 };
-pub(crate) use store::STATE_VERSION;
+pub(crate) use retention::{JobRetention, MIN_JOB_RETENTION};
 pub use store::{ApprovalHistory, JobStore};
+pub(crate) use store::{QueuedJob, STATE_VERSION};
 
 #[cfg(test)]
 mod result_tests;

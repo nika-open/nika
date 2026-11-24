@@ -23,6 +23,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::error::{ApiError, ResponseBody};
 use super::{AppState, ServerError, cost_review, route};
+use crate::job::JobBindings;
 use crate::{IdempotencyKey, JobId, JobStatus, JobStoreError, RequestDigest};
 
 /// The Session of the project at `root`, opened by this process as bare `nika` opens it, its
@@ -169,7 +170,14 @@ impl Resident {
         let (key, digest) = identity(bound.to_string().as_bytes())?;
         let (access, ceiling) = (run.access_pin.clone(), Some(run.max_cost_usd));
         let admission = (state.coordinator)
-            .admit_manual_inputs(key, digest, name, world, access, inputs, None, ceiling)
+            .admit_manual_inputs(
+                key,
+                digest,
+                name,
+                world,
+                access,
+                JobBindings::of(inputs, ceiling),
+            )
             .await;
         let response = match admission {
             Ok(admission) => route::admission_response(admission),

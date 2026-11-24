@@ -48,6 +48,10 @@ pub use admission::{AdmissionState, AttemptReceipt, InferenceAdmission, Inferenc
 pub mod authoring;
 pub mod census;
 pub mod dispatch_journal;
+pub mod gate;
+pub use gate::{ProviderCallEntry, ProviderCallGate, ProviderCallRefused, ProviderCallSlot};
+#[cfg(test)]
+mod gate_tests;
 pub mod key_check;
 pub mod model_choice;
 mod overflow;

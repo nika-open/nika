@@ -599,10 +599,27 @@ pub struct JobRecord {
     /// Literal API input overrides, separate from the immutable workflow world.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) inputs: BTreeMap<String, Value>,
-    /// The per-job ceiling its requester bound (a Session's run, USD): it restricts the
-    /// resident's per-run ceiling, never widens it. Absent on other jobs and older records.
+    /// The per-job ceiling its requester bound (a Session's run, a triggered schedule's
+    /// declared ceiling, USD): it restricts the resident's per-run ceiling, never widens it.
+    /// Absent on other jobs and older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_cost_usd: Option<serde_json::Number>,
+    /// The owner its requester stated (ADR-155): attribution, never an
+    /// authorization boundary. Absent on an unattributed job and bound in the
+    /// identity and event preimages only when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) owner: Option<String>,
+    /// The labels its requester stated, bound like [`Self::owner`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) labels: BTreeMap<String, String>,
+    /// When the resident admitted the job, outside every hash preimage.
+    /// Absent on a record written before format 4: never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) created_at: Option<EventInstant>,
+    /// Admission rank in this store (format 4): the listing order, and what a
+    /// page cursor names. Zero only while an older format is being read.
+    #[serde(default)]
+    pub(crate) ordinal: u64,
     /// Engine execution identity minted when the captured world is readmitted.
     /// Empty until the worker readmits the POST-time snapshot.
     #[serde(default)]
@@ -642,6 +659,15 @@ pub struct JobRecord {
 }
 
 impl JobRecord {
+    /// Whether the admission bound something a hash must hold before the job
+    /// runs: literal inputs, a requested ceiling, or a stated attribution.
+    pub(crate) fn binds_admission(&self) -> bool {
+        !self.inputs.is_empty()
+            || self.max_cost_usd.is_some()
+            || self.owner.is_some()
+            || !self.labels.is_empty()
+    }
+
     /// The per-job ceiling its requester bound, when one did (USD).
     pub(crate) fn max_cost_usd(&self) -> Option<f64> {
         self.max_cost_usd
@@ -689,6 +715,26 @@ impl JobRecord {
     #[must_use]
     pub fn access_pin(&self) -> Option<&str> {
         self.access_pin.as_deref()
+    }
+
+    /// Return the owner the requester stated, when it stated one. An owner is
+    /// attribution inside one authority domain, never an access boundary.
+    #[must_use]
+    pub fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    /// Return the labels the requester stated.
+    #[must_use]
+    pub const fn labels(&self) -> &BTreeMap<String, String> {
+        &self.labels
+    }
+
+    /// Return when the resident admitted the job (RFC 3339 · UTC), or `None`
+    /// for a record written before the resident dated its admissions.
+    #[must_use]
+    pub fn created_at(&self) -> Option<&str> {
+        self.created_at.as_ref().map(EventInstant::as_str)
     }
 
     /// Return the engine execution identity after snapshot readmission.

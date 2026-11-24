@@ -828,10 +828,6 @@ pub fn production_runtime_with_emitter(
     let http = Arc::new(fetch_http(caps.net)?);
     // Providers use their own client (see `provider_http`); fetch retains SSRF checks.
     let runtime_config = host_config.unwrap_or_else(|| RuntimeConfig::new(None, seams.jitter_seed));
-    // A declared-free observer bounds only the routes it observes; every
-    // other route keeps this client (one attempt per post, as every provider client).
-    let account = runtime_config.inference_admission.clone();
-    let scoped = matches!(&account, Some(a) if a.observes_declared_free_only());
     let provider_http = Arc::new(provider_http()?);
     let config = config_from_env();
     let access_probes = nika_providers::probe::collect_access_probes_env(config.clone());
@@ -854,14 +850,7 @@ pub fn production_runtime_with_emitter(
 
     // The provider registry (real http + env keys) drives infer directly
     // and the agent via the per-call RegistryProvider bridge.
-    let registry = ProviderRegistry::new(provider_http, config);
-    let registry = Arc::new(match account {
-        Some(a) if scoped => {
-            registry.with_inference_admission_http(a, Arc::new(self::provider_http()?))
-        }
-        Some(a) => registry.with_inference_admission(a),
-        None => registry,
-    });
+    let registry = Arc::new(provider_registry(provider_http, config, &runtime_config)?);
     let agent_provider = Arc::new(RegistryProvider::new(Arc::clone(&registry), default_model));
     // A broken adapter refuses at composition (A-4). `nika test` never seats.
     let harness_seat = crate::harness_seat::seat_from_env()?;
@@ -898,6 +887,30 @@ pub fn production_runtime_with_emitter(
     .with_secret_resolver(Arc::new(EnvFileSecretResolver))
     // The seat holds the admitted project as its received-image room (P3 B4.5).
     .with_seat(harness_seat)?)
+}
+
+/// The provider registry of one production run: the run's inference
+/// admission, then the host's cap on calls in flight per provider, across
+/// its runs. A declared-free observer bounds only the routes it observes;
+/// every other route keeps `http` (one attempt per post, as every provider
+/// client).
+fn provider_registry(
+    http: Arc<ReqwestHttp>,
+    config: ProvidersConfig,
+    runtime_config: &RuntimeConfig,
+) -> Result<ProviderRegistry<ReqwestHttp>, nika_kernel::HttpError> {
+    let registry = ProviderRegistry::new(http, config);
+    let registry = match runtime_config.inference_admission.clone() {
+        Some(account) if account.observes_declared_free_only() => {
+            registry.with_inference_admission_http(account, Arc::new(provider_http()?))
+        }
+        Some(account) => registry.with_inference_admission(account),
+        None => registry,
+    };
+    Ok(match runtime_config.provider_gate.clone() {
+        Some(gate) => registry.with_call_gate(gate),
+        None => registry,
+    })
 }
 
 /// The builtin plane production and simulated compositions share: the real

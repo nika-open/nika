@@ -41,9 +41,15 @@ fn stamp_execution(store: &JobStore, id: &JobId, byte: u8) {
 
 fn downgrade_state_to_v2(state: &mut serde_json::Value) {
     state["version"] = json!(2);
-    // a v2 store predates the writer stamp (ADR-132)
-    state.as_object_mut().expect("state").remove("writer");
+    // a v2 store predates the writer stamp (ADR-132) and the ordinals,
+    // admission dates and attribution of format 4 (ADR-155)
+    let root = state.as_object_mut().expect("state");
+    root.remove("writer");
+    root.remove("next_ordinal");
     for job in state["jobs"].as_array_mut().expect("jobs") {
+        let record = job["record"].as_object_mut().expect("record");
+        record.remove("ordinal");
+        record.remove("created_at");
         let stored = job.as_object_mut().expect("stored job");
         stored.remove("terminal_sequence");
         stored.remove("identity_digest");
@@ -294,6 +300,16 @@ fn restart_replays_the_same_job() {
     assert_eq!(replay, Admission::Existing(created));
 }
 
+/// Rewrite the state file at `path` as a format 2 store would have left it.
+fn rewrite_as_v2(path: &std::path::Path) {
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read state")).expect("decode state");
+    downgrade_state_to_v2(&mut state);
+    let mut encoded = serde_json::to_vec(&state).expect("encode v2 state");
+    encoded.push(b'\n');
+    std::fs::write(path, encoded).expect("write v2 state");
+}
+
 #[test]
 fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     let queued_root = tempfile::tempdir().expect("queued root");
@@ -306,13 +322,7 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
     stamp_execution(&queued_store, queued_record.id(), 55);
     drop(queued_store);
     let queued_path = queued_root.path().join("jobs/state.json");
-    let mut queued: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&queued_path).expect("read queued state"))
-            .expect("decode queued state");
-    downgrade_state_to_v2(&mut queued);
-    let mut encoded = serde_json::to_vec(&queued).expect("encode v2 queued state");
-    encoded.push(b'\n');
-    std::fs::write(&queued_path, encoded).expect("write v2 queued state");
+    rewrite_as_v2(&queued_path);
 
     let migrated_store = JobStore::open(queued_root.path()).expect("migrate v2 queued state");
     let migrated_record = migrated_store
@@ -321,11 +331,23 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("migrated record exists");
     assert_eq!(migrated_record.execution_id(), None);
     assert_eq!(migrated_record.trace_id(), None);
+    // Opening lifts the format in memory; the first writer stores it.
+    drop(
+        migrated_store
+            .claim_server_incarnation()
+            .expect("the resident holds the lease"),
+    );
     drop(migrated_store);
     let migrated: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&queued_path).expect("read migrated state"))
             .expect("decode migrated state");
-    assert_eq!(migrated["version"], 3);
+    assert_eq!(migrated["version"], 4);
+    assert_eq!(migrated["next_ordinal"], 2);
+    assert_eq!(migrated["jobs"][0]["record"]["ordinal"], 1);
+    assert!(
+        migrated["jobs"][0]["record"].get("created_at").is_none(),
+        "a migrated job gains no invented admission date"
+    );
     assert!(migrated["jobs"][0].get("terminal_sequence").is_some());
 
     let terminal_root = tempfile::tempdir().expect("terminal root");
@@ -356,13 +378,7 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("settle terminal candidate");
     drop(terminal_store);
     let terminal_path = terminal_root.path().join("jobs/state.json");
-    let mut terminal: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&terminal_path).expect("read terminal state"))
-            .expect("decode terminal state");
-    downgrade_state_to_v2(&mut terminal);
-    let mut encoded = serde_json::to_vec(&terminal).expect("encode v2 terminal state");
-    encoded.push(b'\n');
-    std::fs::write(&terminal_path, encoded).expect("write v2 terminal state");
+    rewrite_as_v2(&terminal_path);
 
     let migrated = JobStore::open(terminal_root.path()).expect("migrate v2 terminal state");
     let migrated_record = migrated
@@ -371,11 +387,16 @@ fn version_two_unsettled_and_terminal_states_migrate_with_new_bindings() {
         .expect("terminal exists");
     assert_eq!(migrated_record.status(), JobStatus::Succeeded);
     assert_eq!(migrated_record.receipt(), Some(&receipt));
+    drop(
+        migrated
+            .claim_server_incarnation()
+            .expect("the resident holds the lease"),
+    );
     drop(migrated);
     let persisted: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&terminal_path).expect("read migrated terminal"))
             .expect("decode migrated terminal");
-    assert_eq!(persisted["version"], 3);
+    assert_eq!(persisted["version"], 4);
     assert!(persisted["jobs"][0]["identity_digest"].as_str().is_some());
     assert!(persisted["jobs"][0]["terminal_sequence"].as_u64().is_some());
 }
@@ -1168,7 +1189,15 @@ fn transition_and_events_commit_as_one_mutation() {
 }
 
 #[cfg(test)]
+mod attribution;
+#[cfg(test)]
 mod event_integrity;
+#[cfg(test)]
+mod listing;
+#[cfg(test)]
+mod retention;
+#[cfg(test)]
+mod throughput;
 
 #[test]
 fn a_queued_pin_survives_reopen_without_changing_the_legacy_listing() {

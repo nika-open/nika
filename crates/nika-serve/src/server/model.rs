@@ -163,6 +163,13 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     "eventStream",
     "cancel",
     "jobInputs",
+    // `owner` and `labels` on the by-name form of `POST /v1/jobs` (ADR-155).
+    "jobAttribution",
+    // `GET /v1/jobs`: the filtered, paged job list (ADR-155).
+    "jobList",
+    // `GET /v1/occupancy`: what the resident holds against its limits, and
+    // `429 owner_queue_full` at an owner's own bound (ADR-155).
+    "occupancy",
     "compile",
     "artifacts",
     "accessServiceTier",
@@ -170,6 +177,9 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
 ];
 // Only on a server whose resident scheduler is live: the schedule routes.
 const SCHEDULE_CAPABILITY: &str = "schedule";
+// Beside it (ADR-155): `GET /v1/schedules`, `DELETE /v1/schedules/{id}`,
+// `POST /v1/schedules/{id}/trigger`, and `owner`/`labels` on a schedule body.
+const SCHEDULE_MANAGE_CAPABILITY: &str = "scheduleManage";
 // Only on a server the operator built with a native authoring seat: `POST /v1/compile` also
 // speaks generation 2 (explicitProvider · kept-round replay). It names no model, bound,
 // snapshot or endpoint — those are the operator's, never public.
@@ -237,6 +247,7 @@ impl HttpAdapterIdentity {
                 .iter()
                 .copied()
                 .chain(schedule_live.then_some(SCHEDULE_CAPABILITY))
+                .chain(schedule_live.then_some(SCHEDULE_MANAGE_CAPABILITY))
                 .chain(native.then_some(NATIVE_COMPILE_CAPABILITY))
                 .chain(native.then_some(JUDGED_ANSWER_CAPABILITY))
                 .chain(native.then_some(OBSERVED_WORLD_CAPABILITY))

@@ -120,6 +120,128 @@ curl -s -H "Authorization: Bearer $TOKEN" -o totals.svg \
   http://127.0.0.1:8787/v1/jobs/<id>/artifacts/file/out/totals.svg
 ```
 
+## Keeping the job store bounded
+
+The resident keeps every job it admits in one state file under the state
+root. Out of the box nothing ever leaves it: after 10,000 jobs every
+admission answers `507 job_capacity`, and each operation costs more as the
+file grows. A resident that takes steady traffic sets a retention window:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
+  --token-file .nika/serve.token \
+  --job-retention 24h --job-retention-unsuccessful 7d
+```
+
+- `--job-retention` forgets a `succeeded` job once it has been settled that
+  long. `--job-retention-unsuccessful` does the same for `failed`,
+  `cancelled` and `interrupted` jobs; without it they follow the first
+  window. A duration is a whole number and one unit: `s`, `m`, `h` or `d`.
+  The minimum is one minute.
+- A job that is `queued`, `running` or `paused` is never forgotten.
+- Jobs leave when the next job is admitted, and at startup. A read never
+  evicts.
+- A forgotten job's `Idempotency-Key` is forgotten with it: the same key
+  then creates a new job. Keep the window longer than your callers retry.
+- `GET /v1/jobs/{id}` and the artifact routes answer `404` for a forgotten
+  job. Its trace journal under `.nika/traces` is not removed: it is the
+  evidence of the run, and `nika trace` still reads it.
+
+Both flags work without `--bind`: scheduled runs fill the same store.
+
+## Sharing the workers between users
+
+A resident that runs jobs for many users of one application states who each
+job is for (`owner` on `POST /v1/jobs`) and bounds what one of them holds:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
+  --token-file .nika/serve.token \
+  --max-concurrent-jobs 16 --queue-capacity 2000 \
+  --max-queued-per-owner 50 --max-concurrent-per-owner 2 \
+  --provider-concurrency openai=16 --provider-concurrency anthropic=8 \
+  --job-retention 24h --shutdown-grace 5m
+```
+
+- A free worker goes to the owner with the fewest jobs running, in turn
+  among equals. A user who submits fifty jobs does not delay the user who
+  submits one. Jobs without an `owner` share one lane.
+- `--max-queued-per-owner` refuses the owner's next job with
+  `429 owner_queue_full` and a `Retry-After` header. Nothing is written:
+  send the same request again, with the same `Idempotency-Key`.
+- `--max-concurrent-per-owner` refuses nothing: the owner's other jobs wait
+  while free workers serve other owners.
+- `--queue-capacity` bounds all waiting jobs together (`503 queue_full`), and
+  `--max-jobs` the jobs the store keeps (`507 job_capacity`). Every job
+  operation rewrites the whole store, so prefer a retention window to a
+  larger `--max-jobs`.
+- `--max-concurrent-jobs` takes at most 256.
+- After a restart the jobs that were waiting hold their places again. A
+  resident that restarts with a full queue answers `503 queue_full` to new
+  jobs until the backlog drains below `--queue-capacity`.
+- With `--cost-review`, a job refused by a full queue or by its owner's bound
+  keeps its approved review: send the same request again while the review
+  lives.
+- `--shutdown-grace` is how long a stop waits for running and queued jobs
+  (`30s` by default). Give your supervisor a longer kill timeout: with
+  systemd, `TimeoutStopSec` of the grace plus 15 seconds.
+- A scheduled run is never refused or held back by a per-owner limit.
+- `--provider-concurrency PROVIDER=N` keeps at most `N` model calls in
+  flight on that provider, all jobs together: set it under the provider's
+  own rate limit for your account. A call past it waits its turn; a
+  `for_each` still fans out, its calls go as slots free. Retries are
+  unchanged, and a retry waits its turn like any call. The wait counts in a
+  task's `timeout:`, so a cap far under the demand shows as task timeouts.
+  Only the model calls of `infer` and `agent` tasks are counted: calls an
+  agent harness makes through its own client, and the image and speech
+  tools, are not.
+
+Read what the resident holds at any time:
+
+```sh
+curl -sS -H "Authorization: Bearer $(cat .nika/serve.token)" \
+  http://127.0.0.1:8787/v1/occupancy
+```
+
+The answer counts the jobs running and waiting, repeats the limits, names
+the busiest owners (at most 100), and gives for each capped provider the
+calls in flight and the calls waiting. A provider whose `waiting` stays above
+zero is your bottleneck: raise its cap if the provider allows it, or lower
+`--max-concurrent-jobs`. The owner is what your backend states: it
+shares the workers fairly, it is not a security boundary between users.
+
+## Managing schedules over HTTP
+
+A resident whose `/health` lists `scheduleManage` lets an operator see,
+remove and run the schedules without touching its files:
+
+```sh
+TOKEN="Authorization: Bearer $(cat .nika/serve.token)"
+# Every schedule: the ones this door created, then the project's beats.
+curl -s http://127.0.0.1:8787/v1/schedules -H "$TOKEN"
+# Run one now, once. The cadence does not move.
+curl -s -X POST http://127.0.0.1:8787/v1/schedules/nightly/trigger \
+  -H "$TOKEN" -H 'Idempotency-Key: nightly-by-hand-1'
+# Remove one, whichever revision is current.
+curl -s -X DELETE http://127.0.0.1:8787/v1/schedules/nightly \
+  -H "$TOKEN" -H 'If-Match: *'
+```
+
+A trigger admits an ordinary job: it waits in the same queue, counts
+against the same limits, and shows in `GET /v1/jobs` with
+`"origin":{"kind":"manual"}`. It runs under what the schedule declares,
+including its `owner` and `labels`, and takes no body. Send the same
+`Idempotency-Key` again and the answer is the same job, never a second
+run.
+
+Removing a schedule does not stop a job it already fired: cancel that job
+by its id. To remove only if nobody changed the schedule since you read
+it, send the `ETag` of that read in `If-Match` instead of `*`; a changed
+schedule answers `412` and stays. The project's beats are declared in
+`nika.yaml`: remove or change them there, and run one by hand with
+`nika arm fire`. Over HTTP both gestures answer
+`409 schedule_declared_by_project`.
+
 ## Runs on a route the catalog does not price
 
 A workflow whose model the engine's catalog does not price (an API route

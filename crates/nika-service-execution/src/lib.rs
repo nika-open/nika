@@ -171,6 +171,8 @@ pub struct ServiceExecutionDriver {
     probe_source: fn() -> Vec<nika_providers::probe::ProviderProbe>,
     /// The Run's inference account a child composes with: the parent's own.
     child_account: Option<nika_providers::InferenceAdmission>,
+    /// The host's provider gate: a child's calls count against the same cap.
+    child_gate: Option<Arc<dyn nika_providers::ProviderCallGate>>,
 }
 
 impl std::fmt::Debug for ServiceExecutionDriver {
@@ -200,6 +202,7 @@ impl Clone for ServiceExecutionDriver {
             access_probes: Arc::clone(&self.access_probes),
             probe_source: self.probe_source,
             child_account: self.child_account.clone(),
+            child_gate: self.child_gate.clone(),
         }
     }
 }
@@ -256,6 +259,7 @@ impl ServiceExecutionDriver {
             access_probes: Arc::new(OnceLock::new()),
             probe_source: access::access_probes_env,
             child_account: None,
+            child_gate: None,
         })
     }
 
@@ -363,6 +367,7 @@ impl ServiceExecutionDriver {
         // Children of this Run compose with its account: one Run, one account.
         let mut runner = self.clone();
         runner.child_account = config.as_ref().and_then(|c| c.inference_admission.clone());
+        runner.child_gate = config.as_ref().and_then(|c| c.provider_gate.clone());
         let runtime = self.base_runtime(default_model, caps, run, config)?;
         let raw_sha = sha256_hex(self.root_source.as_bytes());
         let lf_sha = sha256_hex(lf_normal_form(&self.root_source).as_bytes());
@@ -391,6 +396,19 @@ impl ServiceExecutionDriver {
     /// `service_runtime` or `production_runtime`, with a host config when one
     /// is bound: the same emitter and sandbox root either way, so an account
     /// never moves where effects land.
+    /// What a child of this Run composes with: the parent Run's account,
+    /// never a fresh one, so its uncertainty stays; and its host's provider
+    /// gate, so a child's calls count against the same cap as its parent's.
+    /// `None` when the parent holds neither.
+    fn child_config(&self, run: Option<&nika_schema::types::RunDecl>) -> Option<RuntimeConfig> {
+        (self.child_account.is_some() || self.child_gate.is_some()).then(|| {
+            let mut config = RuntimeConfig::new(None, RunSeams::of(run).jitter_seed);
+            config.inference_admission.clone_from(&self.child_account);
+            config.provider_gate.clone_from(&self.child_gate);
+            config
+        })
+    }
+
     fn base_runtime(
         &self,
         default_model: &str,
@@ -1273,14 +1291,8 @@ impl ChildRunner for ServiceExecutionDriver {
                 .as_ref()
                 .map_or("", |model| model.value.as_str());
             let run = workflow.run.as_ref().map(|run| &run.value);
-            // The parent Run's account, never a fresh one: its uncertainty stays.
-            let account = self.child_account.clone().map(|account| {
-                let mut config = RuntimeConfig::new(None, RunSeams::of(run).jitter_seed);
-                config.inference_admission = Some(account);
-                config
-            });
             let runtime = self
-                .base_runtime(model, caps, run, account)
+                .base_runtime(model, caps, run, self.child_config(run))
                 .map_err(|error| refusal("NIKA-COMP-001", format!("child runtime: {error}")))?
                 .with_var_overrides(call.args.clone().into_iter().collect())
                 .with_max_cost_usd(call.remaining_budget_usd)

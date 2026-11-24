@@ -285,7 +285,6 @@ async fn inputs_refuse_missing_unknown_wrong_type_null_and_unknown_envelopes_bef
         ))
         .await;
     assert_eq!(too_large.status, 413);
-    assert_eq!(server.request(&get_request("/v1/jobs")).await.status, 404);
     server.stop().await.expect("stop");
     assert_eq!(backend.calls(), 0);
     let state: Value = serde_json::from_str(
@@ -398,7 +397,7 @@ async fn queued_inputs_survive_restart_without_live_source_and_tampering_is_dete
             "root.nika".to_owned(),
             &admitted.snapshot().encode().expect("world"),
             None,
-            (inputs, None),
+            crate::job::JobBindings::of(inputs, None),
         )
         .expect("persist queued");
     let id = admission.record().id().as_str().to_owned();

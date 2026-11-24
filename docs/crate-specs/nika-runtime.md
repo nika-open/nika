@@ -685,6 +685,15 @@ handling, cloud endpoint overrides and local URL normalization are unchanged.
 The pending cost review contract lives in provider admission; Runtime preserves
 the narrow `cost_choice` compatibility path and the configuration binding test.
 
+`RuntimeConfig::provider_gate` (`with_provider_gate`) carries a host's
+`nika_providers::ProviderCallGate` into the composed registry: every
+round-trip the run's providers send takes one slot on its provider first.
+The Runtime only carries it. It reads no slot count and changes no fan-out:
+a `for_each` starts its items as before and each item's call waits its turn,
+so the calls in flight are the smaller of `max_parallel` and the free slots.
+Child runs compose with the same gate (`nika-service-execution`). Absent,
+only the run's own fan-out bounds its calls, as under `nika run`.
+
 A host account that observes declared-free routes only
 (`observes_declared_free_only`) keeps the normal provider client for the
 registry and gets a separate single-attempt client through

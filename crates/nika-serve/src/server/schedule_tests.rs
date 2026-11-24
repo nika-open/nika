@@ -796,12 +796,14 @@ async fn validation_and_fire_share_the_resident_workflow_root() {
     server.stop().await.expect("stop");
 }
 
+/// The list, the removal and the trigger exist since ADR-155
+/// (`schedule_manage_tests`). Backfill and an ARM door stay absent, and a
+/// trigger is a POST: reading its path is no route.
 #[tokio::test(flavor = "multi_thread")]
-async fn no_schedule_list_delete_trigger_backfill_or_arm_routes_exist() {
+async fn no_schedule_backfill_or_arm_routes_exist() {
     let world = TestWorld::new();
     let server = world.start(Arc::new(NoopBackend), limits()).await;
     for path in [
-        "/v1/schedules",
         "/v1/schedules/id/trigger",
         "/v1/schedules/id/backfill",
         "/v1/arm",
@@ -812,11 +814,11 @@ async fn no_schedule_list_delete_trigger_backfill_or_arm_routes_exist() {
             "{path}"
         );
     }
-    let delete = format!(
-        "DELETE /v1/schedules/id HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{}\r\n",
+    let backfill = format!(
+        "POST /v1/schedules/id/backfill HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{}\r\n",
         auth_header()
     );
-    assert_eq!(server.request(&delete).await.status, 404);
+    assert_eq!(server.request(&backfill).await.status, 404);
     server.stop().await.expect("stop");
 }
 

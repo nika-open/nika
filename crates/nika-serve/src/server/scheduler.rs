@@ -416,11 +416,15 @@ async fn prepare_claim(
         let generation = generation(&candidate.schedule.definition, &admitted);
         let fired_at = clock.now();
         let origin = fire_origin(&candidate, fired_at.timestamp(), &generation)?;
-        let prepared = coordinator.prepare_scheduled_with_max_cost(
+        // Every job a schedule fires carries the owner and labels the
+        // schedule states (ADR-155).
+        let attribution = super::attribution::of_schedule(&candidate.schedule.definition)
+            .map_err(|_| ServerError::ScheduledAdmission)?;
+        let prepared = coordinator.prepare_scheduled_bound(
             admitted,
             origin,
             Some(candidate.schedule.definition.max_cost_usd()),
-            inputs,
+            crate::job::JobBindings::of(inputs, None).attributed(attribution),
         )?;
         let claim_now = clock.now();
         if !fire_is_still_due(&store, &candidate, &claim_now)? {

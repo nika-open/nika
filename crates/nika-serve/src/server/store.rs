@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
+use crate::job::{JobBindings, JobListFilter, JobPage};
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -152,11 +153,8 @@ enum RequestCommand {
         workflow: String,
         world: String,
         access_pin: Option<String>,
-        /// The literal inputs and the per-job ceiling its requester bound.
-        bindings: (
-            std::collections::BTreeMap<String, serde_json::Value>,
-            Option<f64>,
-        ),
+        /// The literal inputs, the per-job ceiling and the attribution its requester bound.
+        bindings: JobBindings,
         reply: Reply<Admission>,
     },
     Replay {
@@ -174,7 +172,7 @@ enum RequestCommand {
         execution_id: String,
         trace_id: String,
         snapshot_digest: String,
-        inputs: BTreeMap<String, Value>,
+        bindings: JobBindings,
         event: Value,
         reply: Reply<Admission>,
     },
@@ -187,7 +185,13 @@ enum RequestCommand {
         reply: Reply<String>,
     },
     Queued {
-        reply: Reply<Vec<(JobId, String, Option<String>)>>,
+        reply: Reply<Vec<crate::job::QueuedJob>>,
+    },
+    List {
+        filter: Box<JobListFilter>,
+        limit: usize,
+        before: Option<u64>,
+        reply: Reply<JobPage>,
     },
     EventsAfter {
         id: JobId,
@@ -263,10 +267,7 @@ impl StoreHandle {
         workflow: String,
         world: String,
         access_pin: Option<String>,
-        bindings: (
-            std::collections::BTreeMap<String, serde_json::Value>,
-            Option<f64>,
-        ),
+        bindings: JobBindings,
     ) -> Result<Admission, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_request(RequestCommand::Create {
@@ -277,6 +278,23 @@ impl StoreHandle {
             world,
             access_pin,
             bindings,
+            reply,
+        })?;
+        receive(answer).await
+    }
+
+    /// One page of the job list, read from one snapshot (ADR-155).
+    pub(super) async fn list(
+        &self,
+        filter: JobListFilter,
+        limit: usize,
+        before: Option<u64>,
+    ) -> Result<JobPage, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        self.send_request(RequestCommand::List {
+            filter: Box::new(filter),
+            limit,
+            before,
             reply,
         })?;
         receive(answer).await
@@ -305,7 +323,7 @@ impl StoreHandle {
         execution_id: String,
         trace_id: String,
         snapshot_digest: String,
-        inputs: BTreeMap<String, Value>,
+        bindings: JobBindings,
         event: Value,
     ) -> Result<Admission, ServerError> {
         let (reply, answer) = oneshot::channel();
@@ -319,7 +337,7 @@ impl StoreHandle {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            bindings,
             event,
             reply,
         })?;
@@ -375,9 +393,7 @@ impl StoreHandle {
         receive(answer).await
     }
 
-    pub(super) async fn queued_jobs(
-        &self,
-    ) -> Result<Vec<(JobId, String, Option<String>)>, ServerError> {
+    pub(super) async fn queued_jobs(&self) -> Result<Vec<crate::job::QueuedJob>, ServerError> {
         let (reply, answer) = oneshot::channel();
         self.send_request(RequestCommand::Queued { reply })?;
         receive(answer).await
@@ -690,7 +706,7 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            bindings,
             event,
             reply,
         } => {
@@ -704,7 +720,7 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
                 execution_id,
                 trace_id,
                 snapshot_digest,
-                inputs,
+                bindings,
                 &event,
             );
             let _result = reply.send(result);
@@ -716,7 +732,15 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
             let _result = reply.send(store.load_world(&id));
         }
         RequestCommand::Queued { reply } => {
-            let _result = reply.send(store.queued_jobs_pinned());
+            let _result = reply.send(store.queued_for_recovery());
+        }
+        RequestCommand::List {
+            filter,
+            limit,
+            before,
+            reply,
+        } => {
+            let _result = reply.send(store.list(&filter, limit, before));
         }
         RequestCommand::EventsAfter {
             id,

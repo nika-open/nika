@@ -9,19 +9,27 @@ use nika_execution::AdmittedExecution;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
+use crate::job::JobBindings;
 use crate::{
     Admission, IdempotencyKey, JobId, JobOrigin, JobReceipt, JobRecord, JobStatus, RequestDigest,
 };
 
+use super::fair_queue::{FairQueue, QueueLoad, QueueRefusal, Reservation};
+use super::provider_gate::{ProviderGates, ProviderLoad};
 use super::{ExecutionTask, ServerError, ServerLimits, StoreHandle};
 
-/// A reservation on the execution queue that did not land: a FULL queue is
-/// back-pressure (`ExecutionQueueFull`); a CLOSED one means the authority is
-/// stopping (`Stopping`), which no caller may read as capacity.
-fn queue_refusal<T>(error: &tokio::sync::mpsc::error::TrySendError<T>) -> ServerError {
-    match error {
-        tokio::sync::mpsc::error::TrySendError::Full(_) => ServerError::ExecutionQueueFull,
-        tokio::sync::mpsc::error::TrySendError::Closed(_) => ServerError::Stopping,
+/// One place in the job queue, taken before its job is admitted.
+pub(super) type Place = Reservation<ExecutionTask>;
+
+/// A place in the execution queue that was not given: a FULL queue is
+/// back-pressure (`ExecutionQueueFull`), an owner at its own bound is that
+/// owner's to wait out (`OwnerQueueFull`), and a CLOSED queue means the
+/// authority is stopping (`Stopping`), which no caller may read as capacity.
+fn queue_refusal(refusal: QueueRefusal) -> ServerError {
+    match refusal {
+        QueueRefusal::Full => ServerError::ExecutionQueueFull,
+        QueueRefusal::OwnerFull => ServerError::OwnerQueueFull,
+        QueueRefusal::Closed => ServerError::Stopping,
     }
 }
 
@@ -39,9 +47,11 @@ pub(super) const SCHEDULE_KEY_PREFIX: &str = "schedule:";
 #[derive(Clone)]
 pub struct ResidentExecutionCoordinator {
     store: StoreHandle,
-    jobs: tokio::sync::mpsc::Sender<ExecutionTask>,
+    jobs: std::sync::Arc<FairQueue<ExecutionTask>>,
     limits: ServerLimits,
     reviewed: std::sync::Arc<super::cost_review::Reviewed>,
+    /// The operator's caps on provider calls in flight, when any is set.
+    provider_gates: Option<std::sync::Arc<ProviderGates>>,
 }
 
 impl fmt::Debug for ResidentExecutionCoordinator {
@@ -56,7 +66,7 @@ impl fmt::Debug for ResidentExecutionCoordinator {
 impl ResidentExecutionCoordinator {
     pub(super) fn new(
         store: StoreHandle,
-        jobs: tokio::sync::mpsc::Sender<ExecutionTask>,
+        jobs: std::sync::Arc<FairQueue<ExecutionTask>>,
         limits: ServerLimits,
         reviewed: std::sync::Arc<super::cost_review::Reviewed>,
     ) -> Self {
@@ -65,12 +75,49 @@ impl ResidentExecutionCoordinator {
             jobs,
             limits,
             reviewed,
+            provider_gates: None,
         }
+    }
+
+    /// Report the provider caps the resident's jobs run under.
+    pub(super) fn with_provider_gates(
+        mut self,
+        gates: Option<std::sync::Arc<ProviderGates>>,
+    ) -> Self {
+        self.provider_gates = gates;
+        self
+    }
+
+    /// The resident's ceilings and what its queue holds now, with the `most`
+    /// busiest owners.
+    pub(super) fn occupancy(&self, most: usize) -> (ServerLimits, QueueLoad) {
+        (self.limits, self.jobs.load(most))
+    }
+
+    /// What each capped provider holds now. Empty when none is capped.
+    pub(super) fn provider_load(&self) -> Vec<ProviderLoad> {
+        self.provider_gates
+            .as_ref()
+            .map(|gates| gates.load())
+            .unwrap_or_default()
+    }
+
+    /// Give back the queue place of a job that left `queued` without
+    /// running.
+    pub(super) fn forget_queued(&self, id: &JobId) {
+        self.jobs.forget(id);
+    }
+
+    /// The task that runs a queued record.
+    fn queued_task(&self, record: &JobRecord) -> ExecutionTask {
+        ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
+            .with_access_pin(record.access_pin().map(str::to_owned))
     }
 
     /// The job already bound to this key, without capturing anything
     /// (ADR-132 · the freeze audit): a retry replays its record, and a
-    /// queued replay is re-enqueued exactly as `admit_manual` does.
+    /// queued replay is queued again unless it waits already, so a replay
+    /// takes no second place in its owner's lane.
     pub(super) async fn replay_manual(
         &self,
         key: IdempotencyKey,
@@ -82,15 +129,13 @@ impl ResidentExecutionCoordinator {
         if let Admission::Existing(record) = &admission
             && record.status() == JobStatus::Queued
         {
-            let permit = self
-                .jobs
-                .clone()
-                .try_reserve_owned()
-                .map_err(|error| queue_refusal(&error))?;
-            permit.send(
-                ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                    .with_access_pin(record.access_pin().map(str::to_owned)),
-            );
+            self.jobs
+                .requeue(
+                    record.owner(),
+                    record.id().clone(),
+                    self.queued_task(record),
+                )
+                .map_err(queue_refusal)?;
         }
         Ok(Some(admission))
     }
@@ -110,19 +155,13 @@ impl ResidentExecutionCoordinator {
             workflow,
             world,
             access_pin,
-            std::collections::BTreeMap::new(),
-            None,
-            None,
+            JobBindings::default(),
         )
         .await
     }
 
-    /// A reviewed admission (`reviewed`) attaches its captured world and cost
-    /// authority to the created job before its task is queued; any other
-    /// outcome drops it, which settles its account with nothing sent. A
-    /// `declared` ceiling (a Session's run) is kept with the job: it restricts
-    /// the server's at every run of it, never widens it.
-    #[allow(clippy::too_many_arguments)]
+    /// A ceiling in `bindings` (a Session's run) is kept with the job: it
+    /// restricts the server's at every run of it, never widens it.
     pub(super) async fn admit_manual_inputs(
         &self,
         key: IdempotencyKey,
@@ -130,15 +169,42 @@ impl ResidentExecutionCoordinator {
         workflow: String,
         world: String,
         access_pin: Option<String>,
-        inputs: std::collections::BTreeMap<String, serde_json::Value>,
-        reviewed: Option<(nika_execution::ExecutionSession, super::CostAuthority)>,
-        declared: Option<f64>,
+        bindings: JobBindings,
     ) -> Result<Admission, ServerError> {
-        let permit = self
-            .jobs
-            .clone()
-            .try_reserve_owned()
-            .map_err(|error| queue_refusal(&error))?;
+        // The place is taken in the owner's lane before the record exists:
+        // an owner at its bound is refused with nothing written.
+        let place = self.place(bindings.attribution.owner())?;
+        self.admit_placed(
+            place,
+            (key, digest),
+            (workflow, world, access_pin),
+            bindings,
+            None,
+        )
+        .await
+    }
+
+    /// One place in `owner`'s lane, for an admission that must know it has
+    /// one before it spends anything: a cost review is taken only after it.
+    ///
+    /// # Errors
+    /// The queue, or this owner's part of it, is full.
+    pub(super) fn place(&self, owner: Option<&str>) -> Result<Place, ServerError> {
+        self.jobs.reserve(owner).map_err(queue_refusal)
+    }
+
+    /// Admit under a place already taken. A reviewed admission (`reviewed`)
+    /// attaches its captured world and cost authority to the created job
+    /// before its task is queued; any other outcome drops it, which settles
+    /// its account with nothing sent.
+    pub(super) async fn admit_placed(
+        &self,
+        permit: Place,
+        (key, digest): (IdempotencyKey, RequestDigest),
+        (workflow, world, access_pin): (String, String, Option<String>),
+        bindings: JobBindings,
+        reviewed: Option<(nika_execution::ExecutionSession, super::CostAuthority)>,
+    ) -> Result<Admission, ServerError> {
         let admission = self
             .store
             .create_or_replay(
@@ -148,7 +214,7 @@ impl ResidentExecutionCoordinator {
                 workflow,
                 world,
                 access_pin,
-                (inputs, declared),
+                bindings,
             )
             .await?;
         match &admission {
@@ -157,16 +223,10 @@ impl ResidentExecutionCoordinator {
                     self.reviewed
                         .attach(record.id().as_str(), Box::new(reviewed));
                 }
-                permit.send(
-                    ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                        .with_access_pin(record.access_pin().map(str::to_owned)),
-                );
+                permit.send(record.id().clone(), self.queued_task(record));
             }
             Admission::Existing(record) if record.status() == JobStatus::Queued => {
-                permit.send(
-                    ExecutionTask::new(record.id().clone(), self.limits.default_max_cost_usd())
-                        .with_access_pin(record.access_pin().map(str::to_owned)),
-                );
+                permit.send(record.id().clone(), self.queued_task(record));
             }
             Admission::Existing(_) | Admission::Conflict(_) => drop(permit),
         }
@@ -204,6 +264,23 @@ impl ResidentExecutionCoordinator {
         max_cost_usd: Option<f64>,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<PreparedScheduledRun, ServerError> {
+        self.prepare_scheduled_bound(
+            admitted,
+            origin,
+            max_cost_usd,
+            JobBindings::of(inputs, None),
+        )
+    }
+
+    /// [`Self::prepare_scheduled_with_max_cost`] under everything the
+    /// schedule binds onto its run: the inputs and the attribution it states.
+    pub(crate) fn prepare_scheduled_bound(
+        &self,
+        admitted: AdmittedExecution,
+        origin: JobOrigin,
+        max_cost_usd: Option<f64>,
+        bindings: JobBindings,
+    ) -> Result<PreparedScheduledRun, ServerError> {
         if max_cost_usd.is_some_and(|cost| !cost.is_finite() || cost <= 0.0) {
             return Err(ServerError::ScheduledAdmission);
         }
@@ -219,11 +296,12 @@ impl ResidentExecutionCoordinator {
         let trace_id = admitted.trace_id().to_string();
         let snapshot_digest = admitted.snapshot().digest().to_owned();
         let event_origin = origin.clone();
+        // A run the resident starts itself is bounded by the whole queue
+        // alone and served before every lane (see `fair_queue`).
         let permit = self
             .jobs
-            .clone()
-            .try_reserve_owned()
-            .map_err(|error| queue_refusal(&error))?;
+            .reserve_started(bindings.attribution.owner())
+            .map_err(queue_refusal)?;
         let admission = self.store.prepare_scheduled_blocking(
             key,
             digest,
@@ -234,7 +312,7 @@ impl ResidentExecutionCoordinator {
             execution_id,
             trace_id,
             snapshot_digest,
-            inputs,
+            bindings,
             json!({
                 "kind": crate::JobEventKind::Prepared,
                 "origin": event_origin,
@@ -249,13 +327,14 @@ impl ResidentExecutionCoordinator {
                 permit,
                 max_cost_usd,
             )),
-            Admission::Existing(record) => {
+            // The slot already has its job. Under another world it means the
+            // workflow changed after that fire: a deploy between a crash and
+            // its restart, or a schedule removed and declared again while
+            // the slot is still on time. The slot stays consumed against the
+            // run it had; it never fires twice and never stops the resident.
+            Admission::Existing(record) | Admission::Conflict(record) => {
                 drop(permit);
                 Ok(PreparedScheduledRun::existing(self.clone(), record))
-            }
-            Admission::Conflict(_) => {
-                drop(permit);
-                Err(ServerError::ScheduledIdempotencyConflict)
             }
         }
     }
@@ -325,7 +404,7 @@ pub struct PreparedScheduledRun {
     coordinator: ResidentExecutionCoordinator,
     record: JobRecord,
     admitted: Option<AdmittedExecution>,
-    permit: Option<tokio::sync::mpsc::OwnedPermit<ExecutionTask>>,
+    permit: Option<Reservation<ExecutionTask>>,
     abort_on_drop: bool,
     max_cost_usd: Option<f64>,
 }
@@ -345,7 +424,7 @@ impl PreparedScheduledRun {
         coordinator: ResidentExecutionCoordinator,
         record: JobRecord,
         admitted: AdmittedExecution,
-        permit: tokio::sync::mpsc::OwnedPermit<ExecutionTask>,
+        permit: Reservation<ExecutionTask>,
         max_cost_usd: Option<f64>,
     ) -> Self {
         Self {
@@ -395,12 +474,15 @@ impl PreparedScheduledRun {
     pub fn execute(mut self) -> Result<JobRecord, ServerError> {
         if let (Some(permit), Some(admitted)) = (self.permit.take(), self.admitted.take()) {
             self.abort_on_drop = false;
-            permit.send(ExecutionTask::scheduled(
+            permit.send(
                 self.record.id().clone(),
-                admitted,
-                self.record.origin().clone(),
-                self.max_cost_usd,
-            ));
+                ExecutionTask::scheduled(
+                    self.record.id().clone(),
+                    admitted,
+                    self.record.origin().clone(),
+                    self.max_cost_usd,
+                ),
+            );
         }
         self.coordinator.observe_terminal(self.record.id())
     }
@@ -439,26 +521,32 @@ fn scheduled_key(origin: &JobOrigin) -> Result<IdempotencyKey, ServerError> {
 
 #[cfg(test)]
 mod queue_refusal_tests {
+    use super::super::fair_queue::QueueBounds;
     use super::*;
 
-    /// A full queue is back-pressure; a closed queue is the authority
-    /// stopping. The two were one error before, and a fire that met the
-    /// closed queue at shutdown ended the resident with « queue full ».
+    /// A full queue is back-pressure; an owner at its bound is that owner's
+    /// refusal; a closed queue is the authority stopping. The first and the
+    /// last were one error before, and a fire that met the closed queue at
+    /// shutdown ended the resident with « queue full ».
     #[test]
     fn a_closed_queue_is_stopping_and_a_full_one_is_capacity() {
-        let (sender, receiver) = tokio::sync::mpsc::channel::<u8>(1);
-        let held = sender.clone().try_reserve_owned().expect("one slot");
-        let full = sender
-            .clone()
-            .try_reserve_owned()
-            .expect_err("no second slot");
+        let queue: std::sync::Arc<FairQueue<u8>> = FairQueue::new(QueueBounds {
+            capacity: 2,
+            queued_per_owner: Some(1),
+            running_per_owner: None,
+        });
+        let held = queue.reserve(Some("a")).expect("one place");
+        let owner = queue.reserve(Some("a")).err().expect("the owner's bound");
+        assert!(matches!(queue_refusal(owner), ServerError::OwnerQueueFull));
+        let other = queue.reserve(Some("b")).expect("another owner's place");
+        let full = queue.reserve(Some("c")).err().expect("no third place");
         assert!(matches!(
-            queue_refusal(&full),
+            queue_refusal(full),
             ServerError::ExecutionQueueFull
         ));
-        drop(held);
-        drop(receiver);
-        let closed = sender.try_reserve_owned().expect_err("closed queue");
-        assert!(matches!(queue_refusal(&closed), ServerError::Stopping));
+        drop((held, other));
+        queue.close();
+        let closed = queue.reserve(None).err().expect("closed queue");
+        assert!(matches!(queue_refusal(closed), ServerError::Stopping));
     }
 }

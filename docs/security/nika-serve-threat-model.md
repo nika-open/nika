@@ -79,10 +79,15 @@ alone.
 | `/v1/workflows` | no | no | Bearer auth before listing; `.nika` names only |
 | `/v1/workflows/{name}` | no | no | Bearer auth; contained relative name metadata; no source bytes |
 | `GET /v1/access-offers/{name}` | no | no prompt; at most one bounded ACP session per row, on the workflow's own declared route | Bearer auth; the name is admitted exactly as the job door admits it; the route, the seat and the models come from the served file, never from the request; a session only for `run.access.via` under `run.access.protocol: acp`; the same registry adapter, identity judgment and completion profile as a run; one model selection and no other setter; no `session/prompt` on the path; the adapter leads its own process group, ended with the reading; a scratch session root removed with it; one reading at a time, eight held requests, eight sessions per request, 30 s per session, 90 s per request; rows kept 60 s (15 s unavailable); every listed value carried as a graphic-ASCII token of at most 160 bytes or counted, never as adapter text; reasons bounded with every path dropped; the answer authorizes no run |
+| `GET /v1/jobs` | no | no | Bearer auth before the query is read; every query member validated and an unknown one refused (`400`), never ignored; page size bounded (200); light summaries only: no inputs, outputs, receipt or settlement, and the same redacted error as the job; the `owner` filter is a query, never an authorization (ADR-155) |
 | `/v1/jobs/{opaque-id}` | no | no | Bearer auth before lookup; uniform unknown-id response |
 | `/v1/jobs/{opaque-id}/events` | no | no | Bearer auth; bounded SSE buffer and reconnect delay; monotonic `Last-Event-ID`; cursor-neutral heartbeats; redaction |
 | `POST /v1/jobs/{opaque-id}/cancel` | no | yes | Bearer auth before lookup; run-scoped engine token; one durable terminal receipt; idempotent replay |
 | `GET /v1/jobs/{opaque-id}/trace/verify` | no | no | Bearer auth; typed unavailable verdict until a real journal authority exists; no paths |
+| `GET /v1/occupancy` | no | no | Bearer auth; counts and the configured limits only, read from the resident's memory; names stated owners, so it is never on the public `/health`; at most 100 owners, the rest counted; per-owner limits are a fairness bound between the stated owners of one credential, never isolation; `providers` names only the providers the operator capped, with counts of calls and no model, prompt or key; a provider cap bounds calls in flight across jobs and is not a spend limit (ADR-155) |
+| `GET /v1/schedules` | no | no | Bearer auth; the status projection of each schedule, bounded in number (320) and to one next slot; no workflow source, no credential, no path outside the served names |
+| `DELETE /v1/schedules/{id}` | no | yes (durable removal) | Bearer auth before lookup; `If-Match` required (exact `ETag` or `*`), a missing or stale precondition changes nothing; API schedules only, a project beat is refused `409`; a job already fired is untouched |
+| `POST /v1/schedules/{id}/trigger` | no | yes | Bearer auth before parse; `Idempotency-Key` required and replayed before the schedule is read; no body member is accepted, so the caller chooses no input, ceiling, owner or workflow: the stored schedule states them; admitted through the job door's own queue and limits; consumes no slot; API schedules only |
 | `GET /v1/openapi.json` | no | no | Bearer auth; live-route document; no credential examples or artifact paths; a native server adds only its compile generation-2 contract, never its seat (model, endpoint, credential, snapshot, bounds) |
 | effecting `/v1/*` POST | no | yes | auth before parse; body limit; content type; idempotency before execution |
 | `POST /v1/compile` | no | no (native server: the seat's calls only) | auth before parse; its own 1 MiB body ceiling and per-field bounds; content type; bounded concurrency; returns authoring data only; generation 2 exists only under an explicit operator seat, bounded in calls, tokens, time, slots and kept rounds |
@@ -195,6 +200,16 @@ billing cannot be proven stopped by a local deadline.
   limits are explicit and tested at their boundary values.
 - Process restart preserves enough idempotency/job state to avoid a duplicate
   effect or else fails closed before rerun.
+- A job's `owner` and `labels` are what the caller states (ADR-155). They are
+  validated against a closed alphabet and bounds, bound in the request digest
+  and the durable record, and never trusted as identity: one Bearer is one
+  authority domain, and whoever holds it lists, reads and cancels every job
+  whatever its owner. A deployment that serves several users keeps the token
+  in its own backend and authorizes each user there.
+- Retention (`--job-retention`) forgets a settled job together with its
+  idempotency key. Within the window a replay returns the original job; after
+  it the same key creates a new job. The window is an operator bound, and the
+  flag refuses less than one minute.
 
 ### Responses, events, and logs
 
@@ -359,6 +374,10 @@ Artifact download itself was reopened and admitted by ADR-117's amendment of
 seat gains a harness or decision seat, another strategy or sample count, a
 caller-chosen model or knowledge source, durable or shared kept rounds, or an
 automatic retry of paid work.
+
+A stated `owner` (ADR-155) is not multi-tenancy and does not reopen ADR-117:
+no route authorizes by it. Deriving an owner from a credential, or refusing a
+read by owner, is multi-tenancy and reopens it.
 
 Webhook triggers are reopened by ADR-136 (proposed): one route family,
 `POST /v1/ingress/{hook_id}`, authenticated by a per-binding policy (Standard

@@ -47,6 +47,19 @@ pub enum ScheduleApplyOutcome {
     },
 }
 
+/// What a conditional removal found. `expected` is the revision the caller
+/// read, or `None` for "whichever revision is current".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScheduleRemoval {
+    /// The schedule of this revision and its last-slot decision are
+    /// durably gone.
+    Removed(ScheduleRevision),
+    /// No API schedule carries this id.
+    Absent,
+    /// The schedule carries another revision; nothing changed.
+    Stale(ScheduleRevision),
+}
+
 /// Durable resident action that consumed one canonical slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScheduleSlotAction {

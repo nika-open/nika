@@ -1068,3 +1068,31 @@ provider error is reduced, with the key withheld. The Session's census takes it 
 route (the census take, all routes at once); `ProviderReadiness::key_auth` keeps the rung and
 `key_refused()` reads it. `ModelInventory::from_probes` never offers a key-refused route, and a
 listed route's own listing governs its offers, as for a local route.
+
+## Provider call gate (ADR-155)
+
+A run bounds its own fan-out. A host that runs many jobs at once needs one
+more bound, per provider and across its runs: a provider's rate limit belongs
+to the account. `ProviderCallGate` is that seam. The host implements it and
+attaches it with `ProviderRegistry::with_call_gate`; a registry without one
+sends exactly as before.
+
+- `enter(provider)` waits for one slot on the canonical provider id and
+  answers a `ProviderCallSlot`. Dropping the slot gives it back. A provider
+  the gate does not bound answers `ProviderCallSlot::unbounded()` at once.
+- `ResolvedProvider::infer_reported` takes the slot before anything else,
+  the cost reservation included, and holds it for that one round-trip. A
+  call that waits its turn holds no money.
+- `infer_stream` keeps the slot inside the returned stream until the stream
+  is dropped.
+- The gate owns no retry (ADR-019). A round-trip that ends in a transient
+  rejection has returned its slot before its verb backs off.
+- A gate may withdraw a call that waits (`ProviderCallRefused`): the host
+  stopped its run. Nothing is sent, and the caller gets a
+  `ProviderError::Other` that says so, which no verb retries.
+- Waiting is cancel-safe: a future dropped in line takes no slot.
+
+The trait lives here, beside `InferenceAdmission`, and not in the kernel: its
+only caller is this crate's round-trip, and its only implementor is a host
+that already depends on this crate. `nika serve` is that host today
+(`--provider-concurrency`).

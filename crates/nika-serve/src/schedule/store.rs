@@ -20,8 +20,8 @@ use sha2::{Digest as _, Sha256};
 
 use super::{
     MAX_API_SCHEDULES, MAX_ENCODED_SCHEDULE_BYTES, MAX_SCHEDULE_STORE_BYTES, ScheduleApplyOutcome,
-    ScheduleApplyPrecondition, ScheduleClaimEvidence, ScheduleDecisionRecord, ScheduleSlotAction,
-    ScheduleStoreError, model::MAX_DURABLE_SCHEDULE_DECISIONS,
+    ScheduleApplyPrecondition, ScheduleClaimEvidence, ScheduleDecisionRecord, ScheduleRemoval,
+    ScheduleSlotAction, ScheduleStoreError, model::MAX_DURABLE_SCHEDULE_DECISIONS,
 };
 
 const SCHEDULES_DIR: &str = "schedules";
@@ -186,6 +186,62 @@ impl ScheduleStore {
             .map(PersistedSchedule::definition)
             .collect::<Result<Vec<_>, _>>()
             .map(Vec::into_boxed_slice)
+    }
+
+    /// Read every API-origin definition and every retained last-slot
+    /// decision from ONE durable snapshot, so a listing never pairs a
+    /// definition with a decision another writer made after it.
+    ///
+    /// # Errors
+    /// Returns a typed I/O or corruption failure.
+    pub(crate) fn overview(
+        &self,
+    ) -> Result<(Vec<ScheduleDefinition>, Vec<ScheduleDecisionRecord>), ScheduleStoreError> {
+        let _local = self.local_guard()?;
+        let _lease = self.kernel_lease()?;
+        let state = self.load_state()?;
+        let definitions = state
+            .schedules
+            .iter()
+            .map(PersistedSchedule::definition)
+            .collect::<Result<Vec<_>, _>>()?;
+        let decisions = state
+            .decisions
+            .iter()
+            .map(PersistedDecision::record)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((definitions, decisions))
+    }
+
+    /// Remove one API-origin schedule and its last-slot decision in one
+    /// atomic replacement. A schedule declared again under the same id
+    /// starts with no history, exactly like a new id.
+    ///
+    /// # Errors
+    /// Returns a typed I/O or corruption failure before acknowledgement.
+    pub(crate) fn remove(
+        &self,
+        id: &str,
+        expected: Option<&ScheduleRevision>,
+    ) -> Result<ScheduleRemoval, ScheduleStoreError> {
+        let _local = self.local_guard()?;
+        let _lease = self.kernel_lease()?;
+        let mut state = self.load_state()?;
+        let Ok(index) = state
+            .schedules
+            .binary_search_by(|stored| stored.id.as_str().cmp(id))
+        else {
+            return Ok(ScheduleRemoval::Absent);
+        };
+        let current = state.schedules[index].revision()?;
+        if expected.is_some_and(|expected| *expected != current) {
+            return Ok(ScheduleRemoval::Stale(current));
+        }
+        state.schedules.remove(index);
+        let key = decision_key(ScheduleOrigin::Api, id);
+        state.decisions.retain(|stored| stored.key != key);
+        self.persist(&state)?;
+        Ok(ScheduleRemoval::Removed(current))
     }
 
     /// Restore the last consumed slot for an origin-local schedule id.
@@ -507,6 +563,13 @@ struct PersistedSchedule {
     /// and revision across the upgrade.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     inputs: BTreeMap<String, String>,
+    /// Who the jobs this schedule fires are attributed to (ADR-155). Like
+    /// `inputs`, both members are absent on every row that states none, so
+    /// such a row keeps its exact bytes, integrity and revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    labels: BTreeMap<String, String>,
     revision: String,
     integrity: String,
     // Reserved explicitly for a later history schema. V1 writes and accepts
@@ -564,6 +627,11 @@ impl PersistedSchedule {
             inputs: definition
                 .inputs()
                 .map(|(key, text)| (key.to_owned(), text.to_owned()))
+                .collect(),
+            owner: definition.owner().map(str::to_owned),
+            labels: definition
+                .labels()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
                 .collect(),
             revision: definition.revision().as_str().to_owned(),
             integrity: String::new(),
@@ -646,6 +714,8 @@ impl PersistedSchedule {
         draft.pause_reason.clone_from(&self.pause_reason);
         draft.pause_until.clone_from(&self.pause_until);
         draft.inputs.clone_from(&self.inputs);
+        draft.owner.clone_from(&self.owner);
+        draft.labels.clone_from(&self.labels);
         draft.validate().map_err(|finding| {
             ScheduleStoreError::Corrupt(format!(
                 "stored schedule failed canonical validation: {finding}"
@@ -674,6 +744,8 @@ impl PersistedSchedule {
             pause_reason: self.pause_reason.as_deref(),
             pause_until: self.pause_until.as_deref(),
             inputs: &self.inputs,
+            owner: self.owner.as_deref(),
+            labels: &self.labels,
             revision: &self.revision,
             history: &self.history,
         };
@@ -718,6 +790,10 @@ struct IntegrityProjection<'a> {
     // every row written before the key existed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     inputs: &'a BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<&'a str>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    labels: &'a BTreeMap<String, String>,
     revision: &'a str,
     history: &'a [Value],
 }

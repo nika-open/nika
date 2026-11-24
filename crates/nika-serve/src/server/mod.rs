@@ -3,6 +3,7 @@
 
 mod access_offer;
 mod artifacts;
+mod attribution;
 mod auth;
 mod cancel;
 mod compile;
@@ -11,22 +12,28 @@ mod coordinator;
 mod cost_policy;
 mod cost_review;
 mod error;
+mod fair_queue;
 mod inputs;
+mod job_list;
 mod listen;
 mod model;
+mod occupancy;
 mod openapi;
 mod production;
+mod provider_gate;
 mod registry;
+mod resident_options;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
+mod schedule_manage;
 mod scheduler;
 mod session;
 mod sse;
 mod store;
 mod trace_verdict;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -40,7 +47,7 @@ use nika_execution::{ExecutionContext, ExecutionService, SnapshotLimits};
 use nika_fs::OwnedDir;
 use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, Semaphore, mpsc};
+use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -68,8 +75,9 @@ use listen::listen_line;
 pub use production::{
     ResidentExecutionBackend, ServerLaunchRefuse, launch_operator_message, optional_server_config,
     process_shutdown, seat_cost_review, serve_resident, serve_resident_process,
-    server_operator_message,
+    serve_resident_process_with, server_operator_message,
 };
+pub use resident_options::ResidentOptions;
 use store::{StoreActor, StoreHandle};
 
 /// Backend-owned terminal class projected onto the durable job lifecycle.
@@ -499,8 +507,7 @@ impl ExecutionTask {
 pub struct ResidentAuthority {
     state: Arc<AuthorityState>,
     coordinator: ResidentExecutionCoordinator,
-    jobs: mpsc::Receiver<ExecutionTask>,
-    recovered: VecDeque<ExecutionTask>,
+    jobs: fair_queue::QueueReader<ExecutionTask>,
     store_actor: Option<StoreActor>,
 }
 
@@ -524,24 +531,28 @@ impl ResidentAuthority {
             config.limits().max_connections(),
             control_capacity,
         )?;
-        let (jobs, receiver) = mpsc::channel(config.limits().queue_capacity());
+        let jobs = fair_queue::FairQueue::new(fair_queue::QueueBounds {
+            capacity: config.limits().queue_capacity(),
+            queued_per_owner: config.limits().max_queued_per_owner(),
+            running_per_owner: config.limits().max_concurrent_per_owner(),
+        });
+        let receiver = fair_queue::QueueReader::new(Arc::clone(&jobs));
+        // Jobs queued when the resident last stopped re-enter their owner's
+        // lane first, in admission order, past today's bounds.
         let default_max_cost_usd = config.limits().default_max_cost_usd();
-        let recovered = store_actor
-            .handle()
-            .queued_jobs()
-            .await?
-            .into_iter()
-            .map(|(id, _workflow, access_pin)| {
-                ExecutionTask::new(id, default_max_cost_usd).with_access_pin(access_pin)
-            })
-            .collect();
+        for queued in store_actor.handle().queued_jobs().await? {
+            let task = ExecutionTask::new(queued.id.clone(), default_max_cost_usd)
+                .with_access_pin(queued.access_pin);
+            jobs.recover(queued.owner.as_deref(), queued.id, task);
+        }
         let reviewed = Arc::new(cost_review::Reviewed::default());
         let coordinator = ResidentExecutionCoordinator::new(
             store_actor.handle(),
             jobs,
             config.limits(),
             Arc::clone(&reviewed),
-        );
+        )
+        .with_provider_gates(config.provider_gates());
         let project = Arc::new(OnceLock::new());
         if let Some(held) = prepared.project {
             let _set = project.set(held);
@@ -579,7 +590,6 @@ impl ResidentAuthority {
             state,
             coordinator,
             jobs: receiver,
-            recovered,
             store_actor: Some(store_actor),
         })
     }
@@ -793,9 +803,11 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
     let state_root = config.state_root().to_owned();
     let workflow_root = config.workflow_root().map(Path::to_owned);
     let clock = Arc::clone(config.clock());
+    let retention = config.limits().job_retention();
     tokio::task::spawn_blocking(move || {
         ensure_state_root(&state_root)?;
-        let store = Arc::new(JobStore::open_fail_fast(&state_root)?.with_clock(clock));
+        let store = JobStore::open_fail_fast(&state_root)?.with_clock(clock);
+        let store = Arc::new(store.with_retention(retention));
         let schedules = ScheduleStore::open(&state_root).map_err(ServerError::ScheduleStore)?;
         let project = workflow_root
             .map(|root| {
@@ -814,6 +826,8 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
             .stamp_writer_as_resident()
             .map_err(ServerError::ScheduleStore)?;
         store.settle_interrupted_jobs(&incarnation)?;
+        // After the interruptions are dated: a job this start just settled is new.
+        store.evict_expired()?;
         Ok(PreparedAuthority {
             store,
             incarnation,
@@ -848,6 +862,11 @@ fn validate_resident_config(config: &ResidentConfig) -> Result<(), ServerError> 
     if !config.limits().valid() {
         return Err(ServerError::InvalidConfig(
             "all size, timeout, concurrency, queue, connection, sse, and header ceilings must be non-zero, and the default budget ceiling must be finite and non-negative",
+        ));
+    }
+    if !config.limits().job_retention().valid() {
+        return Err(ServerError::InvalidConfig(
+            "a job retention window must be at least one minute",
         ));
     }
     if config.limits().max_body_bytes() > crate::MAX_ENCODED_EXECUTION_SNAPSHOT_BYTES {
@@ -886,7 +905,7 @@ fn ensure_state_root(path: &Path) -> Result<(), ServerError> {
 }
 
 async fn run_authority_until<F>(
-    mut authority: ResidentAuthority,
+    authority: ResidentAuthority,
     shutdown: F,
 ) -> Result<(), ServerError>
 where
@@ -903,18 +922,12 @@ where
     tokio::pin!(shutdown);
 
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
         tokio::select! {
             () = &mut shutdown => break,
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                if let Some(task) = task {
-                    executions.spawn(run_job(Arc::clone(&authority.state), task));
+                if let Some(dispatched) = dispatched {
+                    executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                 }
             }
             joined = executions.join_next(), if !executions.is_empty() => {
@@ -940,7 +953,7 @@ where
 }
 
 async fn run_authority_with_http<F>(
-    mut authority: ResidentAuthority,
+    authority: ResidentAuthority,
     server: BoundServer,
     shutdown: F,
 ) -> Result<(), ServerError>
@@ -961,12 +974,6 @@ where
     tokio::pin!(shutdown);
 
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
         tokio::select! {
             () = &mut shutdown => break,
             accepted = listener.accept(),
@@ -981,10 +988,10 @@ where
                     }
                 }
             }
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                if let Some(task) = task {
-                    executions.spawn(run_job(Arc::clone(&authority.state), task));
+                if let Some(dispatched) = dispatched {
+                    executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                 }
             }
             joined = executions.join_next(), if !executions.is_empty() => {
@@ -1105,22 +1112,16 @@ async fn drain_authority(
     let mut failure = None;
     let mut queue_drained = false;
     loop {
-        if executions.len() < authority.state.limits.max_concurrent_jobs()
-            && let Some(task) = authority.recovered.pop_front()
-        {
-            executions.spawn(run_job(Arc::clone(&authority.state), task));
-            continue;
-        }
-        if executions.is_empty() && authority.recovered.is_empty() && queue_drained {
+        if executions.is_empty() && queue_drained {
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
-            task = authority.jobs.recv(),
+            dispatched = authority.jobs.next(),
                 if !queue_drained
                     && executions.len() < authority.state.limits.max_concurrent_jobs() => {
-                match task {
-                    Some(task) => {
-                        executions.spawn(run_job(Arc::clone(&authority.state), task));
+                match dispatched {
+                    Some(dispatched) => {
+                        executions.spawn(run_dispatched(Arc::clone(&authority.state), dispatched));
                     }
                     None => queue_drained = true,
                 }
@@ -1150,6 +1151,16 @@ async fn serve_connection(stream: TcpStream, state: Arc<AppState>) {
         .await;
 }
 
+/// Run one dispatched job. Its owner's running count is held until the run
+/// ends, however it ends.
+async fn run_dispatched(
+    state: Arc<AuthorityState>,
+    dispatched: fair_queue::Dispatched<ExecutionTask>,
+) -> Result<(), ServerError> {
+    let _running = dispatched.running;
+    Box::pin(run_job(state, dispatched.task)).await
+}
+
 async fn run_job(state: Arc<AuthorityState>, mut task: ExecutionTask) -> Result<(), ServerError> {
     // A reviewed job's first run takes its captured world and cost authority;
     // a duplicate never runs it. Leaving early drops (settles) the authority.
@@ -1168,8 +1179,11 @@ async fn run_claimed(
     claim: cost_review::Claim,
 ) -> Result<(), ServerError> {
     // Replays can leave duplicate queue entries after the owner settles.
-    // This is only a read-avoidance optimization: the durable claim and
-    // queued-only refusal below still arbitrate concurrent transitions.
+    // For a job the store still holds this is only a read-avoidance
+    // optimization: the durable claim and queued-only refusal below still
+    // arbitrate concurrent transitions. A job the store no longer holds was
+    // settled and then forgotten by retention: its entry runs nothing, and
+    // must end here, since refusing an absent job is an error.
     let expected = if task.prestarted {
         JobStatus::Running
     } else {
@@ -1179,7 +1193,7 @@ async fn run_claimed(
         .store
         .execution_status(task.id.clone())
         .await?
-        .is_some_and(|status| status != expected)
+        .is_none_or(|status| status != expected)
     {
         return Ok(());
     }
@@ -1536,17 +1550,27 @@ mod admission_race_tests;
 #[cfg(test)]
 mod admission_tests;
 #[cfg(test)]
+mod attribution_tests;
+#[cfg(test)]
 mod coordinator_tests;
 #[cfg(test)]
 mod credential_tests;
 #[cfg(test)]
 mod failure_tests;
 #[cfg(test)]
+mod fair_admission_tests;
+#[cfg(test)]
+mod job_list_tests;
+#[cfg(test)]
 mod registry_tests;
 #[cfg(test)]
 mod result_tests;
 #[cfg(test)]
+mod retention_tests;
+#[cfg(test)]
 mod schedule_inputs_tests;
+#[cfg(test)]
+mod schedule_manage_tests;
 #[cfg(test)]
 mod schedule_tests;
 #[cfg(test)]

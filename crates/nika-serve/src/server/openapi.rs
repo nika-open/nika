@@ -114,6 +114,13 @@ pub(crate) fn under_cost_policy(mut document: Value, reviewed: bool) -> Value {
     document
 }
 
+#[cfg(test)]
+mod job_list;
+#[cfg(test)]
+mod occupancy;
+#[cfg(test)]
+mod schedule_manage;
+
 /// The document's source: the builder the committed file is generated from.
 #[cfg(test)]
 mod builder {
@@ -128,7 +135,7 @@ mod builder {
             "info": {
                 "title": "nika serve",
                 "version": env!("CARGO_PKG_VERSION"),
-                "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule list/delete/trigger/backfill, /v1/arm, and POST /v1/run are absent."
+                "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule backfill, /v1/arm, and POST /v1/run are absent."
             },
             "servers": [{"url": "http://127.0.0.1"}],
             "security": [{"bearerAuth": []}],
@@ -229,6 +236,11 @@ mod builder {
                 "SchedulePreconditionFailed".to_owned(),
                 schedule_precondition_schema(),
             );
+            let listed = super::job_list::schemas().into_iter();
+            let listed = listed.chain(super::occupancy::schemas());
+            for (name, schema) in listed.chain(super::schedule_manage::schemas()) {
+                named.insert(name.to_owned(), schema);
+            }
         }
         schemas
     }
@@ -699,7 +711,10 @@ mod builder {
             "/v1/jobs/{id}/trace/verify": job_trace_verify_path(),
             "/v1/jobs/{id}/artifacts": job_artifacts_path(),
             "/v1/jobs/{id}/artifacts/{name}": job_artifact_path(),
-            "/v1/schedules/{id}": schedule_path()
+            "/v1/occupancy": super::occupancy::path(&error_named),
+            "/v1/schedules": super::schedule_manage::list_path(&error_named),
+            "/v1/schedules/{id}": schedule_path(),
+            "/v1/schedules/{id}/trigger": super::schedule_manage::trigger_path(&error_named, &json_job())
         })
     }
 
@@ -717,6 +732,14 @@ mod builder {
     }
 
     fn schedule_put_schema() -> Value {
+        let mut schema = schedule_put_base();
+        for (name, member) in super::schedule_manage::put_members() {
+            schema["properties"][name] = member;
+        }
+        schema
+    }
+
+    fn schedule_put_base() -> Value {
         json!({
             "type": "object", "additionalProperties": false,
             "required": ["workflow", "when", "maxCostUsd", "missed"],
@@ -754,6 +777,7 @@ mod builder {
                 "summary": "Read one declarative resident schedule",
                 "responses": {"200": {"description": "Fresh planned status", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScheduleStatus"}}}}, "401": error_ref(), "404": error_ref()}
             },
+            "delete": super::schedule_manage::delete_operation(&error_named),
             "put": {
                 "summary": "Create or revision-conditionally update one resident schedule",
                 "description": "Create requires If-None-Match: *. Update requires the exact ETag in If-Match. Identical lost-response retries are unchanged and retain the revision. A refused precondition answers 412 with the schedule's current revision (null when none exists). A definition the planner or the schedule validator refuses answers 422 with its findings; a malformed body, refused inputs or a refused workflow answer 422 with the error envelope.",
@@ -857,7 +881,7 @@ mod builder {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions.",
+            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions. Optional `owner` and `labels` (health capability `jobAttribution`) are what the caller states about the job so its application can find it again (GET /v1/jobs): they are attribution inside one authority domain, never an authorization boundary, and whoever holds the token reads every job. They bind the exact request identity like every other member; a snapshot body carries none, and a cost review binds none (they are stated on the admission that consumes it).",
             "required": ["workflow"],
             "properties": {
                 "workflow": {"type": "string", "minLength": 1, "maxLength": 4096},
@@ -871,6 +895,20 @@ mod builder {
                     "minLength": 1,
                     "maxLength": 64,
                     "description": "Access pin, same vocabulary as `--access` (class or harness id). A pin never silently substitutes a metered seat."
+                },
+                "owner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._:@-]+$",
+                    "description": "Who the caller attributes this job to: opaque to the engine. Outside its bounds, or null: 422 invalid_job_owner. Require the `jobAttribution` capability first: a resident without it refuses the member as an unknown field."
+                },
+                "labels": {
+                    "type": "object",
+                    "maxProperties": 16,
+                    "propertyNames": {"minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._/-]+$"},
+                    "additionalProperties": {"type": "string", "maxLength": 256},
+                    "description": "At most 16 caller labels. A key is 1 to 64 bytes of letters, digits and `._/-` (no colon); a value is at most 256 bytes of text without control characters. Outside these bounds, or null: 422 invalid_job_labels."
                 }
             }
         })
@@ -891,9 +929,9 @@ mod builder {
     }
 
     fn jobs_path() -> Value {
-        json!({"post": {
+        json!({"get": super::job_list::operation(&error_named), "post": {
             "summary": "Admit a workflow as a durable job — by served name, or as immutable snapshot bytes",
-            "description": "Two forms, one admission (ADR-131). `{\"workflow\": \"<name>\"}` names a workflow the served registry lists: the resident captures its world through ExecutionService, exactly as a schedule does. Optional `access` on that form is CLI `--access` for this job only. A snapshot body is the world `nika check <file> --json --sdk-snapshot` prints, decoded and readmitted through the same ExecutionService; its digests are optional caller-supplied integrity digests (a content assertion, never a signature). Snapshot jobs inherit the resident's unpinned plan. The server never interprets a caller filesystem path. Idempotency binds to the exact request bytes.",
+            "description": "Two forms, one admission (ADR-131). `{\"workflow\": \"<name>\"}` names a workflow the served registry lists: the resident captures its world through ExecutionService, exactly as a schedule does. Optional `access` on that form is CLI `--access` for this job only. A snapshot body is the world `nika check <file> --json --sdk-snapshot` prints, decoded and readmitted through the same ExecutionService; its digests are optional caller-supplied integrity digests (a content assertion, never a signature). Snapshot jobs inherit the resident's unpinned plan. The server never interprets a caller filesystem path. Idempotency binds to the exact request bytes. Waiting jobs are served fairly (health capability `occupancy`): the next free worker goes to the owner with the fewest jobs running, in turn among equals, first in first out inside one owner; jobs that state no owner share one lane. A resident may bound what one owner holds: past its waiting bound the admission answers 429 `owner_queue_full` with `Retry-After`, and past its running bound the owner's other jobs wait while free workers serve other owners.",
             "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
             "requestBody": snapshot_request_body("JobByName"),
             "responses": {
@@ -906,6 +944,7 @@ mod builder {
                 "413": error_named("Encoded body or decoded snapshot resource limit"),
                 "415": error_named("Content-Type or Content-Encoding refused"),
                 "422": error_named("Malformed, unsupported, tampered, or semantically refused snapshot"),
+                "429": super::occupancy::owner_refusal(),
                 "503": error_named("Execution queue or durable store unavailable"),
                 "507": error_named("Durable job capacity exhausted")
             }
@@ -1106,17 +1145,14 @@ mod tests {
         "/v1/jobs/{id}/trace/verify",
         "/v1/jobs/{id}/artifacts",
         "/v1/jobs/{id}/artifacts/{name}",
+        "/v1/occupancy",
+        "/v1/schedules",
         "/v1/schedules/{id}",
+        "/v1/schedules/{id}/trigger",
         "/v1/openapi.json",
     ];
 
-    const ABSENT_PATHS: &[&str] = &[
-        "/v1/run",
-        "/v1/schedules",
-        "/v1/schedules/{id}/trigger",
-        "/v1/schedules/{id}/backfill",
-        "/v1/arm",
-    ];
+    const ABSENT_PATHS: &[&str] = &["/v1/run", "/v1/schedules/{id}/backfill", "/v1/arm"];
 
     #[test]
     fn document_is_openapi_31_and_lists_only_live_paths() {
@@ -1147,10 +1183,19 @@ mod tests {
             .as_object()
             .expect("post responses");
         for status in [
-            "200", "202", "400", "401", "408", "409", "413", "415", "422", "503", "507",
+            "200", "202", "400", "401", "408", "409", "413", "415", "422", "429", "503", "507",
         ] {
             assert!(post.contains_key(status), "missing POST {status}");
         }
+        assert!(
+            post["429"]["headers"]["Retry-After"].is_object(),
+            "an owner at its bound is told when to retry"
+        );
+        let occupancy = &spec["components"]["schemas"]["Occupancy"];
+        assert_eq!(
+            occupancy["additionalProperties"], true,
+            "occupancy is open: a later engine adds members"
+        );
         let status_summary = spec["paths"]["/v1/jobs/{id}/status"]["get"]["summary"]
             .as_str()
             .expect("status summary");

@@ -132,7 +132,10 @@ invokes (`invoke: { tool: "mcp:<server>/<tool>" }`). The operator guide is
 - **`client`** — the registry `.nika/mcp_servers.json` (`mcp_servers_format: 1`
   · `servers.<name>.{command, args, network}` · strict, teaching parse) and
   the pin flow over the `ToolsListDyn` seam: `approve_server` (the operator
-  re-pin · `nika mcp approve <server>`) and `connect_verified` (TOFU enroll ·
+  re-pin · `nika mcp approve <server>`), `approve_server_declaring` (the
+  same re-pin with the roles the operator declares for the tools they
+  reviewed · `ApproveError::UnknownTool` when a declared name is not
+  served, nothing written) and `connect_verified` (TOFU enroll ·
   verify · drift refusal). `StdioMcpClient` is the one-shot production
   `tools/list` (open a session, ask, drop).
 - **`session`** — `StdioSession`: spawn CONFINED (the exec verb's
@@ -147,7 +150,13 @@ invokes (`invoke: { tool: "mcp:<server>/<tool>" }`). The operator guide is
 - **`pin`** — `.nika/mcp_pins.json` (`mcp_pins_format: 1`): one blake3 pin
   per tool over `{name, description, inputSchema}` + the snapshot, keyed by
   the server's identity (command + args · re-pointing is drift). A
-  hand-edited lockfile is `NIKA-MCP-004`, never re-anchored.
+  hand-edited lockfile is `NIKA-MCP-004`, never re-anchored. Each tool may
+  carry `roles` (`nika_check::mcp_roles::McpToolRoles` · `private-read` ·
+  `egress` · `[]` for a declared-inert tool · absent = never declared):
+  what the OPERATOR says the tool does, outside the pin hash, which vets
+  what the SERVER says. A re-pin keeps a tool's role only while its pin and
+  the server identity are unchanged. The check reads the roles from the
+  lockfile (`nika-check` · `mcp_roles`); this crate only records them.
 - **`dispatch`** — `McpToolPlane`, the runtime plane (#1575), handed to the
   invoke verb as `nika_runtime::McpPlane` via `dispatch::run_plane`. The law
   is **approved tools only**, judged before each effect: server in the

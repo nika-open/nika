@@ -255,6 +255,9 @@ pub struct RunView {
     /// the card's `--answer` shape. `None` when the frame omitted it
     /// (stdlib default is confirm).
     pub(crate) paused_mode: Option<String>,
+    /// The paused prompt's question, as the frame's `message` field carried
+    /// it. It can hold fetched content: the card prints it scrubbed.
+    pub(crate) paused_message: Option<String>,
     /// A WORKFLOW-level failure reason carried on `workflow_failed` (e.g. a
     /// run-end NIKA-VAR-009 typed-output breach) — not tied to a task row.
     pub workflow_detail: Option<String>,
@@ -529,6 +532,7 @@ impl RunView {
                 self.touch(event, TaskState::Paused);
                 self.paused_task = Some(task);
                 self.paused_mode = str_field(event, "mode").map(str::to_owned);
+                self.paused_message = str_field(event, "message").map(str::to_owned);
             }
             EventKind::AgentBudgetCheckpoint => self.apply_agent_checkpoint(event),
             // Dispatch + cost/stream/permit kinds carry no row state

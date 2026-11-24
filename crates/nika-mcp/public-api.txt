@@ -1,5 +1,66 @@
 pub mod nika_mcp
 pub mod nika_mcp::client
+#[non_exhaustive] pub enum nika_mcp::client::ApproveError
+pub nika_mcp::client::ApproveError::Pin(nika_mcp::pin::PinError)
+pub nika_mcp::client::ApproveError::UnknownTool
+pub nika_mcp::client::ApproveError::UnknownTool::served: alloc::vec::Vec<alloc::string::String>
+pub nika_mcp::client::ApproveError::UnknownTool::server: alloc::string::String
+pub nika_mcp::client::ApproveError::UnknownTool::unknown: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::clone(&self) -> nika_mcp::client::ApproveError
+impl core::cmp::Eq for nika_mcp::client::ApproveError
+impl core::cmp::PartialEq for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::eq(&self, other: &nika_mcp::client::ApproveError) -> bool
+impl core::convert::From<nika_mcp::pin::PinError> for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::from(err: nika_mcp::pin::PinError) -> Self
+impl core::error::Error for nika_mcp::client::ApproveError
+impl core::fmt::Debug for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_mcp::client::ApproveError
+impl<D> owo_colors::OwoColorize for nika_mcp::client::ApproveError
+impl<Q, K> equivalent::Equivalent<K> for nika_mcp::client::ApproveError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_mcp::client::ApproveError where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_mcp::client::ApproveError where U: core::convert::From<T>
+pub fn nika_mcp::client::ApproveError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_mcp::client::ApproveError where U: core::convert::Into<T>
+pub type nika_mcp::client::ApproveError::Error = core::convert::Infallible
+pub fn nika_mcp::client::ApproveError::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_mcp::client::ApproveError where U: core::convert::TryFrom<T>
+pub type nika_mcp::client::ApproveError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_mcp::client::ApproveError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_mcp::client::ApproveError where T: core::clone::Clone
+pub type nika_mcp::client::ApproveError::Owned = T
+pub fn nika_mcp::client::ApproveError::clone_into(&self, target: &mut T)
+pub fn nika_mcp::client::ApproveError::to_owned(&self) -> T
+impl<T> alloc::string::ToString for nika_mcp::client::ApproveError where T: core::fmt::Display + ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for nika_mcp::client::ApproveError where T: 'static + ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_mcp::client::ApproveError where T: ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_mcp::client::ApproveError where T: ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_mcp::client::ApproveError where T: core::clone::Clone
+pub unsafe fn nika_mcp::client::ApproveError::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_mcp::client::ApproveError where T: core::clone::Clone
+pub fn nika_mcp::client::ApproveError::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> iri_string::format::ToStringFallible for nika_mcp::client::ApproveError where T: core::fmt::Display
+pub fn nika_mcp::client::ApproveError::try_to_string(&self) -> core::result::Result<alloc::string::String, alloc::collections::TryReserveError>
+impl<T> nika_error::traits::AsAny for nika_mcp::client::ApproveError where T: 'static
+pub fn nika_mcp::client::ApproveError::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_mcp::client::ApproveError where T: ?core::marker::Sized
+pub fn nika_mcp::client::ApproveError::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_mcp::client::ApproveError::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_mcp::client::ApproveError
+impl<T> tracing::instrument::WithSubscriber for nika_mcp::client::ApproveError
+impl<T> typenum::type_operators::Same for nika_mcp::client::ApproveError
+pub type nika_mcp::client::ApproveError::Output = T
 #[non_exhaustive] pub enum nika_mcp::client::ConnectOutcome
 pub nika_mcp::client::ConnectOutcome::Enrolled
 pub nika_mcp::client::ConnectOutcome::Enrolled::pinned_at: alloc::string::String
@@ -40,8 +101,10 @@ impl<T> typenum::type_operators::Same for nika_mcp::client::ConnectOutcome
 pub type nika_mcp::client::ConnectOutcome::Output = T
 #[non_exhaustive] pub struct nika_mcp::client::ApproveReport
 pub nika_mcp::client::ApproveReport::confinement: core::option::Option<alloc::string::String>
+pub nika_mcp::client::ApproveReport::dropped_roles: alloc::vec::Vec<alloc::string::String>
 pub nika_mcp::client::ApproveReport::pinned_at: alloc::string::String
 pub nika_mcp::client::ApproveReport::pins: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub nika_mcp::client::ApproveReport::roles: alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<nika_check::mcp_roles::McpToolRoles>>
 pub nika_mcp::client::ApproveReport::server: alloc::string::String
 impl core::fmt::Debug for nika_mcp::client::ApproveReport
 pub fn nika_mcp::client::ApproveReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -174,6 +237,7 @@ impl nika_mcp::client::ToolsListDyn for nika_mcp::client::StdioMcpClient
 pub fn nika_mcp::client::StdioMcpClient::confinement(&self) -> core::option::Option<alloc::string::String>
 pub fn nika_mcp::client::StdioMcpClient::tools_list(&self) -> core::result::Result<alloc::vec::Vec<nika_mcp::pin::McpToolDef>, nika_mcp::pin::PinError>
 pub fn nika_mcp::client::approve_server<C: nika_mcp::client::ToolsListDyn + ?core::marker::Sized>(config: &nika_mcp::client::McpServerConfig, client: &C, project_dir: &std::path::Path, now_epoch: u64) -> core::result::Result<nika_mcp::client::ApproveReport, nika_mcp::pin::PinError>
+pub fn nika_mcp::client::approve_server_declaring<C: nika_mcp::client::ToolsListDyn + ?core::marker::Sized>(config: &nika_mcp::client::McpServerConfig, client: &C, project_dir: &std::path::Path, declared: &nika_mcp::pin::RoleDeclarations, now_epoch: u64) -> core::result::Result<nika_mcp::client::ApproveReport, nika_mcp::client::ApproveError>
 pub fn nika_mcp::client::connect_verified<C: nika_mcp::client::ToolsListDyn + ?core::marker::Sized>(config: &nika_mcp::client::McpServerConfig, client: &C, project_dir: &std::path::Path, now_epoch: u64) -> core::result::Result<nika_mcp::client::ConnectOutcome, nika_mcp::pin::PinError>
 pub fn nika_mcp::client::load_server_configs(project_dir: &std::path::Path) -> core::result::Result<alloc::vec::Vec<nika_mcp::client::McpServerConfig>, nika_mcp::pin::PinError>
 pub mod nika_mcp::conversation
@@ -286,6 +350,7 @@ impl<T> typenum::type_operators::Same for nika_mcp::dispatch::McpToolPlane
 pub type nika_mcp::dispatch::McpToolPlane::Output = T
 pub fn nika_mcp::dispatch::run_plane(project_dir: impl core::convert::Into<std::path::PathBuf>) -> nika_verb_invoke::mcp::McpPlane
 pub mod nika_mcp::pin
+pub use nika_mcp::pin::McpToolRoles
 #[non_exhaustive] pub enum nika_mcp::pin::PinError
 pub nika_mcp::pin::PinError::Corrupt
 pub nika_mcp::pin::PinError::Corrupt::path: std::path::PathBuf
@@ -317,6 +382,8 @@ pub fn nika_mcp::pin::PinError::clone(&self) -> nika_mcp::pin::PinError
 impl core::cmp::Eq for nika_mcp::pin::PinError
 impl core::cmp::PartialEq for nika_mcp::pin::PinError
 pub fn nika_mcp::pin::PinError::eq(&self, other: &nika_mcp::pin::PinError) -> bool
+impl core::convert::From<nika_mcp::pin::PinError> for nika_mcp::client::ApproveError
+pub fn nika_mcp::client::ApproveError::from(err: nika_mcp::pin::PinError) -> Self
 impl core::error::Error for nika_mcp::pin::PinError
 impl core::fmt::Debug for nika_mcp::pin::PinError
 pub fn nika_mcp::pin::PinError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -580,6 +647,7 @@ pub type nika_mcp::pin::ToolDrift::Output = T
 pub const nika_mcp::pin::PINS_FORMAT: u32
 pub const nika_mcp::pin::PINS_PATH: &str
 pub fn nika_mcp::pin::pinned_tool(project_dir: &std::path::Path, server: &str, tool: &str) -> nika_mcp::pin::PinVerdict
+pub type nika_mcp::pin::RoleDeclarations = alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_check::mcp_roles::McpToolRoles>
 pub mod nika_mcp::sandbox
 pub fn nika_mcp::sandbox::platform_sandbox() -> alloc::sync::Arc<dyn nika_kernel_core::io::command_sandbox::CommandSandbox>
 pub mod nika_mcp::session

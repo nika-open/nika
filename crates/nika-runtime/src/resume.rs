@@ -484,6 +484,11 @@ impl ResumeContext {
     pub(crate) fn markers(&self) -> &BTreeMap<String, Value> {
         &self.markers
     }
+
+    /// Every declared group → its member ids, in declaration order.
+    pub(crate) fn groups(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.groups
+    }
 }
 
 /// Every group the workflow declares → its member ids in declaration order,
@@ -544,16 +549,20 @@ pub(crate) fn settled(
             let Some(prior) = plan.get(&task.id.value) else {
                 return false;
             };
-            let id = task.id.value.clone();
-            let verb = task.action.verb().to_owned();
-            (definition_identity(task, ctx))
-                .and_then(|definition| {
-                    ResumeKey::new(id, verb, definition, Value::Null).definition_hash()
-                })
-                .is_some_and(|hash| hash == prior.def_hash)
+            definition_digest(task, ctx).is_some_and(|hash| hash == prior.def_hash)
         })
         .map(|task| task.id.value.clone())
         .collect()
+}
+
+/// A task's definition hash this run, without its inputs: the `def_hash` its settled success
+/// journals. It covers what [`definition_identity`] covers and no value the run produces, so
+/// it is known before the task runs — the approval ticket binds it (NEP-0013 law 1). `None` =
+/// the task has no definition identity this run.
+pub(crate) fn definition_digest(task: &RawTask, ctx: &ResumeContext) -> Option<String> {
+    let definition = definition_identity(task, ctx)?;
+    let (id, verb) = (task.id.value.clone(), task.action.verb().to_owned());
+    ResumeKey::new(id, verb, definition, Value::Null).definition_hash()
 }
 
 /// A task's definition identity this run: its behavior-bearing fields as

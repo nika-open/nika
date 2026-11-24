@@ -523,7 +523,7 @@ pub(super) fn scan_mcp_against_registry(
 }
 
 /// Where the approved MCP pins live (`nika mcp approve` writes them; the run gates on them).
-const MCP_PINS_PATH: &str = ".nika/mcp_pins.json";
+pub(crate) const MCP_PINS_PATH: &str = ".nika/mcp_pins.json";
 
 /// The pin advisory beside C04 (the composed lane). A call to a REGISTERED server whose pins were
 /// never approved, or to a tool its approved pins do not hold, is refused by the run
@@ -569,7 +569,9 @@ pub(super) fn scan_mcp_against_pins(
         .collect()
 }
 
-fn mcp_call_sites(wf: &RawWorkflow) -> Vec<(String, String)> {
+/// `(task, tool)` for every concrete `mcp:<server>/<tool>` a task names: an
+/// `invoke:` target or an `agent:` whitelist entry (globs are left out).
+pub(crate) fn mcp_call_sites(wf: &RawWorkflow) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for task in &wf.tasks {
         collect_mcp(task.value.id.value.as_str(), &task.value.action, &mut out);

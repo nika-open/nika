@@ -991,7 +991,6 @@ where
             self.model_override.as_deref(),
             self.boot_access_fields.clone(),
             self.harness_seat_id.as_deref(),
-            &self.approvals,
             opening_stamp,
             run_facts,
             stamper,

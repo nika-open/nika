@@ -365,7 +365,10 @@ pub(crate) fn check_with(
     // resolved (the trifecta reads a child that brings untrusted content in
     // as the ingress it is · NIK-273).
     let resolved = composition::scan_resolved_with(wf, root, read, files);
-    let mut report = crate::check_calls(wf, resolved.calls);
+    // The roles the operator declared on the MCP pins, read before the
+    // lanes: the trifecta arms its legs from them.
+    let roles = crate::mcp_roles::read_declared(wf, read);
+    let mut report = crate::check_calls(wf, resolved.calls, roles);
     report.composition = resolved.findings;
     // The composition COST half (spec 14 · the 2026-07-29 finding): every
     // resolvable child's ceiling folds into the parent's envelope — a
@@ -388,6 +391,10 @@ pub(crate) fn check_with(
         .extend(tools::scan_mcp_against_registry(wf, read));
     // Beside it, advice that never blocks: a registered server whose pins the run would refuse.
     report.hints.extend(tools::scan_mcp_against_pins(wf, read));
+    // And the tools approved with no declared role: the trifecta row does not cover them.
+    report
+        .hints
+        .extend(crate::mcp_roles::scan_undeclared(wf, read));
     // Re-fold the class-erased list over the finished lane (one truth), and
     // the failure plan over the folded envelope (a child's paid media).
     report.findings = findings::collect(&report);

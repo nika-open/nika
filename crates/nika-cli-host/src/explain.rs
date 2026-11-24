@@ -427,7 +427,8 @@ fn cli_fix_hint(code: &str) -> Option<&'static str> {
         ),
         _ => reference_fix_hint(code)
             .or_else(|| decide_fix_hint(code))
-            .or_else(|| run_decl_fix_hint(code)),
+            .or_else(|| run_decl_fix_hint(code))
+            .or_else(|| security_fix_hint(code)),
     }
 }
 
@@ -493,6 +494,39 @@ fn run_decl_fix_hint(code: &str) -> Option<&'static str> {
              consumes a structural source (a live retry jitter · `nika:uuid`) \
              — set `jitter: false`, drop the uuid call, or name the stream \
              with `entropy: { seeded: <u64> }`",
+        ),
+        _ => None,
+    }
+}
+
+/// The security-boundary hints — split out of [`cli_fix_hint`] at the
+/// fn-length wall.
+fn security_fix_hint(code: &str) -> Option<&'static str> {
+    match code {
+        // The finding's own fix names only the gate. A missing leg is safe
+        // by construction, while a gate is safe only while someone answers
+        // it, so the page teaches the leg first. Both gate placements below
+        // were checked clean on 0.124.5: after the reads, only the effect
+        // past the gate tests the answer; upstream of every entry, a fetch
+        // past the gate that ignores the answer fires NIKA-SEC-014.
+        "NIKA-SEC-009" => Some(
+            "first drop a leg the workflow does not need: the finding names \
+             each leg and the grant that arms it (private read · \
+             `permits.fs.read`; untrusted ingress · `nika:fetch` or an \
+             `mcp:` server in `permits.tools`, or `exec`; external egress · \
+             `permits.net.http`, an escaping `fs.write` glob or `exec`, so an \
+             exec grant arms two legs), and a boundary missing a leg is safe \
+             by construction. When all three are needed, add a blocking \
+             `nika:prompt` (no `default:`, granted in `permits.tools`) that \
+             every path to the egress task crosses, data edges included. \
+             Placed after the reads and fetches, its question can show the \
+             content that would leave; placed upstream of every entry task \
+             the finding names, it is asked before the untrusted content \
+             exists, so the person consents to the run, not to the payload. \
+             Then bind its answer with `with:` into each effect that runs \
+             after it, a fetch included, and gate that effect with `when:`: \
+             NIKA-SEC-014 refuses an effect it can prove runs on a « no » \
+             to a confirm gate",
         ),
         _ => None,
     }
@@ -757,6 +791,55 @@ mod tests {
             !floor.text.contains("catches this before a run ever starts"),
             "a run-time hop is never a check-time promise:\n{}",
             floor.text
+        );
+    }
+
+    /// The SEC-009 page described the trifecta but printed no fix, and the
+    /// finding's own fix names only the gate. Both doors now teach dropping
+    /// a leg before the gate, and say what the gate is consent to.
+    #[test]
+    fn the_trifecta_page_teaches_the_leg_before_the_gate() {
+        let cli = run("NIKA-SEC-009");
+        assert_eq!(cli.code, exit::OK);
+        let leg = cli
+            .text
+            .find("fix: first drop a leg the workflow does not need");
+        let gate = cli
+            .text
+            .find("add a blocking `nika:prompt` (no `default:`, granted in `permits.tools`)");
+        assert!(
+            matches!((leg, gate), (Some(leg), Some(gate)) if leg < gate),
+            "the leg comes first, then the gate:\n{}",
+            cli.text
+        );
+        for fact in [
+            "private read · `permits.fs.read`",
+            "untrusted ingress · `nika:fetch` or an `mcp:` server in `permits.tools`, or `exec`",
+            "external egress · `permits.net.http`, an escaping `fs.write` glob or `exec`",
+            "an exec grant arms two legs",
+            "safe by construction",
+            "every path to the egress task crosses, data edges included",
+            "Placed after the reads and fetches, its question can show the content",
+            "upstream of every entry task the finding names",
+            "consents to the run, not to the payload",
+            "into each effect that runs after it, a fetch included",
+            "gate that effect with `when:`",
+            "NIKA-SEC-014 refuses an effect it can prove runs on a « no » to a confirm gate",
+        ] {
+            assert!(cli.text.contains(fact), "`{fact}` missing:\n{}", cli.text);
+        }
+        // The page names only the tools the check counts as ingress.
+        assert!(!cli.text.contains("browsing"), "{}", cli.text);
+        let oracle = run_for(
+            "NIKA-SEC-009",
+            Theme::new(false, false, false),
+            Door::Oracle,
+        );
+        assert_eq!(oracle.code, exit::OK);
+        assert!(
+            oracle.text.contains("fix: first drop a leg"),
+            "the MCP door teaches the same fix:\n{}",
+            oracle.text
         );
     }
 

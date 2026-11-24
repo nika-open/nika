@@ -171,7 +171,7 @@ builtins. Copy, fill, check.
 
 ## Cost honesty (never hide unknown spend)
 - `nika check` estimates output-token cost before execution. Input billing
-  is not included; `≥ $X FLOOR` signals an unbounded or unpriced component.
+  is not included; `est unbounded` signals an uncapped or unpriced task.
   Name the reason; never round unknown costs to $0.
 - A local model is unpriced compute, **never « free »**.
 - `nika run <file> --max-cost-usd <n>` stops new admissions after crossing
@@ -1175,8 +1175,10 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../.agents/plugins/nika/hooks/claude-hooks.json"
         ));
+        // The kit quotes its root so a plugin installed under a path with a
+        // space still runs its guard; the project wiring quotes its own.
         let expected: serde_json::Value = serde_json::from_str(&kit.replace(
-            "${CLAUDE_PLUGIN_ROOT}/scripts/",
+            "\\\"${CLAUDE_PLUGIN_ROOT}\\\"/scripts/",
             "\\\"$CLAUDE_PROJECT_DIR\\\"/.claude/hooks-nika/",
         ))
         .expect("rewritten kit JSON");

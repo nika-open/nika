@@ -18,14 +18,14 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8095
+  classified_files: 8100
   file_rows: 11
   pattern_rows: 24
   by_class:
     authored: 4844
     authored-pin: 2
     generated: 283
-    pinned-copy: 261
+    pinned-copy: 266
     testimonial: 2705
     foreign: 0
   unverified-default: 8
@@ -113,8 +113,8 @@ files:
 patterns:
 - glob: "crates/nika-pack/pack/**"
   class: pinned-copy
-  match_count: 260
-  aggregate_sha256: 3d733b7e51458c4f727e27900a50f2b31df6f0795969bab81ffc697a5fe20d66
+  match_count: 265
+  aggregate_sha256: 1780ac8881d0ef06967add3f9d8acf5f88221535496494b6b7e86f3a724d96a3
   evidence: "crates/nika-pack/src/lib.rs:16 'The snapshot under pack/ is vendored by scripts/sync-pack.sh' — a byte-copy of the spec surface, never edited here"
   derivation:
     tool: "bash scripts/sync-pack.sh <nika-spec checkout at SPEC_PIN> — spec-pin-heal.yml advances the pin and pack together, and Diamond CI refuses any pack differing from spec@SPEC_PIN"

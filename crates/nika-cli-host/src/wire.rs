@@ -444,8 +444,20 @@ fn wire_one(
 
 /// The writer half of a wiring: patch the config at `path` the way
 /// `target`'s host reads it. The path is [`config_path`]'s, never decided
-/// here.
+/// here. A refusal names its host: a read or a write that fails knows
+/// only the file, and `detected` prints one line per host.
 fn wire_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction, String> {
+    let host = format!("{}: ", target.id());
+    patch_at(target, path, dry_run).map_err(|why| {
+        if why.starts_with(&host) {
+            why
+        } else {
+            format!("{host}{why}")
+        }
+    })
+}
+
+fn patch_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction, String> {
     match target {
         WireTarget::Vscode => patch_vscode(path, dry_run),
         // The `[mcp_servers.nika]` table: Codex CLI, and Grok Build, whose
@@ -665,21 +677,20 @@ fn lmstudio_mcp_path_from(home: &Path) -> PathBuf {
 /// is: only rewrite a file we can round-trip losslessly (a plain-JSON parse
 /// succeeding ⇒ no comments existed); otherwise return
 /// [`WireAction::Manual`] with the exact snippet and leave the user's file
-/// byte-identical.
+/// byte-identical. A file that cannot be read at all is not that case: it
+/// is refused with its reason ([`read_plain_json`]).
 fn patch_zed(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let label_path = format!("zed: {}", path.display());
     let (mut root, original) = if existed {
-        match read_json_text(path) {
-            Ok((value, text)) => (value, Some(text)),
-            Err(_) => {
-                return Ok(WireAction::Manual(format!(
-                    "{label_path} is JSONC (comments) — add this to \
-                     \"context_servers\" yourself:\n  \"nika\": {{ \
-                     \"command\": \"nika\", \"args\": [\"mcp\"], \"env\": {{}} }}"
-                )));
-            }
-        }
+        let Some((value, text)) = read_plain_json(path)? else {
+            return Ok(WireAction::Manual(format!(
+                "{label_path} {NOT_PLAIN_JSON} — add this to \
+                 \"context_servers\" yourself:\n  \"nika\": {{ \
+                 \"command\": \"nika\", \"args\": [\"mcp\"], \"env\": {{}} }}"
+            )));
+        };
+        (value, Some(text))
     } else {
         (Value::Object(Map::new()), None)
     };
@@ -990,17 +1001,15 @@ fn patch_copilot(path: &Path, dry_run: bool) -> Result<WireAction, String> {
 fn patch_amp(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let (mut root, original) = if existed {
-        match read_json_text(path) {
-            Ok((value, text)) => (value, Some(text)),
-            Err(_) => {
-                return Ok(WireAction::Manual(format!(
-                    "amp: {} is JSONC (comments) — add this under \
-                     \"amp.mcpServers\" yourself:\n  \"nika\": {{ \
-                     \"command\": \"nika\", \"args\": [\"mcp\"] }}",
-                    path.display()
-                )));
-            }
-        }
+        let Some((value, text)) = read_plain_json(path)? else {
+            return Ok(WireAction::Manual(format!(
+                "amp: {} {NOT_PLAIN_JSON} — add this under \
+                 \"amp.mcpServers\" yourself:\n  \"nika\": {{ \
+                 \"command\": \"nika\", \"args\": [\"mcp\"] }}",
+                path.display()
+            )));
+        };
+        (value, Some(text))
     } else {
         (Value::Object(Map::new()), None)
     };
@@ -1063,6 +1072,20 @@ fn read_json_text(path: &Path) -> Result<(Value, String), String> {
     Ok((value, body))
 }
 
+/// What a manual line says of a settings file that reads but is not
+/// plain JSON. Its host allows comments, so that is the likely cause —
+/// and a damaged file reads the same, so neither is asserted.
+const NOT_PLAIN_JSON: &str = "is not plain JSON (it may hold comments, or be damaged)";
+
+/// A settings file whose host reads JSONC (Zed, Amp), with its exact
+/// text: `None` when it reads but is not plain JSON, which nika cannot
+/// rewrite without losing what it could not parse. A file that cannot be
+/// read at all is an error with its reason, never a `None`.
+fn read_plain_json(path: &Path) -> Result<Option<(Value, String)>, String> {
+    let text = crate::detect::read_config(path)?;
+    Ok(serde_json::from_str(&text).ok().map(|value| (value, text)))
+}
+
 /// The config as it is (with its text) when it exists, else an empty object.
 fn read_existing(path: &Path, existed: bool) -> Result<(Value, Option<String>), String> {
     if existed {
@@ -1104,10 +1127,14 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("{}: cannot write: {e}", path.display()))?;
     }
     let tmp = path.with_file_name(format!(".nika-tmp-{}", std::process::id()));
-    let result = write_atomic_via(&tmp, path, body);
+    // The failure is the settings file's: the temporary file beside it is
+    // nika's own business, and a name the person has never seen.
+    let result = write_atomic_via(&tmp, path, body)
+        .map_err(|e| format!("{}: cannot write: {e}", path.display()));
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp); // never litter the user's dir
     }
@@ -1116,22 +1143,20 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 
 /// The tmp-file half of [`write_atomic`], split so every error path
 /// funnels through the litter sweep (the 100-line fn ratchet).
-fn write_atomic_via(tmp: &Path, path: &Path, body: &str) -> Result<(), String> {
+fn write_atomic_via(tmp: &Path, path: &Path, body: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt as _;
-    let mut file = std::fs::File::create(tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    file.write_all(body.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let mut file = std::fs::File::create(tmp)?;
+    file.write_all(body.as_bytes())?;
+    file.sync_all()?;
     drop(file);
     // An existing file keeps its mode; a new one is owner-only (0600).
     let mode = match std::fs::metadata(path) {
         Ok(meta) => meta.permissions().mode() & 0o777,
         Err(_) => 0o600,
     };
-    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))
-        .map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))?;
+    std::fs::rename(tmp, path)
 }
 
 fn write_json(path: &Path, value: &Value, original: Option<&str>) -> Result<(), String> {

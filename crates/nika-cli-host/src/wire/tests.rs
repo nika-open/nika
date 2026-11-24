@@ -1324,7 +1324,8 @@ fn detected_refuses(hazard: crate::detect::hazards::Hazard) {
             .find(|line| line.starts_with("✖ skipped"))
             .unwrap_or_default();
         assert!(
-            line.contains(&path.display().to_string()) && line.contains(reason),
+            line.starts_with(&format!("✖ skipped gemini: {}: ", path.display()))
+                && line.contains(reason),
             "{hazard:?} (dry-run {dry_run}): {out:?}"
         );
     }
@@ -1348,6 +1349,11 @@ fn detected_refuses_an_unreadable_file() {
 }
 
 #[test]
+fn detected_refuses_a_file_that_is_not_text() {
+    detected_refuses(crate::detect::hazards::Hazard::NotText);
+}
+
+#[test]
 fn detected_refuses_a_link_to_dev_zero() {
     detected_refuses(crate::detect::hazards::Hazard::DevZeroLink);
 }
@@ -1360,6 +1366,141 @@ fn detected_refuses_a_fifo() {
 #[test]
 fn detected_refuses_an_oversized_file() {
     detected_refuses(crate::detect::hazards::Hazard::Oversized);
+}
+
+/// Zed and Amp keep settings that may be JSONC, and a file nika cannot
+/// round-trip is handed back as a snippet. A file that cannot be READ at
+/// all is not that case: it is a refusal with its real reason, under
+/// `detected` (its own line, exit ENV) and by name, never a manual line
+/// that calls it JSONC.
+#[test]
+fn zed_and_amp_refuse_a_settings_file_that_cannot_be_read() {
+    use crate::detect::hazards::Hazard;
+    for (target, folder) in [(WireTarget::Zed, "zed"), (WireTarget::Amp, "amp")] {
+        for hazard in [Hazard::Unreadable, Hazard::NotText, Hazard::Directory] {
+            let home = temp_dir(&format!("unread-{folder}-{hazard:?}-home"));
+            let dir = temp_dir(&format!("unread-{folder}-{hazard:?}-dir"));
+            let path = home.join(".config").join(folder).join("settings.json");
+            let Some(reason) = hazard.plant(&path) else {
+                continue; // root reads through a 000 mode: nothing to stage
+            };
+            let skipped = format!("✖ skipped {folder}: {}: ", path.display());
+            for (door, dry_run) in [
+                (WireTarget::Detected, true),
+                (WireTarget::Detected, false),
+                (target, true),
+                (target, false),
+            ] {
+                let out = run_in(
+                    door,
+                    Some(&home),
+                    dir.to_str().expect("utf8"),
+                    WireOptions {
+                        dry_run,
+                        ..WireOptions::default()
+                    },
+                );
+                assert_eq!(out.code, crate::output::exit::ENV, "{hazard:?}: {out:?}");
+                let line = out
+                    .text
+                    .lines()
+                    .find(|line| line.starts_with(&skipped))
+                    .unwrap_or_default();
+                assert!(line.contains(reason), "{door:?} {hazard:?}: {out:?}");
+                assert!(!out.text.contains("manual"), "{door:?} {hazard:?}: {out:?}");
+            }
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A Zed or Amp settings file that reads but is not plain JSON stays
+/// manual and byte-identical, exit OK — and the line does not assert
+/// comments as a fact: the text may hold comments, or be damaged.
+#[test]
+fn zed_and_amp_stay_manual_on_text_that_is_not_plain_json() {
+    for folder in ["zed", "amp"] {
+        for body in [
+            "{\n  // mine\n  \"theme\": \"dark\"\n}\n",
+            "{\"theme\":",
+            "",
+        ] {
+            let home = temp_dir(&format!("manual-{folder}-home"));
+            let dir = temp_dir(&format!("manual-{folder}-dir"));
+            let path = home.join(".config").join(folder).join("settings.json");
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+            std::fs::write(&path, body).expect("seed");
+            let out = run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions::default(),
+            );
+            assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+            let manual = format!(
+                "✋ manual {folder}: {} is not plain JSON (it may hold comments, or be damaged)",
+                path.display()
+            );
+            assert!(out.text.starts_with(&manual), "{body:?}: {out:?}");
+            assert!(out.text.contains("\"command\": \"nika\""), "{out:?}");
+            assert!(!out.text.contains("JSONC"), "{out:?}");
+            assert_eq!(std::fs::read_to_string(&path).expect("read"), body);
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A settings folder this account cannot write in. The run's line names
+/// the host and its settings file, never the temporary file nika writes
+/// beside it, and the file is as it was. The preview shows the plan: it
+/// does not test that the file can be written.
+#[test]
+fn a_write_failure_names_the_host_and_its_settings_file() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = temp_dir("write-refused-home");
+    let dir = temp_dir("write-refused-dir");
+    let folder = home.join(".gemini");
+    let path = folder.join("settings.json");
+    std::fs::create_dir_all(&folder).expect("dir");
+    std::fs::write(&path, GEMINI_UNWIRED).expect("seed");
+    let mode = |mode| {
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(mode)).expect("chmod");
+    };
+    mode(0o555);
+    // Root writes through a read-only mode: nothing to stage.
+    let staged = std::fs::File::create(folder.join("probe")).is_err();
+    let run = |dry_run| {
+        run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+    let (preview, out) = (run(true), run(false));
+    let after = std::fs::read_to_string(&path).expect("read");
+    mode(0o755); // before any assertion: a failure must not strand the folder
+    if staged {
+        assert_eq!(preview.code, crate::output::exit::OK, "{preview:?}");
+        let planned = format!("+ would update gemini: {}", path.display());
+        assert!(preview.text.contains(&planned), "{preview:?}");
+
+        assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+        let refused = format!(
+            "✖ skipped gemini: {}: cannot write: Permission denied",
+            path.display()
+        );
+        assert!(out.text.starts_with(&refused), "{out:?}");
+        assert!(!out.text.contains(".nika-tmp-"), "{out:?}");
+        assert_eq!(after, GEMINI_UNWIRED);
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate

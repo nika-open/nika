@@ -755,6 +755,11 @@ fn doctor_reads_past_an_unreadable_file() {
 }
 
 #[test]
+fn doctor_reads_past_a_file_that_is_not_text() {
+    doctor_reads_past(crate::detect::hazards::Hazard::NotText);
+}
+
+#[test]
 fn doctor_reads_past_a_link_to_dev_zero() {
     doctor_reads_past(crate::detect::hazards::Hazard::DevZeroLink);
 }

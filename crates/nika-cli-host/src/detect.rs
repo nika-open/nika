@@ -224,6 +224,7 @@ pub(crate) mod hazards {
         Directory,
         Empty,
         Unreadable,
+        NotText,
         DevZeroLink,
         Fifo,
         Oversized,
@@ -247,6 +248,7 @@ pub(crate) mod hazards {
                         return None;
                     }
                 }
+                Self::NotText => std::fs::write(path, [0xff, 0xfe]).expect("bytes"),
                 Self::DevZeroLink => std::os::unix::fs::symlink("/dev/zero", path).expect("link"),
                 Self::Fifo => {
                     nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU).expect("fifo");
@@ -260,6 +262,7 @@ pub(crate) mod hazards {
                 Self::Directory | Self::DevZeroLink | Self::Fifo => "not a regular file",
                 Self::Empty => "malformed JSON",
                 Self::Unreadable => "Permission denied",
+                Self::NotText => "not UTF-8 text",
                 Self::Oversized => "larger than 4 MiB",
             })
         }
@@ -410,17 +413,11 @@ mod tests {
         let full = dir.path().join("full.json");
         std::fs::write(&full, " ".repeat(MAX_CONFIG_BYTES)).expect("seed");
         assert_eq!(read(&full).map(|text| text.len()), Ok(MAX_CONFIG_BYTES));
-        let binary = dir.path().join("binary.json");
-        std::fs::write(&binary, [0xff, 0xfe]).expect("seed");
-        assert_eq!(
-            read(&binary),
-            Err(format!("{}: not UTF-8 text", binary.display()))
-        );
-
         for hazard in [
             Hazard::Directory,
             Hazard::Empty,
             Hazard::Unreadable,
+            Hazard::NotText,
             Hazard::DevZeroLink,
             Hazard::Fifo,
             Hazard::Oversized,

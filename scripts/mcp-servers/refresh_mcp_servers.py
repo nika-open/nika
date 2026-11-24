@@ -8,8 +8,11 @@
 #
 # Exit 0 · every entry verified (or written)
 # Exit 2 · environment (the file is unreadable or malformed)
+# Exit 3 · offline: half or more of the probes never reached their registry (DNS, TLS,
+#          timeout, a dropped connection), so nothing is written, not even --json
 # Exit 4 · at least one entry is DEAD (a package or remote its registry says is gone) or
-#          DEPRECATED upstream; nothing is ever removed here, the report names each one
+#          DEPRECATED upstream without `status = "deprecated"` in the data; nothing is ever
+#          removed here, the report names each one
 #
 # The shelf describes third-party products, so its contract is "this exists, according to
 # THIS source, on THIS date". Each entry is probed where it is distributed:
@@ -26,12 +29,16 @@
 # the date it had, so the date is a per-entry measurement, never a batch stamp. The official
 # MCP Registry (registry.modelcontextprotocol.io) is queried as a cross-check: an entry whose
 # package or remote is listed there is reported with the registry's server name. Network
-# failures are UNKNOWN, never DEAD: only an authoritative 404 condemns a package.
+# failures are UNKNOWN, never DEAD: only an authoritative 404 condemns a package. Each probe
+# records the version its registry answered (`version` in the --json report). Text a registry
+# returns (a deprecation message, a version) is stripped of control characters before it is
+# printed or saved.
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
 import datetime
+import http.client
 import json
 import pathlib
 import re
@@ -54,6 +61,13 @@ SOURCES = (
 )
 
 ALIVE, GONE, DEPRECATED, UNKNOWN = "alive", "gone", "deprecated", "unknown"
+NETWORK = "network"  # the detail prefix of a probe that never reached its registry
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
+
+
+def clean(text, limit=200):
+    """Registry text with every control character (ESC, CR, NUL...) folded to one space."""
+    return CONTROL.sub(" ", str(text)).strip()[:limit]
 
 
 # ── probes ─────────────────────────────────────────────────────────────────────────────────
@@ -84,10 +98,10 @@ def probe_npm(pkg):
         return GONE, "npm 404"
     if status != 200 or not isinstance(doc, dict):
         return UNKNOWN, f"npm HTTP {status}"
-    version = doc.get("version", "?")
+    version = clean(doc.get("version", "?"), 40)
     if doc.get("deprecated"):
-        return DEPRECATED, f"npm {version} deprecated: {str(doc['deprecated'])[:120]}"
-    return ALIVE, f"npm {version}"
+        return DEPRECATED, f"npm {version} deprecated: {clean(doc['deprecated'], 160)}", version
+    return ALIVE, f"npm {version}", version
 
 
 def probe_pypi(pkg):
@@ -96,7 +110,8 @@ def probe_pypi(pkg):
         return GONE, "pypi 404"
     if status != 200 or not isinstance(doc, dict):
         return UNKNOWN, f"pypi HTTP {status}"
-    return ALIVE, f"pypi {doc.get('info', {}).get('version', '?')}"
+    version = clean((doc.get("info") or {}).get("version", "?"), 40)
+    return ALIVE, f"pypi {version}", version
 
 
 def probe_oci(identifier):
@@ -131,7 +146,7 @@ def probe_oci(identifier):
         manifest, "HEAD", headers={"Authorization": f"Bearer {token}", "Accept": accept}
     )
     if status == 200:
-        return ALIVE, f"oci {tag}"
+        return ALIVE, f"oci {tag}", tag
     if status == 404:
         return GONE, f"oci manifest {tag} 404"
     return UNKNOWN, f"oci HTTP {status}"
@@ -166,6 +181,12 @@ def probe_remote(url):
 
 
 def probe_target(kind, ident):
+    """(state, detail, version-or-None) of one package or remote."""
+    state, detail, *version = _probe(kind, ident)
+    return state, detail, (version[0] if version else None)
+
+
+def _probe(kind, ident):
     try:
         if kind == "npm":
             return probe_npm(ident)
@@ -176,8 +197,9 @@ def probe_target(kind, ident):
         if kind == "remote":
             return probe_remote(ident)
         return UNKNOWN, f"{kind}: no online registry"
-    except (OSError, ValueError) as e:  # DNS, TLS, timeout: never a verdict on the package
-        return UNKNOWN, f"{kind} network: {type(e).__name__}"
+    # DNS, TLS, timeout, a dropped or garbled connection: never a verdict on the package
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        return UNKNOWN, f"{NETWORK} {kind}: {type(e).__name__}"
 
 
 def registry_listing(server):
@@ -191,7 +213,7 @@ def registry_listing(server):
         query = urllib.parse.urlencode({"search": term, "limit": 100})
         try:
             status, doc = _request(f"{REGISTRY}?{query}")
-        except (OSError, ValueError):
+        except (OSError, ValueError, http.client.HTTPException):
             return None
         if status != 200 or not isinstance(doc, dict):
             continue
@@ -219,7 +241,7 @@ def targets(server):
 
 def classify(results):
     """One entry's state from its probes: dead beats deprecated beats unknown beats verified."""
-    states = [state for _, _, state, _ in results]
+    states = [r[2] for r in results]
     if GONE in states:
         return "dead"
     if DEPRECATED in states:
@@ -235,9 +257,25 @@ def check_entry(server, with_registry):
     return {
         "id": server["id"],
         "state": classify(results),
-        "probes": [{"kind": k, "target": i, "state": s, "detail": d} for k, i, s, d in results],
+        "status": server.get("status", "current"),
+        "probes": [{"kind": k, "target": i, "state": s, "detail": d, "version": v}
+                   for k, i, s, d, v in results],
         "mcp_registry": listed,
     }
+
+
+def offline(report):
+    """True when half or more of the probes never reached their registry."""
+    probes = [p for r in report for p in r["probes"]]
+    unreached = sum(1 for p in probes if p["detail"].startswith(NETWORK))
+    return bool(probes) and 2 * unreached >= len(probes)
+
+
+def failing(report):
+    """A dead entry, or one deprecated upstream that the data does not mark deprecated."""
+    return any(r["state"] == "dead"
+               or (r["state"] == "deprecated" and r.get("status") != "deprecated")
+               for r in report)
 
 
 # ── write-back ─────────────────────────────────────────────────────────────────────────────
@@ -309,6 +347,13 @@ def run(args):
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         report = list(pool.map(lambda s: check_entry(s, not args.no_registry), servers))
 
+    if offline(report):
+        unreached = sum(1 for r in report for p in r["probes"] if p["detail"].startswith(NETWORK))
+        total = sum(len(r["probes"]) for r in report)
+        print(f"error: offline: {unreached} of {total} probes never reached their registry; "
+              "nothing written", file=sys.stderr)
+        return 3
+
     verified = {r["id"] for r in report if r["state"] == "verified"}
     new_text = stamp(text, verified, today)
     dates = set(re.findall(r'^last_verified = "([0-9-]+)"$', new_text, flags=re.M))
@@ -338,8 +383,7 @@ def run(args):
             print(f"wrote {TARGET.relative_to(ROOT)} · {len(verified)} entries dated {today}")
         else:
             print("no change")
-    bad = any(r["state"] in ("dead", "deprecated") for r in report)
-    return 4 if bad else 0
+    return 4 if failing(report) else 0
 
 
 def selftest():
@@ -356,6 +400,17 @@ def selftest():
     assert classify([("npm", "x", DEPRECATED, ""), ("pypi", "y", UNKNOWN, "")]) == "deprecated"
     assert classify([("npm", "x", GONE, ""), ("pypi", "y", DEPRECATED, "")]) == "dead"
     assert classify([]) == "unknown", "an entry with nothing to probe is never verified"
+    assert clean("ok\x1b[2J\r\nforged\x00") == "ok [2J forged", clean("ok\x1b[2J\r\nforged\x00")
+    net = {"kind": "npm", "target": "x", "state": UNKNOWN, "detail": f"{NETWORK} npm: URLError"}
+    live = {"kind": "npm", "target": "y", "state": ALIVE, "detail": "npm 1.0.0"}
+    assert offline([{"probes": [net, net]}, {"probes": [live]}]), "two of three unreached"
+    assert offline([{"probes": [net]}, {"probes": [live]}]), "half unreached is offline"
+    assert not offline([{"probes": [net]}, {"probes": [live, live]}])
+    assert not offline([]), "an empty shelf is not offline"
+    assert failing([{"state": "dead", "status": "current"}])
+    assert failing([{"state": "deprecated", "status": "current"}]), "an unrecorded deprecation"
+    assert not failing([{"state": "deprecated", "status": "deprecated"}]), "already recorded"
+    assert probe_target("mcpb", "x") == (UNKNOWN, "mcpb: no online registry", None)
     report = [{"id": "a", "state": "verified", "probes": [], "mcp_registry": "io.x/a"},
               {"id": "b", "state": "dead", "probes": [], "mcp_registry": None}]
     replaced = replace_meta(stamped, meta_block(report, {"2026-11-24", "2026-04-14"}, "2026-11-24"))

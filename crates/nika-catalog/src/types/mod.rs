@@ -35,7 +35,7 @@ pub use distribution::{
 };
 pub use embedding::{Embedding, Similarity};
 pub use json_mode::{JsonMode, ParseJsonModeError};
-pub use mcp_server::{McpPricing, McpServer, ToolEffectHints};
+pub use mcp_server::{McpPricing, McpServer, McpStatus, ToolEffectHints};
 #[cfg(feature = "capabilities")]
 pub use modality::{Modality, ParseModalityError};
 pub use model::{

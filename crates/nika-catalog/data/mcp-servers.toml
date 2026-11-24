@@ -543,6 +543,8 @@ description = "CircleCI integration."
 category = "developer"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @circleci/mcp-server-circleci 0.20.0 deprecated (2026-11-24): « Deprecated: use CircleCI's hosted MCP server or CircleCI CLI MCP instead. »"
 tags = ["destructive", "official"]
 
 [[servers.packages]]
@@ -647,6 +649,8 @@ description = "Browserbase integration."
 category = "developer"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @browserbasehq/mcp 3.0.0 deprecated (2026-11-24): « This package is no longer maintained. »"
 tags = ["destructive", "sandbox"]
 
 [[servers.packages]]
@@ -848,6 +852,8 @@ description = "Google Drive integration."
 category = "productivity"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @modelcontextprotocol/server-gdrive 2025.1.14 deprecated (2026-11-24): « Package no longer supported. »"
 tags = ["destructive", "official"]
 
 [[servers.packages]]
@@ -1081,6 +1087,8 @@ description = "E2B integration."
 category = "ai"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @e2b/mcp-server 0.2.3 deprecated (2026-11-24): « Package no longer supported. »"
 tags = ["destructive", "sandbox"]
 
 [[servers.packages]]
@@ -1207,6 +1215,8 @@ category = "marketing"
 pricing = "paid"
 homepage = "https://ahrefs.com/"
 last_verified = "2026-11-24"
+status = "restricted"
+status_note = "Ahrefs allows its hosted endpoint only from the AI tools it supports (Claude, ChatGPT, Copilot Studio, n8n, Le Chat and others): « Using the external MCP endpoint via custom scripts, bridges, or standalone HTTP/JSON-RPC clients is unsupported and not permitted » (docs.ahrefs.com/en/mcp/docs/introduction, 2026-11-24). A workflow's own MCP client is not on that list."
 tags = ["read-only"]
 
 [[servers.packages]]
@@ -1539,6 +1549,8 @@ description = "Dynatrace integration."
 category = "analytics"
 pricing = "paid"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @dynatrace-oss/dynatrace-mcp-server 2.1.2 deprecated (2026-11-24): « Package no longer supported. »"
 tags = ["enterprise", "read-only"]
 
 [[servers.packages]]
@@ -1676,6 +1688,8 @@ description = "Salesforce integration."
 category = "ecommerce"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @salesforce/mcp 0.30.15 deprecated (2026-11-24): « The Salesforce DX MCP Server has been deprecated. »"
 tags = ["destructive", "enterprise"]
 
 [[servers.packages]]
@@ -1882,6 +1896,8 @@ description = "Railway integration."
 category = "devops"
 pricing = "freemium"
 last_verified = "2026-04-14"
+status = "deprecated"
+status_note = "npm marks @railway/mcp-server 0.1.12 deprecated (2026-11-24): « Deprecated: Railway MCP is now bundled into the Railway CLI. Use 'railway mcp'. »"
 tags = ["destructive", "official"]
 
 [[servers.packages]]
@@ -2221,6 +2237,8 @@ required = true
 is_secret = false
 description = "Qdrant server URL (http://host:port)."
 
+# Sources (2026-11-24): developers.intercom.com/docs/guides/mcp, whose table gives the
+# Streamable HTTP endpoint (« Recommended ») and lists /sse as « Legacy SSE (deprecated) ».
 [[servers]]
 id = "intercom"
 aliases = []
@@ -2234,7 +2252,7 @@ tags = ["destructive", "official"]
 
 [[servers.remotes]]
 transport = "streamable-http"
-url = "https://mcp.intercom.com/sse"
+url = "https://mcp.intercom.com/mcp"
 auth = "oauth"
 
 # The image is docker.io/grafana/mcp-grafana (MCP Registry: io.github.grafana/mcp-grafana,
@@ -2293,7 +2311,7 @@ auth = "oauth"
 id = "composio"
 aliases = []
 title = "Composio Connect"
-description = "Composio Connect, a tool hub: one MCP server over 1,000+ apps. COMPOSIO_SEARCH_TOOLS and COMPOSIO_GET_TOOL_SCHEMAS discover tools, COMPOSIO_MULTI_EXECUTE_TOOL runs up to 50 per call and COMPOSIO_MANAGE_CONNECTIONS links the user's accounts. Free tier: 10,000 tool calls a month."
+description = "Composio Connect, a tool hub: one MCP server over 1,500+ apps. COMPOSIO_SEARCH_TOOLS and COMPOSIO_GET_TOOL_SCHEMAS discover tools, COMPOSIO_MULTI_EXECUTE_TOOL runs up to 50 per call and COMPOSIO_MANAGE_CONNECTIONS links the user's accounts. Free tier: 10,000 tool calls a month."
 category = "ai"
 pricing = "freemium"
 homepage = "https://composio.dev/"

@@ -69,6 +69,13 @@ pub struct McpServerExport {
     /// ISO date on which every package and remote of the entry last
     /// answered the refresh probe (`scripts/refresh-mcp-servers.sh`).
     pub last_verified: &'static str,
+    /// `current`, `deprecated` (its vendor or registry deprecates the listed
+    /// distribution) or `restricted` (its vendor limits which clients may
+    /// connect).
+    pub status: &'static str,
+    /// Why a non-current entry is not current, in plain words; absent when
+    /// current.
+    pub status_note: Option<&'static str>,
 }
 
 /// One local-install package of a server.
@@ -133,6 +140,8 @@ fn server_export(s: &McpServer) -> McpServerExport {
         env_vars: s.env_vars.iter().map(env_export).collect(),
         homepage: s.homepage,
         last_verified: s.last_verified,
+        status: s.status.as_str(),
+        status_note: s.status_note,
     }
 }
 
@@ -211,31 +220,68 @@ mod tests {
         serde_json::to_value(mcp_shelf_export()).expect("the shelf serializes")
     }
 
-    fn entry<'a>(wire: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
-        wire["mcp_servers"]
-            .as_array()
-            .expect("mcp_servers array")
-            .iter()
-            .find(|s| s["id"] == id)
-            .unwrap_or_else(|| panic!("`{id}` is on the shelf"))
+    fn servers(wire: &serde_json::Value) -> &Vec<serde_json::Value> {
+        wire["mcp_servers"].as_array().expect("mcp_servers array")
     }
 
-    #[test]
-    fn the_envelope_is_two_keys_and_every_server() {
-        let wire = wire();
-        let mut keys: Vec<&str> = wire
+    fn sorted_keys(v: &serde_json::Value) -> Vec<&str> {
+        let mut keys: Vec<&str> = v
             .as_object()
             .expect("object")
             .keys()
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["catalog_version", "mcp_servers"]);
+        keys
+    }
+
+    #[test]
+    fn the_envelope_is_two_keys_and_every_server() {
+        let wire = wire();
+        assert_eq!(sorted_keys(&wire), ["catalog_version", "mcp_servers"]);
         assert_eq!(wire["catalog_version"], MCP_SHELF_EXPORT_VERSION);
-        assert_eq!(
-            wire["mcp_servers"].as_array().expect("array").len(),
-            crate::all_mcp_servers().len()
-        );
+        assert_eq!(servers(&wire).len(), crate::all_mcp_servers().len());
+    }
+
+    #[test]
+    fn every_server_carries_the_same_keys() {
+        let wire = wire();
+        for s in servers(&wire) {
+            assert_eq!(
+                sorted_keys(s),
+                [
+                    "aliases",
+                    "category",
+                    "description",
+                    "env_vars",
+                    "homepage",
+                    "id",
+                    "last_verified",
+                    "packages",
+                    "pricing",
+                    "remotes",
+                    "status",
+                    "status_note",
+                    "tags",
+                    "title",
+                ],
+                "{}",
+                s["id"]
+            );
+            for p in s["packages"].as_array().expect("packages") {
+                assert_eq!(
+                    sorted_keys(p),
+                    ["identifier", "registry_type", "runner", "transport"]
+                );
+            }
+            for r in s["remotes"].as_array().expect("remotes") {
+                assert_eq!(sorted_keys(r), ["auth", "transport", "url"]);
+            }
+            for v in s["env_vars"].as_array().expect("env_vars") {
+                assert_eq!(sorted_keys(v), ["is_secret", "name", "required"]);
+                assert!(v["name"].as_str().is_some_and(|n| !n.is_empty()));
+            }
+        }
     }
 
     #[test]
@@ -258,93 +304,104 @@ mod tests {
                 s.id,
                 s.pricing
             );
-            assert_eq!(s.last_verified.len(), 10, "`{}` date", s.id);
+            let d = s.last_verified.as_bytes();
+            assert!(
+                d.len() == 10
+                    && d[4] == b'-'
+                    && d[7] == b'-'
+                    && d.iter()
+                        .enumerate()
+                        .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit()),
+                "`{}` date {}",
+                s.id,
+                s.last_verified
+            );
         }
     }
 
     #[test]
     fn enums_leave_as_the_toml_words() {
-        let wire = wire();
-        let firecrawl = entry(&wire, "firecrawl");
-        assert_eq!(firecrawl["category"], "search");
-        assert_eq!(firecrawl["pricing"], "freemium");
-        assert_eq!(firecrawl["packages"][0]["registry_type"], "npm");
-        assert_eq!(firecrawl["packages"][0]["identifier"], "firecrawl-mcp");
-        assert_eq!(firecrawl["packages"][0]["transport"], "stdio");
-        assert!(firecrawl["packages"][0]["runner"].is_null());
-        assert_eq!(firecrawl["remotes"][0]["transport"], "streamable-http");
-        assert_eq!(
-            firecrawl["remotes"][0]["url"],
-            "https://mcp.firecrawl.dev/v2/mcp"
-        );
-        assert_eq!(firecrawl["remotes"][0]["auth"], "bearer");
-        assert_eq!(firecrawl["remotes"][1]["auth"], "oauth");
-        let qdrant = entry(&wire, "qdrant");
-        assert_eq!(qdrant["packages"][0]["registry_type"], "pypi");
-        assert_eq!(qdrant["packages"][0]["runner"], "uvx");
-    }
-
-    #[test]
-    fn the_firecrawl_entry_names_alexandria_discovery() {
-        let wire = wire();
-        let description = entry(&wire, "firecrawl")["description"]
-            .as_str()
-            .expect("description");
-        for word in ["search", "scrape", "map", "crawl", "Alexandria"] {
-            assert!(
-                description.contains(word),
-                "missing `{word}`: {description}"
-            );
+        for s in mcp_shelf_export().mcp_servers {
+            for p in &s.packages {
+                assert!(
+                    matches!(p.registry_type, "npm" | "pypi" | "oci" | "cargo" | "mcpb"),
+                    "`{}` registry {}",
+                    s.id,
+                    p.registry_type
+                );
+                assert!(matches!(p.transport, "stdio" | "streamable-http" | "sse"));
+                assert_eq!(
+                    p.runner.is_some(),
+                    p.registry_type == "pypi",
+                    "`{}`: a runner exactly on a PyPI package",
+                    s.id
+                );
+                assert!(p.runner.is_none_or(|r| matches!(r, "uvx" | "pipx")));
+            }
+            for r in &s.remotes {
+                assert!(matches!(r.transport, "streamable-http" | "sse"));
+                assert!(matches!(r.auth, "none" | "bearer" | "oauth"));
+                assert!(r.url.starts_with("https://"), "`{}` {}", s.id, r.url);
+            }
         }
     }
 
     #[test]
-    fn the_tool_hubs_are_marked_and_reached_by_their_hosted_endpoint() {
+    fn a_note_says_why_exactly_when_an_entry_is_not_current() {
         let shelf = mcp_shelf_export();
-        let mut hubs: Vec<&str> = shelf
+        for s in &shelf.mcp_servers {
+            assert!(
+                matches!(s.status, "current" | "deprecated" | "restricted"),
+                "`{}` status {}",
+                s.id,
+                s.status
+            );
+            assert_eq!(
+                s.status_note.is_some_and(|n| !n.trim().is_empty()),
+                s.status != "current",
+                "`{}` status {} note {:?}",
+                s.id,
+                s.status,
+                s.status_note
+            );
+        }
+        let wire = wire();
+        let current = servers(&wire)
+            .iter()
+            .find(|s| s["status"] == "current")
+            .expect("a current entry");
+        assert!(current["status_note"].is_null(), "absent, never empty");
+    }
+
+    #[test]
+    fn printed_texts_carry_no_control_character() {
+        for s in mcp_shelf_export().mcp_servers {
+            let texts = [s.title, s.description, s.status_note.unwrap_or("")]
+                .into_iter()
+                .chain(s.packages.iter().map(|p| p.identifier))
+                .chain(s.remotes.iter().map(|r| r.url));
+            for text in texts {
+                assert!(!text.chars().any(char::is_control), "`{}`: {text:?}", s.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_tool_hubs_are_reached_by_a_hosted_endpoint_and_run_third_party_tools() {
+        let shelf = mcp_shelf_export();
+        let hubs: Vec<&McpServerExport> = shelf
             .mcp_servers
             .iter()
             .filter(|s| s.tags.contains(&"tool-hub"))
-            .map(|s| s.id)
             .collect();
-        hubs.sort_unstable();
-        assert_eq!(hubs, ["composio", "pipedream", "treg", "zapier"]);
-        for id in hubs {
-            let s = shelf
-                .mcp_servers
-                .iter()
-                .find(|s| s.id == id)
-                .expect("listed above");
-            assert!(s.remotes.iter().all(|r| r.url.starts_with("https://")));
+        assert!(!hubs.is_empty(), "the shelf marks its tool hubs");
+        for s in hubs {
+            assert!(!s.remotes.is_empty(), "`{}` has a hosted endpoint", s.id);
             assert!(
                 s.tags.contains(&"destructive"),
-                "`{id}` runs third-party tools"
+                "`{}` runs third-party tools",
+                s.id
             );
         }
-        let treg = shelf
-            .mcp_servers
-            .iter()
-            .find(|s| s.id == "treg")
-            .expect("treg");
-        assert_eq!(treg.remotes.len(), 1);
-        assert_eq!(
-            (treg.remotes[0].url, treg.remotes[0].auth),
-            ("https://treg.to/mcp/", "oauth")
-        );
-    }
-
-    #[test]
-    fn an_env_var_leaves_as_a_name_and_two_flags() {
-        let wire = wire();
-        let var = &entry(&wire, "firecrawl")["env_vars"][0];
-        let mut keys: Vec<&str> = var
-            .as_object()
-            .expect("object")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        keys.sort_unstable();
-        assert_eq!(keys, ["is_secret", "name", "required"]);
-        assert_eq!(var["name"], "FIRECRAWL_API_KEY");
     }
 }

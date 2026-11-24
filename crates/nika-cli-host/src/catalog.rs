@@ -119,6 +119,8 @@ fn mcp_listing(shelf: &McpShelfExport, theme: Theme) -> String {
     let hosted = servers.iter().filter(|s| !s.remotes.is_empty()).count();
     let packaged = servers.iter().filter(|s| !s.packages.is_empty()).count();
     let stale = servers.iter().filter(|s| s.last_verified != newest).count();
+    let deprecated = servers.iter().filter(|s| s.status == "deprecated").count();
+    let restricted = servers.iter().filter(|s| s.status == "restricted").count();
 
     let mut out = format!(
         "nika catalog --mcp — {n} MCP servers (embedded · offline) · last verified {newest}\n",
@@ -126,7 +128,8 @@ fn mcp_listing(shelf: &McpShelfExport, theme: Theme) -> String {
     );
     let facets = format!(
         "  {hubs} tool hubs · {hosted} hosted · {packaged} with a local package · \
-         {stale} not verified since {oldest} · env var NAMES only, values never read",
+         {stale} not verified since {oldest} · {deprecated} deprecated · {restricted} restricted · \
+         env var NAMES only, values never read",
         hubs = hubs.len(),
     );
     out.push_str(&theme.paint(Role::Dim, &facets));
@@ -146,32 +149,54 @@ fn mcp_listing(shelf: &McpShelfExport, theme: Theme) -> String {
         out.push_str(&mcp_line(s, theme, newest));
     }
     out.push_str(
-        "\nnika catalog --mcp --json → the machine projection (packages · remotes · env var names · last_verified)",
+        "\nnika catalog --mcp --json → the machine projection (packages · remotes · env var names · last_verified · status and its note)",
     );
     out
 }
 
+/// A shelf text as it reaches the terminal: every control character (an
+/// escape sequence, a carriage return) becomes U+FFFD, so an entry can
+/// neither move the cursor nor forge a row. The codegen already refuses
+/// them in the data; this keeps the listing safe on its own.
+fn shown(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        std::borrow::Cow::Owned(
+            text.chars()
+                .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 /// One server row: id, title, category, pricing, how it is reached, env
-/// var names, and its date when the last refresh did not verify it.
+/// var names, its status when not current, and its date when the last
+/// refresh did not verify it.
 fn mcp_line(s: &McpServerExport, theme: Theme, newest: &str) -> String {
     let mut reach: Vec<String> = s
         .packages
         .iter()
-        .map(|p| format!("{} {}", p.registry_type, p.identifier))
+        .map(|p| format!("{} {}", p.registry_type, shown(p.identifier)))
         .collect();
     reach.extend(
         s.remotes
             .iter()
-            .map(|r| format!("remote {} ({})", r.url, r.auth)),
+            .map(|r| format!("remote {} ({})", shown(r.url), r.auth)),
     );
     let env = if s.env_vars.is_empty() {
         "no env".to_owned()
     } else {
         s.env_vars
             .iter()
-            .map(|v| v.name)
+            .map(|v| shown(v.name))
             .collect::<Vec<_>>()
             .join(", ")
+    };
+    let status = if s.status == "current" {
+        String::new()
+    } else {
+        format!(" · {}", s.status.to_ascii_uppercase())
     };
     let date = if s.last_verified == newest {
         String::new()
@@ -183,18 +208,19 @@ fn mcp_line(s: &McpServerExport, theme: Theme, newest: &str) -> String {
         chrome::rail_line(
             theme,
             &format!(
-                " {}{}{}",
-                theme.paint(Role::Strong, &format!("{:<14}", s.id)),
+                " {}{}{}{}",
+                theme.paint(Role::Strong, &format!("{:<14}", shown(s.id))),
                 theme.paint(
                     Role::Dim,
                     &format!(
                         " {} · {} · {} · {} · {env}",
-                        s.title,
+                        shown(s.title),
                         s.category,
                         s.pricing,
                         reach.join(" · ")
                     ),
                 ),
+                theme.paint(Role::Warn, &status),
                 theme.paint(Role::Dim, &date),
             ),
         )
@@ -687,9 +713,48 @@ mod tests {
             "remotes",
             "env_vars",
             "last_verified",
+            "status",
+            "status_note",
         ] {
             assert!(firecrawl.get(key).is_some(), "firecrawl missing `{key}`");
         }
+        for s in servers {
+            let status = s["status"].as_str().expect("a status word");
+            assert!(matches!(status, "current" | "deprecated" | "restricted"));
+            assert_eq!(
+                s["status_note"].is_string(),
+                status != "current",
+                "{}",
+                s["id"]
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_current_server_says_so_on_its_row() {
+        let shelf = mcp_shelf_export();
+        let text = mcp_listing(&shelf, PLAIN);
+        for s in &shelf.mcp_servers {
+            let row = text
+                .lines()
+                .find(|l| l.contains(&format!(" {:<14} ", s.id)))
+                .unwrap_or_else(|| panic!("`{}` has a row", s.id));
+            let word = format!(" · {}", s.status.to_ascii_uppercase());
+            assert_eq!(row.contains(&word), s.status != "current", "{row}");
+        }
+    }
+
+    #[test]
+    fn a_control_character_never_reaches_the_terminal() {
+        let shelf = mcp_shelf_export();
+        let mut s = shelf.mcp_servers[0].clone();
+        s.title = "ok\u{1b}[2J\rforged";
+        let row = mcp_line(&s, PLAIN, s.last_verified);
+        assert!(
+            !row.trim_end_matches('\n').chars().any(char::is_control),
+            "{row:?}"
+        );
+        assert!(row.contains("ok\u{fffd}[2J\u{fffd}forged"), "{row:?}");
     }
 
     #[test]

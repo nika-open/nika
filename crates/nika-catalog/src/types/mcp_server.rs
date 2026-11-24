@@ -9,6 +9,34 @@
 
 use super::{Category, EnvVarSpec, McpPackage, McpRemote};
 
+/// Whether a shelf entry is safe to recommend as listed.
+///
+/// `#[non_exhaustive]` for additive variants; a non-current entry carries a
+/// [`McpServer::status_note`] that says why, in plain words.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum McpStatus {
+    /// Its distribution answered the last refresh probe and nothing restricts its use.
+    Current,
+    /// Its vendor or registry marks the listed distribution deprecated.
+    Deprecated,
+    /// Its vendor restricts which clients may connect: the note says how.
+    Restricted,
+}
+
+impl McpStatus {
+    /// The TOML and wire word: `current`, `deprecated` or `restricted`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Deprecated => "deprecated",
+            Self::Restricted => "restricted",
+        }
+    }
+}
+
 /// Pricing model for an MCP server's underlying service.
 ///
 /// Mirrors the small, closed set used by CLI UX (`nika mcp list` colouring,
@@ -101,6 +129,10 @@ pub struct McpServer {
     pub pricing: McpPricing,
     /// ISO date (YYYY-MM-DD) of the last `xtask verify-catalog` success.
     pub last_verified: &'static str,
+    /// Whether the entry is current, deprecated or restricted.
+    pub status: McpStatus,
+    /// Why a non-current entry is not current, in plain words; `None` when current.
+    pub status_note: Option<&'static str>,
     /// Typed tags describing MCP server capabilities and permissioning.
     /// Every MCP server MUST carry `Tag::ReadOnly` XOR `Tag::Destructive`.
     /// Sorted + deduplicated (enforced by build.rs assertion).
@@ -135,6 +167,8 @@ impl McpServer {
         category: Category,
         pricing: McpPricing,
         last_verified: &'static str,
+        status: McpStatus,
+        status_note: Option<&'static str>,
         tags: &'static [crate::types::Tag],
         extra_tags: &'static [&'static str],
         effect_hints: &'static [ToolEffectHints],
@@ -151,6 +185,8 @@ impl McpServer {
             category,
             pricing,
             last_verified,
+            status,
+            status_note,
             tags,
             extra_tags,
             effect_hints,
@@ -186,6 +222,8 @@ mod tests {
             category: Category::Anthropic,
             pricing: McpPricing::Free,
             last_verified: "2026-04-14",
+            status: McpStatus::Current,
+            status_note: None,
             tags: &[],
             extra_tags: &[],
             effect_hints: &[],
@@ -193,6 +231,9 @@ mod tests {
         assert_eq!(s.id, "filesystem");
         assert_eq!(s.category, Category::Anthropic);
         assert!(s.effect_hints.is_empty(), "no manifest vendored");
+        assert_eq!(s.status.as_str(), "current");
+        assert_eq!(McpStatus::Deprecated.as_str(), "deprecated");
+        assert_eq!(McpStatus::Restricted.as_str(), "restricted");
     }
 
     #[test]

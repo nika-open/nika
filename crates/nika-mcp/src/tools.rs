@@ -251,13 +251,20 @@ fn learn_tools() -> Value {
                             shelf instead (same `catalog_version: 1` envelope, key \
                             `mcp_servers`): tool hubs (tag `tool-hub`) and vendor \
                             servers, each with its packages, hosted remotes (transport \
-                            and auth), env-var NAMES and `last_verified` date.",
+                            and auth), env-var NAMES, `last_verified` date and `status` \
+                            (`current`, `deprecated` or `restricted`, with a \
+                            `status_note` saying why). Add `query` to keep only the \
+                            servers whose id, alias, title, category or tag contains it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "mcp": {
                         "type": "boolean",
                         "description": "Return the MCP server shelf instead of the provider/model catalog."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "With mcp: true, keep only the servers whose id, alias, title, category or tag contains this text (case-insensitive)."
                     }
                 }
             }
@@ -718,8 +725,14 @@ fn inspect(args: &Value) -> Result<String, String> {
 ///
 /// With `mcp: true` it serves the MCP server shelf instead: the SAME
 /// payload `nika catalog --mcp --json` emits (built by
-/// `nika-catalog::mcp_export`).
+/// `nika-catalog::mcp_export`), written compact because a model reads it,
+/// and narrowed by `query` when one is given.
 fn catalog_payload(args: &Value) -> Result<String, String> {
+    let query = match args.get("query") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(q)) => Some(q.trim().to_ascii_lowercase()),
+        Some(other) => return Err(format!("`query` must be a string, got {other}")),
+    };
     match args.get("mcp") {
         None | Some(Value::Bool(false) | Value::Null) => {
             let export = nika_catalog::export::catalog_export()
@@ -728,11 +741,24 @@ fn catalog_payload(args: &Value) -> Result<String, String> {
                 .map_err(|e| format!("catalog projection failed: {e}"))
         }
         Some(Value::Bool(true)) => {
-            serde_json::to_string_pretty(&nika_catalog::mcp_export::mcp_shelf_export())
-                .map_err(|e| format!("MCP shelf projection failed: {e}"))
+            let mut shelf = nika_catalog::mcp_export::mcp_shelf_export();
+            if let Some(q) = query.as_deref().filter(|q| !q.is_empty()) {
+                shelf.mcp_servers.retain(|s| shelf_match(s, q));
+            }
+            serde_json::to_string(&shelf).map_err(|e| format!("MCP shelf projection failed: {e}"))
         }
         Some(other) => Err(format!("`mcp` must be a boolean, got {other}")),
     }
+}
+
+/// Whether one shelf server answers a lowercase `query`: a substring of its
+/// id, an alias, its title, its category or a tag, ignoring ASCII case.
+fn shelf_match(s: &nika_catalog::mcp_export::McpServerExport, query: &str) -> bool {
+    std::iter::once(s.id)
+        .chain(s.aliases.iter().copied())
+        .chain([s.title, s.category])
+        .chain(s.tags.iter().copied())
+        .any(|text| text.to_ascii_lowercase().contains(query))
 }
 
 /// `nika_tools` — the versioned builtin-tool projection: the SAME payload

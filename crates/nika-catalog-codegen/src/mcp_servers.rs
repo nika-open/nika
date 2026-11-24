@@ -43,6 +43,13 @@ pub struct McpServerEntry {
     #[serde(default)]
     pub homepage: Option<String>,
     pub last_verified: String,
+    /// `current` (the default), `deprecated` or `restricted`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Why a non-current entry is not current; required exactly when the
+    /// status is not `current`.
+    #[serde(default)]
+    pub status_note: Option<String>,
     #[serde(default)]
     pub packages: Vec<PackageEntry>,
     #[serde(default)]
@@ -189,6 +196,8 @@ fn validate_servers(servers: &[McpServerEntry], path: &Path) -> Result<(), Codeg
         }
         validate_category(&s.category, &s.id)
             .map_err(|r| CodegenError::schema_validation(&ctx, r))?;
+        validate_status(s).map_err(|r| CodegenError::schema_validation(&ctx, r))?;
+        validate_printable(s).map_err(|r| CodegenError::schema_validation(&ctx, r))?;
         validate_pricing(&s.pricing, &s.id)
             .map_err(|r| CodegenError::schema_validation(&ctx, r))?;
         validate_tags(&s.tags, &s.id).map_err(|r| CodegenError::schema_validation(&ctx, r))?;
@@ -227,6 +236,12 @@ fn validate_servers(servers: &[McpServerEntry], path: &Path) -> Result<(), Codeg
             }
         }
         for r in &s.remotes {
+            if !r.url.starts_with("https://") {
+                return Err(CodegenError::schema_validation(
+                    ctx,
+                    format!("server {:?}: remote url {:?} is not https://", s.id, r.url),
+                ));
+            }
             validate_transport(&r.transport, &s.id)
                 .map_err(|reason| CodegenError::schema_validation(&ctx, reason))?;
             validate_auth(&r.auth, &s.id)
@@ -263,6 +278,60 @@ fn assert_ascii_key(kind: &str, s: &str) -> Result<(), String> {
     }
     if s.is_empty() {
         return Err(format!("{kind} is empty"));
+    }
+    Ok(())
+}
+
+/// `status` is `current` (or absent), `deprecated` or `restricted`, and a
+/// note says why exactly when it is not current.
+fn validate_status(s: &McpServerEntry) -> Result<(), String> {
+    let status = s.status.as_deref().unwrap_or("current");
+    if !matches!(status, "current" | "deprecated" | "restricted") {
+        return Err(format!(
+            "server {:?}: unknown status {status:?} (expected current, deprecated or restricted)",
+            s.id
+        ));
+    }
+    let noted = s
+        .status_note
+        .as_deref()
+        .is_some_and(|n| !n.trim().is_empty());
+    match (status, noted) {
+        ("current", true) => Err(format!(
+            "server {:?}: a current entry carries no status_note",
+            s.id
+        )),
+        ("deprecated" | "restricted", false) => Err(format!(
+            "server {:?}: a {status} entry needs a status_note saying why",
+            s.id
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The texts a terminal prints (title, description, status note, package
+/// identifiers, remote urls) carry no control character: an entry cannot
+/// move the cursor, clear the screen or forge a line of output.
+fn validate_printable(s: &McpServerEntry) -> Result<(), String> {
+    let texts = [
+        ("title", s.title.as_str()),
+        ("description", s.description.as_str()),
+        ("status_note", s.status_note.as_deref().unwrap_or("")),
+    ]
+    .into_iter()
+    .chain(
+        s.packages
+            .iter()
+            .map(|p| ("identifier", p.identifier.as_str())),
+    )
+    .chain(s.remotes.iter().map(|r| ("url", r.url.as_str())));
+    for (field, text) in texts {
+        if text.chars().any(char::is_control) {
+            return Err(format!(
+                "server {:?}: {field} {text:?} contains a control character",
+                s.id
+            ));
+        }
     }
     Ok(())
 }
@@ -456,6 +525,16 @@ fn emit_server(out: &mut String, s: &McpServerEntry) {
         pricing_variant(&s.pricing)
     );
     let _ = writeln!(out, "        last_verified: {},", rstr(&s.last_verified));
+    let _ = writeln!(
+        out,
+        "        status: crate::types::McpStatus::{},",
+        status_variant(s.status.as_deref())
+    );
+    let _ = writeln!(
+        out,
+        "        status_note: {},",
+        opt_rstr(s.status_note.as_deref())
+    );
     let _ = writeln!(out, "        tags: {},", tags_slice_expr(&s.tags));
     let _ = writeln!(
         out,
@@ -464,6 +543,15 @@ fn emit_server(out: &mut String, s: &McpServerEntry) {
     );
     write_effect_hints(out, &s.effect_hints);
     let _ = writeln!(out, "    }},");
+}
+
+/// The `McpStatus` variant of a validated status word.
+fn status_variant(status: Option<&str>) -> &'static str {
+    match status {
+        Some("deprecated") => "Deprecated",
+        Some("restricted") => "Restricted",
+        _ => "Current",
+    }
 }
 
 /// Per-tool hints in `BTreeMap` order (sorted by tool name) so emission
@@ -690,6 +778,8 @@ mod tests {
             pricing: "free".to_string(),
             homepage: None,
             last_verified: "2026-01-01".to_string(),
+            status: None,
+            status_note: None,
             packages: vec![PackageEntry {
                 registry_type: "npm".to_string(),
                 identifier: "demo-pkg".to_string(),
@@ -803,6 +893,71 @@ mod tests {
         let err = validate_servers(&[s], Path::new("/x")).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("no packages and no remotes"), "got: {msg}");
+    }
+
+    #[test]
+    fn validate_servers_refuses_a_plain_http_remote_and_control_characters() {
+        let mut s = fixture_one_server();
+        s.remotes.push(RemoteEntry {
+            transport: "streamable-http".to_string(),
+            url: "http://mcp.example/mcp".to_string(),
+            auth: "none".to_string(),
+        });
+        let msg = format!("{}", validate_servers(&[s], Path::new("/x")).unwrap_err());
+        assert!(msg.contains("is not https://"), "got: {msg}");
+        for field in ["title", "description", "identifier", "url", "status_note"] {
+            let mut s = fixture_one_server();
+            s.remotes.push(RemoteEntry {
+                transport: "streamable-http".to_string(),
+                url: "https://mcp.example/mcp".to_string(),
+                auth: "none".to_string(),
+            });
+            let forged = "ok\u{1b}[2Jforged".to_string();
+            match field {
+                "title" => s.title = forged,
+                "description" => s.description = forged,
+                "identifier" => s.packages[0].identifier = forged,
+                "url" => s.remotes[0].url = format!("https://mcp.example/{forged}"),
+                _ => {
+                    s.status = Some("deprecated".to_string());
+                    s.status_note = Some(forged);
+                }
+            }
+            let msg = format!("{}", validate_servers(&[s], Path::new("/x")).unwrap_err());
+            assert!(
+                msg.contains(field) && msg.contains("control character"),
+                "{field}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_servers_needs_a_note_exactly_when_not_current() {
+        let ok = |status: Option<&str>, note: Option<&str>| {
+            let mut s = fixture_one_server();
+            s.status = status.map(str::to_string);
+            s.status_note = note.map(str::to_string);
+            validate_servers(&[s], Path::new("/x")).map_err(|e| e.to_string())
+        };
+        assert!(ok(None, None).is_ok());
+        assert!(ok(Some("current"), None).is_ok());
+        assert!(ok(Some("deprecated"), Some("npm marks it deprecated")).is_ok());
+        assert!(ok(Some("restricted"), Some("supported clients only")).is_ok());
+        let err = ok(Some("current"), Some("why")).unwrap_err();
+        assert!(err.contains("carries no status_note"), "{err}");
+        let err = ok(Some("restricted"), None).unwrap_err();
+        assert!(err.contains("needs a status_note"), "{err}");
+        let err = ok(Some("gone"), Some("why")).unwrap_err();
+        assert!(err.contains("unknown status"), "{err}");
+        let mut s = fixture_one_server();
+        s.status = Some("restricted".to_string());
+        s.status_note = Some("supported clients only".to_string());
+        let src = generate_mcp_servers_rs(&[s]);
+        assert!(
+            src.contains("status: crate::types::McpStatus::Restricted,"),
+            "{src}"
+        );
+        assert!(src.contains("status_note: Some("), "{src}");
     }
 
     #[test]

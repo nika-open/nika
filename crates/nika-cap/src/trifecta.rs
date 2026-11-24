@@ -29,9 +29,13 @@
 //! [`crate::HUMAN_GATE_TOOL`] carrying NO `default:` arg (a default lets
 //! the run proceed unattended; the Rule of Two escape is the HUMAN
 //! decision, not a scripted fallback). **Dominance**, not mere ancestry: a
-//! gate a sibling branch bypasses mitigates nothing. One violation per
-//! ungated tainted egress task, message opening with the NEP's verbatim
-//! « lethal trifecta complete · human gate required ».
+//! gate a sibling branch bypasses mitigates nothing. A `mode: choice` gate
+//! answers with a string, not a yes: it counts only before an egress task
+//! whose own `when:` tests that answer
+//! ([`TrifectaSubject::answer_tested_by`]), since a task that merely waits
+//! on it runs whichever answer is picked. One violation per ungated tainted
+//! egress task, message opening with the NEP's verbatim « lethal trifecta
+//! complete · human gate required ».
 //!
 //! The judge is pure L0 (the same shape the dead `policy_violations`
 //! set): it
@@ -92,6 +96,13 @@ pub struct TrifectaSubject {
     /// egress when approving its pin (`nika mcp approve --sends-out`): the
     /// declaration arms leg ③ where `permits.net.http` cannot see it.
     pub declared_egress: bool,
+    /// For a gate whose answer is a string rather than a typed yes (a
+    /// `mode: choice` prompt): the subjects whose own `when:` tests that
+    /// answer (indices into the same slice). The judge credits such a gate
+    /// only before an egress task listed here: one that merely waits on the
+    /// gate runs whichever answer is picked. `None`: a gate credited wherever
+    /// it dominates (a confirm, whose « no » the consent lane judges).
+    pub answer_tested_by: Option<Vec<usize>>,
     /// Direct predecessors (indices into the same subject slice).
     pub parents: Vec<usize>,
 }
@@ -110,8 +121,30 @@ impl TrifectaSubject {
             ingress_source: false,
             declared_private_read: false,
             declared_egress: false,
+            answer_tested_by: None,
             parents: Vec::new(),
         }
+    }
+
+    /// Mark the subject a gate whose answer is a string (a `mode: choice`
+    /// prompt) and list the subjects whose `when:` tests that answer (the
+    /// projection reads the guards; the judge credits the gate only before
+    /// those).
+    #[must_use]
+    pub fn with_answer_tested_by(mut self, tested_by: Vec<usize>) -> Self {
+        self.answer_tested_by = Some(tested_by);
+        self
+    }
+
+    /// Whether this subject, a blocking gate, is credited before `sink`:
+    /// every such gate where it dominates, a choice gate only where `sink`
+    /// tests its answer.
+    fn credits(&self, sink: usize) -> bool {
+        self.human_gate
+            && self
+                .answer_tested_by
+                .as_ref()
+                .is_none_or(|tested| tested.contains(&sink))
     }
 
     /// Mark the subject a DEFAULTED prompt (the projection sets it; the
@@ -444,52 +477,19 @@ pub fn trifecta_verdict(
         // whether that gate is real.
         let gate = dom[i]
             .iter()
-            .find_map(|&g| subjects.get(g).filter(|t| t.human_gate).map(|t| &t.id));
-        if let Some(gate) = gate {
-            mitigations.push(TrifectaMitigation {
+            .find_map(|&g| subjects.get(g).filter(|t| t.credits(i)).map(|t| &t.id));
+        match gate {
+            Some(gate) => mitigations.push(TrifectaMitigation {
                 sink: s.id.clone(),
                 gate: gate.clone(),
-            });
-        }
-        if gate.is_none() {
-            let source = witness.and_then(|w| w.source.clone());
-            // The dominance rule, EXPLAINED (user gauntlet 2026-07-31 ·
-            // G-07: the printed fix applied verbatim returned the finding
-            // byte-identical, zero delta, no rule named). Two teaching
-            // arms, one placement law: a gate parked next to the sink
-            // cannot dominate it — the data edges feeding the sink from
-            // pre-gate tasks are paths too. Upstream of the ingress,
-            // EVERY path (order and data alike) crosses the gate.
-            let why = bypass_note(&dom, subjects, i)
-                .or_else(|| defaulted_gate_note(subjects))
-                .unwrap_or_else(|| {
-                    format!(
-                        "no blocking `invoke: {}` dominates every path to it",
-                        crate::HUMAN_GATE_TOOL
-                    )
-                });
-            let legs = leg_reasons(permits, subjects);
-            let entries = join_names(&entry_ancestors(subjects, i));
-            out.push(TrifectaViolation {
-                task: s.id.clone(),
-                detail: format!(
-                    "lethal trifecta complete · human gate required — untrusted content from \
-                     `{}` reaches egress task `{}` while private read + untrusted ingress + \
-                     external egress are all permitted ({legs}), and {why} · fix: a blocking \
-                     `invoke: {}` must dominate EVERY path to `{}`, data edges (`with:`) \
-                     included — place it upstream of {entries} (grant `{}` in `permits.tools` · \
-                     bind its answer into the effect with `with:` · gate the effect with \
-                     `when:`), then every path to `{}`, order and data edges alike, crosses \
-                     it (NEP-0002 · the Rule of Two as a check)",
-                    source.as_deref().unwrap_or("<ingress>"),
-                    s.id,
-                    crate::HUMAN_GATE_TOOL,
-                    s.id,
-                    crate::HUMAN_GATE_TOOL,
-                    s.id,
-                ),
-                source,
-            });
+            }),
+            None => out.push(refusal(
+                permits,
+                subjects,
+                &dom,
+                i,
+                witness.and_then(|w| w.source.clone()),
+            )),
         }
     }
     TrifectaVerdict {
@@ -497,6 +497,93 @@ pub fn trifecta_verdict(
         mitigations,
         armed: true,
     }
+}
+
+/// The refusal of the tainted egress task `sink` no credited gate
+/// dominates: the NEP's sentence, the legs, WHY no gate counts, the fix.
+fn refusal(
+    permits: &Permits,
+    subjects: &[TrifectaSubject],
+    dom: &[BTreeSet<usize>],
+    sink: usize,
+    source: Option<String>,
+) -> TrifectaViolation {
+    let id = subjects.get(sink).map_or("<sink>", |s| s.id.as_str());
+    // A choice gate that dominates the sink and is not credited there: the
+    // why and the fix are its own (the placement is right, the guard is
+    // missing), never the « no gate dominates » clause it would contradict.
+    let untested = dom
+        .get(sink)
+        .into_iter()
+        .flatten()
+        .filter_map(|&g| subjects.get(g))
+        .find(|g| g.human_gate && !g.credits(sink));
+    // The dominance rule, EXPLAINED (user gauntlet 2026-07-31 · G-07: the
+    // printed fix applied verbatim returned the finding byte-identical,
+    // zero delta, no rule named). Two teaching arms, one placement law: a
+    // gate parked next to the sink cannot dominate it — the data edges
+    // feeding the sink from pre-gate tasks are paths too. Upstream of the
+    // ingress, EVERY path (order and data alike) crosses the gate.
+    let why = untested
+        .map(|gate| untested_answer_note(&gate.id, id))
+        .or_else(|| bypass_note(dom, subjects, sink))
+        .or_else(|| defaulted_gate_note(subjects))
+        .unwrap_or_else(|| {
+            format!(
+                "no blocking `invoke: {}` dominates every path to it",
+                crate::HUMAN_GATE_TOOL
+            )
+        });
+    let fix = untested.map_or_else(
+        || {
+            let entries = join_names(&entry_ancestors(subjects, sink));
+            format!(
+                "a blocking `invoke: {}` must dominate EVERY path to `{id}`, data edges \
+                 (`with:`) included — place it upstream of {entries} (grant `{}` in \
+                 `permits.tools` · bind its answer into the effect with `with:` · gate the \
+                 effect with `when:`), then every path to `{id}`, order and data edges alike, \
+                 crosses it",
+                crate::HUMAN_GATE_TOOL,
+                crate::HUMAN_GATE_TOOL,
+            )
+        },
+        |gate| untested_answer_fix(&gate.id, id),
+    );
+    let legs = leg_reasons(permits, subjects);
+    TrifectaViolation {
+        task: id.to_owned(),
+        detail: format!(
+            "lethal trifecta complete · human gate required — untrusted content from `{}` \
+             reaches egress task `{id}` while private read + untrusted ingress + external \
+             egress are all permitted ({legs}), and {why} · fix: {fix} (NEP-0002 · the Rule of \
+             Two as a check)",
+            source.as_deref().unwrap_or("<ingress>"),
+        ),
+        source,
+    }
+}
+
+/// WHY a choice gate that dominates the sink does not count there: its
+/// answer is a string, not a yes, and the sink's own guard does not test it.
+fn untested_answer_note(gate: &str, sink: &str) -> String {
+    format!(
+        "the choice gate `{gate}` dominates `{sink}`, but `{sink}` does not test its answer: \
+         a choice is a string, not a yes, and unless the `when:` of `{sink}` reads \
+         `tasks.{gate}.output` through `with:` and some choice makes it false, `{sink}` runs \
+         whichever answer is picked, the one that declines included"
+    )
+}
+
+/// The repair for [`untested_answer_note`]: the effect tests the answer, or
+/// the gate becomes a confirm whose « no » the consent lane judges.
+fn untested_answer_fix(gate: &str, sink: &str) -> String {
+    format!(
+        "test the answer in the `when:` of `{sink}` (`with: {{ pick: \"${{{{ \
+         tasks.{gate}.output }}}}\" }}` + `when: \"${{{{ with.pick == '<the choice that \
+         approves it>' }}}}\"`), so `{sink}` runs only on that choice, or make `{gate}` a \
+         `mode: confirm` gate whose yes `{sink}` tests (bound as `go`: `when: \"${{{{ with.go \
+         == true }}}}\"` · NIKA-SEC-014 refuses an effect a « no » reaches)"
+    )
 }
 
 /// Dominators over the derived DAG with a virtual root: dom(root)={root},
@@ -649,6 +736,68 @@ mod tests {
         p.net = None;
         let v = trifecta_verdict(&p, &subjects, &witnesses, &topo(&subjects));
         assert!(v.violations.is_empty() && v.mitigations.is_empty());
+    }
+
+    /// A choice gate is credited only before the egress tasks that test its
+    /// answer: fetch → pick (a choice) → send (tests it) · copy (waits only).
+    /// `send` is cleared by `pick`; `copy` is refused, the note naming the
+    /// gate that dominates it and the guard it lacks, never « no gate ».
+    #[test]
+    fn a_choice_gate_is_credited_only_where_its_answer_is_tested() {
+        let mut subjects = vec![
+            TrifectaSubject::new("fetch".to_owned(), false, false).with_ingress_source(true),
+            TrifectaSubject::new("pick".to_owned(), false, true).with_answer_tested_by(vec![2]),
+            TrifectaSubject::new("send".to_owned(), true, false),
+            TrifectaSubject::new("copy".to_owned(), true, false),
+        ];
+        subjects[1].parents = vec![0];
+        subjects[2].parents = vec![1];
+        subjects[3].parents = vec![1];
+        let tainted = TaintWitness::new(true, Some("fetch".to_owned()));
+        let witnesses = vec![
+            TaintWitness::clean(),
+            TaintWitness::clean(),
+            tainted.clone(),
+            tainted,
+        ];
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert_eq!(
+            v.mitigations,
+            vec![TrifectaMitigation {
+                sink: "send".to_owned(),
+                gate: "pick".to_owned(),
+            }]
+        );
+        let refused: Vec<&str> = v.violations.iter().map(|x| x.task.as_str()).collect();
+        assert_eq!(refused, ["copy"]);
+        let d = &v.violations[0].detail;
+        for part in [
+            "the choice gate `pick` dominates `copy`, but `copy` does not test its answer",
+            "test the answer in the `when:` of `copy`",
+            "`mode: confirm`",
+        ] {
+            assert!(d.contains(part), "missing `{part}`: {d}");
+        }
+        assert!(!d.contains("dominates every path to it"), "{d}");
+        assert!(
+            !d.contains("place it upstream of"),
+            "the placement is right, the guard is missing: {d}"
+        );
+
+        // The same gate with no tested sink clears nothing; listed for both,
+        // it clears both, exactly as a confirm does.
+        subjects[1].answer_tested_by = Some(Vec::new());
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert!(v.mitigations.is_empty(), "{:?}", v.mitigations);
+        assert_eq!(v.violations.len(), 2);
+        subjects[1].answer_tested_by = Some(vec![2, 3]);
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert!(v.violations.is_empty(), "{:?}", v.violations);
+        assert_eq!(v.mitigations.len(), 2);
+        subjects[1].answer_tested_by = None;
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert!(v.violations.is_empty(), "{:?}", v.violations);
+        assert_eq!(v.mitigations.len(), 2);
     }
 
     /// The violations half, for batteries whose subject is the refusal.

@@ -526,7 +526,12 @@ fn security_fix_hint(code: &str) -> Option<&'static str> {
              Then bind its answer with `with:` into each effect that runs \
              after it, a fetch included, and gate that effect with `when:`: \
              NIKA-SEC-014 refuses an effect it can prove runs on a « no » \
-             to a confirm gate",
+             to a confirm gate. A `mode: choice` gate answers with a string, \
+             not a yes: it counts only before an effect whose own `when:` \
+             tests that answer (`when: ${{ with.pick == 'send' }}` on a \
+             `with:` binding of its output), and an effect that only waits \
+             on it runs whichever answer is picked, so it is refused as if \
+             no gate stood there",
         ),
         _ => None,
     }
@@ -825,6 +830,9 @@ mod tests {
             "into each effect that runs after it, a fetch included",
             "gate that effect with `when:`",
             "NIKA-SEC-014 refuses an effect it can prove runs on a « no » to a confirm gate",
+            "A `mode: choice` gate answers with a string, not a yes",
+            "it counts only before an effect whose own `when:` tests that answer",
+            "an effect that only waits on it runs whichever answer is picked",
         ] {
             assert!(cli.text.contains(fact), "`{fact}` missing:\n{}", cli.text);
         }

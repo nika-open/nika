@@ -885,6 +885,7 @@ impl<T> core::convert::From<T> for nika_cap::TrifectaMitigation
 pub fn nika_cap::TrifectaMitigation::from(t: T) -> T
 impl<T> serde_core::de::DeserializeOwned for nika_cap::TrifectaMitigation where T: for<'de> serde_core::de::Deserialize<'de>
 #[non_exhaustive] pub struct nika_cap::TrifectaSubject
+pub nika_cap::TrifectaSubject::answer_tested_by: core::option::Option<alloc::vec::Vec<usize>>
 pub nika_cap::TrifectaSubject::declared_egress: bool
 pub nika_cap::TrifectaSubject::declared_private_read: bool
 pub nika_cap::TrifectaSubject::defaulted_gate: bool
@@ -895,6 +896,7 @@ pub nika_cap::TrifectaSubject::ingress_source: bool
 pub nika_cap::TrifectaSubject::parents: alloc::vec::Vec<usize>
 impl nika_cap::TrifectaSubject
 pub fn nika_cap::TrifectaSubject::new(id: alloc::string::String, egress_capable: bool, human_gate: bool) -> Self
+pub fn nika_cap::TrifectaSubject::with_answer_tested_by(self, tested_by: alloc::vec::Vec<usize>) -> Self
 pub fn nika_cap::TrifectaSubject::with_declared_roles(self, private_read: bool, egress: bool) -> Self
 pub fn nika_cap::TrifectaSubject::with_defaulted_gate(self, defaulted_gate: bool) -> Self
 pub fn nika_cap::TrifectaSubject::with_ingress_source(self, ingress_source: bool) -> Self

@@ -17,9 +17,24 @@ secrets), proven after it runs (hash-chained trace).
   every X, watch-then-act)
 - anything with a spend concern, an approval step, or an audit need
 - converting an existing script/CI job that wraps AI or HTTP plumbing
+- a fan-out over many items in parallel: pages, locales, files, images,
+  tickets (`for_each` with a bounded pool)
+- media pipelines: images, edits, composition, charts, speech
+- comparing several models on the same input
+- parallel agent seats (Codex or Claude Code over ACP) working on many
+  items
+- crawling and research across sources
+- watchers that act on change, with state kept between runs
+- reconciliation and data jobs that must be exact (jq, not model
+  arithmetic)
+- anything that must run again, be audited, or be capped
 
 Do NOT reach for it for one-shot questions, interactive exploration,
 or pure code edits.
+
+Two commands start from what exists: `/nika:ideas` reads the project and
+proposes five workflows it would use; `/nika:capture` turns the work just
+done in this conversation into a checked workflow.
 
 ## Choose the relevant skill or bounded role
 

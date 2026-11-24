@@ -1,10 +1,12 @@
 # Evals for the Nika plugin
 
-Six cases that measure what the plugin is for: Nika is offered on intent,
+Seven cases that measure what the plugin is for: Nika is offered on intent,
 the engine reads the user's own sentence before anything is written, a
 missing address is asked and never guessed, the verdict is said in plain
-words, a question is never answered for the user, and the plugin stays
-quiet when it has nothing to add.
+words, a question is never answered for the user, the plugin stays quiet
+when it has nothing to add, and a new job is designed deep by default
+(phases, branches, state between runs, validation, a run report, at most
+one gate, no send nobody asked for).
 
 Run from the plugin root (needs a signed-in Claude Code and `nika` on PATH):
 
@@ -13,7 +15,8 @@ Run from the plugin root (needs a signed-in Claude Code and `nika` on PATH):
 
 `claude plugin eval` also runs each case without the plugin, so the report
 shows what the plugin adds. `--scaffold` is needed by `plain-verdict`, whose
-fixture is a workflow refused on purpose.
+fixture is a workflow refused on purpose, and by `deep-by-default`, whose
+fixture is a folder of CI logs.
 
 What the command line is for:
 
@@ -31,7 +34,7 @@ What the command line is for:
   that is first on `PATH` for the eval command, and confirm with a one-run
   probe case (`runs: 1` in its `case.yaml`) that `nika --version` answers.
 - **The MCP oracle is not started** unless you add a mock under
-  `evals/mocks/` or pass `--allow-real-servers`. The six cases do not need it.
+  `evals/mocks/` or pass `--allow-real-servers`. The seven cases do not need it.
 - Add `--max-cost-usd <n>` for a hard ceiling. `--case <name> --ablation none
   --keep-temp` reruns one case with the plugin only and keeps its trace.
 

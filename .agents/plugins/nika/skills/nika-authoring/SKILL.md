@@ -34,10 +34,41 @@ change the result or an effect
 instruction covers each effect it names (saving, running, activating a beat)
 once: carry it out without asking again.
 
+## Design before you write
+
+Nika is an automation engine: crawls and feeds, bounded fan-outs, state
+between runs, seats and their images, charts and media, schedules. For a new
+job, or one the person wants to grow, design before the first line:
+
+1. Scan the [capability map](references/capabilities.md) for every source,
+   data step, decision, medium and output the job could use.
+2. Write a short design: the phases (gather, normalize, judge, act, report),
+   the builtins each phase uses, the branch points, the state kept between
+   runs, the run report, and the gate if the check will require one.
+3. Build the richest honest version of it
+   ([job anatomy](references/job-anatomy.md)). **Ambition in craft, fidelity
+   in effects**: additions that do not widen what the workflow touches
+   (validation of external and model values, state between runs, dedupe and
+   idempotency keys, bounded fan-out, recover and retry, typed schemas with
+   `max_tokens`, `nika:assert` budgets, a chart, a run report with its
+   `nika:inspect` cost) go in by default and are named in the hand-over.
+   Additions that widen effects (a new send, a new host, new paid inference, a
+   seat route, a write outside the person's folder) are proposed in one line
+   and added only on a yes.
+4. Interrupt the person as little as possible: at most one human gate, where
+   the check requires it or something leaves the machine, and a cost
+   assertion instead of a gate when the risk is cost.
+5. Before handing over, run the thin-workflow checklist and report the counts.
+
+A small edit to an existing workflow keeps its scope and skips the design.
+
 ## Read the reference that resolves the uncertainty
 
 | Task | Reference |
 |---|---|
+| What Nika can do: every source, data step, decision, model route, medium and schedule, with the example that shows it | [Capabilities](references/capabilities.md) |
+| The phases of a real job, the depth bar, the patterns (state, idempotency, validation, budget, run report, fan-out, recover, the always-run report, approve once and the single gate), the engine behaviors to design around (secret taint, expression and field limits, binary downloads, stale files, mock answers, resume) and the thin-workflow checklist | [Job anatomy](references/job-anatomy.md) |
+| A seat route (`run.access`, ACP), images an agent application draws (`agent.images`), seat images versus `nika:image_generate`, what mock can rehearse | [Seats and images](references/seats-and-images.md) |
 | Find a local owner or example for a new graph | [Workspace and examples](references/workspace-and-examples.md) |
 | Envelope, values, modifiers, verbs, permits or CEL syntax | [Language](references/language.md) |
 | Check findings, execution, rehearsal, traces or cost reporting | [Validation and execution](references/validation-and-execution.md) |
@@ -75,7 +106,9 @@ tool and read grants, or explicitly supply the required files as context.
 ## Finish at the requested outcome
 
 For authoring, report the file, actual check verdict, effect scope and remaining
-blockers. For an authorized run, retain its session and exact trace, read
+blockers, with the design, the counts (tasks, distinct builtins, branch points,
+state, report, gates), the craft additions you made and the effect upgrades
+you only proposed. A thin job says why it is thin. For an authorized run, retain its session and exact trace, read
 back what it wrote or created and inspect that against the task's expected
 result, and report the exit status and verified evidence tier. Reconcile partial effects before any retry. A golden
 is suitable only for the simulated plane that supports the workflow; a green

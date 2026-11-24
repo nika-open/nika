@@ -5,6 +5,32 @@ Versions move together across all manifests (the mirror gate pins it).
 
 ## Unreleased
 
+The plugin is ambitious about what one workflow can do, and careful
+about what it touches: ambition in craft, fidelity in effects. The
+authoring skill opens with a design step and three new references: a
+capability map (sources, data, decisions, models and seats, media, state,
+composition, time, MCP servers and hubs, serving), a job anatomy (the five
+phases, a depth bar, measured patterns for state between runs,
+idempotency keys, validation, budget assertions, a report that survives a
+failed run, fan-out, recover samples, and the engine behaviors to design
+around: secret taint, expression limits, field limits, binary downloads,
+stale files, mock answers, resume, two hints that cannot both clear) and
+a seats-and-images guide (`run.access`, `agent.images`, what mock can
+rehearse). Every workflow these references print was checked on 0.125.0.
+`/nika:make` adds an ambition pass and the subagent a design pass and a
+self-audit. The kit teaches « approve once, then let it run »: a gate only
+where something leaves the machine or cannot be undone, cost bounded by an
+assertion and the ceiling, and a scheduled workflow that keeps a gate is
+said to pause at every fire. `/nika:ideas` reads the project and proposes
+five workflows; `/nika:capture` turns the conversation's recent work into
+a checked workflow; both are served as MCP prompts. The delegation rule
+and the intent hint reach for a workflow on wide jobs too (fan-outs,
+media, model comparisons, agent seats, crawls, watchers, exact
+reconciliations), in English and French. The edit hook judges with
+NIKA_BIN, else, inside the engine tree, the session's CARGO_TARGET_DIR
+build, then the tree's own build, else the PATH. A seventh evaluation
+measures that a new job is designed deep by default.
+
 The run guard no longer bricks the editor when the `nika` binary is
 missing from its PATH. Inside a Nika project (a `nika.yaml` or a `.nika/`
 store in the host's project directory, the hook's working directory or

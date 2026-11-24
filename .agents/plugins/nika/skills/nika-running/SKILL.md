@@ -52,8 +52,14 @@ and exit 4 is how you learn that a run is waiting for an answer.
    question from the paused frame, show it with the real destination and
    cost, and wait for the person's own answer. Resume at once, with the
    same `--var` values: an answer is accepted for 15 minutes after the
-   pause. You never answer a gate yourself, and permission to run is not
-   an answer.
+   pause. You never answer a gate yourself, never pass `--answer` on your
+   own initiative, and permission to run is not an answer.
+   **Approve once, then let it run**: a gate belongs only where something
+   leaves the machine to a person or a third party, or cannot be undone.
+   Cost is bounded by a `nika:assert` budget and the run ceiling, never by
+   a gate. A scheduled workflow that keeps a gate pauses at every fire on
+   this version (exit 4); say so, and offer to design the gate out where
+   the risk allows.
 5. **Two files, not thirty.** A new project is a workflow and `nika.yaml`.
    Run the full `nika init` only when asked, and say how many files it
    adds.

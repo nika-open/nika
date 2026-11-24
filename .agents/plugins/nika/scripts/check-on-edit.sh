@@ -64,10 +64,21 @@ esac
 # Everywhere else falls back to the PATH's nika. Same capability-honesty:
 # an unset or broken NIKA_BIN and a missing binary fall back to silence,
 # never to a failure.
+#
+# The tree build has two homes. A checkout that builds into its own
+# `target/` keeps it there; a worktree whose session points
+# CARGO_TARGET_DIR outside the tree (one build folder per lane) keeps it
+# under that folder. The session's folder counts only inside the engine
+# tree (the tree holds `crates/nika-cli`): elsewhere it may hold another
+# project's build. A project outside the engine names its judge with
+# NIKA_BIN in the environment the client gives its hooks.
 NIKA="${NIKA_BIN:-}"
 if [ -z "$NIKA" ]; then
   root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -n "$root" ] && [ -x "$root/target/debug/nika" ]; then
+  if [ -n "$root" ] && [ -f "$root/crates/nika-cli/Cargo.toml" ] \
+    && [ -n "${CARGO_TARGET_DIR:-}" ] && [ -x "$CARGO_TARGET_DIR/debug/nika" ]; then
+    NIKA="$CARGO_TARGET_DIR/debug/nika"
+  elif [ -n "$root" ] && [ -x "$root/target/debug/nika" ]; then
     NIKA="$root/target/debug/nika"
   else
     NIKA="nika"
@@ -184,7 +195,7 @@ else
 fi
 printf 'oracle: %s (tag %s · a tag does not say what the build contains)\n' \
   "$oracle" "${tag:-unknown}" >&2
-printf 'inside the engine tree the hook prefers the tree build by default (F14) — override:\n  export NIKA_BIN=<path-to-nika>\n' >&2
+printf 'the judge: NIKA_BIN when set, else inside the engine tree its build (the session CARGO_TARGET_DIR, then target/debug), else the PATH; to name another, set NIKA_BIN=<path-to-nika> where the client starts its hooks\n' >&2
 if [ -n "$cc" ]; then
   # PostToolUse exit 2 = stderr fed to Claude, edit already applied.
   exit 2

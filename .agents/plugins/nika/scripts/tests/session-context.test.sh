@@ -77,6 +77,8 @@ play "$ROOT" "{\"cwd\":\"$WS\"}"
 need valid-payload-cwd 'This workspace uses Nika'
 need valid-payload-cwd "$ws_resolved"
 need valid-payload-cwd 'payload_cwd'
+need valid-payload-cwd 'One file can crawl sites and read feeds, fan out over many items'
+need valid-payload-cwd 'ideas, capture'
 
 # 4 · payload cwd = a SUBDIR of a git workspace — the map must name the
 # resolved git root (the subdir law, proven lost 2026-07-12), with the

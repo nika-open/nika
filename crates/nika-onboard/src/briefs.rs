@@ -345,6 +345,21 @@ const AGENT_DECISIONS_AND_EFFECTS: &str = include_str!(concat!(
     "/../../.agents/plugins/nika/skills/nika-authoring/references/decisions-and-effects.md"
 ));
 
+const AGENT_CAPABILITIES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/capabilities.md"
+));
+
+const AGENT_JOB_ANATOMY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/job-anatomy.md"
+));
+
+const AGENT_SEATS_AND_IMAGES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/seats-and-images.md"
+));
+
 /// `.cursor/agents/nika-*.md` — the three kit subagents, project-side.
 /// Cursor's LOCAL plugin loader consumes MCP + skills ONLY (agents in a
 /// local plugin manifest are ignored; the marketplace path processes the
@@ -486,7 +501,7 @@ pub fn agents_md() -> &'static str {
 
 /// The scaffold set · (relative path, body). The ONE source of what `init`
 /// writes — `plan` and the docs both read it.
-pub(super) fn targets() -> [(&'static str, &'static str); 30] {
+pub(super) fn targets() -> [(&'static str, &'static str); 33] {
     [
         (".vscode/settings.json", VSCODE_SETTINGS),
         ("AGENTS.md", AGENTS_MD),
@@ -545,6 +560,18 @@ pub(super) fn targets() -> [(&'static str, &'static str); 30] {
         (
             ".agents/skills/nika-authoring/references/decisions-and-effects.md",
             AGENT_DECISIONS_AND_EFFECTS,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/capabilities.md",
+            AGENT_CAPABILITIES,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/job-anatomy.md",
+            AGENT_JOB_ANATOMY,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/seats-and-images.md",
+            AGENT_SEATS_AND_IMAGES,
         ),
         (".github/copilot-instructions.md", COPILOT_INSTRUCTIONS),
         ("CLAUDE.md", CLAUDE_MD),
@@ -1122,7 +1149,7 @@ mod tests {
     #[test]
     fn targets_names_every_brief_family() {
         let t = targets();
-        assert_eq!(t.len(), 30);
+        assert_eq!(t.len(), 33);
         let paths: Vec<&str> = t.iter().map(|(p, _)| *p).collect();
         for expected in [
             ".vscode/settings.json",
@@ -1140,6 +1167,9 @@ mod tests {
             ".cursor/hooks-nika/check-on-edit.sh",
             ".cursor/hooks-nika/guard-run.sh",
             ".agents/skills/nika-authoring/SKILL.md",
+            ".agents/skills/nika-authoring/references/capabilities.md",
+            ".agents/skills/nika-authoring/references/job-anatomy.md",
+            ".agents/skills/nika-authoring/references/seats-and-images.md",
             ".github/copilot-instructions.md",
             "CLAUDE.md",
         ] {

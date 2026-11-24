@@ -45,7 +45,10 @@ Then resume, repeating every `--var` you passed:
 `nika run <file> <same flags and vars> --resume <trace_path> --answer <task>=<true|false>`.
 The answer is only accepted for 15 minutes after the pause, so do not
 start other work in between. **Never answer a question yourself**:
-permission to run is not an answer to a gate.
+permission to run is not an answer to a gate. Never pass `--answer` on your own
+initiative. A gate stands only where something leaves the machine or
+cannot be undone; if this one guards nothing of the kind, say so after the
+run and offer to design it out, so the next run does not stop.
 
 **7 · It failed?** One sentence on what stopped and the one fix. Offer
 the detail (`nika explain <code>`) instead of printing it.

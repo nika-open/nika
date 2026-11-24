@@ -383,4 +383,73 @@ mod tests {
             "the intent table was read ({table_rows} slugs)"
         );
     }
+
+    /// The capability map sends the reader to an example for every row
+    /// (« Shown in »), and the job anatomy calibrates on named examples. A
+    /// renamed example would leave the map pointing at nothing, so every
+    /// backticked slug in the map's last column, and every numbered slug in
+    /// either guide, must resolve to a shipped example.
+    #[test]
+    fn the_capability_map_shows_only_living_examples() {
+        let map = include_str!(
+            "../../../.agents/plugins/nika/skills/nika-authoring/references/capabilities.md"
+        );
+        let anatomy = include_str!(
+            "../../../.agents/plugins/nika/skills/nika-authoring/references/job-anatomy.md"
+        );
+        let slug_shaped = |token: &str| {
+            token.contains('-')
+                && !token.starts_with('-')
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        };
+        let numbered = |token: &str| {
+            let (head, _) = token.split_once('-').unwrap_or((token, ""));
+            head.len() == 2 && head.bytes().all(|b| b.is_ascii_digit())
+        };
+        let mut shown = 0;
+        for line in map.lines().filter(|l| l.starts_with("| `")) {
+            let cells: Vec<&str> = line.split(" | ").collect();
+            let last = cells.last().copied().unwrap_or("");
+            for token in last.split('`').skip(1).step_by(2) {
+                if slug_shaped(token) {
+                    shown += 1;
+                    assert!(
+                        nika_pack::example(token).is_some(),
+                        "the capability map shows `{token}`, which no example carries: {line}"
+                    );
+                }
+            }
+        }
+        assert!(
+            shown >= 40,
+            "the « Shown in » column was read ({shown} slugs)"
+        );
+        for line in map.lines().chain(anatomy.lines()) {
+            for token in line.split('`').skip(1).step_by(2) {
+                if slug_shaped(token) && numbered(token) {
+                    assert!(
+                        nika_pack::example(token).is_some(),
+                        "a guide teaches `{token}`, which no example carries: {line}"
+                    );
+                }
+            }
+        }
+        for calibration in [
+            "release-radar",
+            "config-drift-sentinel",
+            "competitor-radar",
+            "ceo-monday-brief",
+        ] {
+            assert!(
+                anatomy.contains(&format!("`{calibration}`")),
+                "the job anatomy calibrates on `{calibration}`"
+            );
+            assert!(
+                nika_pack::example(calibration).is_some(),
+                "the calibration example `{calibration}` ships"
+            );
+        }
+    }
 }

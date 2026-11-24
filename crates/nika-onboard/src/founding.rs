@@ -856,18 +856,21 @@ mod tests {
             .collect();
         let guides = std::collections::BTreeSet::from(
             [
+                "capabilities.md",
                 "composition.md",
                 "decisions-and-effects.md",
+                "job-anatomy.md",
                 "language.md",
                 "native-and-artifacts.md",
                 "paid-inference.md",
                 "project.md",
+                "seats-and-images.md",
                 "validation-and-execution.md",
                 "workspace-and-examples.md",
             ]
             .map(str::to_owned),
         );
-        assert_eq!(shipped, guides, "the eight guides the briefs write");
+        assert_eq!(shipped, guides, "the eleven guides the briefs write");
         assert_eq!(
             linked, guides,
             "all conditional guides reachable from the entry"
@@ -902,7 +905,7 @@ mod tests {
     #[test]
     fn plan_creates_both_when_nothing_exists() {
         let p = plan(".", &|_| false, false);
-        assert_eq!(p.len(), 30);
+        assert_eq!(p.len(), 33);
         assert!(p.iter().all(|a| matches!(a, Action::Create { .. })));
         // Schema wiring + agent guide + per-client briefs are the targets.
         let paths: Vec<&str> = p

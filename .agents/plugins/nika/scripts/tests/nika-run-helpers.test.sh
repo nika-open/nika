@@ -167,6 +167,34 @@ out="$(hint '{"session_id":"t3","prompt":"What is the difference between a mutex
 refuse "hint stays silent on a one-off question" "$out" "additionalContext"
 out="$(hint '{"session_id":"t4","prompt":"/nika:run every week"}')"
 refuse "hint stays silent on a slash command" "$out" "additionalContext"
+# the wide jobs: a fan-out, media, a comparison, a watcher, a reconciliation
+n=0
+for prompt in \
+  'Translate the landing page into 5 languages' \
+  'Traduis la page d accueil en 4 langues' \
+  'Write the release note for every locale we ship' \
+  'Pour chaque langue, adapte le titre' \
+  'Summarize all the pages of the docs site' \
+  'Fais un resume de toutes les pages du site' \
+  'Generate 12 images for the campaign' \
+  'Propose 6 variantes du logo' \
+  'Compare the models on this prompt' \
+  'Watch the pricing page and alert me when it changes' \
+  'Surveille le flux et previens-moi quand une version sort' \
+  'Reconcile the bank export with our invoices' \
+  'Rapprocher les paiements et les factures du mois'; do
+  n=$((n + 1))
+  out="$(hint "{\"session_id\":\"w$n\",\"prompt\":\"$prompt\"}")"
+  check "hint fires on a wide job: $prompt" "$out" "additionalContext"
+done
+for prompt in \
+  'Explain how React reconciliation works' \
+  'Translate this sentence into French' \
+  'Compare these two functions for me'; do
+  n=$((n + 1))
+  out="$(hint "{\"session_id\":\"w$n\",\"prompt\":\"$prompt\"}")"
+  refuse "hint stays silent on a one-off: $prompt" "$out" "additionalContext"
+done
 
 # ── the waiting-run notice at session start, and the monitor's single pass
 (cd "$ROOT" && nika run asks.nika --plain --no-progress >/dev/null 2>&1 || true)
@@ -305,7 +333,7 @@ else
   FAILS=$((FAILS + 1))
 fi
 out="$(printf '{"session_id":"i2","cwd":"%s","prompt":"every week, do the same cleanup for the sales notes"}' "$HOOKP" | (cd "$HOOKP" && "$HERE/intent-hint.sh"))"
-check "an unreadable repeatable request gets the plain hint" "$out" "looks repeatable (a schedule"
+check "an unreadable repeatable request gets the plain hint" "$out" "looks repeatable or wide (a schedule"
 
 if [ "$FAILS" -eq 0 ]; then
   echo "all green"

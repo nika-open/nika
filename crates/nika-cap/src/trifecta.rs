@@ -35,9 +35,9 @@
 //! whose own `when:` tests that answer
 //! ([`TrifectaSubject::answer_tested_by`]), since a task that merely waits
 //! on it runs whatever the answer; an input gate also counts before a
-//! `nika:` tool call that sends only the typed answer, and neither counts
-//! when an `on_error:` or a `for_each:` can stand in for its answer
-//! ([`TrifectaSubject::answer_stood_in`]). One violation per ungated tainted
+//! `nika:` tool call that sends only the typed answer, and no gate of any
+//! mode counts when an `on_error:` or a `for_each:` can stand in for its
+//! answer ([`TrifectaSubject::answer_stood_in`]). One violation per ungated tainted
 //! egress task, message opening with the NEP's verbatim « lethal trifecta
 //! complete · human gate required ».
 //!
@@ -108,10 +108,10 @@ pub struct TrifectaSubject {
     /// the gate runs whatever the answer. `None`: a gate credited wherever it
     /// dominates (a confirm, whose « no » the consent lane judges).
     pub answer_tested_by: Option<Vec<usize>>,
-    /// For such a gate: an `on_error:` or a `for_each:` on the gate task can
-    /// stand in for its answer (a recovered value, a list of answers), so the
-    /// projection lists no subject in [`Self::answer_tested_by`] and the
-    /// refusal names the cause instead of an untested guard.
+    /// For a blocking gate of any mode: an `on_error:` or a `for_each:` on the
+    /// gate task can stand in for its answer (a recovered value, a list of
+    /// answers), so the judge credits it before no egress task and the
+    /// refusal names that cause instead of an untested guard.
     pub answer_stood_in: bool,
     /// Direct predecessors (indices into the same subject slice).
     pub parents: Vec<usize>,
@@ -148,8 +148,8 @@ impl TrifectaSubject {
         self
     }
 
-    /// Mark whether an `on_error:` or a `for_each:` on this text-answer gate
-    /// can stand in for its answer (the judge's wording reads it).
+    /// Mark whether an `on_error:` or a `for_each:` on this gate can stand in
+    /// for its answer (the judge then credits it nowhere and says why).
     #[must_use]
     pub fn with_answer_stood_in(mut self, stood_in: bool) -> Self {
         self.answer_stood_in = stood_in;
@@ -157,10 +157,12 @@ impl TrifectaSubject {
     }
 
     /// Whether this subject, a blocking gate, is credited before `sink`:
-    /// a confirm wherever it dominates, a gate whose answer is text only
-    /// where the projection listed `sink`.
+    /// never when something can stand in for its answer, otherwise a confirm
+    /// wherever it dominates, a gate whose answer is text only where the
+    /// projection listed `sink`.
     fn credits(&self, sink: usize) -> bool {
         self.human_gate
+            && !self.answer_stood_in
             && self
                 .answer_tested_by
                 .as_ref()
@@ -615,7 +617,7 @@ fn stood_in_note(gate: &str, sink: &str) -> String {
     format!(
         "the gate `{gate}` dominates `{sink}`, but an `on_error:` or a `for_each:` on `{gate}` \
          can stand in for its answer: a recovered value or a list of answers is not a person's \
-         answer, so a choice or an input gate that carries one counts before no effect"
+         answer, so a gate that carries one counts before no effect, whatever its mode"
     )
 }
 
@@ -624,8 +626,8 @@ fn stood_in_note(gate: &str, sink: &str) -> String {
 fn stood_in_fix(gate: &str, sink: &str) -> String {
     format!(
         "remove `on_error:` and `for_each:` from `{gate}` so that only a person answers it, then \
-         test that answer in the `when:` of `{sink}`, or make `{gate}` a `mode: confirm` gate \
-         whose yes `{sink}` tests"
+         test that answer in the `when:` of `{sink}` (a confirm's yes bound as `go`: `when: \
+         \"${{{{ with.go == true }}}}\"` · NIKA-SEC-014 refuses an effect a « no » reaches)"
     )
 }
 
@@ -869,6 +871,24 @@ mod tests {
             assert!(d.contains(part), "missing `{part}`: {d}");
         }
         assert!(!d.contains("does not test its answer"), "{d}");
+
+        // A confirm too: credited by position alone, unless something can
+        // stand in for its answer.
+        subjects[1].answer_tested_by = None;
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert!(v.mitigations.is_empty(), "{:?}", v.mitigations);
+        assert_eq!(v.violations.len(), 2);
+        assert!(
+            v.violations[0]
+                .detail
+                .contains("on `pick` can stand in for its answer"),
+            "{}",
+            v.violations[0].detail
+        );
+        subjects[1].answer_stood_in = false;
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert!(v.violations.is_empty(), "{:?}", v.violations);
+        assert_eq!(v.mitigations.len(), 2);
     }
 
     /// The violations half, for batteries whose subject is the refusal.

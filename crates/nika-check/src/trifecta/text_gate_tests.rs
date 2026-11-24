@@ -138,6 +138,20 @@ fn a_choice_gate_whose_answer_the_effect_tests_is_credited() {
 /// « no »): clean once `send` tests the yes.
 #[test]
 fn the_confirm_twin_stays_credited() {
+    let r = report(&confirm_twin());
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert!(r.consent_findings.is_empty(), "{:?}", r.consent_findings);
+    let credited: Vec<(&str, &str)> = r
+        .trifecta_mitigations
+        .iter()
+        .map(|m| (m.sink.as_str(), m.gate.as_str()))
+        .collect();
+    assert_eq!(credited, [("send", "human")]);
+}
+
+/// [`CHOICE`] with a confirm gate whose yes `send` tests.
+fn confirm_twin() -> String {
     let confirm = swap(
         CHOICE,
         "args: { mode: \"choice\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"send\", \"no\"] }",
@@ -152,17 +166,7 @@ fn the_confirm_twin_stays_credited() {
             1,
         ),
     );
-    let confirm = swap(&confirm, "${{ with.pick }}\" }", "${{ with.ok }}\" }");
-    let r = report(&confirm);
-    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
-    assert!(r.consent_findings.is_empty(), "{:?}", r.consent_findings);
-    let credited: Vec<(&str, &str)> = r
-        .trifecta_mitigations
-        .iter()
-        .map(|m| (m.sink.as_str(), m.gate.as_str()))
-        .collect();
-    assert_eq!(credited, [("send", "human")]);
+    swap(&confirm, "${{ with.pick }}\" }", "${{ with.ok }}\" }")
 }
 
 /// Two effects behind one choice gate: the one that tests the answer
@@ -630,4 +634,34 @@ fn a_subprocess_is_never_an_answer_only_effect() {
     assert!(r.conformance.is_empty(), "{:?}", r.conformance);
     assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
     assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
+}
+
+/// A confirm gate counts by its position alone only while a person alone
+/// answers it: recovered on error, its yes may be nobody's, so the POST it
+/// precedes is refused with the cause named. The plain confirm keeps its
+/// credit.
+#[test]
+fn a_confirm_whose_answer_a_recovery_can_supply_counts_before_nothing() {
+    let r = report(&on_gate(
+        &confirm_twin(),
+        "    on_error: { recover: true }\n",
+    ));
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert_eq!(
+        sinks(&r),
+        [("send", Some("page"))],
+        "{:?}",
+        r.trifecta_findings
+    );
+    assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
+    let d = &r.trifecta_findings[0].detail;
+    for part in [
+        "the gate `human` dominates `send`, but an `on_error:` or a `for_each:` on `human` can stand in for its answer",
+        "remove `on_error:` and `for_each:` from `human` so that only a person answers it",
+    ] {
+        assert!(d.contains(part), "missing `{part}`: {d}");
+    }
+    let r = report(&confirm_twin());
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert_eq!(credited(&r), [("send", "human")]);
 }

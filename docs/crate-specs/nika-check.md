@@ -130,7 +130,8 @@ depend on without pulling the CLI:
   readings credits a choice or an input gate with an `on_error:` or a
   `for_each:` (`analyzer::gates::answer_stands_alone`, the conditions
   `human_confirm` puts on a confirm): a recovered value or a list of answers
-  is not a person's answer, and the refusal names that cause. An egress
+  is not a person's answer, and the refusal names that cause; a confirm
+  gate with either is not credited by its position either. An egress
   task that only waits on the gate is refused as for
   no gate, and the refusal names the gate, the task and the two repairs
   (test the answer, or `mode: confirm`). A confirm keeps the dominance

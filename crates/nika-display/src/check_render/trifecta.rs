@@ -21,7 +21,8 @@ pub(super) fn trifecta_rung(out: &mut String, report: &CheckReport, wf: &RawWork
         // The tick is DERIVED, never asserted. This lane clears a sink
         // when a blocking `nika:prompt` dominates it — a syntactic credit
         // (`human_gate`: an invoke of the tool with no `default:` key, no
-        // route analysis), which for a gate that answers with text (`mode:
+        // `on_error:` or `for_each:` that could supply its answer, no route
+        // analysis), which for a gate that answers with text (`mode:
         // choice` or `input`) also needs the sink's own `when:` to test the
         // answer, or, for an input, the sink to be a `nika:` tool call that
         // sends only the typed answer.

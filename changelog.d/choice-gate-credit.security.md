@@ -17,7 +17,8 @@
   answers is not a person's answer. Otherwise the trifecta is refused as for
   no gate, and the finding names the gate and the task and gives both
   repairs: test the answer in `when:`, or use `mode: confirm`, whose « no »
-  `NIKA-SEC-014` judges. A confirm gate is credited as before. Not judged:
+  `NIKA-SEC-014` judges. A confirm gate is credited as before unless it has
+  `on_error:` or `for_each:`, which now refuses it the same way. Not judged:
   what a jq program computes from the answer it reads, which the check reads
   as text and never runs. An answer tested through any other stage (a model,
   a subprocess, another tool) is refused. The `headless-prompt` hint on a

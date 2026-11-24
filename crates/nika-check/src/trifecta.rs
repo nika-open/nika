@@ -31,8 +31,8 @@
 //!   is refused as for no gate. An input gate also counts before a builtin
 //!   `nika:` tool call that sends nothing but the typed answer
 //!   ([`crate::analyzer::gates::answer_sent_by`]): what it sends is what the
-//!   person typed. A choice or an input gate with an `on_error:` or a
-//!   `for_each:` counts before no effect
+//!   person typed. A gate of any mode with an `on_error:` or a `for_each:`
+//!   counts before no effect
 //!   ([`crate::analyzer::gates::answer_stands_alone`]): something other than
 //!   a person can supply its answer. A confirm keeps the dominance credit: the consent lane
 //!   (`NIKA-SEC-014`) judges its « no ». A test made by any other upstream
@@ -144,11 +144,10 @@ pub fn scan_trifecta_declared(
                 super::content_flow::classify(&task.action, &mcp_trusted).0
                     || call.is_some_and(|c| c.ingress.is_some()),
             )
-            .with_declared_roles(declared.private_read, declared.egress);
+            .with_declared_roles(declared.private_read, declared.egress)
+            .with_answer_stood_in(gate && !crate::analyzer::gates::answer_stands_alone(task));
             match text_gate(&task.action).filter(|_| gate) {
-                Some(text) => subject
-                    .with_answer_stood_in(!crate::analyzer::gates::answer_stands_alone(task))
-                    .with_answer_tested_by(answered_by(wf, &task.id.value, &text)),
+                Some(text) => subject.with_answer_tested_by(answered_by(wf, &task.id.value, &text)),
                 None => subject,
             }
         })

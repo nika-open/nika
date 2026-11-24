@@ -142,6 +142,18 @@ fn describe(refusal: &ArgvFloorRefusal) -> (String, String) {
             ),
             String::from("use `nika:read`/`nika:write` under a declared fs boundary"),
         ),
+        ArgvFloorRefusal::RecursiveDelete { base, target } => (
+            format!(
+                "`{base}` recursive delete of `{target}` is REFUSED at the exec floor: \
+                 the target is absolute or leaves the working directory, and the \
+                 command never starts"
+            ),
+            String::from(
+                "name the path relative to the working directory, inside it (`cwd:` \
+                 sets where the task runs), or remove one file with \
+                 `nika:remove_file` under a `permits.fs.write` bound",
+            ),
+        ),
         // #[non_exhaustive] — a future refusal class still earns a finding;
         // the reason sentence is the one truth both surfaces quote.
         other => (other.reason(), String::from("the exec floor is always-on")),
@@ -283,6 +295,42 @@ mod tests {
                 "{command} must earn the SEC-001 finding: {findings:?}"
             );
             assert_eq!(findings[0].wire_code(), "NIKA-SEC-001");
+        }
+    }
+
+    /// The spec corpus case `envelope/sec-exec-blocklist-rm-rf`: a literal
+    /// recursive delete of an absolute path is the run's SEC-001 refusal,
+    /// so it is the check's finding too, with a repair an author can write.
+    /// A delete inside the working directory stays green.
+    #[test]
+    fn a_recursive_delete_outside_the_working_directory_is_a_finding() {
+        let findings = floor_findings(&exec_wf(
+            "[\"rm\", \"-rf\", \"/tmp/nonexistent-xyz-nika-test\"]",
+        ));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].wire_code(), "NIKA-SEC-001");
+        assert!(
+            findings[0]
+                .detail
+                .contains("/tmp/nonexistent-xyz-nika-test")
+        );
+        assert!(
+            findings[0].fix.contains("nika:remove_file"),
+            "{}",
+            findings[0].fix
+        );
+        assert!(findings[0].fix.contains("cwd:"), "{}", findings[0].fix);
+
+        for inside in [
+            "[\"rm\", \"-rf\", \"build\"]",
+            "[\"find\", \".\", \"-delete\"]",
+        ] {
+            let r = report(&exec_wf(inside));
+            assert!(
+                r.exec_floor_findings.is_empty(),
+                "{inside}: {:#?}",
+                r.findings
+            );
         }
     }
 

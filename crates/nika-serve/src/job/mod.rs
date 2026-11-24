@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
+mod attempt;
 mod attribution;
 mod evidence;
 mod kind;
@@ -9,6 +10,11 @@ mod model;
 mod retention;
 mod store;
 
+pub(crate) use attempt::{
+    AttemptMode, ClosedAttempt, DEFAULT_RETRY_ATTEMPTS, LostRun, MAX_RETRY_ATTEMPTS, OnInterrupted,
+    Remaining, RetryAsk, RetryPolicy, RetryRefusal, RetryState, RetryStatement, Spend, decide,
+    remaining,
+};
 pub(crate) use attribution::{AttributionError, JobAttribution, JobBindings};
 pub use evidence::{JournalEvidence, JournalFailure};
 pub use kind::JobEventKind;
@@ -24,7 +30,10 @@ pub use model::{
 };
 pub(crate) use retention::{JobRetention, MIN_JOB_RETENTION};
 pub use store::{ApprovalHistory, JobStore};
-pub(crate) use store::{QueuedJob, STATE_VERSION};
+pub(crate) use store::{
+    AttemptView, JobAttempts, LostOwnerJudge, LostVerdict, QueuedJob, Retried, RetriedAttempt,
+    STATE_VERSION, is_replay, retryable,
+};
 
 #[cfg(test)]
 mod result_tests;

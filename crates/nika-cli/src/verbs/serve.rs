@@ -88,6 +88,10 @@ fn go(args: &ServeArgs) -> Result<VerbOutput, VerbOutput> {
         })
         .and_then(|options| options.with_shutdown_grace(args.shutdown_grace.as_deref()))
         .and_then(|options| options.with_provider_concurrency(&args.provider_concurrency))
+        .and_then(|options| {
+            options
+                .with_retry_interrupted(args.retry_interrupted.as_deref(), args.retry_max_attempts)
+        })
         .map_err(nika_serve::launch_operator_message)
         .map_err(&fail)?;
     let now = instant(args.now.as_deref()).map_err(&fail)?;

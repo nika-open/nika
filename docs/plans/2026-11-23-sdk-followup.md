@@ -29,6 +29,7 @@ engine version. No method may discover a missing route from a 404.
 | `jobList` | `GET /v1/jobs` |
 | `occupancy` | `GET /v1/occupancy`, and `429 owner_queue_full` at an owner's bound |
 | `scheduleManage` | `GET /v1/schedules`, `DELETE /v1/schedules/{id}`, `POST /v1/schedules/{id}/trigger`, `owner` and `labels` on a schedule body |
+| `jobRetry` | `retry` on the by-name form of `POST /v1/jobs`, `POST /v1/jobs/{id}/retry`, `GET /v1/jobs/{id}/attempts`, `?attempt=N` on `GET /v1/jobs/{id}/trace/verify` |
 
 `scheduleManage` appears only beside `schedule`, on a resident whose
 scheduler is live.
@@ -97,16 +98,34 @@ provider cap.
   job (`202`), or answers the same job on a replay (`200`). It can meet the
   same admission refusals as a submission, `owner_queue_full` included.
 
-### 3.6 `retryJob` and attempts: not yet
+### 3.6 `retry` on submission, `retryJob` and `jobAttempts`
 
-Re-attempting an interrupted job is decided in ADR-156 and not built yet.
-Nothing of it is served. `retryJob`, an attempts reader and a `retry`
-member on a submission wait for the engine to serve them behind the
-capability `jobRetry`; this plan only reserves the names.
+Served behind the capability `jobRetry` (ADR-156).
 
-One consequence to prepare for: a job's
-`execution_id` and `trace_id` change when it is re-attempted. A client
-that caches them from an early read holds an earlier attempt's.
+- `retry` on submission: `{on_interrupted: "off"|"restart"|"resume",
+  max_attempts: 1..16, max_cost_usd}`, each optional, closed; the `retry`
+  member of the by-name job request in `openapi.json` holds the bounds.
+  Stating it, even empty, is the caller's consent to run the workflow's
+  effects again when its run loses its owner. It is bound into the
+  idempotency digest. Refused with `422 invalid_job_retry` on a submission
+  that consumes a cost review.
+- `retryJob(id, {attempt, mode, maxCostUsd?})`: `POST /v1/jobs/{id}/retry`.
+  `attempt` names the job's latest attempt, which makes the call safe to
+  send again: `202` queues a new attempt, `200` means the same request
+  already did. `409` carries `job_not_retryable`, `retry_exhausted`,
+  `resume_refused`, `unknown_spend` or `budget_exhausted`; `429
+  owner_queue_full` as on a submission. `maxCostUsd` bounds the re-attempts
+  alone and never raises the job's ceiling.
+- `jobAttempts(id)`: `GET /v1/jobs/{id}/attempts`, an open object with the
+  policy in force, `retry_state` (`none`, `queued`, `exhausted`, `refused`,
+  open), `retry_reason`, and the attempts oldest first.
+- `verifyTrace(id, {attempt})`: the optional query member.
+- `JobSummary` gains `attempts` and `retry_state`; it was open already.
+
+One consequence to prepare for: a job's `execution_id` and `trace_id`
+change when it is started again. A client that caches them from an early
+read holds an earlier attempt's. `GET /v1/jobs/{id}` always answers the
+latest attempt.
 
 ## 4. Tests
 
@@ -125,7 +144,7 @@ that caches them from an early read holds an earlier attempt's.
 3. `listJobs`.
 4. `listSchedules`, `deleteSchedule`, `triggerSchedule`.
 5. `occupancy`.
-6. Once the engine serves `jobRetry`: `retryJob` and attempts.
+6. `retry` on submission, `retryJob`, `jobAttempts` and the trace query.
 
 ## 6. Next engine candidates this plan does not cover
 

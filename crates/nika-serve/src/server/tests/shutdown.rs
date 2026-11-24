@@ -6,6 +6,8 @@
 use super::*;
 
 #[cfg(unix)]
+mod kill_resume;
+#[cfg(unix)]
 mod process;
 
 const JOBS: usize = 40;

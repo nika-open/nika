@@ -1024,6 +1024,114 @@ pub fn nika_dap::anchor::sidecar_path(trace: &str) -> std::path::PathBuf
 pub async fn nika_dap::anchor::submit(http: &impl nika_kernel_core::io::http::HttpPostDyn, rekor_url: &str, tsa_url: &str, head: &[u8; 32], key: &nika_dap::anchor::RunKeyMaterial) -> core::result::Result<nika_dap::anchor::AnchorSidecar, alloc::string::String>
 pub fn nika_dap::anchor::verify_offline(sidecar: &nika_dap::anchor::AnchorSidecar, head: &[u8; 32], pk32: &[u8; 32], key_id: &str) -> core::result::Result<nika_dap::anchor::VerifiedAnchor, alloc::string::String>
 pub fn nika_dap::anchor::write_sidecar(path: &std::path::Path, sidecar: &nika_dap::anchor::AnchorSidecar) -> core::result::Result<(), alloc::string::String>
+pub mod nika_dap::attempt
+#[non_exhaustive] pub enum nika_dap::attempt::EffectsClass
+pub nika_dap::attempt::EffectsClass::Contained
+pub nika_dap::attempt::EffectsClass::ContainedOffHarness
+pub nika_dap::attempt::EffectsClass::External
+impl nika_dap::attempt::EffectsClass
+pub const fn nika_dap::attempt::EffectsClass::as_str(self) -> &'static str
+pub fn nika_dap::attempt::EffectsClass::parse(word: &str) -> core::option::Option<Self>
+impl core::clone::Clone for nika_dap::attempt::EffectsClass
+pub fn nika_dap::attempt::EffectsClass::clone(&self) -> nika_dap::attempt::EffectsClass
+impl core::cmp::Eq for nika_dap::attempt::EffectsClass
+impl core::cmp::PartialEq for nika_dap::attempt::EffectsClass
+pub fn nika_dap::attempt::EffectsClass::eq(&self, other: &nika_dap::attempt::EffectsClass) -> bool
+impl core::fmt::Debug for nika_dap::attempt::EffectsClass
+pub fn nika_dap::attempt::EffectsClass::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_dap::attempt::EffectsClass
+impl core::marker::StructuralPartialEq for nika_dap::attempt::EffectsClass
+impl<D> owo_colors::OwoColorize for nika_dap::attempt::EffectsClass
+impl<Q, K> equivalent::Equivalent<K> for nika_dap::attempt::EffectsClass where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_dap::attempt::EffectsClass where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_dap::attempt::EffectsClass where U: core::convert::From<T>
+pub fn nika_dap::attempt::EffectsClass::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::attempt::EffectsClass where U: core::convert::Into<T>
+pub type nika_dap::attempt::EffectsClass::Error = core::convert::Infallible
+pub fn nika_dap::attempt::EffectsClass::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::attempt::EffectsClass where U: core::convert::TryFrom<T>
+pub type nika_dap::attempt::EffectsClass::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::attempt::EffectsClass::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::attempt::EffectsClass where T: core::clone::Clone
+pub type nika_dap::attempt::EffectsClass::Owned = T
+pub fn nika_dap::attempt::EffectsClass::clone_into(&self, target: &mut T)
+pub fn nika_dap::attempt::EffectsClass::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::attempt::EffectsClass where T: 'static + ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::attempt::EffectsClass where T: ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::attempt::EffectsClass where T: ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::attempt::EffectsClass where T: core::clone::Clone
+pub unsafe fn nika_dap::attempt::EffectsClass::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::attempt::EffectsClass
+pub fn nika_dap::attempt::EffectsClass::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::attempt::EffectsClass where T: core::clone::Clone
+pub fn nika_dap::attempt::EffectsClass::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::attempt::EffectsClass where T: 'static
+pub fn nika_dap::attempt::EffectsClass::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> outref::AsOut<T> for nika_dap::attempt::EffectsClass where T: core::marker::Copy
+pub fn nika_dap::attempt::EffectsClass::as_out(&mut self) -> outref::Out<'_, T>
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::attempt::EffectsClass where T: ?core::marker::Sized
+pub fn nika_dap::attempt::EffectsClass::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::attempt::EffectsClass::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::attempt::EffectsClass
+impl<T> tracing::instrument::WithSubscriber for nika_dap::attempt::EffectsClass
+impl<T> typenum::type_operators::Same for nika_dap::attempt::EffectsClass
+pub type nika_dap::attempt::EffectsClass::Output = T
+#[non_exhaustive] pub struct nika_dap::attempt::AttemptSpend
+pub nika_dap::attempt::AttemptSpend::unknown: bool
+pub nika_dap::attempt::AttemptSpend::usd: f64
+impl core::clone::Clone for nika_dap::attempt::AttemptSpend
+pub fn nika_dap::attempt::AttemptSpend::clone(&self) -> nika_dap::attempt::AttemptSpend
+impl core::cmp::PartialEq for nika_dap::attempt::AttemptSpend
+pub fn nika_dap::attempt::AttemptSpend::eq(&self, other: &nika_dap::attempt::AttemptSpend) -> bool
+impl core::fmt::Debug for nika_dap::attempt::AttemptSpend
+pub fn nika_dap::attempt::AttemptSpend::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_dap::attempt::AttemptSpend
+impl core::marker::StructuralPartialEq for nika_dap::attempt::AttemptSpend
+impl<D> owo_colors::OwoColorize for nika_dap::attempt::AttemptSpend
+impl<T, U> core::convert::Into<U> for nika_dap::attempt::AttemptSpend where U: core::convert::From<T>
+pub fn nika_dap::attempt::AttemptSpend::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::attempt::AttemptSpend where U: core::convert::Into<T>
+pub type nika_dap::attempt::AttemptSpend::Error = core::convert::Infallible
+pub fn nika_dap::attempt::AttemptSpend::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::attempt::AttemptSpend where U: core::convert::TryFrom<T>
+pub type nika_dap::attempt::AttemptSpend::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::attempt::AttemptSpend::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::attempt::AttemptSpend where T: core::clone::Clone
+pub type nika_dap::attempt::AttemptSpend::Owned = T
+pub fn nika_dap::attempt::AttemptSpend::clone_into(&self, target: &mut T)
+pub fn nika_dap::attempt::AttemptSpend::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::attempt::AttemptSpend where T: 'static + ?core::marker::Sized
+pub fn nika_dap::attempt::AttemptSpend::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::attempt::AttemptSpend where T: ?core::marker::Sized
+pub fn nika_dap::attempt::AttemptSpend::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::attempt::AttemptSpend where T: ?core::marker::Sized
+pub fn nika_dap::attempt::AttemptSpend::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::attempt::AttemptSpend where T: core::clone::Clone
+pub unsafe fn nika_dap::attempt::AttemptSpend::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::attempt::AttemptSpend
+pub fn nika_dap::attempt::AttemptSpend::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::attempt::AttemptSpend where T: core::clone::Clone
+pub fn nika_dap::attempt::AttemptSpend::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::attempt::AttemptSpend where T: 'static
+pub fn nika_dap::attempt::AttemptSpend::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> outref::AsOut<T> for nika_dap::attempt::AttemptSpend where T: core::marker::Copy
+pub fn nika_dap::attempt::AttemptSpend::as_out(&mut self) -> outref::Out<'_, T>
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::attempt::AttemptSpend where T: ?core::marker::Sized
+pub fn nika_dap::attempt::AttemptSpend::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::attempt::AttemptSpend::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::attempt::AttemptSpend
+impl<T> tracing::instrument::WithSubscriber for nika_dap::attempt::AttemptSpend
+impl<T> typenum::type_operators::Same for nika_dap::attempt::AttemptSpend
+pub type nika_dap::attempt::AttemptSpend::Output = T
+pub fn nika_dap::attempt::effects_class(wf: &nika_schema::raw::workflow::RawWorkflow, report: &nika_check::CheckReport) -> nika_dap::attempt::EffectsClass
+pub fn nika_dap::attempt::interrupted_spend(wf: &nika_schema::raw::workflow::RawWorkflow, inputs: &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>, events: &[nika_event::event::Event]) -> nika_dap::attempt::AttemptSpend
+pub fn nika_dap::attempt::lost_journal(path: &std::path::Path) -> core::option::Option<alloc::vec::Vec<nika_event::event::Event>>
+pub fn nika_dap::attempt::rode_harness(events: &[nika_event::event::Event]) -> bool
 pub mod nika_dap::bounded
 #[non_exhaustive] pub enum nika_dap::bounded::DecodeRefusal
 pub nika_dap::bounded::DecodeRefusal::IdOverflow
@@ -1152,6 +1260,218 @@ pub type nika_dap::chain::Verdict::Output = T
 pub const nika_dap::chain::CHAIN_GENESIS: &[u8]
 pub const nika_dap::chain::MAX_LINE_BYTES: usize
 pub fn nika_dap::chain::walk(raw: &str) -> nika_dap::chain::Verdict
+pub mod nika_dap::continuation
+#[non_exhaustive] pub enum nika_dap::continuation::ResumeNotice
+pub nika_dap::continuation::ResumeNotice::AccessChanged
+pub nika_dap::continuation::ResumeNotice::AccessChanged::model: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::AccessChanged::now: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::AccessChanged::was: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::BrokenChainWaived
+pub nika_dap::continuation::ResumeNotice::BrokenChainWaived::finding: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::CrossVersion
+pub nika_dap::continuation::ResumeNotice::CrossVersion::recorded: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::GatesAskAgain
+pub nika_dap::continuation::ResumeNotice::GatesAskAgain::tasks: alloc::vec::Vec<alloc::string::String>
+pub nika_dap::continuation::ResumeNotice::Keyless
+pub nika_dap::continuation::ResumeNotice::Keyless::count: usize
+pub nika_dap::continuation::ResumeNotice::NoKeys
+pub nika_dap::continuation::ResumeNotice::SeatChanged
+pub nika_dap::continuation::ResumeNotice::SeatChanged::declared: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::SeatChanged::recorded: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::SourceChanged
+pub nika_dap::continuation::ResumeNotice::Truncated
+pub nika_dap::continuation::ResumeNotice::Truncated::note: alloc::string::String
+pub nika_dap::continuation::ResumeNotice::Unchained
+pub nika_dap::continuation::ResumeNotice::UnprotectedProject
+pub nika_dap::continuation::ResumeNotice::Unresolved
+pub nika_dap::continuation::ResumeNotice::Unresolved::values: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for nika_dap::continuation::ResumeNotice
+pub fn nika_dap::continuation::ResumeNotice::clone(&self) -> nika_dap::continuation::ResumeNotice
+impl core::cmp::Eq for nika_dap::continuation::ResumeNotice
+impl core::cmp::PartialEq for nika_dap::continuation::ResumeNotice
+pub fn nika_dap::continuation::ResumeNotice::eq(&self, other: &nika_dap::continuation::ResumeNotice) -> bool
+impl core::fmt::Debug for nika_dap::continuation::ResumeNotice
+pub fn nika_dap::continuation::ResumeNotice::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_dap::continuation::ResumeNotice
+impl<D> owo_colors::OwoColorize for nika_dap::continuation::ResumeNotice
+impl<Q, K> equivalent::Equivalent<K> for nika_dap::continuation::ResumeNotice where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_dap::continuation::ResumeNotice where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_dap::continuation::ResumeNotice where U: core::convert::From<T>
+pub fn nika_dap::continuation::ResumeNotice::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::continuation::ResumeNotice where U: core::convert::Into<T>
+pub type nika_dap::continuation::ResumeNotice::Error = core::convert::Infallible
+pub fn nika_dap::continuation::ResumeNotice::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::continuation::ResumeNotice where U: core::convert::TryFrom<T>
+pub type nika_dap::continuation::ResumeNotice::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::continuation::ResumeNotice::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::continuation::ResumeNotice where T: core::clone::Clone
+pub type nika_dap::continuation::ResumeNotice::Owned = T
+pub fn nika_dap::continuation::ResumeNotice::clone_into(&self, target: &mut T)
+pub fn nika_dap::continuation::ResumeNotice::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::continuation::ResumeNotice where T: 'static + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::continuation::ResumeNotice where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::continuation::ResumeNotice where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::continuation::ResumeNotice where T: core::clone::Clone
+pub unsafe fn nika_dap::continuation::ResumeNotice::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::continuation::ResumeNotice
+pub fn nika_dap::continuation::ResumeNotice::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::continuation::ResumeNotice where T: core::clone::Clone
+pub fn nika_dap::continuation::ResumeNotice::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::continuation::ResumeNotice where T: 'static
+pub fn nika_dap::continuation::ResumeNotice::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::continuation::ResumeNotice where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeNotice::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::continuation::ResumeNotice::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::continuation::ResumeNotice
+impl<T> tracing::instrument::WithSubscriber for nika_dap::continuation::ResumeNotice
+impl<T> typenum::type_operators::Same for nika_dap::continuation::ResumeNotice
+pub type nika_dap::continuation::ResumeNotice::Output = T
+#[non_exhaustive] pub enum nika_dap::continuation::ResumeRefusal
+pub nika_dap::continuation::ResumeRefusal::AccessMoved(alloc::string::String)
+pub nika_dap::continuation::ResumeRefusal::BrokenChain
+pub nika_dap::continuation::ResumeRefusal::BrokenChain::finding: alloc::string::String
+pub nika_dap::continuation::ResumeRefusal::Refused(alloc::string::String)
+impl core::clone::Clone for nika_dap::continuation::ResumeRefusal
+pub fn nika_dap::continuation::ResumeRefusal::clone(&self) -> nika_dap::continuation::ResumeRefusal
+impl core::cmp::Eq for nika_dap::continuation::ResumeRefusal
+impl core::cmp::PartialEq for nika_dap::continuation::ResumeRefusal
+pub fn nika_dap::continuation::ResumeRefusal::eq(&self, other: &nika_dap::continuation::ResumeRefusal) -> bool
+impl core::fmt::Debug for nika_dap::continuation::ResumeRefusal
+pub fn nika_dap::continuation::ResumeRefusal::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_dap::continuation::ResumeRefusal
+impl<D> owo_colors::OwoColorize for nika_dap::continuation::ResumeRefusal
+impl<Q, K> equivalent::Equivalent<K> for nika_dap::continuation::ResumeRefusal where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_dap::continuation::ResumeRefusal where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_dap::continuation::ResumeRefusal where U: core::convert::From<T>
+pub fn nika_dap::continuation::ResumeRefusal::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::continuation::ResumeRefusal where U: core::convert::Into<T>
+pub type nika_dap::continuation::ResumeRefusal::Error = core::convert::Infallible
+pub fn nika_dap::continuation::ResumeRefusal::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::continuation::ResumeRefusal where U: core::convert::TryFrom<T>
+pub type nika_dap::continuation::ResumeRefusal::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::continuation::ResumeRefusal::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::continuation::ResumeRefusal where T: core::clone::Clone
+pub type nika_dap::continuation::ResumeRefusal::Owned = T
+pub fn nika_dap::continuation::ResumeRefusal::clone_into(&self, target: &mut T)
+pub fn nika_dap::continuation::ResumeRefusal::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::continuation::ResumeRefusal where T: 'static + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::continuation::ResumeRefusal where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::continuation::ResumeRefusal where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::continuation::ResumeRefusal where T: core::clone::Clone
+pub unsafe fn nika_dap::continuation::ResumeRefusal::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::continuation::ResumeRefusal
+pub fn nika_dap::continuation::ResumeRefusal::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::continuation::ResumeRefusal where T: core::clone::Clone
+pub fn nika_dap::continuation::ResumeRefusal::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::continuation::ResumeRefusal where T: 'static
+pub fn nika_dap::continuation::ResumeRefusal::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::continuation::ResumeRefusal where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeRefusal::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::continuation::ResumeRefusal::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::continuation::ResumeRefusal
+impl<T> tracing::instrument::WithSubscriber for nika_dap::continuation::ResumeRefusal
+impl<T> typenum::type_operators::Same for nika_dap::continuation::ResumeRefusal
+pub type nika_dap::continuation::ResumeRefusal::Output = T
+#[non_exhaustive] pub struct nika_dap::continuation::Continuation
+pub nika_dap::continuation::Continuation::compat: core::option::Option<alloc::string::String>
+pub nika_dap::continuation::Continuation::paused: core::option::Option<nika_runtime::approval::PausedApproval>
+pub nika_dap::continuation::Continuation::plan: nika_runtime::resume::ResumePlan
+pub nika_dap::continuation::Continuation::resumed_from: core::option::Option<alloc::string::String>
+pub nika_dap::continuation::Continuation::run_facts: core::option::Option<nika_runtime::run_facts::RunFacts>
+pub nika_dap::continuation::Continuation::unverified: core::option::Option<nika_runtime::resume::ResumeUnverified>
+impl core::fmt::Debug for nika_dap::continuation::Continuation
+pub fn nika_dap::continuation::Continuation::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D> owo_colors::OwoColorize for nika_dap::continuation::Continuation
+impl<T, U> core::convert::Into<U> for nika_dap::continuation::Continuation where U: core::convert::From<T>
+pub fn nika_dap::continuation::Continuation::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::continuation::Continuation where U: core::convert::Into<T>
+pub type nika_dap::continuation::Continuation::Error = core::convert::Infallible
+pub fn nika_dap::continuation::Continuation::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::continuation::Continuation where U: core::convert::TryFrom<T>
+pub type nika_dap::continuation::Continuation::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::continuation::Continuation::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for nika_dap::continuation::Continuation where T: 'static + ?core::marker::Sized
+pub fn nika_dap::continuation::Continuation::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::continuation::Continuation where T: ?core::marker::Sized
+pub fn nika_dap::continuation::Continuation::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::continuation::Continuation where T: ?core::marker::Sized
+pub fn nika_dap::continuation::Continuation::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for nika_dap::continuation::Continuation
+pub fn nika_dap::continuation::Continuation::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_dap::continuation::Continuation where T: 'static
+pub fn nika_dap::continuation::Continuation::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::continuation::Continuation where T: ?core::marker::Sized
+pub fn nika_dap::continuation::Continuation::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::continuation::Continuation::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::continuation::Continuation
+impl<T> tracing::instrument::WithSubscriber for nika_dap::continuation::Continuation
+impl<T> typenum::type_operators::Same for nika_dap::continuation::Continuation
+pub type nika_dap::continuation::Continuation::Output = T
+#[non_exhaustive] pub struct nika_dap::continuation::ResumeAsk<'a>
+impl<'a> nika_dap::continuation::ResumeAsk<'a>
+pub const fn nika_dap::continuation::ResumeAsk<'a>::from_task(self, from: core::option::Option<&'a str>) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::new(journal: &'a std::path::Path, label: &'a str, workflow: &'a nika_schema::raw::workflow::RawWorkflow, source: &'a str, engine: &'a str) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::requiring_a_chain(self) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::waiving_a_broken_chain(self, waive: bool) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::with_access(self, live: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dap::resume::LaneCarry>, pin: core::option::Option<&'a str>) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::with_compat(self, compat: core::option::Option<&'a str>) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::with_model_override(self, model: core::option::Option<&'a str>) -> Self
+pub const fn nika_dap::continuation::ResumeAsk<'a>::with_project(self, fingerprint: core::option::Option<&'a str>) -> Self
+impl<'a> core::clone::Clone for nika_dap::continuation::ResumeAsk<'a>
+pub fn nika_dap::continuation::ResumeAsk<'a>::clone(&self) -> nika_dap::continuation::ResumeAsk<'a>
+impl<'a> core::fmt::Debug for nika_dap::continuation::ResumeAsk<'a>
+pub fn nika_dap::continuation::ResumeAsk<'a>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for nika_dap::continuation::ResumeAsk<'a>
+impl<D> owo_colors::OwoColorize for nika_dap::continuation::ResumeAsk<'a>
+impl<T, U> core::convert::Into<U> for nika_dap::continuation::ResumeAsk<'a> where U: core::convert::From<T>
+pub fn nika_dap::continuation::ResumeAsk<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::continuation::ResumeAsk<'a> where U: core::convert::Into<T>
+pub type nika_dap::continuation::ResumeAsk<'a>::Error = core::convert::Infallible
+pub fn nika_dap::continuation::ResumeAsk<'a>::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::continuation::ResumeAsk<'a> where U: core::convert::TryFrom<T>
+pub type nika_dap::continuation::ResumeAsk<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::continuation::ResumeAsk<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::continuation::ResumeAsk<'a> where T: core::clone::Clone
+pub type nika_dap::continuation::ResumeAsk<'a>::Owned = T
+pub fn nika_dap::continuation::ResumeAsk<'a>::clone_into(&self, target: &mut T)
+pub fn nika_dap::continuation::ResumeAsk<'a>::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::continuation::ResumeAsk<'a> where T: 'static + ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeAsk<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::continuation::ResumeAsk<'a> where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeAsk<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::continuation::ResumeAsk<'a> where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeAsk<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::continuation::ResumeAsk<'a> where T: core::clone::Clone
+pub unsafe fn nika_dap::continuation::ResumeAsk<'a>::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::continuation::ResumeAsk<'a>
+pub fn nika_dap::continuation::ResumeAsk<'a>::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::continuation::ResumeAsk<'a> where T: core::clone::Clone
+pub fn nika_dap::continuation::ResumeAsk<'a>::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::continuation::ResumeAsk<'a> where T: 'static
+pub fn nika_dap::continuation::ResumeAsk<'a>::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> outref::AsOut<T> for nika_dap::continuation::ResumeAsk<'a> where T: core::marker::Copy
+pub fn nika_dap::continuation::ResumeAsk<'a>::as_out(&mut self) -> outref::Out<'_, T>
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::continuation::ResumeAsk<'a> where T: ?core::marker::Sized
+pub fn nika_dap::continuation::ResumeAsk<'a>::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::continuation::ResumeAsk<'a>::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::continuation::ResumeAsk<'a>
+impl<T> tracing::instrument::WithSubscriber for nika_dap::continuation::ResumeAsk<'a>
+impl<T> typenum::type_operators::Same for nika_dap::continuation::ResumeAsk<'a>
+pub type nika_dap::continuation::ResumeAsk<'a>::Output = T
+pub fn nika_dap::continuation::continue_from(ask: &nika_dap::continuation::ResumeAsk<'_>, raw: &str, notice: &mut dyn core::ops::function::FnMut(nika_dap::continuation::ResumeNotice)) -> core::result::Result<nika_dap::continuation::Continuation, nika_dap::continuation::ResumeRefusal>
+pub fn nika_dap::continuation::live_lanes(plan: &nika_providers::plan::ExecutionAccessPlan) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dap::resume::LaneCarry>
+pub fn nika_dap::continuation::read_journal(path: &std::path::Path, label: &str) -> core::result::Result<alloc::string::String, nika_dap::continuation::ResumeRefusal>
+pub fn nika_dap::continuation::recorded_facts(events: &[nika_event::event::Event]) -> core::result::Result<core::option::Option<nika_runtime::run_facts::RunFacts>, alloc::string::String>
 pub mod nika_dap::cost_journal
 pub mod nika_dap::cost_journal::reconcile
 #[non_exhaustive] pub enum nika_dap::cost_journal::reconcile::Evidence

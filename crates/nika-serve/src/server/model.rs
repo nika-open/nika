@@ -106,6 +106,16 @@ impl<'a> TraceVerificationResponse<'a> {
             trace_id: record.trace_id(),
         }
     }
+
+    /// A closed attempt left no journal to verify: it is settled, and its
+    /// trace is named.
+    pub(crate) const fn unavailable_for(trace_id: &'a str) -> Self {
+        Self {
+            verdict: "unavailable",
+            reason: "trace_journal_unavailable",
+            trace_id: Some(trace_id),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -170,6 +180,9 @@ const HTTP_ADAPTER_CAPABILITIES: &[&str] = &[
     // `GET /v1/occupancy`: what the resident holds against its limits, and
     // `429 owner_queue_full` at an owner's own bound (ADR-155).
     "occupancy",
+    // `retry` on the by-name form of `POST /v1/jobs`: a job whose run lost
+    // its owner is started again as a new attempt of the same job (ADR-156).
+    "jobRetry",
     "compile",
     "artifacts",
     "accessServiceTier",

@@ -17,10 +17,16 @@ use serde_json::Value;
 mod admission;
 mod binding;
 mod format;
+mod history;
+pub(crate) use history::{AttemptView, JobAttempts};
 mod list;
 pub(crate) use list::QueuedJob;
+mod lost;
+pub(crate) use lost::{LostOwnerJudge, LostVerdict};
 mod migration;
 mod retention;
+mod retried;
+pub(crate) use retried::{Retried, RetriedAttempt, is_replay, retryable};
 mod stored_job;
 
 #[cfg(test)]
@@ -28,7 +34,7 @@ mod format_tests;
 
 use binding::{
     attach_interrupted_receipt, ensure_receipt_matches, has_complete_execution_identity,
-    hash_event, hash_execution_identity, migrate_legacy_nonterminal_record,
+    hash_event, hash_execution_identity, migrate_legacy_nonterminal_record, validate_attempts,
     validate_identity_binding, validate_snapshot_digest, validate_terminal_record,
 };
 use migration::decode_state;
@@ -351,6 +357,11 @@ impl JobStore {
     pub fn load_world(&self, id: &JobId) -> Result<String, JobStoreError> {
         let _local = self.local_guard()?;
         let _lease = self.kernel_lease()?;
+        self.read_world(id)
+    }
+
+    /// Read one job's world under a lease the caller already holds.
+    fn read_world(&self, id: &JobId) -> Result<String, JobStoreError> {
         let mut file = self
             .dir
             .open_relative(Path::new(&world_file(id)))
@@ -794,60 +805,7 @@ impl JobStore {
         &self,
         incarnation: &ServerIncarnation,
     ) -> Result<usize, JobStoreError> {
-        let _local = self.local_guard()?;
-        let _lease = self.kernel_lease()?;
-        let mut state = self.load_state()?;
-        if state.incarnation.current != incarnation.generation {
-            return Err(JobStoreError::StaleServerIncarnation);
-        }
-        if state.incarnation.settled == Some(incarnation.generation) {
-            return Ok(0);
-        }
-        let prior_generation = state.incarnation.settled.map(IncarnationGeneration::get);
-        let current_generation = incarnation.generation.get();
-        let mut settled = 0;
-        for job in &mut state.jobs {
-            if job.record.status == JobStatus::Running {
-                if has_complete_execution_identity(&job.record) {
-                    let payload = serde_json::json!({
-                        "incarnation_generation": current_generation,
-                        "kind": "interrupted",
-                        "previous_incarnation_generation": prior_generation,
-                        "status": "interrupted",
-                    });
-                    let batch =
-                        ValidatedEventBatch::for_transition(std::slice::from_ref(&payload))?;
-                    job.record.status = JobStatus::Interrupted;
-                    attach_interrupted_receipt(&mut job.record)?;
-                    job.terminal_sequence = Some(job.final_sequence_after(&batch)?);
-                    job.append_payloads(&batch, &self.now())?;
-                    settled += 1;
-                } else {
-                    if job.record.workflow.is_empty() {
-                        return Err(JobStoreError::Corrupt(
-                            "running job lacks both durable execution identity and restart schedule"
-                                .to_owned(),
-                        ));
-                    }
-                    let payload = serde_json::json!({
-                        "incarnation_generation": current_generation,
-                        "kind": crate::JobEventKind::Requeued,
-                        "previous_incarnation_generation": prior_generation,
-                        "status": JobStatus::Queued,
-                    });
-                    let batch =
-                        ValidatedEventBatch::for_transition(std::slice::from_ref(&payload))?;
-                    job.record.status = JobStatus::Queued;
-                    job.record.outputs = None;
-                    job.record.receipt = None;
-                    job.terminal_sequence = None;
-                    job.append_payloads(&batch, &self.now())?;
-                }
-            }
-        }
-        state.incarnation.settled = Some(incarnation.generation);
-        self.persist(&state)?;
-        Ok(settled)
+        self.settle_lost_jobs(incarnation, &lost::NeverAgain)
     }
 
     /// Mark one running job interrupted under the live server incarnation.
@@ -1052,6 +1010,7 @@ impl PersistedState {
             job.record.request_digest.validate()?;
             validate_terminal_record(&job.record)?;
             validate_identity_binding(job)?;
+            validate_attempts(job)?;
             if !ids.insert(job.record.id.clone()) {
                 return Err(JobStoreError::Corrupt("duplicate job id".to_owned()));
             }

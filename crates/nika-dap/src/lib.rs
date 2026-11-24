@@ -24,8 +24,10 @@
 //! → stopped/continue loop → disconnect.
 
 pub mod anchor;
+pub mod attempt;
 pub mod bounded;
 pub mod chain;
+pub mod continuation;
 pub mod cost_journal;
 pub mod cost_replay;
 pub mod drift;

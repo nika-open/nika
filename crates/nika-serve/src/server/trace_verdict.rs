@@ -31,6 +31,15 @@ impl JournalKey {
         })
     }
 
+    /// The journal of one closed attempt of a job (ADR-156 §10).
+    pub(super) fn named(dir: &Path, execution: &str, trace: &str) -> Self {
+        Self {
+            dir: dir.to_path_buf(),
+            execution: execution.to_owned(),
+            trace: trace.to_owned(),
+        }
+    }
+
     /// The journal's path, when one exists (blocking · the fs).
     pub(super) fn path(&self) -> Option<PathBuf> {
         nika_dap::store::locate_trace(&self.dir, &self.execution, &self.trace)

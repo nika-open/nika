@@ -152,6 +152,7 @@ impl Resident {
         let body = Bytes::from(request.to_string());
         let world = admitted.snapshot().encode();
         let world = world.map_err(|_| "the workflow's world could not be captured".to_owned())?;
+        let effects = super::retry::effects_word(&admitted);
         if let Some(door) = &state.cost_review {
             let Ok(Some(job)) = route::named_job(&body) else {
                 return Err("the run's request is not one this server's review reads".to_owned());
@@ -176,7 +177,7 @@ impl Resident {
                 name,
                 world,
                 access,
-                JobBindings::of(inputs, ceiling),
+                JobBindings::of(inputs, ceiling).classed(effects),
             )
             .await;
         let response = match admission {

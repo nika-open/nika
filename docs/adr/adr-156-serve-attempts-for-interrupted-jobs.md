@@ -332,20 +332,71 @@ Not established, to settle while implementing:
 
 ## Evidence / Affected code
 
-Planned, none of it written:
+Written for the `restart` mode of the automatic re-attempt (the first delivery):
 
-- `crates/nika-serve/src/job/` -- the attempt history, the counter, the reasons
-- `crates/nika-serve/src/job/store.rs` -- `settle_interrupted_jobs` creates the next attempt
-- `crates/nika-serve/src/server/` -- the policy, the classification, the budget fold, the
-  retry route, the attempts route
-- `crates/nika-service-execution` -- a resume plan given by the resident
-- `crates/nika-cli-host`, `crates/nika-cli` -- `--retry-interrupted`, `--retry-max-attempts`
-- `crates/nika-serve/openapi.json`, `docs/security/nika-serve-threat-model.md`
-- Fault-injection tests beside `server/tests/shutdown/process.rs`: a kill in the middle of a
-  mock workflow then a restart (two attempts, completed tasks skipped in the journal, total
-  spend under the ceiling); a stop with a grace shorter than the job; a poisoned job; a
-  workflow with effects and no consent; an idempotency replay across attempts; a format 3
-  store migrated and then re-attempted
+- `crates/nika-dap/src/attempt.rs` -- the effects class from the check report, the route a run
+  rode, the spend of a journal with no terminal record
+- `crates/nika-serve/src/job/attempt.rs` -- the policy, the statement, the attempt history, the
+  decision and the fold of what is left under the ceiling
+- `crates/nika-serve/src/job/store/lost.rs` -- the one write that records a loss and queues the
+  next attempt or leaves the job `interrupted` with its reason; the durable cancellation mark
+- `crates/nika-serve/src/server/retry.rs` -- the resident's judge, the ceiling of the attempt
+  about to run
+- `crates/nika-serve/src/server/mod.rs`, `crates/nika-serve/src/server/store.rs` -- the start
+  pass and the stop path ask the same judge
+- `crates/nika-cli-host/src/serve_args.rs`, `crates/nika-cli/src/verbs/serve.rs` --
+  `--retry-interrupted off|restart`, `--retry-max-attempts`
+- `crates/nika-serve/src/job/tests/attempts.rs`, `crates/nika-serve/src/server/retry_tests.rs`,
+  `crates/nika-dap/src/attempt/tests.rs`
+
+Written for the `resume` mode:
+
+- `crates/nika-dap/src/continuation.rs` -- the one resume judgment `nika run --resume` and the
+  resident call; `crates/nika-cli/src/verbs/run/resume_setup.rs` now calls it
+- `crates/nika-serve/src/server/retry.rs` -- the judgment when the resident decides
+- `crates/nika-serve/src/server/production.rs` -- the judgment when the new attempt starts,
+  and the plan handed to the run
+- `crates/nika-service-execution/src/lib.rs` -- `ServiceExecutionOptions::with_resume`
+- `crates/nika-serve/src/server/mod.rs` -- `ExecutionBackend::execute_resumed`, whose default
+  refuses
+- `crates/nika-dap/src/continuation/tests.rs`, `crates/nika-serve/src/server/retry_tests.rs`
+
+Written for the manual retry route:
+
+- `crates/nika-serve/src/job/attempt.rs` -- the request a route reads, and what a closed
+  attempt keeps of it
+- `crates/nika-serve/src/job/store/retried.rs` -- the one write that closes a settled attempt
+  and queues the next; `crates/nika-serve/src/job/store/binding.rs` -- the hash of a settled
+  attempt's terminal event once a request closed it
+- `crates/nika-serve/src/server/retry.rs` -- the decision for a request, and the budget the
+  latest request stated
+- `crates/nika-serve/src/server/retry_route.rs` -- `POST /v1/jobs/{id}/retry`
+- `crates/nika-serve/src/server/openapi/job_retry.rs`, `crates/nika-serve/openapi.json`
+- `crates/nika-serve/src/job/tests/attempts.rs`,
+  `crates/nika-serve/src/server/retry_route_tests.rs`
+
+Written for reading attempts:
+
+- `crates/nika-serve/src/job/store/history.rs` -- each attempt's view and the retry state,
+  read from one snapshot
+- `crates/nika-serve/src/server/attempts_route.rs` -- `GET /v1/jobs/{id}/attempts` and the
+  attempt a trace query names; `crates/nika-serve/src/server/job_list.rs` -- the two summary
+  members
+- `crates/nika-serve/src/server/openapi/job_retry.rs`, `crates/nika-serve/openapi.json`
+- `crates/nika-serve/src/job/tests/attempts.rs`,
+  `crates/nika-serve/src/server/retry_route_tests.rs`
+
+Written for the faults:
+
+- `crates/nika-serve/src/server/tests/shutdown/kill_resume.rs` -- a resident process killed
+  by SIGKILL in the middle of a workflow; the next one resumes the job from the killed
+  attempt's journal (the completed task served, never run again; the lost attempt's spend
+  read as zero; its journal verified on its own)
+- `crates/nika-serve/src/server/fault_tests.rs` -- a job that takes down every resident that
+  runs it stops at its bound; a lost run whose workflow runs a program waits for a request;
+  a job a format 3 store kept queued is refused at readmission and cannot be started again
+- `crates/nika-serve/src/server/retry_tests.rs` -- a stop with a grace shorter than the job,
+  and the same idempotency key answering the same job across its attempts
 
 ## Alternatives considered
 
@@ -395,6 +446,171 @@ Rejected: the effects of an interrupted attempt are unknown by definition.
 - ADR-117 -- one credential, one authority domain
 
 ## Notes
+
+Found while writing the `restart` mode, 2026-11-23. None of it changes a decision above; each
+point narrows or corrects a sentence of it.
+
+1. **No journal that can be read is unknown spend.** A run's journal opens at its first event,
+   and a journal that fails to open or to write disables its own lane while the run goes on. A
+   missing journal therefore cannot be told apart from a run that sent nothing, and counts as
+   unknown, never as zero.
+2. **The static bound prices the declared output only.** The check's per-task bound multiplies
+   the output token limit by the output price, the `for_each` fan-out and the `retry` attempts.
+   The input of a call in flight is not in it, so section 6's "it can only overstate" holds for
+   the output only: the spend read from a lost attempt can be short by the input of the calls
+   it had in flight. The next attempt's own calls are metered as any run's are. A route that
+   bills reasoning beyond the declared output has no bound in section 6's sense: a call in
+   flight on it makes the spend unknown.
+3. **Which tasks were in flight** (first open point of "What was read"). Every task's
+   `task.scheduled` record is written before the first task runs, and a wave's records are
+   written before the next wave exists. The tasks with no terminal record in the first wave that
+   has one are the ones that may have been sent; a fan-out task stays unsettled until all its
+   items settle and counts whole. A workflow with an `on_error: { recover: ... }` task defers
+   records past that wave, and then every unsettled task counts. A journal whose writes failed
+   during the run stops early: what it shows is short, and one that stops after its first record
+   reads as a run that sent nothing.
+4. **The per-task bound** (second open point). The resident checks the job's captured workflow
+   again, once per lost job, when it decides; it does not read a stored certificate.
+5. **Scope of the automatic re-attempt.** A job a schedule fired on its beat is never re-attempted
+   by the resident: its schedule's catch-up owns what follows a lost fire. A job admitted through
+   a cost review states no `retry` (`422 invalid_job_retry`) and is not classed, so it stays
+   `interrupted` with `effects_need_consent`. An accepted cancellation is made durable on the job
+   before the run is told, so no later incarnation starts it again; that mark is not part of the
+   event chain.
+6. **Not yet delivered**: a `retry` member on a schedule declared over HTTP.
+7. **The class is read twice.** The word kept on the job at admission enters the job's event
+   chain only when the job starts. The resident reads the class again from the captured
+   workflow, whose digest the job's identity binds, and the stricter of the two holds. A world
+   whose digest is not the job's own is not read, and the job is then not contained.
+8. **A journal is evidence only while its chain holds.** A torn last line is what a kill
+   leaves and reads. A journal whose chain is broken, or that has a line that does not parse
+   before its last, counts as unknown spend, like a missing one.
+9. **A child workflow in flight is unknown spend.** The per-task bound of section 6 comes
+   from the parent's own check, which does not bound the calls of a child workflow. A task that
+   calls a child and did not settle makes the spend unknown; a settled one counts what it
+   reported.
+10. **Every job admitted from this version on keeps its class.** Each door that admits a
+    job classes it, whatever the policy, so a later resident started with a policy can decide.
+    Under `off` no decision changes; the record gains that one optional member.
+11. **A cancellation racing a worker.** A cancellation accepted while a worker claims the
+    job is made durable as for a running job before the run is told.
+
+Written for the `resume` mode:
+
+12. **One judgment, two moments.** The composition section 3 asks for is
+    `nika_dap::continuation`; `nika run --resume` and the resident both call it. The resident
+    judges when it decides (chain required, project, workflow, engine; no access, since the
+    lanes are resolved only by a run) and again when the new attempt starts, with the lanes
+    that run resolved, before its cost judgment. The second judgment ends the job `failed`
+    (`resume_refused`), with no task run, as a queued attempt its ceiling no longer covers
+    does. It is reached when the journal changed after the decision, when the access moved,
+    and when the engine that starts the attempt is not the one that decided: a stop past its
+    grace decides in the stopping resident, so a deploy that upgrades the engine then fails
+    the queued attempt rather than leave the job `interrupted`. A start after a kill decides
+    in the new resident and leaves the job `interrupted`, as section 3 states.
+13. **No leftovers settled** (third open point). The resident neither settles a crashed
+    run's leftovers nor puts back what a failed run moved aside before a resume, as
+    `nika run --resume` does; it never did for a restart either. A served run that is killed
+    moves no file (quarantine happens at a failed settlement), and a workflow that writes is
+    resumed only when its job stated `retry`.
+14. **What a resumed attempt continues.** The facts the lost attempt recorded on its first
+    manifest (a scheduled slot) are carried on; a gate the journal holds as paused asks
+    again.
+
+Written for the manual retry route:
+
+15. **The answer to the same request.** The first request answers `202` with the queued job.
+    The same request sent again (same `attempt`, `mode` and `max_cost_usd`) answers `200`
+    with the job as it stands, writes nothing and takes no place in the queue, as a replayed
+    admission does. A different request for an attempt already retried is
+    `409 job_not_retryable`: it does not name the latest attempt.
+16. **What section 9 also refuses.** A job on which a cancellation was accepted, as section 2
+    states for the resident, and a failed job whose latest attempt never started (refused
+    before its execution identity was stamped): there is no attempt to close, so a new job is
+    the answer. Both are `409 job_not_retryable`.
+17. **The order of the refusals.** The bound of section 8, then for `resume` the journal
+    judgment of section 3, then the cost of section 6: no budget makes a journal resumable.
+    A job a schedule fired is never resumed; a request may restart it.
+18. **What the retried attempt spent** is read from its journal, as for a lost run. A failed
+    run that left no journal is of unknown spend: the request states `max_cost_usd`, under a
+    ceiling or not (note 25). A request's `max_cost_usd` holds for the attempts after it until another
+    request states one; a request that states none leaves the earlier one in force.
+19. **A settled attempt stays bound to its end.** The closed attempt keeps the sequence of its
+    terminal event and the request that closed it. That terminal event is hashed from the
+    closed attempt as it was written, and the requeue event binds the closed attempt whole,
+    so neither its result nor the request can be changed afterwards. Both members are
+    optional and join store format 4, which has not shipped, with no migration.
+20. **The place before the write.** The owner's place in the queue is taken after the
+    decision and before the store writes, so an owner at its bound is refused with nothing
+    changed. The store checks again under its lease that the request names the latest
+    attempt: of two different requests racing for one attempt, the first written wins.
+
+Written for reading attempts:
+
+21. **Where the retry state comes from.** `queued` is a queued job with a closed attempt.
+    `exhausted` and `refused` are read from the code on the `interrupted` event that ended
+    the job, or from the error of a re-attempt refused before it ran; `retry_reason` names
+    it. A job whose latest attempt failed for a reason of its own is `none`: a request may
+    still retry it, unless the job has taken its bound (note 30).
+22. **Spend and instants.** `spend` is on the attempts that were started again: what the
+    decision that closed each one counted. The attempt in hand carries its own spend in its
+    settlement. `started_at` is the attempt's `execution.started` event; `ended_at` its
+    terminal event, or for a lost attempt queued again the requeue event.
+23. **The trace query** takes one member, `attempt=N`. Anything else is
+    `400 invalid_trace_query`; a number the job has not reached is `404 attempt_not_found`.
+
+Written for the faults:
+
+24. **A job of an older store.** A format 3 job carries no effects class: a lost one is read
+    as having effects and waits for a request. A format 3 job left queued carries no captured
+    world: it is refused at readmission, as in 0.124.5, and its attempt never started, so a
+    request cannot start it again. No frozen format 3 store holds a running job; that case
+    is judged by the rules above and is not proved from a fixture.
+
+Written for the reviews of the branch:
+
+25. **Unknown spend refuses with no ceiling as well.** Decision 5 reads "unknown cost refuses
+    unless an explicit budget is stated". The first build refused it under a ceiling only; a
+    resident run with no ceiling at all now refuses it too, for a lost run and for a request.
+26. **The order of the automatic decision.** The cancellation, the policy, the bound of
+    section 8, the consent of section 5, then for `resume` the journal judgment of section 3,
+    then the cost of section 6. A broken journal is also of unknown spend: judged first, it says
+    `resume_refused`, as note 17 orders it for a request.
+27. **A call in flight on an agent application is unknown spend.** Section 6 counts any call on
+    an unpriced route as unknown. A journal names its routes for the run, not for each task:
+    when a run rode an agent application for any model, or names no route, every call it had in
+    flight is unknown spend. It can only overstate.
+28. **A job a schedule fired keeps its origin when a request restarts it.** The new attempt
+    runs with the facts of the slot it serves and its receipt states the schedule, as the
+    record does; the same holds for such an attempt still queued when a resident starts.
+29. **A request that ended before its queue entry.** The store's write and the queue entry are
+    two steps: a request that ends between them (a timeout, a disconnect) leaves the job
+    `queued` with no place in its owner's lane. The same request sent again puts it back, unless
+    it waits already. A request is matched by the attempt it names and what it states, amounts
+    compared as amounts (`1` and `1.0` are one budget), whatever attempts came after it.
+30. **The bound in the retry state.** A job a request could retry and that has taken the bound
+    in force reads `exhausted`, `retry_reason: retry_exhausted`, even when its latest attempt
+    failed for a reason of its own: a request would be refused for that reason. This narrows
+    note 21.
+31. **A cancellation racing a stop.** A cancellation reads the job `running`, then a stop
+    queues it again before the durable mark is written: the mark finds the job `queued`, and
+    the cancellation cancels it there, as for any queued job.
+32. **A store that cannot answer.** A retry request whose captured world cannot be read now
+    because the store is busy answers `503 store_busy`; only a job with no world that can be
+    read is judged without one.
+
+Limits found by the reviews and not closed here:
+
+33. **A worker past its attempt.** A run interrupted while its resident lives (the execution
+    timeout, a stop) is told to stop and dropped; its blocking work can still be running when
+    a request starts the next attempt. Not reproduced; the next attempt has its own execution
+    identity and journal, and the two never share a record.
+34. **The retry request writes through the control lane**, as a cancellation does. The lane is
+    bounded and its send blocks: while it is full, the request holds a runtime thread.
+35. **A journal with only its boot record counts zero** (note 3): every task is scheduled before
+    the first one runs, so such a run sent nothing.
+36. **The warnings of the resume judgment** (an engine or a seat that differs, under an exact
+    declaration) are not shown on the job: the judgment's verdict is.
 
 Decisions asked of the decider before any code, and accepted as written on 2026-11-23:
 

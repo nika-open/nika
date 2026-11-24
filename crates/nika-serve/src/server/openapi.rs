@@ -117,6 +117,8 @@ pub(crate) fn under_cost_policy(mut document: Value, reviewed: bool) -> Value {
 #[cfg(test)]
 mod job_list;
 #[cfg(test)]
+mod job_retry;
+#[cfg(test)]
 mod occupancy;
 #[cfg(test)]
 mod schedule_manage;
@@ -237,7 +239,9 @@ mod builder {
                 schedule_precondition_schema(),
             );
             let listed = super::job_list::schemas().into_iter();
-            let listed = listed.chain(super::occupancy::schemas());
+            let listed = listed
+                .chain(super::occupancy::schemas())
+                .chain(super::job_retry::schemas());
             for (name, schema) in listed.chain(super::schedule_manage::schemas()) {
                 named.insert(name.to_owned(), schema);
             }
@@ -708,6 +712,8 @@ mod builder {
             "/v1/jobs/{id}/status": job_status_path(),
             "/v1/jobs/{id}/events": job_events_path(),
             "/v1/jobs/{id}/cancel": job_cancel_path(),
+            "/v1/jobs/{id}/retry": super::job_retry::path(&error_named, &json_job()),
+            "/v1/jobs/{id}/attempts": super::job_retry::attempts_path(&error_named),
             "/v1/jobs/{id}/trace/verify": job_trace_verify_path(),
             "/v1/jobs/{id}/artifacts": job_artifacts_path(),
             "/v1/jobs/{id}/artifacts/{name}": job_artifact_path(),
@@ -881,7 +887,7 @@ mod builder {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions. Optional `owner` and `labels` (health capability `jobAttribution`) are what the caller states about the job so its application can find it again (GET /v1/jobs): they are attribution inside one authority domain, never an authorization boundary, and whoever holds the token reads every job. They bind the exact request identity like every other member; a snapshot body carries none, and a cost review binds none (they are stated on the admission that consumes it).",
+            "description": "The by-name form (ADR-131): a workflow the served registry lists (GET /v1/workflows · project-root-relative, `.nika`). The resident captures its world exactly as a schedule does — the one owner of the snapshot and its digest domain. Idempotency binds to these request bytes. Optional `access` is the same pin as CLI `--access` (a pin is a pin). Absent: the resident's unpinned plan. Snapshot bodies reject both access and inputs overlays, including null or empty maps. Optional inputs are literal JSON values checked against declared keys, types and required values before a job exists; strings are never CLI @env instructions or expressions. Optional `owner` and `labels` (health capability `jobAttribution`) are what the caller states about the job so its application can find it again (GET /v1/jobs): they are attribution inside one authority domain, never an authorization boundary, and whoever holds the token reads every job. They bind the exact request identity like every other member; a snapshot body carries none, and a cost review binds none (they are stated on the admission that consumes it). Optional `retry` (health capability `jobRetry`, ADR-156) states whether the job is started again when its run loses its owner; it binds the request identity too.",
             "required": ["workflow"],
             "properties": {
                 "workflow": {"type": "string", "minLength": 1, "maxLength": 4096},
@@ -909,6 +915,29 @@ mod builder {
                     "propertyNames": {"minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._/-]+$"},
                     "additionalProperties": {"type": "string", "maxLength": 256},
                     "description": "At most 16 caller labels. A key is 1 to 64 bytes of letters, digits and `._/-` (no colon); a value is at most 256 bytes of text without control characters. Outside these bounds, or null: 422 invalid_job_labels."
+                },
+                "retry": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "What the caller states about starting this job again when its run loses its owner: the resident stopped or was killed while the job ran (ADR-156). Stating it, even empty, is the caller's consent to run the workflow's effects a second time. Absent: the resident's own policy applies, and only to a workflow the engine classes as free of external effects. Unknown members, null, or a value outside its bounds: 422 invalid_job_retry. Refused on a request that consumes a cost review. Require the `jobRetry` capability first: a resident without it refuses the member as an unknown field.",
+                    "properties": {
+                        "on_interrupted": {
+                            "type": "string",
+                            "enum": ["off", "restart", "resume"],
+                            "description": "`resume` serves the tasks the interrupted attempt's journal completed and runs the rest, once the journal is judged as `nika run --resume` judges one; a journal that does not pass leaves the job `interrupted` (`resume_refused`). `restart` runs the whole workflow again as a new attempt of the same job, with its own execution and trace identity. `off` leaves the job `interrupted`. Absent: the resident's `--retry-interrupted`."
+                        },
+                        "max_attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 16,
+                            "description": "The most attempts this job may take, counting the first. It lowers the resident's `--retry-max-attempts`, never raises it."
+                        },
+                        "max_cost_usd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "A ceiling for the re-attempts alone (USD). Stating it accepts that an attempt whose spend could not be read is followed by another; without it such a job stays `interrupted` (`unknown_spend`) under a resident that bounds cost. It never raises the ceiling that covers every attempt of the job."
+                        }
+                    }
                 }
             }
         })
@@ -1010,8 +1039,8 @@ mod builder {
         json!({"get": {
             "summary": "Verify the job's trace journal",
             "description": "Locates the journal the resident wrote for this job under the project it serves (by the job's execution and trace identity) and verifies it through the same verifier `nika trace verify` runs; the vocabulary is the CLI's. `unavailable` is the honest refusal when no journal exists. The response never exposes a filesystem path.",
-            "parameters": [job_id_param()],
-            "responses": {"200": {"description": "Typed trace verdict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceVerification"}}}}, "401": error_ref(), "404": error_ref()}
+            "parameters": [job_id_param(), {"name": "attempt", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1}, "description": "The attempt whose journal is verified (ADR-156); the latest when absent. Each attempt has its own journal, chain and seal."}],
+            "responses": {"200": {"description": "Typed trace verdict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceVerification"}}}}, "400": error_named("`invalid_trace_query`: a query member other than one `attempt=N`"), "401": error_ref(), "404": error_named("`job_not_found` · `attempt_not_found`: the job has not taken this attempt")}
         }})
     }
 
@@ -1142,6 +1171,8 @@ mod tests {
         "/v1/jobs/{id}/status",
         "/v1/jobs/{id}/events",
         "/v1/jobs/{id}/cancel",
+        "/v1/jobs/{id}/retry",
+        "/v1/jobs/{id}/attempts",
         "/v1/jobs/{id}/trace/verify",
         "/v1/jobs/{id}/artifacts",
         "/v1/jobs/{id}/artifacts/{name}",

@@ -86,7 +86,8 @@ impl JobAttribution {
 }
 
 /// What one admission binds onto the workflow it runs: literal inputs, the
-/// ceiling its requester asked for, and the attribution it stated.
+/// ceiling its requester asked for, the attribution it stated, and what it
+/// stated and what the check derived about running it again (ADR-156).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct JobBindings {
     /// Literal API input overrides.
@@ -95,6 +96,10 @@ pub(crate) struct JobBindings {
     pub(crate) max_cost_usd: Option<f64>,
     /// The stated owner and labels.
     pub(crate) attribution: JobAttribution,
+    /// What the requester stated about a re-attempt.
+    pub(crate) retry: Option<super::RetryStatement>,
+    /// The effects class of the captured workflow, as its stored word.
+    pub(crate) effects: Option<String>,
 }
 
 impl JobBindings {
@@ -103,13 +108,25 @@ impl JobBindings {
         Self {
             inputs,
             max_cost_usd,
-            attribution: JobAttribution::default(),
+            ..Self::default()
         }
     }
 
     /// The same bindings under a stated attribution.
     pub(crate) fn attributed(mut self, attribution: JobAttribution) -> Self {
         self.attribution = attribution;
+        self
+    }
+
+    /// The same bindings with what the requester stated about a re-attempt.
+    pub(crate) fn retrying(mut self, statement: Option<super::RetryStatement>) -> Self {
+        self.retry = statement;
+        self
+    }
+
+    /// The same bindings with the effects class of the captured workflow.
+    pub(crate) fn classed(mut self, effects: &str) -> Self {
+        self.effects = Some(effects.to_owned());
         self
     }
 }

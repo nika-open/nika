@@ -3,15 +3,18 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 #[cfg(test)]
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::AtomicU8;
 
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot};
 
-use crate::job::{JobBindings, JobListFilter, JobPage};
+use crate::job::{
+    JobAttempts, JobBindings, JobListFilter, JobPage, LostOwnerJudge, Retried, RetriedAttempt,
+};
 use crate::{
     Admission, EventPageLimit, IdempotencyKey, JobEvent, JobId, JobOrigin, JobReceipt, JobRecord,
     JobStatus, JobStore, JobStoreError, RequestDigest, ServerIncarnation,
@@ -180,6 +183,10 @@ enum RequestCommand {
         id: JobId,
         reply: Reply<Option<JobRecord>>,
     },
+    Attempts {
+        id: JobId,
+        reply: Reply<Option<JobAttempts>>,
+    },
     LoadWorld {
         id: JobId,
         reply: Reply<String>,
@@ -239,6 +246,18 @@ enum ControlCommand {
     Interrupt {
         id: JobId,
         reply: Option<Reply<JobRecord>>,
+        /// The resident dropped the run because it is stopping: whether the
+        /// job is started again is judged, as for a crash (ADR-156).
+        lost: bool,
+    },
+    CancelRequested {
+        id: JobId,
+        reply: Reply<bool>,
+    },
+    Retry {
+        id: JobId,
+        retried: Box<RetriedAttempt>,
+        reply: Reply<Retried>,
     },
     SettleInterrupted {
         reply: Reply<usize>,
@@ -254,6 +273,9 @@ pub(super) struct StoreHandle {
     requests: std::sync::mpsc::SyncSender<RequestCommand>,
     controls: std::sync::mpsc::SyncSender<ControlCommand>,
     events: Arc<Notify>,
+    /// Set once the resident stops. A run it drops from then on was not
+    /// interrupted by a fault of its own.
+    stopping: Arc<AtomicBool>,
     #[cfg(test)]
     shutdown_probe: Arc<ShutdownTestProbe>,
 }
@@ -405,6 +427,13 @@ impl StoreHandle {
         receive(answer).await
     }
 
+    /// A job's attempts, read from one validated snapshot (ADR-156 §10).
+    pub(super) async fn attempts(&self, id: JobId) -> Result<Option<JobAttempts>, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        self.send_request(RequestCommand::Attempts { id, reply })?;
+        receive(answer).await
+    }
+
     /// Lifecycle reads share the reserved control lane with their mutations.
     /// A full HTTP request queue cannot turn a stale replay into a fatal run.
     pub(super) async fn execution_status(
@@ -509,12 +538,46 @@ impl StoreHandle {
         self.send_control_blocking(ControlCommand::Interrupt {
             id,
             reply: Some(reply),
+            lost: false,
         })?;
         receive(answer).await
     }
 
+    /// Settle the job of a run dropped without a result. While the
+    /// resident lives that is an interruption; once it stops, the run lost
+    /// its owner and the retry policy decides.
     pub(super) fn interrupt_detached(&self, id: JobId) {
-        let _result = self.send_control_blocking(ControlCommand::Interrupt { id, reply: None });
+        let lost = self.stopping.load(Ordering::Acquire);
+        let _result = self.send_control_blocking(ControlCommand::Interrupt {
+            id,
+            reply: None,
+            lost,
+        });
+    }
+
+    /// The resident stops: the runs it drops from now on lost their owner.
+    pub(super) fn begin_stop(&self) {
+        self.stopping.store(true, Ordering::Release);
+    }
+
+    /// Record durably that a cancellation was accepted for a running job.
+    pub(super) async fn cancel_requested(&self, id: JobId) -> Result<bool, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        self.send_control_blocking(ControlCommand::CancelRequested { id, reply })?;
+        receive(answer).await
+    }
+
+    /// Close a settled job's latest attempt and queue the next one, as a
+    /// retry request decided (ADR-156 section 9).
+    pub(super) async fn retry(
+        &self,
+        id: JobId,
+        retried: RetriedAttempt,
+    ) -> Result<Retried, ServerError> {
+        let (reply, answer) = oneshot::channel();
+        let retried = Box::new(retried);
+        self.send_control_blocking(ControlCommand::Retry { id, retried, reply })?;
+        receive(answer).await
     }
 
     pub(super) async fn settle_interrupted(&self) -> Result<usize, ServerError> {
@@ -574,6 +637,7 @@ impl StoreActor {
     pub(super) fn start(
         store: Arc<JobStore>,
         incarnation: ServerIncarnation,
+        judge: Arc<dyn LostOwnerJudge + Send + Sync>,
         request_capacity: usize,
         control_capacity: usize,
     ) -> Result<Self, ServerError> {
@@ -586,13 +650,13 @@ impl StoreActor {
         let thread = std::thread::Builder::new()
             .name("nika-serve-store".to_owned())
             .spawn(move || {
-                serve_store(
-                    &request_receiver,
-                    &control_receiver,
-                    &store,
-                    &incarnation,
-                    &thread_events,
-                );
+                let owner = StoreOwner {
+                    store: &store,
+                    incarnation: &incarnation,
+                    judge: judge.as_ref(),
+                    events: &thread_events,
+                };
+                serve_store(&request_receiver, &control_receiver, &owner);
             })
             .map_err(|_| ServerError::BlockingTask)?;
         Ok(Self {
@@ -600,6 +664,7 @@ impl StoreActor {
                 requests,
                 controls,
                 events,
+                stopping: Arc::new(AtomicBool::new(false)),
                 #[cfg(test)]
                 shutdown_probe,
             },
@@ -644,16 +709,24 @@ impl Drop for StoreActor {
     }
 }
 
+/// What the one blocking owner of the durable state serves with.
+#[derive(Clone, Copy)]
+struct StoreOwner<'a> {
+    store: &'a JobStore,
+    incarnation: &'a ServerIncarnation,
+    judge: &'a (dyn LostOwnerJudge + Send + Sync),
+    events: &'a Notify,
+}
+
 fn serve_store(
     requests: &std::sync::mpsc::Receiver<RequestCommand>,
     controls: &std::sync::mpsc::Receiver<ControlCommand>,
-    store: &JobStore,
-    incarnation: &ServerIncarnation,
-    events: &Notify,
+    owner: &StoreOwner<'_>,
 ) {
+    let store = owner.store;
     loop {
         if let Ok(command) = controls.try_recv() {
-            if !serve_control(command, store, incarnation, events) {
+            if !serve_control(command, owner) {
                 break;
             }
             continue;
@@ -663,7 +736,7 @@ fn serve_store(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => match controls.recv() {
                 Ok(command) => {
-                    if !serve_control(command, store, incarnation, events) {
+                    if !serve_control(command, owner) {
                         break;
                     }
                     continue;
@@ -728,6 +801,9 @@ fn dispatch_request(command: RequestCommand, store: &JobStore) {
         RequestCommand::Get { id, reply } => {
             let _result = reply.send(store.get(&id));
         }
+        RequestCommand::Attempts { id, reply } => {
+            let _result = reply.send(store.attempts(&id));
+        }
         RequestCommand::LoadWorld { id, reply } => {
             let _result = reply.send(store.load_world(&id));
         }
@@ -767,12 +843,35 @@ fn notify_persisted<T>(result: &Result<T, JobStoreError>, events: &Notify) {
     }
 }
 
-fn serve_control(
-    command: ControlCommand,
+/// A retry request's write; a waiter on the job's events wakes only when
+/// the request queued a new attempt.
+fn retry_settled(
     store: &JobStore,
-    incarnation: &ServerIncarnation,
+    id: &JobId,
+    retried: &RetriedAttempt,
     events: &Notify,
-) -> bool {
+) -> Result<Retried, JobStoreError> {
+    let result = store.retry_settled(id, retried);
+    if matches!(result, Ok(Retried::Queued(_))) {
+        events.notify_waiters();
+    }
+    result
+}
+
+/// Wake the job's event waiters when the write persisted, then answer the
+/// caller with it.
+fn answer_persisted<T>(result: Result<T, JobStoreError>, events: &Notify, reply: Reply<T>) {
+    notify_persisted(&result, events);
+    let _result = reply.send(result);
+}
+
+fn serve_control(command: ControlCommand, owner: &StoreOwner<'_>) -> bool {
+    let StoreOwner {
+        store,
+        incarnation,
+        judge,
+        events,
+    } = *owner;
     match command {
         ControlCommand::ExecutionStatus { id, reply } => {
             let result = store
@@ -784,8 +883,7 @@ fn serve_control(
             let result = store
                 .refuse_queued(&id, &event)
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::CancelQueued {
             id,
@@ -806,8 +904,7 @@ fn serve_control(
                     *receipt,
                 )
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::Transition {
             id,
@@ -818,8 +915,7 @@ fn serve_control(
             reply,
         } => {
             let result = transition_job(store, &id, status, &event, outputs, receipt);
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::StartExecution {
             id,
@@ -838,24 +934,25 @@ fn serve_control(
                     std::slice::from_ref(&event),
                 )
                 .map(|mutation| mutation.record().clone());
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
-        ControlCommand::Interrupt { id, reply } => {
-            let payload = serde_json::json!({
-                "kind": crate::JobEventKind::Interrupted,
-                "status": crate::JobStatus::Interrupted
-            });
-            let result = store.interrupt_running(&id, incarnation, &payload);
+        ControlCommand::Interrupt { id, reply, lost } => {
+            let judge: Option<&dyn LostOwnerJudge> = if lost { Some(judge) } else { None };
+            let result = interrupt_job(store, &id, incarnation, judge);
             notify_persisted(&result, events);
             if let Some(reply) = reply {
                 let _result = reply.send(result);
             }
         }
+        ControlCommand::CancelRequested { id, reply } => {
+            let _result = reply.send(store.mark_cancel_requested(&id));
+        }
+        ControlCommand::Retry { id, retried, reply } => {
+            let _result = reply.send(retry_settled(store, &id, &retried, events));
+        }
         ControlCommand::SettleInterrupted { reply } => {
             let result = store.settle_interrupted_jobs(incarnation);
-            notify_persisted(&result, events);
-            let _result = reply.send(result);
+            answer_persisted(result, events, reply);
         }
         ControlCommand::Shutdown { reply } => {
             let _result = reply.send(());
@@ -863,6 +960,25 @@ fn serve_control(
         }
     }
     true
+}
+
+/// Settle a running job whose run ended without a result: `interrupted`,
+/// or, for a run that lost its owner, as the retry policy decides
+/// (ADR-156).
+fn interrupt_job(
+    store: &JobStore,
+    id: &JobId,
+    incarnation: &ServerIncarnation,
+    lost: Option<&dyn LostOwnerJudge>,
+) -> Result<JobRecord, JobStoreError> {
+    if let Some(judge) = lost {
+        return store.settle_lost_job(id, incarnation, judge);
+    }
+    let payload = serde_json::json!({
+        "kind": crate::JobEventKind::Interrupted,
+        "status": crate::JobStatus::Interrupted
+    });
+    store.interrupt_running(id, incarnation, &payload)
 }
 
 fn transition_job(
@@ -903,6 +1019,7 @@ mod tests {
             requests,
             controls,
             events: Arc::new(Notify::new()),
+            stopping: Arc::new(AtomicBool::new(false)),
             shutdown_probe: Arc::new(ShutdownTestProbe::default()),
         };
         let (reply, _answer) = oneshot::channel();

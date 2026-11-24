@@ -645,6 +645,23 @@ pub struct JobRecord {
     /// Receipt bound atomically to a terminal settlement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) receipt: Option<JobReceipt>,
+    /// What the requester stated about a re-attempt (ADR-156). Bound in the
+    /// identity and event preimages only when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) retry: Option<super::RetryStatement>,
+    /// The effects class the admission computed from the captured workflow,
+    /// as its stored word. Absent on a job admitted before attempts existed,
+    /// which is then read as having external effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) effects: Option<String>,
+    /// A cancellation was accepted while the job ran. A job its caller
+    /// cancelled is never started again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) cancel_requested: bool,
+    /// The attempts this job left, oldest first. The record's own identity,
+    /// status and result are those of its latest attempt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) attempts: Vec<super::ClosedAttempt>,
     /// Read projection of the hash-bound terminal event, never a second
     /// persisted settlement. Rebuilt after validation and event mutation.
     #[serde(skip)]
@@ -660,12 +677,21 @@ pub struct JobRecord {
 
 impl JobRecord {
     /// Whether the admission bound something a hash must hold before the job
-    /// runs: literal inputs, a requested ceiling, or a stated attribution.
+    /// runs: literal inputs, a requested ceiling, a stated attribution, or a
+    /// stated retry.
     pub(crate) fn binds_admission(&self) -> bool {
         !self.inputs.is_empty()
             || self.max_cost_usd.is_some()
             || self.owner.is_some()
             || !self.labels.is_empty()
+            || self.retry.is_some()
+    }
+
+    /// Which attempt the record's identity is: one, plus those it left.
+    pub(crate) fn attempt(&self) -> u32 {
+        u32::try_from(self.attempts.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1)
     }
 
     /// The per-job ceiling its requester bound, when one did (USD).

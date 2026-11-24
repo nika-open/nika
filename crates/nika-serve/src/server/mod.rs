@@ -3,6 +3,7 @@
 
 mod access_offer;
 mod artifacts;
+mod attempts_route;
 mod attribution;
 mod auth;
 mod cancel;
@@ -23,6 +24,8 @@ mod production;
 mod provider_gate;
 mod registry;
 mod resident_options;
+mod retry;
+mod retry_route;
 mod route;
 mod schedule_http;
 mod schedule_inputs;
@@ -380,6 +383,35 @@ pub trait ExecutionBackend: Send + Sync + 'static {
         None
     }
 
+    /// The project root this backend runs jobs under, when it has one. A
+    /// job's interrupted attempt is resumed only against the project its
+    /// journal recorded (ADR-156 §3); `None` (the default) resumes none.
+    fn project_root(&self) -> Option<PathBuf> {
+        None
+    }
+
+    /// Execute a new attempt of a job that resumes its interrupted attempt
+    /// (ADR-156 §3): the tasks that attempt's journal completed are served
+    /// from it and the others run. `interrupted` names that attempt's
+    /// execution and trace. A backend must explicitly support it: the
+    /// default refuses `resume_refused`, and never runs the workflow from
+    /// its first task in its place.
+    fn execute_resumed<'a>(
+        &'a self,
+        _context: ExecutionContext<'a>,
+        _run: (Option<f64>, Option<&str>),
+        _inputs: &BTreeMap<String, serde_json::Value>,
+        _cancel: nika_types::cancel::CancelCtx,
+        _interrupted: (&str, &str),
+    ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
+        Box::pin(async {
+            ExecutionOutcome::failed(
+                "resume_refused",
+                "this execution backend does not resume an interrupted attempt",
+            )
+        })
+    }
+
     /// The operator's standing cost policy this backend enforces, when it holds
     /// one: the server then advertises health `costStandingPolicyV1`. `None`
     /// (the default) says the backend admits no Run under a standing rule.
@@ -433,6 +465,9 @@ struct AppState {
     cost_policy: bool,
     /// The project's native Session door, when the operator started this server with it.
     sessions: Option<Arc<nika_session_host::http::Sessions>>,
+    /// The judge of a run that lost its owner, which also decides a retry
+    /// request (ADR-156 section 9).
+    retry_judge: Arc<retry::LostRunJudge>,
 }
 
 struct AuthorityState {
@@ -457,6 +492,8 @@ struct AuthorityState {
     cancellations: Arc<ActiveCancellations>,
     /// Reviewed jobs' captured worlds and cost authority, until their run.
     reviewed: Arc<cost_review::Reviewed>,
+    /// The judge of a run that lost its owner (ADR-156).
+    retry_judge: Arc<retry::LostRunJudge>,
 }
 
 #[derive(Debug)]
@@ -483,6 +520,13 @@ impl ExecutionTask {
 
     fn with_access_pin(mut self, pin: Option<String>) -> Self {
         self.access_pin = pin;
+        self
+    }
+
+    /// The origin the job's record states: its receipt must state the same,
+    /// and a job a schedule fired runs with the facts of the slot it serves.
+    fn with_origin(mut self, origin: JobOrigin) -> Self {
+        self.origin = origin;
         self
     }
 
@@ -523,11 +567,19 @@ impl ResidentAuthority {
         backend: Arc<dyn ExecutionBackend>,
     ) -> Result<Self, ServerError> {
         validate_resident_config(&config)?;
-        let prepared = prepare_authority(&config).await?;
+        // One judge decides what becomes of a run that lost its owner: at
+        // this start for the incarnation before, and at this one's stop.
+        let judge = Arc::new(retry::LostRunJudge::new(
+            config.limits(),
+            (backend.trace_journal_dir(), backend.project_root()),
+            config.snapshot_limits(),
+        ));
+        let prepared = prepare_authority(&config, Arc::clone(&judge)).await?;
         let control_capacity = store_control_capacity(config.limits());
         let store_actor = StoreActor::start(
             prepared.store,
             prepared.incarnation,
+            Arc::<retry::LostRunJudge>::clone(&judge),
             config.limits().max_connections(),
             control_capacity,
         )?;
@@ -542,7 +594,8 @@ impl ResidentAuthority {
         let default_max_cost_usd = config.limits().default_max_cost_usd();
         for queued in store_actor.handle().queued_jobs().await? {
             let task = ExecutionTask::new(queued.id.clone(), default_max_cost_usd)
-                .with_access_pin(queued.access_pin);
+                .with_access_pin(queued.access_pin)
+                .with_origin(queued.origin);
             jobs.recover(queued.owner.as_deref(), queued.id, task);
         }
         let reviewed = Arc::new(cost_review::Reviewed::default());
@@ -585,6 +638,7 @@ impl ResidentAuthority {
             clock: Arc::clone(config.clock()),
             cancellations,
             reviewed,
+            retry_judge: judge,
         });
         Ok(Self {
             state,
@@ -733,6 +787,7 @@ impl BoundServer {
             cost_review,
             cost_policy,
             sessions: sessions.map(|root| Arc::new(session::open(root, state.clone()))),
+            retry_judge: Arc::clone(&authority.state.retry_judge),
         });
         Ok(Self { listener, state })
     }
@@ -799,7 +854,10 @@ struct PreparedHttp {
     project: Arc<OwnedDir>,
 }
 
-async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority, ServerError> {
+async fn prepare_authority(
+    config: &ResidentConfig,
+    judge: Arc<retry::LostRunJudge>,
+) -> Result<PreparedAuthority, ServerError> {
     let state_root = config.state_root().to_owned();
     let workflow_root = config.workflow_root().map(Path::to_owned);
     let clock = Arc::clone(config.clock());
@@ -825,7 +883,7 @@ async fn prepare_authority(config: &ResidentConfig) -> Result<PreparedAuthority,
         schedules
             .stamp_writer_as_resident()
             .map_err(ServerError::ScheduleStore)?;
-        store.settle_interrupted_jobs(&incarnation)?;
+        store.settle_lost_jobs(&incarnation, judge.as_ref())?;
         // After the interruptions are dated: a job this start just settled is new.
         store.evict_expired()?;
         Ok(PreparedAuthority {
@@ -1051,6 +1109,7 @@ async fn finish_authority(
 ) -> Result<(), ServerError> {
     authority.jobs.close();
     if fatal.is_some() {
+        authority.state.store.begin_stop();
         executions.abort_all();
     }
     let grace = authority.state.limits.shutdown_grace();
@@ -1072,6 +1131,10 @@ async fn finish_authority(
             Ok(())
         }
     } else {
+        // Past the grace the resident drops its runs. Each one lost its
+        // owner: the retry policy decides whether its job is started again
+        // by the next incarnation (ADR-156).
+        authority.state.store.begin_stop();
         executions.abort_all();
         while executions.join_next().await.is_some() {}
         match authority.state.store.settle_interrupted().await {
@@ -1213,11 +1276,13 @@ async fn run_claimed(
         .await?
         .ok_or_else(|| crate::JobStoreError::JobNotFound(task.id.clone()))?;
     // A ceiling the job's requester bound restricts the task's, never widens it: on admission,
-    // replay and restart alike.
-    let max_cost_usd = match (task.max_cost_usd, record.max_cost_usd()) {
-        (Some(task), Some(job)) => Some(task.min(job)),
-        (task, job) => task.or(job),
+    // replay and restart alike. One ceiling covers every attempt of the job: a later attempt
+    // runs under what the earlier ones left (ADR-156).
+    let max_cost_usd = match retry::attempt_ceiling(task.max_cost_usd, &record) {
+        Ok(ceiling) => ceiling,
+        Err(refusal) => return retry::refuse_attempt(state, task, refusal).await,
     };
+    let resumes = retry::resumes(&record);
     let inputs = record.inputs;
     let mut guard = RunningGuard::new(state.store.clone(), task.id.clone(), task.prestarted);
     if !task.prestarted && !start_running(&mut guard, session.context()).await? {
@@ -1233,7 +1298,7 @@ async fn run_claimed(
         (session, authority),
         task.origin.clone(),
         max_cost_usd,
-        task.access_pin.take(),
+        (task.access_pin.take(), resumes),
         inputs,
         cancel,
     )
@@ -1254,6 +1319,17 @@ async fn refuse_admission(
             "workflow world could not be readmitted".to_owned(),
         ),
     };
+    refuse_queued_job(state, task, &code, &message).await
+}
+
+/// Fail a queued job before it runs, with the event's `code` and `message`.
+/// A job another transition already moved stays as it is.
+async fn refuse_queued_job(
+    state: &AuthorityState,
+    task: &ExecutionTask,
+    code: &str,
+    message: &str,
+) -> Result<(), ServerError> {
     let refused = state
         .store
         .refuse_queued(
@@ -1345,30 +1421,47 @@ async fn admit_workflow(
 const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The backend's future for one run: a reviewed job under its authority (C6),
-/// a scheduled fire told its slot, any other job with its literal inputs and
-/// pin under the run's ceiling.
+/// a scheduled fire told its slot, a new attempt resuming the interrupted
+/// one (ADR-156 §3), any other job with its literal inputs and pin under the
+/// run's ceiling.
 fn execution<'a>(
     backend: &'a dyn ExecutionBackend,
     context: ExecutionContext<'a>,
     (authority, max_cost_usd, access_pin): (Option<CostAuthority>, Option<f64>, Option<&str>),
     inputs: &BTreeMap<String, serde_json::Value>,
-    (cancel, facts): (
+    (cancel, facts, resumes): (
         &nika_types::cancel::CancelCtx,
         Option<nika_runtime::RunFacts>,
+        Option<(&str, &str)>,
     ),
 ) -> Pin<Box<dyn Future<Output = ExecutionOutcome> + Send + 'a>> {
-    match (authority, facts) {
-        (Some(authority), _) => {
+    match (authority, facts, resumes) {
+        (None, None, Some(interrupted)) => backend.execute_resumed(
+            context,
+            (max_cost_usd, access_pin),
+            inputs,
+            cancel.clone(),
+            interrupted,
+        ),
+        // Neither a reviewed job nor a fire is ever started again: a resume
+        // of one refuses rather than run it from its first task.
+        (_, _, Some(_)) => Box::pin(async {
+            ExecutionOutcome::failed(
+                "resume_refused",
+                "a job admitted through a cost review or fired by a schedule is never resumed",
+            )
+        }),
+        (Some(authority), _, None) => {
             backend.execute_reviewed(context, inputs, cancel.clone(), authority)
         }
-        (None, Some(facts)) => backend.execute_scheduled(
+        (None, Some(facts), None) => backend.execute_scheduled(
             context,
             (max_cost_usd, access_pin),
             inputs,
             cancel.clone(),
             facts,
         ),
-        (None, None) => {
+        (None, None, None) => {
             backend.execute_with_inputs(context, max_cost_usd, access_pin, inputs, cancel.clone())
         }
     }
@@ -1380,17 +1473,20 @@ async fn settle_disposition(
     (session, authority): (nika_execution::ExecutionSession, Option<CostAuthority>),
     origin: JobOrigin,
     max_cost_usd: Option<f64>,
-    access_pin: Option<String>,
+    (access_pin, resumes): (Option<String>, Option<(String, String)>),
     inputs: BTreeMap<String, serde_json::Value>,
     cancel: nika_types::cancel::CancelCtx,
 ) -> Result<(), ServerError> {
     let run = (authority, max_cost_usd, access_pin.as_deref());
+    let interrupted = resumes
+        .as_ref()
+        .map(|(execution, trace)| (execution.as_str(), trace.as_str()));
     let execute = execution(
         state.backend.as_ref(),
         session.context(),
         run,
         &inputs,
-        (&cancel, origin.run_facts()),
+        (&cancel, origin.run_facts(), interrupted),
     );
     // A cancel signal gives the runtime a grace to reach its next wave
     // boundary and return its result. A signal requests action; only the
@@ -1560,6 +1656,8 @@ mod failure_tests;
 #[cfg(test)]
 mod fair_admission_tests;
 #[cfg(test)]
+mod fault_tests;
+#[cfg(test)]
 mod job_list_tests;
 #[cfg(test)]
 mod registry_tests;
@@ -1567,6 +1665,10 @@ mod registry_tests;
 mod result_tests;
 #[cfg(test)]
 mod retention_tests;
+#[cfg(test)]
+mod retry_route_tests;
+#[cfg(test)]
+mod retry_tests;
 #[cfg(test)]
 mod schedule_inputs_tests;
 #[cfg(test)]

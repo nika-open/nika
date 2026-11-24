@@ -84,6 +84,16 @@ impl JobStore {
                 to: JobStatus::Running,
             });
         }
+        // A new attempt is a new execution (ADR-156): an identity an earlier
+        // attempt of the job closed is never claimed again.
+        if job
+            .record
+            .attempts
+            .iter()
+            .any(|closed| closed.execution_id == execution_id || closed.trace_id == trace_id)
+        {
+            return Err(JobStoreError::InvalidReceipt);
+        }
         job.record.execution_id = execution_id;
         job.record.trace_id = trace_id;
         job.record.snapshot_digest = snapshot_digest;
@@ -202,6 +212,8 @@ impl JobStore {
             inputs,
             max_cost_usd,
             attribution,
+            retry,
+            effects,
         } = bindings;
         let (owner, labels) = attribution.into_parts();
         let max_cost_usd = max_cost_usd.map(ceiling_number).transpose()?;
@@ -251,6 +263,10 @@ impl JobStore {
             error_message: String::new(),
             outputs: None,
             receipt: None,
+            retry,
+            effects,
+            cancel_requested: false,
+            attempts: Vec::new(),
             settlement: None,
             evidence: None,
             paused_outputs: None,
@@ -355,6 +371,12 @@ impl JobStore {
             error_message: String::new(),
             outputs: None,
             receipt: None,
+            // A job a schedule fired on its beat is not started again: its
+            // schedule owns what follows a lost fire.
+            retry: None,
+            effects: None,
+            cancel_requested: false,
+            attempts: Vec::new(),
             settlement: None,
             evidence: None,
             paused_outputs: None,

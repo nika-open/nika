@@ -19,7 +19,9 @@ use super::error::{ApiError, ResponseBody, ServerError};
 use super::route::json_response;
 use nika_cadence::attribution::{valid_label_key, valid_label_value, valid_owner};
 
-use crate::job::{DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind};
+use crate::job::{
+    DEFAULT_PAGE_LEN, JobListFilter, JobPage, JobSummary, MAX_PAGE_LEN, OriginKind, RetryPolicy,
+};
 use crate::{JobOrigin, JobStatus, JobStoreError};
 
 /// Longest query string the list reads, in bytes.
@@ -96,7 +98,10 @@ pub(super) async fn list(query: Option<&str>, state: &AppState) -> Response<Resp
         .list(query.filter, query.limit, query.before)
         .await
     {
-        Ok(page) => json_response(StatusCode::OK, &JobListBody::of(&page)),
+        Ok(page) => json_response(
+            StatusCode::OK,
+            &JobListBody::of(&page, state.limits.retry_policy()),
+        ),
         Err(ServerError::JobStore(JobStoreError::Busy) | ServerError::StoreQueueFull) => {
             ApiError::store_busy().into_response()
         }
@@ -271,6 +276,8 @@ struct JobSummaryBody<'a> {
     trace_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<ErrorBody<'a>>,
+    attempts: u32,
+    retry_state: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,16 +287,21 @@ struct ErrorBody<'a> {
 }
 
 impl<'a> JobListBody<'a> {
-    fn of(page: &'a JobPage) -> Self {
+    fn of(page: &'a JobPage, policy: RetryPolicy) -> Self {
         Self {
-            jobs: page.jobs.iter().map(JobSummaryBody::of).collect(),
+            jobs: page
+                .jobs
+                .iter()
+                .map(|job| JobSummaryBody::of(job, policy))
+                .collect(),
             next_cursor: page.next.map(cursor),
         }
     }
 }
 
 impl<'a> JobSummaryBody<'a> {
-    fn of(job: &'a JobSummary) -> Self {
+    fn of(job: &'a JobSummary, policy: RetryPolicy) -> Self {
+        let bound = policy.for_job(job.retry.as_ref()).max_attempts();
         Self {
             id: job.id.as_str(),
             status: job.status,
@@ -304,6 +316,11 @@ impl<'a> JobSummaryBody<'a> {
                 .error
                 .as_ref()
                 .map(|(code, message)| ErrorBody { code, message }),
+            attempts: job.attempts,
+            retry_state: job
+                .retry_state
+                .at_bound(job.retryable, job.attempts, bound)
+                .as_str(),
         }
     }
 }

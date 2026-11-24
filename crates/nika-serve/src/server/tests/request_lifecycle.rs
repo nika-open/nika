@@ -61,6 +61,7 @@ async fn health_is_public_and_contains_only_compile_bound_identity() {
             "jobAttribution",
             "jobList",
             "occupancy",
+            "jobRetry",
             "compile",
             "artifacts",
             "accessServiceTier",

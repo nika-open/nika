@@ -1178,7 +1178,7 @@ pub(super) fn get_request(path: &str) -> String {
     )
 }
 
-fn cancel_request(id: &str) -> String {
+pub(super) fn cancel_request(id: &str) -> String {
     format!(
         "POST /v1/jobs/{id}/cancel HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{}\r\n",
         auth_header()
@@ -1316,6 +1316,7 @@ async fn openapi_is_authenticated_and_lists_only_real_authorities() {
     assert!(body["paths"].get("/v1/jobs").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/events").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/cancel").is_some());
+    assert!(body["paths"].get("/v1/jobs/{id}/retry").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/trace/verify").is_some());
     assert!(body["paths"].get("/v1/jobs/{id}/artifacts").is_some());
     server.stop().await.expect("clean stop");

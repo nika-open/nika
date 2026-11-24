@@ -1189,6 +1189,8 @@ fn transition_and_events_commit_as_one_mutation() {
 }
 
 #[cfg(test)]
+mod attempts;
+#[cfg(test)]
 mod attribution;
 #[cfg(test)]
 mod event_integrity;

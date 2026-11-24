@@ -511,6 +511,10 @@ impl ServiceExecutionDriver {
             .with_prompt_pause(true)
             .with_model_override(options.model_override)
             .with_run_facts(options.run_facts);
+        let runtime = match options.resume {
+            Some((plan, from)) => runtime.with_resume_plan(plan).with_resumed_from(from),
+            None => runtime,
+        };
         // Both convenience and explicit composition execute a frozen plan;
         // neither may enter the substrate's planless embedder fallback.
         let runtime = runtime.with_access_plan(plan)?;
@@ -899,6 +903,9 @@ pub struct ServiceExecutionOptions {
     /// What the caller tells the run about the instant it serves (spec 04
     /// §`run`): a resident's scheduled slot. The default tells nothing.
     run_facts: nika_runtime::RunFacts,
+    /// The tasks served from an interrupted run's journal, and the trace the
+    /// run continues (ADR-099). The default resumes nothing.
+    resume: Option<(nika_runtime::resume::ResumePlan, Option<String>)>,
 }
 
 /// Builds the mirror sink for one run (a lane per run, the child-trace
@@ -995,6 +1002,19 @@ impl ServiceExecutionOptions {
     #[must_use]
     pub fn with_access_plan(mut self, plan: ExecutionAccessPlan) -> Self {
         self.access_plan = Some(plan);
+        self
+    }
+
+    /// Resume an interrupted run (ADR-099): serve the tasks `plan` holds from
+    /// its journal, and attest `resumed_from`, the trace the run continues.
+    /// The caller judged that journal first; nothing here reads it.
+    #[must_use]
+    pub fn with_resume(
+        mut self,
+        plan: nika_runtime::resume::ResumePlan,
+        resumed_from: Option<String>,
+    ) -> Self {
+        self.resume = Some((plan, resumed_from));
         self
     }
 }

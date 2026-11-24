@@ -154,6 +154,18 @@ pub struct ServeArgs {
     /// interrupted. Give the supervisor a longer kill timeout than this.
     #[arg(long, value_name = "DURATION", conflicts_with_all = ["once", "dry"])]
     pub shutdown_grace: Option<String>,
+    /// What becomes of a job whose run was lost to a crash, a kill or a stop past its grace:
+    /// `off` (default) leaves it interrupted; `restart` runs its captured workflow again from
+    /// the first task, as a new attempt of the same job, under what is left of its cost
+    /// ceiling; `resume` serves the tasks the lost attempt's journal completed and runs the
+    /// rest, once the journal is judged as `nika run --resume` judges one. A workflow that can repeat an effect outside the engine is started again only
+    /// if its job stated `retry` when it was submitted. A job may state its own mode.
+    #[arg(long, value_name = "MODE", conflicts_with_all = ["once", "dry"])]
+    pub retry_interrupted: Option<String>,
+    /// The most attempts one job gets, counting the first (default 3, at most 16). A job may
+    /// state a lower bound, never a higher one.
+    #[arg(long, value_name = "N", conflicts_with_all = ["once", "dry"])]
+    pub retry_max_attempts: Option<usize>,
     /// Keep at most N model calls of `infer` and `agent` tasks in flight on one provider,
     /// across every job (`openai=16`; repeat for each provider). A call past it waits its
     /// turn, inside its task's `timeout:`; retries are unchanged. Calls through an agent

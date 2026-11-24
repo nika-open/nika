@@ -8,12 +8,13 @@ use crate::JobOrigin;
 use crate::job::{JobListFilter, JobPage, JobSummary, OriginKind};
 
 /// A job that was `queued` when the resident last stopped, as its queue
-/// takes it back: the access pin its task carries and the owner whose lane
-/// it waits in.
+/// takes it back: the access pin its task carries, the origin its receipt
+/// states and the owner whose lane it waits in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QueuedJob {
     pub(crate) id: crate::JobId,
     pub(crate) access_pin: Option<String>,
+    pub(crate) origin: JobOrigin,
     pub(crate) owner: Option<String>,
 }
 
@@ -33,6 +34,7 @@ impl JobStore {
             .map(|job| QueuedJob {
                 id: job.record.id.clone(),
                 access_pin: job.record.access_pin.clone(),
+                origin: job.record.origin.clone(),
                 owner: job.record.owner.clone(),
             })
             .collect())
@@ -139,6 +141,10 @@ fn summary(job: &StoredJob) -> JobSummary {
         execution_id: record.execution_id().map(str::to_owned),
         trace_id: record.trace_id().map(str::to_owned),
         error,
+        attempts: record.attempt(),
+        retry_state: job.retry_state(),
+        retry: record.retry.clone(),
+        retryable: super::retryable(record),
         ordinal: record.ordinal,
     }
 }

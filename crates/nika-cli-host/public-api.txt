@@ -3143,6 +3143,8 @@ pub nika_cli_host::serve_args::ServeArgs::now: core::option::Option<alloc::strin
 pub nika_cli_host::serve_args::ServeArgs::once: bool
 pub nika_cli_host::serve_args::ServeArgs::provider_concurrency: alloc::vec::Vec<alloc::string::String>
 pub nika_cli_host::serve_args::ServeArgs::queue_capacity: core::option::Option<usize>
+pub nika_cli_host::serve_args::ServeArgs::retry_interrupted: core::option::Option<alloc::string::String>
+pub nika_cli_host::serve_args::ServeArgs::retry_max_attempts: core::option::Option<usize>
 pub nika_cli_host::serve_args::ServeArgs::run_cost_ceiling: core::option::Option<alloc::string::String>
 pub nika_cli_host::serve_args::ServeArgs::sessions: bool
 pub nika_cli_host::serve_args::ServeArgs::shutdown_grace: core::option::Option<alloc::string::String>

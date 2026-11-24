@@ -120,6 +120,93 @@ curl -s -H "Authorization: Bearer $TOKEN" -o totals.svg \
   http://127.0.0.1:8787/v1/jobs/<id>/artifacts/file/out/totals.svg
 ```
 
+## Starting a job again after a restart
+
+A deploy restarts the resident. A job that was running then is
+`interrupted`, and stays so, unless you ask for more:
+
+```sh
+nika serve --bind 127.0.0.1:8787 --retry-interrupted restart \
+  --retry-max-attempts 3
+```
+
+With `restart`, the next resident runs such a job again from its first task
+as a new attempt of the same job: same id, same `Idempotency-Key`, a new
+execution and trace identity. The attempt that was interrupted is kept as
+it was, with its receipt. `/health` advertises `jobRetry`.
+
+With `resume`, the new attempt does not pay twice for the tasks the lost
+one completed: they are served from its journal and the others run. The
+journal must hold its chain and match the project, the workflow, the engine
+version, the model and the access it recorded, as for `nika run --resume`.
+When it does not, the job stays `interrupted` (`resume_refused`); use
+`restart` if running it from its first task is what you want. A deploy that
+upgrades the engine refuses the resume of the jobs it interrupted: when the
+stopping resident had already queued the new attempt, that attempt fails
+with `resume_refused` instead, without running a task.
+
+- **What counts.** Only a run that lost its resident: a kill, or a stop
+  whose `--shutdown-grace` ended first. A cancelled job, a job that failed
+  or timed out, and a job a schedule fired on its beat are never started
+  again.
+- **Effects.** A workflow that only reads and computes (model calls, file
+  reads, `GET` fetches) is started again on the flag alone. One that runs a
+  program, writes a file, calls a child workflow, sends anything but a
+  `GET` or `HEAD`, or gives an agent a tool that acts, is started again only
+  if its request said so: `"retry": {}` in the body of `POST /v1/jobs` is
+  the caller's consent to run those effects twice. Killing a process does
+  not prove that an effect did not happen.
+- **Per job.** `"retry": {"on_interrupted": "restart", "max_attempts": 2}`
+  asks for a restart whatever the flag says, `"resume"` for a resume, or
+  `"off"` refuses one. A job lowers `--retry-max-attempts`, never raises it.
+- **Cost.** `--run-cost-ceiling` (or the lower ceiling a job bound) covers
+  all the attempts of a job together. What the lost attempt spent is read
+  from its journal; a call that may have been sent counts at the bound
+  `nika check` gives its task, which prices its declared output, not its
+  input. When that spend cannot be known (a model with no price, a task
+  with no `max_tokens`, a call in flight on a model that bills reasoning
+  beyond `max_tokens`, a model call in flight through an agent application,
+  a run that left no journal), the job is not started again. `"retry": {"max_cost_usd": 0.5}` is how a caller
+  accepts it: the re-attempts then run under that amount.
+- **Why not.** A job left `interrupted` says why on its last event:
+  `retry_exhausted`, `effects_need_consent`, `unknown_spend`,
+  `budget_exhausted` or `resume_refused`.
+- **Clients.** A job that is started again shows `queued` then `running`
+  again, and its event stream gains one `execution.requeued` frame; it
+  never shows `interrupted` in between. A client that waits for a terminal
+  status keeps waiting for the real end.
+
+### Retrying a job by hand
+
+Support can start a job that ended `interrupted` or `failed` again, as a
+new attempt of the same job, whatever the flag says:
+
+```sh
+curl -sS -X POST http://127.0.0.1:8787/v1/jobs/<id>/retry \
+  -H "Authorization: Bearer $(cat serve.token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"attempt": 1, "mode": "restart", "max_cost_usd": 0.5}'
+```
+
+`attempt` names the job's latest attempt (the first is 1), so sending the
+same request twice starts one attempt: the second answer is `200` with the
+job as it stands. The request is your consent to run the workflow's effects
+again. `resume` serves what the attempt's journal completed and runs the
+rest; a journal that cannot be resumed answers `409 resume_refused` and
+nothing runs. The bound of attempts and the job's ceiling hold as for a
+restart after a deploy: a failed run that left no journal has an unknown
+spend, which `max_cost_usd` accepts. A job that was cancelled, that
+succeeded, or whose latest attempt is not the one named answers
+`409 job_not_retryable`. To find what to retry, list one owner's jobs of
+the last week that did not succeed:
+`GET /v1/jobs?owner=<owner>&status=failed,interrupted&created_after=2026-11-17T00:00:00Z`.
+Each summary says how many `attempts` the job took and its `retry_state`
+(`none`, `queued`, `exhausted`, `refused`). `GET /v1/jobs/<id>/attempts`
+lists the attempts with their identity, receipt, spend and instants, and
+says why a job was not started again (`retry_reason`).
+`GET /v1/jobs/<id>/trace/verify?attempt=1` verifies the first attempt's
+journal; each attempt has its own.
+
 ## Keeping the job store bounded
 
 The resident keeps every job it admits in one state file under the state

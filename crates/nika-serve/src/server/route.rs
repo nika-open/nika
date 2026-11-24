@@ -52,9 +52,16 @@ pub(super) struct JobByName {
     /// The caller's labels, as written and judged the same way.
     #[serde(default, deserialize_with = "present_value")]
     labels: Option<serde_json::Value>,
+    /// What the caller states about starting the job again if its run is
+    /// lost (ADR-156), as written and judged the same way.
+    #[serde(default, deserialize_with = "present_value")]
+    retry: Option<serde_json::Value>,
     /// The validated attribution: never read from the wire.
     #[serde(skip)]
     pub(super) attribution: JobAttribution,
+    /// The validated retry statement: never read from the wire.
+    #[serde(skip)]
+    pub(super) retry_statement: Option<crate::job::RetryStatement>,
 }
 
 /// A present member keeps its JSON value, null included, so the judge that
@@ -252,6 +259,12 @@ async fn route_authenticated(
         (&Method::POST, "/v1/check") => check_snapshot(request, state).await,
         (&Method::POST, "/v1/compile") => super::compile::handle(request, state).await,
         (&Method::POST, path) if path.ends_with("/cancel") => cancel_job(path, &state).await,
+        (&Method::POST, path) if path.starts_with("/v1/jobs/") && path.ends_with("/retry") => {
+            match job_action_id(path, "/retry").map(str::to_owned) {
+                Some(id) => super::retry_route::retry_job(request, &id, state).await,
+                None => ApiError::route_not_found().into_response(),
+            }
+        }
         (&Method::GET, "/v1/openapi.json") => json_response(StatusCode::OK, &contract(&state)),
         (&Method::GET, "/v1/workflows") => list_registry(&state).await,
         (&Method::GET, path) if path.starts_with("/v1/workflows/") => {
@@ -263,7 +276,15 @@ async fn route_authenticated(
             };
             super::schedule_http::get(id.to_owned(), &state).await
         }
-        (&Method::GET, path) if path.ends_with("/trace/verify") => verify_trace(path, &state).await,
+        (&Method::GET, path) if path.ends_with("/trace/verify") => {
+            verify_trace(path, request.uri().query(), &state).await
+        }
+        (&Method::GET, path) if path.starts_with("/v1/jobs/") && path.ends_with("/attempts") => {
+            match job_action_id(path, "/attempts") {
+                Some(id) => super::attempts_route::read(id, &state).await,
+                None => ApiError::route_not_found().into_response(),
+            }
+        }
         (&Method::GET, path) if super::artifacts::is_manifest(path) => {
             super::artifacts::list(path, &state).await
         }
@@ -337,6 +358,9 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
     // checked when present).
     match named_job(&body) {
         Ok(Some(mut job)) if job.cost_review.is_some() => {
+            if job.retry_statement.is_some() {
+                return super::retry::reviewed_states_no_retry().into_response();
+            }
             let reference = job
                 .cost_review
                 .take()
@@ -356,7 +380,10 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
             let Ok(world) = admitted.snapshot().encode() else {
                 return admission_refused().into_response();
             };
-            let bindings = JobBindings::of(inputs, None).attributed(job.attribution);
+            let bindings = JobBindings::of(inputs, None)
+                .attributed(job.attribution)
+                .retrying(job.retry_statement)
+                .classed(super::retry::effects_word(&admitted));
             return admit_job(
                 state,
                 key,
@@ -384,17 +411,10 @@ async fn create_job(request: Request<Incoming>, state: Arc<AppState>) -> Respons
     let Ok(world) = admitted.snapshot().encode() else {
         return admission_refused().into_response();
     };
-    // A frozen world carries no request overlay: a snapshot job is unattributed.
-    admit_job(
-        state,
-        key,
-        digest,
-        workflow,
-        world,
-        None,
-        JobBindings::default(),
-    )
-    .await
+    // A frozen world carries no request overlay: a snapshot job is unattributed
+    // and states no retry. The resident's own policy still reads its class.
+    let bindings = JobBindings::default().classed(super::retry::effects_word(&admitted));
+    admit_job(state, key, digest, workflow, world, None, bindings).await
 }
 
 /// The preamble of a POST that admits a job or a review, in this order: the
@@ -440,6 +460,7 @@ pub(super) fn named_job(body: &[u8]) -> Result<Option<JobByName>, ApiError> {
         return Err(empty_access_pin());
     }
     job.attribution = super::attribution::stated(job.owner.as_ref(), job.labels.as_ref())?;
+    job.retry_statement = super::retry::stated(job.retry.as_ref())?;
     Ok(Some(job))
 }
 
@@ -447,7 +468,7 @@ fn invalid_job_envelope() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         "malformed_snapshot",
-        "use workflow with optional literal inputs, access, owner and labels; unknown fields, null inputs/pins and snapshot overlays are refused",
+        "use workflow with optional literal inputs, access, owner, labels and retry; unknown fields, null inputs/pins and snapshot overlays are refused",
     )
 }
 
@@ -784,11 +805,51 @@ pub(super) async fn cancel_job(path: &str, state: &AppState) -> Response<Respons
         return json_response(StatusCode::OK, &JobResponse::from(&record));
     }
     if record.status() == crate::JobStatus::Running {
-        state.cancellations.cancel(&id);
-        return current_job(state, id).await;
+        return cancel_running_job(state, id).await;
     }
     match cancel_queued_job(state, id, record).await {
         Ok(response) | Err(response) => response,
+    }
+}
+
+/// Cancel a running job. Durable first: a job its caller cancelled is never
+/// started again, even if the resident dies before the run settles. Then
+/// its run is told. A job that stopped running between the read and the
+/// mark (a stop queued it again for a new attempt) is cancelled as it now
+/// stands.
+pub(super) async fn cancel_running_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
+    match state.store.cancel_requested(id.clone()).await {
+        Ok(true) => {}
+        Ok(false) => return cancel_as_it_stands(state, id).await,
+        Err(
+            super::ServerError::JobStore(crate::JobStoreError::Busy)
+            | super::ServerError::StoreQueueFull,
+        ) => return store_busy(),
+        Err(_) => return internal_error(),
+    }
+    state.cancellations.cancel(&id);
+    current_job(state, id).await
+}
+
+/// The cancellation of a job the mark found no longer running: queued, it
+/// is cancelled there; settled, it is answered as it stands.
+async fn cancel_as_it_stands(state: &AppState, id: JobId) -> Response<ResponseBody> {
+    match state.store.get(id.clone()).await {
+        // Each turn back here follows a real transition of the job, from
+        // running to queued: boxed, since the two cancellations call each
+        // other.
+        Ok(Some(record)) if record.status() == crate::JobStatus::Queued => {
+            match Box::pin(cancel_queued_job(state, id, record)).await {
+                Ok(response) | Err(response) => response,
+            }
+        }
+        Ok(Some(record)) => json_response(StatusCode::OK, &JobResponse::from(&record)),
+        Ok(None) => job_not_found(),
+        Err(
+            super::ServerError::JobStore(crate::JobStoreError::Busy)
+            | super::ServerError::StoreQueueFull,
+        ) => store_busy(),
+        Err(_) => internal_error(),
     }
 }
 
@@ -859,9 +920,9 @@ async fn cancel_queued_job(
         }
         Err(super::ServerError::JobStore(crate::JobStoreError::IllegalTransition { .. })) => {
             // A worker may have started while admission was reconstructed.
-            // Only its execution owner may persist the resulting settlement.
-            state.cancellations.cancel(&id);
-            Ok(current_job(state, id).await)
+            // Only its execution owner may persist the resulting settlement;
+            // the cancellation is made durable as for any running job.
+            Ok(cancel_running_job(state, id).await)
         }
         Err(
             super::ServerError::JobStore(crate::JobStoreError::Busy)
@@ -888,7 +949,7 @@ async fn current_job(state: &AppState, id: JobId) -> Response<ResponseBody> {
     }
 }
 
-async fn verify_trace(path: &str, state: &AppState) -> Response<ResponseBody> {
+async fn verify_trace(path: &str, query: Option<&str>, state: &AppState) -> Response<ResponseBody> {
     let Some(raw_id) = job_action_id(path, "/trace/verify") else {
         return job_not_found();
     };
@@ -904,31 +965,39 @@ async fn verify_trace(path: &str, state: &AppState) -> Response<ResponseBody> {
         ) => return store_busy(),
         Err(_) => return internal_error(),
     };
-    // The journal the resident wrote for this job, under the backend's own
-    // journal directory, verified through the ONE verifier `nika trace
+    // `?attempt=N` names one closed attempt (ADR-156 §10): each attempt has
+    // its own journal, chain and seal.
+    let closed = match super::attempts_route::named_attempt(query, &record) {
+        Ok(closed) => closed,
+        Err(refused) => return refused.into_response(),
+    };
+    let unavailable = match closed {
+        Some(closed) => TraceVerificationResponse::unavailable_for(&closed.trace_id),
+        None => TraceVerificationResponse::unavailable(&record),
+    };
+    // The journal the resident wrote for this attempt, under the backend's
+    // own journal directory, verified through the ONE verifier `nika trace
     // verify` runs; `unavailable` only when no journal exists (a job refused
     // before its first event · a queued job · a backend keeping none).
-    let Some(key) = state
-        .journal_dir
-        .as_deref()
-        .and_then(|dir| super::trace_verdict::JournalKey::of(dir, &record))
-    else {
-        return json_response(
-            StatusCode::OK,
-            &TraceVerificationResponse::unavailable(&record),
-        );
+    let key = state.journal_dir.as_deref().and_then(|dir| match closed {
+        Some(closed) => Some(super::trace_verdict::JournalKey::named(
+            dir,
+            &closed.execution_id,
+            &closed.trace_id,
+        )),
+        None => super::trace_verdict::JournalKey::of(dir, &record),
+    });
+    let Some(key) = key else {
+        return json_response(StatusCode::OK, &unavailable);
     };
     match tokio::task::spawn_blocking(move || key.verify()).await {
         Ok(Some(verdict)) => json_response(StatusCode::OK, &verdict),
-        Ok(None) => json_response(
-            StatusCode::OK,
-            &TraceVerificationResponse::unavailable(&record),
-        ),
+        Ok(None) => json_response(StatusCode::OK, &unavailable),
         Err(_) => internal_error(),
     }
 }
 
-fn job_action_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+pub(super) fn job_action_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
     let tail = path.strip_prefix("/v1/jobs/")?;
     let id = tail.strip_suffix(suffix)?;
     (!id.is_empty() && !id.contains('/')).then_some(id)

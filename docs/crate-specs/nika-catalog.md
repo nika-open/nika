@@ -96,6 +96,14 @@ pub enum   AuthMode      { None, Bearer, OAuth }
 pub enum   PyRunner      { Uvx, Pipx }
 pub enum   Category      { /* 18 variants */ }
 
+// The MCP shelf on the wire (`features = serde + mcp`): what
+// `nika catalog --mcp --json` and the oracle's `nika_catalog { mcp: true }`
+// emit. A separate envelope from `export::CatalogExport`, whose two
+// top-level keys are locked: `{ catalog_version: 1, mcp_servers: [...] }`,
+// every enum as its TOML word (`streamable-http`, `oauth`, `tool-hub`),
+// env vars by name only.
+pub fn mcp_export::mcp_shelf_export() -> McpShelfExport
+
 pub struct Embedding {
     pub id, provider, model,
     pub dimensions, max_input_tokens, normalized_by_default,
@@ -206,7 +214,7 @@ crates/nika-catalog/
 ├── build/
 │   └── capabilities.rs           (~380 LOC — capabilities TOML codegen, split Session 2a)
 ├── data/
-│   ├── mcp-servers.toml
+│   ├── mcp-servers.toml          ← per-entry last_verified · scripts/refresh-mcp-servers.sh
 │   ├── llm-providers.toml        ← 21 providers + api_dialect
 │   ├── embeddings.toml
 │   └── model-capabilities.toml   ← 9 rules, @1.0 schema

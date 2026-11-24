@@ -247,8 +247,20 @@ fn learn_tools() -> Value {
                             rows where `resolves` is true. A cataloged vendor is not a \
                             runnable one: `resolves: false` means this binary has no \
                             adapter for it and `nika check` refuses the model at the \
-                            MODELS rung.",
-            "inputSchema": { "type": "object", "properties": {} }
+                            MODELS rung. With `mcp: true` it returns the MCP server \
+                            shelf instead (same `catalog_version: 1` envelope, key \
+                            `mcp_servers`): tool hubs (tag `tool-hub`) and vendor \
+                            servers, each with its packages, hosted remotes (transport \
+                            and auth), env-var NAMES and `last_verified` date.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mcp": {
+                        "type": "boolean",
+                        "description": "Return the MCP server shelf instead of the provider/model catalog."
+                    }
+                }
+            }
         },
         {
             "name": "nika_tools",
@@ -272,7 +284,7 @@ pub(crate) fn execute(name: &str, args: &Value) -> Result<String, String> {
         "nika_examples" => crate::learn::examples(args),
         "nika_template" => crate::learn::template(args),
         "nika_canon" => Ok(nika_pack::canon().to_owned()),
-        "nika_catalog" => catalog_payload(),
+        "nika_catalog" => catalog_payload(args),
         "nika_tools" => tools_payload(),
         other => Err(format!(
             "unknown tool `{other}` — nika exposes nika_check · nika_inspect · \
@@ -703,10 +715,24 @@ fn inspect(args: &Value) -> Result<String, String> {
 /// most: the reader is a machine that acts, not a human who shrugs. The
 /// chain over `CANONICAL_IDS` is what makes `resolves` true anywhere —
 /// drop it and every row reads `false`.
-fn catalog_payload() -> Result<String, String> {
-    let export =
-        nika_catalog::export::catalog_export().with_resolvable(&nika_providers::CANONICAL_IDS);
-    serde_json::to_string_pretty(&export).map_err(|e| format!("catalog projection failed: {e}"))
+///
+/// With `mcp: true` it serves the MCP server shelf instead: the SAME
+/// payload `nika catalog --mcp --json` emits (built by
+/// `nika-catalog::mcp_export`).
+fn catalog_payload(args: &Value) -> Result<String, String> {
+    match args.get("mcp") {
+        None | Some(Value::Bool(false) | Value::Null) => {
+            let export = nika_catalog::export::catalog_export()
+                .with_resolvable(&nika_providers::CANONICAL_IDS);
+            serde_json::to_string_pretty(&export)
+                .map_err(|e| format!("catalog projection failed: {e}"))
+        }
+        Some(Value::Bool(true)) => {
+            serde_json::to_string_pretty(&nika_catalog::mcp_export::mcp_shelf_export())
+                .map_err(|e| format!("MCP shelf projection failed: {e}"))
+        }
+        Some(other) => Err(format!("`mcp` must be a boolean, got {other}")),
+    }
 }
 
 /// `nika_tools` — the versioned builtin-tool projection: the SAME payload

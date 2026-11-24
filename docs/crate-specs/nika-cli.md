@@ -475,4 +475,6 @@ The Compile transport/materializer is owned by `nika-cli-host::compile` and
 re-exported at `verbs::compile`; `nika-onboard` owns its typed core. The CLI
 binary only dispatches. This follows the existing ADR-110 interface split.
 
+MCP server discovery (`nika catalog --mcp`) lists the embedded MCP shelf: tool hubs first (one server fronting many providers' tools behind the user's own account, tag `tool-hub`), then every other server, each row naming how it is reached (a package or a hosted remote with its auth), the env var names it reads, and its verification date when the last `scripts/refresh-mcp-servers.sh` run could not verify it. `--mcp --json` emits the `catalog_version: 1` projection built by `nika-catalog::mcp_export`; the MCP oracle's `nika_catalog` tool returns the same payload with `mcp: true`.
+
 Builtin discovery (`nika catalog --tools`) keeps agent-only context visible in its short human listing. The JSON projection exposes `legal_contexts` and `standalone_invoke` from the shared static-checking law, so a consumer can distinguish an agent tool from a legal standalone invoke.

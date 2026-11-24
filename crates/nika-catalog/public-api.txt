@@ -1620,6 +1620,193 @@ pub fn nika_catalog::lookup::model_capabilities(provider: &str, model: &str) -> 
 pub fn nika_catalog::lookup::model_facts(provider: &str, model: &str) -> core::option::Option<&'static nika_catalog::provider::ModelFacts>
 pub fn nika_catalog::lookup::resolve_mcp_name(name: &str) -> core::option::Option<alloc::string::String>
 pub fn nika_catalog::lookup::validate_key_format(provider: &nika_catalog::provider::Provider, key: &str) -> bool
+pub mod nika_catalog::mcp_export
+#[non_exhaustive] pub struct nika_catalog::mcp_export::McpEnvVarExport
+pub nika_catalog::mcp_export::McpEnvVarExport::is_secret: bool
+pub nika_catalog::mcp_export::McpEnvVarExport::name: &'static str
+pub nika_catalog::mcp_export::McpEnvVarExport::required: bool
+impl core::clone::Clone for nika_catalog::mcp_export::McpEnvVarExport
+pub fn nika_catalog::mcp_export::McpEnvVarExport::clone(&self) -> nika_catalog::mcp_export::McpEnvVarExport
+impl core::fmt::Debug for nika_catalog::mcp_export::McpEnvVarExport
+pub fn nika_catalog::mcp_export::McpEnvVarExport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for nika_catalog::mcp_export::McpEnvVarExport
+pub fn nika_catalog::mcp_export::McpEnvVarExport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_catalog::mcp_export::McpEnvVarExport
+impl<T, U> core::convert::Into<U> for nika_catalog::mcp_export::McpEnvVarExport where U: core::convert::From<T>
+pub fn nika_catalog::mcp_export::McpEnvVarExport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::mcp_export::McpEnvVarExport where U: core::convert::Into<T>
+pub type nika_catalog::mcp_export::McpEnvVarExport::Error = core::convert::Infallible
+pub fn nika_catalog::mcp_export::McpEnvVarExport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::mcp_export::McpEnvVarExport where U: core::convert::TryFrom<T>
+pub type nika_catalog::mcp_export::McpEnvVarExport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::mcp_export::McpEnvVarExport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::mcp_export::McpEnvVarExport where T: core::clone::Clone
+pub type nika_catalog::mcp_export::McpEnvVarExport::Owned = T
+pub fn nika_catalog::mcp_export::McpEnvVarExport::clone_into(&self, target: &mut T)
+pub fn nika_catalog::mcp_export::McpEnvVarExport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::mcp_export::McpEnvVarExport where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpEnvVarExport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::mcp_export::McpEnvVarExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpEnvVarExport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::mcp_export::McpEnvVarExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpEnvVarExport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::mcp_export::McpEnvVarExport where T: core::clone::Clone
+pub unsafe fn nika_catalog::mcp_export::McpEnvVarExport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::mcp_export::McpEnvVarExport
+pub fn nika_catalog::mcp_export::McpEnvVarExport::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::mcp_export::McpEnvVarExport where T: 'static
+pub fn nika_catalog::mcp_export::McpEnvVarExport::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub struct nika_catalog::mcp_export::McpPackageExport
+pub nika_catalog::mcp_export::McpPackageExport::identifier: &'static str
+pub nika_catalog::mcp_export::McpPackageExport::registry_type: &'static str
+pub nika_catalog::mcp_export::McpPackageExport::runner: core::option::Option<&'static str>
+pub nika_catalog::mcp_export::McpPackageExport::transport: &'static str
+impl core::clone::Clone for nika_catalog::mcp_export::McpPackageExport
+pub fn nika_catalog::mcp_export::McpPackageExport::clone(&self) -> nika_catalog::mcp_export::McpPackageExport
+impl core::fmt::Debug for nika_catalog::mcp_export::McpPackageExport
+pub fn nika_catalog::mcp_export::McpPackageExport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for nika_catalog::mcp_export::McpPackageExport
+pub fn nika_catalog::mcp_export::McpPackageExport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_catalog::mcp_export::McpPackageExport
+impl<T, U> core::convert::Into<U> for nika_catalog::mcp_export::McpPackageExport where U: core::convert::From<T>
+pub fn nika_catalog::mcp_export::McpPackageExport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::mcp_export::McpPackageExport where U: core::convert::Into<T>
+pub type nika_catalog::mcp_export::McpPackageExport::Error = core::convert::Infallible
+pub fn nika_catalog::mcp_export::McpPackageExport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::mcp_export::McpPackageExport where U: core::convert::TryFrom<T>
+pub type nika_catalog::mcp_export::McpPackageExport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::mcp_export::McpPackageExport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::mcp_export::McpPackageExport where T: core::clone::Clone
+pub type nika_catalog::mcp_export::McpPackageExport::Owned = T
+pub fn nika_catalog::mcp_export::McpPackageExport::clone_into(&self, target: &mut T)
+pub fn nika_catalog::mcp_export::McpPackageExport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::mcp_export::McpPackageExport where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpPackageExport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::mcp_export::McpPackageExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpPackageExport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::mcp_export::McpPackageExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpPackageExport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::mcp_export::McpPackageExport where T: core::clone::Clone
+pub unsafe fn nika_catalog::mcp_export::McpPackageExport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::mcp_export::McpPackageExport
+pub fn nika_catalog::mcp_export::McpPackageExport::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::mcp_export::McpPackageExport where T: 'static
+pub fn nika_catalog::mcp_export::McpPackageExport::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub struct nika_catalog::mcp_export::McpRemoteExport
+pub nika_catalog::mcp_export::McpRemoteExport::auth: &'static str
+pub nika_catalog::mcp_export::McpRemoteExport::transport: &'static str
+pub nika_catalog::mcp_export::McpRemoteExport::url: &'static str
+impl core::clone::Clone for nika_catalog::mcp_export::McpRemoteExport
+pub fn nika_catalog::mcp_export::McpRemoteExport::clone(&self) -> nika_catalog::mcp_export::McpRemoteExport
+impl core::fmt::Debug for nika_catalog::mcp_export::McpRemoteExport
+pub fn nika_catalog::mcp_export::McpRemoteExport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for nika_catalog::mcp_export::McpRemoteExport
+pub fn nika_catalog::mcp_export::McpRemoteExport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_catalog::mcp_export::McpRemoteExport
+impl<T, U> core::convert::Into<U> for nika_catalog::mcp_export::McpRemoteExport where U: core::convert::From<T>
+pub fn nika_catalog::mcp_export::McpRemoteExport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::mcp_export::McpRemoteExport where U: core::convert::Into<T>
+pub type nika_catalog::mcp_export::McpRemoteExport::Error = core::convert::Infallible
+pub fn nika_catalog::mcp_export::McpRemoteExport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::mcp_export::McpRemoteExport where U: core::convert::TryFrom<T>
+pub type nika_catalog::mcp_export::McpRemoteExport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::mcp_export::McpRemoteExport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::mcp_export::McpRemoteExport where T: core::clone::Clone
+pub type nika_catalog::mcp_export::McpRemoteExport::Owned = T
+pub fn nika_catalog::mcp_export::McpRemoteExport::clone_into(&self, target: &mut T)
+pub fn nika_catalog::mcp_export::McpRemoteExport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::mcp_export::McpRemoteExport where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpRemoteExport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::mcp_export::McpRemoteExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpRemoteExport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::mcp_export::McpRemoteExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpRemoteExport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::mcp_export::McpRemoteExport where T: core::clone::Clone
+pub unsafe fn nika_catalog::mcp_export::McpRemoteExport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::mcp_export::McpRemoteExport
+pub fn nika_catalog::mcp_export::McpRemoteExport::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::mcp_export::McpRemoteExport where T: 'static
+pub fn nika_catalog::mcp_export::McpRemoteExport::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub struct nika_catalog::mcp_export::McpServerExport
+pub nika_catalog::mcp_export::McpServerExport::aliases: &'static [&'static str]
+pub nika_catalog::mcp_export::McpServerExport::category: &'static str
+pub nika_catalog::mcp_export::McpServerExport::description: &'static str
+pub nika_catalog::mcp_export::McpServerExport::env_vars: alloc::vec::Vec<nika_catalog::mcp_export::McpEnvVarExport>
+pub nika_catalog::mcp_export::McpServerExport::homepage: core::option::Option<&'static str>
+pub nika_catalog::mcp_export::McpServerExport::id: &'static str
+pub nika_catalog::mcp_export::McpServerExport::last_verified: &'static str
+pub nika_catalog::mcp_export::McpServerExport::packages: alloc::vec::Vec<nika_catalog::mcp_export::McpPackageExport>
+pub nika_catalog::mcp_export::McpServerExport::pricing: &'static str
+pub nika_catalog::mcp_export::McpServerExport::remotes: alloc::vec::Vec<nika_catalog::mcp_export::McpRemoteExport>
+pub nika_catalog::mcp_export::McpServerExport::tags: alloc::vec::Vec<&'static str>
+pub nika_catalog::mcp_export::McpServerExport::title: &'static str
+impl core::clone::Clone for nika_catalog::mcp_export::McpServerExport
+pub fn nika_catalog::mcp_export::McpServerExport::clone(&self) -> nika_catalog::mcp_export::McpServerExport
+impl core::fmt::Debug for nika_catalog::mcp_export::McpServerExport
+pub fn nika_catalog::mcp_export::McpServerExport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for nika_catalog::mcp_export::McpServerExport
+pub fn nika_catalog::mcp_export::McpServerExport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_catalog::mcp_export::McpServerExport
+impl<T, U> core::convert::Into<U> for nika_catalog::mcp_export::McpServerExport where U: core::convert::From<T>
+pub fn nika_catalog::mcp_export::McpServerExport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::mcp_export::McpServerExport where U: core::convert::Into<T>
+pub type nika_catalog::mcp_export::McpServerExport::Error = core::convert::Infallible
+pub fn nika_catalog::mcp_export::McpServerExport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::mcp_export::McpServerExport where U: core::convert::TryFrom<T>
+pub type nika_catalog::mcp_export::McpServerExport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::mcp_export::McpServerExport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::mcp_export::McpServerExport where T: core::clone::Clone
+pub type nika_catalog::mcp_export::McpServerExport::Owned = T
+pub fn nika_catalog::mcp_export::McpServerExport::clone_into(&self, target: &mut T)
+pub fn nika_catalog::mcp_export::McpServerExport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::mcp_export::McpServerExport where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpServerExport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::mcp_export::McpServerExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpServerExport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::mcp_export::McpServerExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpServerExport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::mcp_export::McpServerExport where T: core::clone::Clone
+pub unsafe fn nika_catalog::mcp_export::McpServerExport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::mcp_export::McpServerExport
+pub fn nika_catalog::mcp_export::McpServerExport::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::mcp_export::McpServerExport where T: 'static
+pub fn nika_catalog::mcp_export::McpServerExport::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub struct nika_catalog::mcp_export::McpShelfExport
+pub nika_catalog::mcp_export::McpShelfExport::catalog_version: u32
+pub nika_catalog::mcp_export::McpShelfExport::mcp_servers: alloc::vec::Vec<nika_catalog::mcp_export::McpServerExport>
+impl core::clone::Clone for nika_catalog::mcp_export::McpShelfExport
+pub fn nika_catalog::mcp_export::McpShelfExport::clone(&self) -> nika_catalog::mcp_export::McpShelfExport
+impl core::fmt::Debug for nika_catalog::mcp_export::McpShelfExport
+pub fn nika_catalog::mcp_export::McpShelfExport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for nika_catalog::mcp_export::McpShelfExport
+pub fn nika_catalog::mcp_export::McpShelfExport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_catalog::mcp_export::McpShelfExport
+impl<T, U> core::convert::Into<U> for nika_catalog::mcp_export::McpShelfExport where U: core::convert::From<T>
+pub fn nika_catalog::mcp_export::McpShelfExport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::mcp_export::McpShelfExport where U: core::convert::Into<T>
+pub type nika_catalog::mcp_export::McpShelfExport::Error = core::convert::Infallible
+pub fn nika_catalog::mcp_export::McpShelfExport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::mcp_export::McpShelfExport where U: core::convert::TryFrom<T>
+pub type nika_catalog::mcp_export::McpShelfExport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::mcp_export::McpShelfExport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::mcp_export::McpShelfExport where T: core::clone::Clone
+pub type nika_catalog::mcp_export::McpShelfExport::Owned = T
+pub fn nika_catalog::mcp_export::McpShelfExport::clone_into(&self, target: &mut T)
+pub fn nika_catalog::mcp_export::McpShelfExport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::mcp_export::McpShelfExport where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpShelfExport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::mcp_export::McpShelfExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpShelfExport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::mcp_export::McpShelfExport where T: ?core::marker::Sized
+pub fn nika_catalog::mcp_export::McpShelfExport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::mcp_export::McpShelfExport where T: core::clone::Clone
+pub unsafe fn nika_catalog::mcp_export::McpShelfExport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::mcp_export::McpShelfExport
+pub fn nika_catalog::mcp_export::McpShelfExport::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::mcp_export::McpShelfExport where T: 'static
+pub fn nika_catalog::mcp_export::McpShelfExport::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub const nika_catalog::mcp_export::MCP_SHELF_EXPORT_VERSION: u32
+pub fn nika_catalog::mcp_export::mcp_shelf_export() -> nika_catalog::mcp_export::McpShelfExport
 pub mod nika_catalog::mcp_server
 #[non_exhaustive] pub enum nika_catalog::mcp_server::McpPricing
 pub nika_catalog::mcp_server::McpPricing::Free
@@ -2827,6 +3014,7 @@ pub nika_catalog::tags::Tag::Sandbox
 pub nika_catalog::tags::Tag::Serverless
 pub nika_catalog::tags::Tag::Streaming
 pub nika_catalog::tags::Tag::StructuredOutput
+pub nika_catalog::tags::Tag::ToolHub
 pub nika_catalog::tags::Tag::Verified
 pub nika_catalog::tags::Tag::Vision
 pub nika_catalog::tags::Tag::WebSearch
@@ -5335,6 +5523,7 @@ pub nika_catalog::types::tags::Tag::Sandbox
 pub nika_catalog::types::tags::Tag::Serverless
 pub nika_catalog::types::tags::Tag::Streaming
 pub nika_catalog::types::tags::Tag::StructuredOutput
+pub nika_catalog::types::tags::Tag::ToolHub
 pub nika_catalog::types::tags::Tag::Verified
 pub nika_catalog::types::tags::Tag::Vision
 pub nika_catalog::types::tags::Tag::WebSearch
@@ -6415,6 +6604,7 @@ pub nika_catalog::types::Tag::Sandbox
 pub nika_catalog::types::Tag::Serverless
 pub nika_catalog::types::Tag::Streaming
 pub nika_catalog::types::Tag::StructuredOutput
+pub nika_catalog::types::Tag::ToolHub
 pub nika_catalog::types::Tag::Verified
 pub nika_catalog::types::Tag::Vision
 pub nika_catalog::types::Tag::WebSearch
@@ -8843,6 +9033,7 @@ pub nika_catalog::Tag::Sandbox
 pub nika_catalog::Tag::Serverless
 pub nika_catalog::Tag::Streaming
 pub nika_catalog::Tag::StructuredOutput
+pub nika_catalog::Tag::ToolHub
 pub nika_catalog::Tag::Verified
 pub nika_catalog::Tag::Vision
 pub nika_catalog::Tag::WebSearch

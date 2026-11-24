@@ -45,6 +45,10 @@ pub mod error;
 #[cfg(all(feature = "serde", feature = "providers", feature = "capabilities"))]
 pub mod export;
 pub mod lookup;
+// The MCP shelf on the wire (`nika catalog --mcp --json` · MCP `nika_catalog` with `mcp: true`):
+// a separate envelope, since the provider projection's two top-level keys are locked.
+#[cfg(all(feature = "serde", feature = "mcp"))]
+pub mod mcp_export;
 // A model's output facts: its recorded limit and what an authoring seat reads of it.
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 mod output;
@@ -183,7 +187,7 @@ mod tests {
 
     #[test]
     fn all_mcp_servers_non_empty() {
-        assert_eq!(all_mcp_servers().len(), 105);
+        assert_eq!(all_mcp_servers().len(), 120);
     }
 
     #[test]

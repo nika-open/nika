@@ -278,6 +278,11 @@ enum Command {
         /// reaches without MCP — the old `tools` verb, one roof).
         #[arg(long)]
         tools: bool,
+        /// The MCP server shelf instead: tool hubs and vendor servers, how
+        /// each is reached (package or hosted remote), the env var names it
+        /// reads and the date it was last verified.
+        #[arg(long, conflicts_with = "tools")]
+        mcp: bool,
     },
     /// See a canonical workflow WORK — on the mock model by default (zero
     /// keys · no model call · zero flags; a step that fetches still reaches
@@ -928,8 +933,10 @@ fn dispatch_verb(
             schema,
             project,
         } => emit(&verbs::pack_surface::spec_or_schema(canon, schema, project)),
-        Command::Catalog { json, tools } => emit(&if tools {
+        Command::Catalog { json, tools, mcp } => emit(&if tools {
             verbs::tools::run(json, plain_theme)
+        } else if mcp {
+            verbs::catalog::run_mcp(json, plain_theme)
         } else {
             verbs::catalog::run(json, plain_theme)
         }),

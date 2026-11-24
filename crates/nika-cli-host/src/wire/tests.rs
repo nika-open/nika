@@ -1368,6 +1368,92 @@ fn detected_refuses_an_oversized_file() {
     detected_refuses(crate::detect::hazards::Hazard::Oversized);
 }
 
+/// "Current" under `detected` is an entry that can RUN: a `command`
+/// that is a non-empty string, and args that are exactly the ones `wire`
+/// writes. Our args with no command launch nothing, and an args value
+/// holding anything but strings is not ours: each is judged to update
+/// and repaired, in a JSON config, in the `opencode.json` argv and in
+/// Codex's TOML alike. The doctor read of the same file says not wired
+/// before, and wired after.
+#[test]
+fn detected_repairs_an_entry_that_only_looks_wired() {
+    let json = |entry: &str| format!("{{\"mcpServers\":{{\"nika\":{entry}}}}}\n");
+    let toml = |entry: &str| format!("[mcp_servers.nika]\n{entry}\n");
+    let cases = [
+        (WireTarget::Gemini, json(r#"{"args":["mcp"]}"#)),
+        (WireTarget::Gemini, json(r#"{"command":"","args":["mcp"]}"#)),
+        (WireTarget::Gemini, json(r#"{"command":7,"args":["mcp"]}"#)),
+        (
+            WireTarget::Gemini,
+            json(r#"{"command":"/opt/nika","args":["mcp",1]}"#),
+        ),
+        (
+            WireTarget::Gemini,
+            json(r#"{"command":"/opt/nika","args":"mcp"}"#),
+        ),
+        (
+            WireTarget::Opencode,
+            "{\"mcp\":{\"nika\":{\"type\":\"local\",\"command\":[\"\",\"mcp\"]}}}\n".to_owned(),
+        ),
+        (WireTarget::Codex, toml("args = [\"mcp\"]")),
+        (WireTarget::Codex, toml("command = \"\"\nargs = [\"mcp\"]")),
+        (WireTarget::Codex, toml("command = 7\nargs = [\"mcp\"]")),
+        (
+            WireTarget::Codex,
+            toml("command = \"/opt/nika\"\nargs = [\"mcp\", 1]"),
+        ),
+        (
+            WireTarget::Codex,
+            toml("command = \"nika\"\nargs = [\"mcp\", 1]"),
+        ),
+        (
+            WireTarget::Codex,
+            toml("command = \"/opt/nika\"\nargs = \"mcp\""),
+        ),
+    ];
+    for (target, body) in cases {
+        let home = temp_dir("looks-wired-home");
+        let dir = temp_dir("looks-wired-dir");
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(&path, &body).expect("seed");
+        let line = format!("{}: {}", target.id(), path.display());
+        let run = |dry_run| {
+            run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        };
+
+        assert_eq!(reads(target, &path), (false, false), "{body}");
+        let preview = run(true);
+        assert_eq!(preview.code, crate::output::exit::OK, "{body}: {preview:?}");
+        assert!(
+            preview.text.contains(&format!("+ would update {line}")),
+            "{body}: {preview:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), body);
+
+        let out = run(false);
+        assert_eq!(out.text, format!("✔ updated {line}"), "{body}");
+        assert_eq!(out.code, crate::output::exit::OK, "{body}");
+        // Repaired: the strict writer, asked by name, finds nothing to change.
+        assert_eq!(
+            wire_at(target, &path, true),
+            Ok(WireAction::Current(line)),
+            "{body}"
+        );
+        assert_eq!(reads(target, &path), (true, false), "{body}");
+        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 /// Zed and Amp keep settings that may be JSONC, and a file nika cannot
 /// round-trip is handed back as a snippet. A file that cannot be READ at
 /// all is not that case: it is a refusal with its real reason, under

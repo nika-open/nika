@@ -496,19 +496,21 @@ fn patch_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction
 
 /// `target`'s plan at `path` as the `detected` door judges it, on every
 /// host: the writer's own plan, nothing written, except that an entry
-/// the writer would only respell is current. A `nika` entry carrying the
-/// args `wire` writes is wired whatever its `command` and whatever keys
-/// of its own it holds — what `doctor` has always said of the six
-/// standing rows, and says of the others through [`reads`]: one voice
-/// about one entry. A desktop application does not inherit the shell's
-/// PATH, so its entry pins an absolute binary on purpose: replacing it
-/// with the bare name can break a setup that works. (A client wired BY
-/// NAME keeps the strict writer: the person asked for nika's own
+/// the writer would only respell is current. A `nika` entry that RUNS
+/// ours — a `command` that is a non-empty string, and exactly the args
+/// `wire` writes ([`entry_argv`]) — is wired whatever that command's path
+/// and whatever keys of its own it holds: one voice with [`reads`] about
+/// one entry. A desktop application does not inherit the shell's PATH, so
+/// its entry pins an absolute binary on purpose: replacing it with the
+/// bare name can break a setup that works. An entry with our args and no
+/// command launches nothing, and is repaired like any other. (A client
+/// wired BY NAME keeps the strict writer: the person asked for nika's own
 /// spelling.)
 fn judged(target: WireTarget, path: &Path) -> Result<WireAction, String> {
     match wire_at(target, path, true) {
         Ok(WireAction::Updated(_))
-            if entry_args(target, path).is_some_and(|args| args == NIKA_MCP_ARGS) =>
+            if entry_argv(target, path)
+                .is_some_and(|(command, args)| !command.is_empty() && args == NIKA_MCP_ARGS) =>
         {
             let label = format!("{}: {}", target.id(), path.display());
             Ok(WireAction::Current(label))
@@ -528,17 +530,22 @@ pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
     }
 }
 
-/// The args of the `nika` entry `target`'s host reads at `path`: each
-/// writer's table and shape, read back (a test wires every such host
-/// and holds this reader to its writer). `None` when the file does not
-/// parse or holds no entry — and for Hermes, whose YAML its writer
-/// never rewrites and reads with a predicate of its own.
-fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
+/// The `nika` entry `target`'s host reads at `path`, as the command it
+/// launches and the args it passes: each writer's table and shape, read
+/// back (a test wires every such host and holds this reader to its
+/// writer). `None` when the file does not parse, holds no entry, or the
+/// entry is not a command line — no `command` string, args that are not
+/// an array, or an array holding anything but strings, in JSON and in
+/// TOML alike. And for Hermes, whose YAML its writer never rewrites and
+/// reads with a predicate of its own.
+fn entry_argv(target: WireTarget, path: &Path) -> Option<(String, Vec<String>)> {
     let body = crate::detect::read_config(path).ok()?;
     let table = match target {
         WireTarget::Codex | WireTarget::Grok => {
             let doc: toml_edit::DocumentMut = body.parse().ok()?;
-            return doc.get("mcp_servers")?.get("nika").map(toml_args);
+            let entry = doc.get("mcp_servers")?.get("nika")?;
+            let command = entry.get("command")?.as_str()?.to_owned();
+            return Some((command, toml_args(entry)?));
         }
         WireTarget::Opencode => "mcp",
         WireTarget::Amp => "amp.mcpServers",
@@ -562,19 +569,22 @@ fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
     };
     let root: Value = serde_json::from_str(&body).ok()?;
     let entry = root.get(table)?.get("nika")?;
-    // OpenCode keeps the whole argv in `command`: its args are the tail.
-    let (key, skip) = if target == WireTarget::Opencode {
-        ("command", 1)
-    } else {
-        ("args", 0)
+    let strings = |value: &Value| -> Option<Vec<String>> {
+        value
+            .as_array()?
+            .iter()
+            .map(|arg| arg.as_str().map(str::to_owned))
+            .collect()
     };
-    entry
-        .get(key)?
-        .as_array()?
-        .iter()
-        .skip(skip)
-        .map(|arg| arg.as_str().map(str::to_owned))
-        .collect()
+    if target == WireTarget::Opencode {
+        // OpenCode keeps the whole argv in `command`: its head is the
+        // command, its tail the args.
+        let mut argv = strings(entry.get("command")?)?.into_iter();
+        let command = argv.next()?;
+        return Some((command, argv.collect()));
+    }
+    let command = entry.get("command")?.as_str()?.to_owned();
+    Some((command, strings(entry.get("args")?)?))
 }
 
 /// LM Studio documents `~/.lmstudio/mcp.json` (blog v0.3.17 · macOS+Linux ·
@@ -855,24 +865,24 @@ fn patch_toml_mcp(path: &Path, label: &str, dry_run: bool) -> Result<WireAction,
     }
 }
 
-fn toml_args(item: &toml_edit::Item) -> Vec<String> {
-    item.get("args")
-        .and_then(toml_edit::Item::as_array)
-        .map(|args| {
-            args.iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+/// The args of a `[mcp_servers.nika]` entry: `None` unless `args` is an
+/// array of strings and nothing else. An element that is not a string is
+/// never dropped to make the rest look like ours.
+fn toml_args(item: &toml_edit::Item) -> Option<Vec<String>> {
+    item.get("args")?
+        .as_array()?
+        .iter()
+        .map(|arg| arg.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn toml_entry_is_current(item: &toml_edit::Item) -> bool {
     item.get("command").and_then(toml_edit::Item::as_str) == Some("nika")
-        && toml_args(item) == NIKA_MCP_ARGS
+        && toml_args(item).is_some_and(|args| args == NIKA_MCP_ARGS)
 }
 
 fn toml_entry_is_stale(item: &toml_edit::Item) -> bool {
-    toml_args(item) == ["mcp", "serve", "--stdio"]
+    toml_args(item).is_some_and(|args| args == ["mcp", "serve", "--stdio"])
 }
 
 /// `OpenCode` wires MCP through `opencode.json` — its OWN shape (`mcp.nika`

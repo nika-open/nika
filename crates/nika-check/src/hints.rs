@@ -79,6 +79,11 @@
 //!   `NIKA-SEC-014` refusal, this hint is the undecidable remainder
 //!   (sound, never a false red); the advice teaches the `with: go` +
 //!   `when:` pattern and the risk grade reads it as a High signal.
+//! - **approved MCP tool with no declared role** (`mcp-roles`) — emitted by
+//!   the composed check (`mcp_roles.rs`) for each concrete `mcp:` tool whose
+//!   pin exists and carries no `roles`: the trifecta lane does not judge
+//!   what that tool reads or sends, and the advice names the three
+//!   `nika mcp approve` flags that declare it.
 //! - **read beneath a skippable value** (`skipped-read`) — emitted by the
 //!   `check/skipped_read.rs` lane over the analyzer's `skipped_reads` walk:
 //!   a step into the value of a task that can be skipped, from a `with:`
@@ -154,7 +159,7 @@ pub struct Hint {
     /// · `glob-readme` · `assert-quarantine` · `jq-as-map` · `infer-as-law`
     /// · `fail-open-consent`
     /// · `unproven-law` · `silent-literal` · `documentation-host`
-    /// · `exec-read-path` · `mcp-pins` · `skipped-read` · `branch-steering`
+    /// · `exec-read-path` · `mcp-pins` · `mcp-roles` · `skipped-read` · `branch-steering`
     /// · `harness` (composed by the check doors from the access plan —
     /// [`Hint::harness`] — since this crate has no notion of a seat)
     /// (additive · agents route on it; the module doc describes each).

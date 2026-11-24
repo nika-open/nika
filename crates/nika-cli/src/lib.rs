@@ -123,7 +123,7 @@ mod pause_card_tests {
         );
         assert!(
             !joined.contains("=yes"),
-            "boolean true/false, not yes: {joined}"
+            "the command line teaches the boolean, the note names yes: {joined}"
         );
     }
 }

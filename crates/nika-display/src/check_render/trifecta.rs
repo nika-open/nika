@@ -73,12 +73,22 @@ pub(super) fn trifecta_rung(out: &mut String, report: &CheckReport, wf: &RawWork
         // from realized flow. So the judge answers "is this DECLARED
         // boundary a lethal trifecta", and a body that under-declares was
         // (F8) able to shorten a leg. DAG-gated at the source too.
+        let ok = guarded_by(report).map_or_else(
+            || "no lethal trifecta over the declared permits: without a human gate".to_owned(),
+            |guards| {
+                format!(
+                    "no lethal trifecta over the declared permits: a blocking human gate \
+                     sits on every path to each egress the untrusted content reaches \
+                     ({guards})"
+                )
+            },
+        );
         section_or_skip(
             out,
             report,
             t,
             "TRIFECTA",
-            "no lethal trifecta over the declared permits: without a human gate",
+            &ok,
             report
                 .trifecta_findings
                 .iter()
@@ -86,4 +96,30 @@ pub(super) fn trifecta_rung(out: &mut String, report: &CheckReport, wf: &RawWork
                 .collect(),
         );
     }
+}
+
+/// The credited gates, each with the sinks it sits before (`ask` before
+/// `leak`, `post`), or `None` when no gate was needed. A missing leg and a
+/// credited gate are different facts: the first is safe by construction, the
+/// second only while the gate is real, so the tick names the gate it stands
+/// on. It says where the gate sits, not what a « no » does: the CONSENT lane
+/// judges that for a confirm gate.
+fn guarded_by(report: &CheckReport) -> Option<String> {
+    let mut gates: Vec<(&str, Vec<&str>)> = Vec::new();
+    for m in &report.trifecta_mitigations {
+        match gates.iter_mut().find(|(gate, _)| *gate == m.gate) {
+            Some((_, sinks)) => sinks.push(&m.sink),
+            None => gates.push((&m.gate, vec![&m.sink])),
+        }
+    }
+    (!gates.is_empty()).then(|| {
+        gates
+            .iter()
+            .map(|(gate, sinks)| {
+                let sinks: Vec<String> = sinks.iter().map(|s| format!("`{s}`")).collect();
+                format!("`{gate}` before {}", sinks.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    })
 }

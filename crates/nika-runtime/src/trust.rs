@@ -84,8 +84,17 @@ pub(crate) fn check_report(wf: &RawWorkflow, report: &CheckReport) -> Result<(),
     // `check()` resolves none): it may bring anything in, so it counts as
     // unresolved (NIK-273 · fail-closed), as an unreadable child does.
     let (calls, unresolved) = judged_calls(wf, &report.composed_calls);
+    // The MCP tool roles ride the report the same way: declared roles only
+    // ADD legs, so an honest report's lanes equal these, and a report that
+    // lists no role is judged as the bytes alone show it.
     let trifecta = match nika_check::analyze(wf) {
-        Ok(a) => nika_check::trifecta::scan_trifecta_composed(wf, &a.edges, &a.topo_waves, &calls),
+        Ok(a) => nika_check::trifecta::scan_trifecta_declared(
+            wf,
+            &a.edges,
+            &a.topo_waves,
+            &calls,
+            &report.mcp_tool_roles,
+        ),
         Err(_) => nika_cap::TrifectaVerdict::default(),
     };
     let escapes = nika_check::permits_fit::scan_escapes(wf);
@@ -397,6 +406,48 @@ mod tests {
         let mut stripped = report.clone();
         stripped.composed_calls.clear();
         let err = super::check_report(&wf, &stripped).expect_err("the credit needs the calls");
+        assert_eq!(err.spec_code(), "NIKA-1707");
+    }
+
+    /// The roles an operator declared on the MCP pins ride the report, as
+    /// the composed calls do: the gate re-derives the trifecta over them,
+    /// so an honest report whose gate clears a role-armed trifecta passes,
+    /// and the credit is bound to those roles. The report stripped of them
+    /// no longer describes the bytes it judged.
+    #[test]
+    fn a_report_with_declared_mcp_roles_and_the_gate_judge_the_same_legs() {
+        const GATED: &str = "nika: mail\nmodel: mock/echo\npermits: { tools: [\"mcp:mail/read_inbox\", \"mcp:mail/send_email\", \"nika:prompt\"] }\ntasks:\n  ask:\n    invoke: { tool: \"nika:prompt\", args: { mode: confirm, message: \"Read the inbox and email the digest?\" } }\n  inbox:\n    with: { go: \"${{ tasks.ask.output }}\" }\n    when: ${{ with.go == true }}\n    invoke: { tool: \"mcp:mail/read_inbox\", args: {} }\n  send:\n    after: { inbox: success }\n    with: { mail: \"${{ tasks.inbox.output }}\" }\n    invoke: { tool: \"mcp:mail/send_email\", args: { to: \"${{ with.mail }}\" } }\n";
+        const REGISTRY: &str =
+            r#"{"mcp_servers_format":1,"servers":{"mail":{"command":"mail-srv"}}}"#;
+        const PINS: &str = r#"{"mcp_pins_format":1,"servers":{"mail":{"pinned_at":"t","tools":{
+            "read_inbox":{"pin":"blake3:00","description":"","inputSchema":{},"roles":["private-read"]},
+            "send_email":{"pin":"blake3:01","description":"","inputSchema":{},"roles":["egress"]}}}}}"#;
+        let wf = parse(GATED);
+        let report = nika_check::check_composed(&wf, "mail.nika", &mut |path| match path {
+            ".nika/mcp_servers.json" => Ok(REGISTRY.to_owned()),
+            ".nika/mcp_pins.json" => Ok(PINS.to_owned()),
+            other => Err(format!("no fixture for {other}")),
+        });
+        assert!(report.is_clean(), "{:?}", report.findings);
+        assert_eq!(report.mcp_tool_roles.len(), 2, "both roles ride the report");
+        assert!(
+            report.trifecta_findings.is_empty(),
+            "the confirm gate clears the send: {:?}",
+            report.trifecta_findings
+        );
+        let credited: Vec<(&str, &str)> = report
+            .trifecta_mitigations
+            .iter()
+            .map(|m| (m.sink.as_str(), m.gate.as_str()))
+            .collect();
+        assert_eq!(credited, vec![("send", "ask")], "the gate is credited");
+        assert!(
+            super::check_report(&wf, &report).is_ok(),
+            "the re-derivation over the report's roles agrees"
+        );
+        let mut stripped = report.clone();
+        stripped.mcp_tool_roles.clear();
+        let err = super::check_report(&wf, &stripped).expect_err("the credit needs the roles");
         assert_eq!(err.spec_code(), "NIKA-1707");
     }
 

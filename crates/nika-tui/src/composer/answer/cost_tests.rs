@@ -5,10 +5,11 @@
 //! (the edit, the rows its filter shows, the selection, and one whole frame
 //! derived and painted from them) is timed alone, never the suite around it,
 //! in the debug build a developer preview ships. The sentence is typed in a
-//! few rounds and the quickest round is judged: tests running beside this one
-//! or another build on the machine only ever slow a round down, while a
-//! per-row search that allocates, or a check that walks the list once per
-//! row, slows every round past the budget.
+//! few rounds and the quickest round is judged: another build on the machine
+//! only ever slows a round down, while a per-row search that allocates, or a
+//! check that walks the list once per row, slows every round past the budget.
+//! Under nextest this module runs alone (`.config/nextest.toml` gives it every
+//! test slot): beside the whole suite, all three rounds could miss the budget.
 
 #![allow(clippy::expect_used)]
 

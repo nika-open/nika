@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use nika_event::EventKind;
-use nika_kernel::tool_executor::{ToolErrorMeta, ToolResult};
+use nika_kernel::tool_executor::{ToolCall, ToolErrorMeta, ToolResult};
 use nika_kernel_mock::{
     MockClock, MockProvider, MockShell, MockToolDefinitionProvider, MockToolExecutor,
 };
@@ -27,10 +27,41 @@ use nika_verb_invoke::InvokeVerb;
 use serde_json::Value;
 
 use super::*;
-use crate::resume::{PriorSuccess, ResumePlan, fields};
+use crate::resume::{PriorSuccess, ResumeContext, ResumePlan, fields};
 use crate::{DeterministicStamper, RunOutcome, Runtime, RuntimeConfig, VecSink};
 
 // ─── unit plane · the ticket + the book ─────────────────────────────
+
+/// A workflow with no gate: the books that only mint and decide open on it.
+const NO_GATE_WF: &str = "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n";
+
+/// A workflow whose one task is the gate `ask`: a paused ticket names that
+/// step, and its answer binds only over a closure the book holds.
+const ASK_WF: &str = "nika: t\npermits: { tools: [\"nika:prompt\"] }\ntasks:\n  ask:\n    invoke:\n      tool: \"nika:prompt\"\n      args: { mode: \"confirm\", message: \"proceed?\" }\n";
+
+fn parsed(yaml: &str) -> RawWorkflow {
+    nika_schema::parse(
+        yaml,
+        nika_schema::FileId::new(0),
+        nika_schema::ParseMode::Strict,
+    )
+    .expect("parses")
+}
+
+/// The identity context of a run no composer prepared: no model override, no
+/// skill text, no child closure digest.
+fn bare_ctx(wf: &RawWorkflow) -> ResumeContext {
+    let none = BTreeMap::new();
+    ResumeContext::of(wf, &BTreeMap::new(), None, &none, &none, None, &none)
+}
+
+/// A book opened on `yaml` under `nonce`, as a run opens it.
+fn opened(yaml: &str, nonce: &str) -> ApprovalBook {
+    let wf = parsed(yaml);
+    let book = ApprovalBook::new();
+    book.begin_run(&wf, nonce.to_owned(), &bare_ctx(&wf));
+    book
+}
 
 fn ticket(step: &str) -> ApprovalTicket {
     ApprovalTicket::new(
@@ -137,16 +168,7 @@ fn the_ttl_window_is_sudo_shaped() {
 
 #[test]
 fn the_book_mints_counts_and_refuses_the_sixth_distinct() {
-    let book = ApprovalBook::new();
-    book.begin_run(
-        &nika_schema::parse(
-            "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-            nika_schema::FileId::new(0),
-            nika_schema::ParseMode::Strict,
-        )
-        .expect("parses"),
-        "nonce".to_owned(),
-    );
+    let book = opened(NO_GATE_WF, "nonce");
     for i in 0..APPROVAL_MAX_TICKETS_PER_RUN {
         let hash = format!("{i:064x}");
         let admit = book.admit("ask", "confirm", &hash, 0, None, "builtin", None);
@@ -175,16 +197,7 @@ fn the_book_mints_counts_and_refuses_the_sixth_distinct() {
 
 #[test]
 fn the_book_consumes_a_decided_ticket_instead_of_replaying_it() {
-    let book = ApprovalBook::new();
-    book.begin_run(
-        &nika_schema::parse(
-            "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-            nika_schema::FileId::new(0),
-            nika_schema::ParseMode::Strict,
-        )
-        .expect("parses"),
-        "nonce".to_owned(),
-    );
+    let book = opened(NO_GATE_WF, "nonce");
     let hash = "a".repeat(64);
     // Mint + decide (the attest path records the answer for dedup).
     let Admit::Run { .. } = book.admit("one", "confirm", &hash, 0, None, "builtin", None) else {
@@ -229,16 +242,7 @@ fn the_book_consumes_a_decided_ticket_instead_of_replaying_it() {
 
 #[test]
 fn the_first_terminal_decision_is_immutable() {
-    let book = ApprovalBook::new();
-    book.begin_run(
-        &nika_schema::parse(
-            "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-            nika_schema::FileId::new(0),
-            nika_schema::ParseMode::Strict,
-        )
-        .expect("parses"),
-        "nonce".to_owned(),
-    );
+    let book = opened(NO_GATE_WF, "nonce");
     let hash = "e".repeat(64);
     let Admit::Run { .. } = book.admit("ask", "confirm", &hash, 0, None, "builtin", None) else {
         panic!("the ticket mints");
@@ -277,16 +281,7 @@ fn the_first_terminal_decision_is_immutable() {
 
 #[test]
 fn the_book_validates_the_resumed_ticket_laws() {
-    let book = ApprovalBook::new();
-    book.begin_run(
-        &nika_schema::parse(
-            "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-            nika_schema::FileId::new(0),
-            nika_schema::ParseMode::Strict,
-        )
-        .expect("parses"),
-        "nonce-b".to_owned(),
-    );
+    let book = opened(ASK_WF, "nonce-b");
     let hash = "c".repeat(64);
     // cross-run: the ticket's nonce ≠ the trace's nonce → refused.
     book.set_paused(Some(PausedApproval::new(
@@ -371,22 +366,14 @@ fn the_book_validates_the_resumed_ticket_laws() {
 
 #[test]
 fn a_paused_capability_clone_admits_exactly_one_runtime() {
-    let workflow = nika_schema::parse(
-        "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-        nika_schema::FileId::new(0),
-        nika_schema::ParseMode::Strict,
-    )
-    .expect("parses");
     let hash = "e".repeat(64);
     let paused = PausedApproval::new(
         ApprovalTicket::new(hash.clone(), "nonce-a".to_owned(), "ask".to_owned(), 0, 900),
         "nonce-a".to_owned(),
     );
-    let first = ApprovalBook::new();
-    first.begin_run(&workflow, "nonce-a".to_owned());
+    let first = opened(ASK_WF, "nonce-a");
     first.set_paused(Some(paused.clone()));
-    let second = ApprovalBook::new();
-    second.begin_run(&workflow, "nonce-a".to_owned());
+    let second = opened(ASK_WF, "nonce-a");
     second.set_paused(Some(paused));
 
     assert!(matches!(
@@ -418,21 +405,25 @@ fn a_paused_capability_clone_admits_exactly_one_runtime() {
 
 #[test]
 fn the_closure_stops_at_the_nearest_gate() {
-    let wf = nika_schema::parse(
+    let wf = parsed(
         "nika: t\npermits: { exec: [\"echo\"], tools: [\"nika:prompt\"] }\ntasks:\n  first:\n    invoke:\n      tool: \"nika:prompt\"\n      args: { message: \"one?\" }\n  second:\n    after: { first: success }\n    invoke:\n      tool: \"nika:prompt\"\n      args: { message: \"two?\" }\n  act:\n    after: { second: success }\n    exec: { command: [\"echo\", \"x\"] }\n",
-        nika_schema::FileId::new(0),
-        nika_schema::ParseMode::Strict,
-    )
-    .expect("parses");
-    let closures = gated_closures(&wf);
-    assert!(
-        closures["first"].is_empty(),
-        "the first gate's closure stops AT the second gate: {:?}",
-        closures["first"]
     );
-    assert_eq!(closures["second"].len(), 1);
-    assert_eq!(closures["second"][0].task, "act");
-    assert_eq!(closures["second"][0].classes, vec!["exec"]);
+    let closures = gated_closures(&wf, &bare_ctx(&wf));
+    // The first answer unleashes the second gate, bound as written (an edit
+    // cannot turn it into a gate that answers itself), and nothing past it:
+    // `act` belongs to the second gate's answer.
+    let first: Vec<&str> = (closures["first"].gated.iter())
+        .map(|gated| gated.task.as_str())
+        .collect();
+    assert_eq!(
+        first,
+        ["second"],
+        "the first gate's closure stops AT the second gate"
+    );
+    assert_eq!(closures["first"].gated[0].classes, vec!["tools"]);
+    assert_eq!(closures["second"].gated.len(), 1);
+    assert_eq!(closures["second"].gated[0].task, "act");
+    assert_eq!(closures["second"].gated[0].classes, vec!["exec"]);
 }
 
 // ─── the mock-seam harness (the pause.rs precedent) ─────────────────
@@ -676,6 +667,24 @@ async fn a_wellformed_input_answer_still_binds() {
 }
 
 async fn run_gated(yaml: &str, seams: Seams) -> (RunOutcome, VecSink) {
+    let (outcome, sink, _calls) = run_composed(yaml, seams, Composed::default()).await;
+    (outcome, sink)
+}
+
+/// What a composer hands the runtime beside the seams: the closure digest
+/// of each child workflow a task names, and the runner of those children.
+#[derive(Default)]
+struct Composed {
+    closures: BTreeMap<String, String>,
+    runner: Option<Arc<dyn crate::child::ChildRunner>>,
+}
+
+/// [`run_gated`] over a composed runtime, with every tool call the run made.
+async fn run_composed(
+    yaml: &str,
+    seams: Seams,
+    composed: Composed,
+) -> (RunOutcome, VecSink, Vec<ToolCall>) {
     let wf = nika_schema::parse(
         yaml,
         nika_schema::FileId::new(0),
@@ -693,6 +702,7 @@ async fn run_gated(yaml: &str, seams: Seams) -> (RunOutcome, VecSink) {
         tools = tools.enqueue_ok(result);
     }
     let registry = Arc::new(ProviderRegistry::without_http(ProvidersConfig::default()));
+    let played = tools.clone();
     let invoke = Arc::new(InvokeVerb::new(Arc::new(tools)));
     let mut runtime = Runtime::new(
         ExecVerb::new(Arc::new(shell)),
@@ -709,9 +719,13 @@ async fn run_gated(yaml: &str, seams: Seams) -> (RunOutcome, VecSink) {
     )
     .with_prompt_pause(seams.pause)
     .with_prompt_answers(seams.answers)
-    .with_paused_approval(seams.paused);
+    .with_paused_approval(seams.paused)
+    .with_child_closures(composed.closures);
     if let Some(plan) = seams.plan {
         runtime = runtime.with_resume_plan(plan);
+    }
+    if let Some(runner) = composed.runner {
+        runtime = runtime.with_child_runner(runner);
     }
     let mut stamper = DeterministicStamper::new();
     let mut sink = VecSink::new();
@@ -719,7 +733,7 @@ async fn run_gated(yaml: &str, seams: Seams) -> (RunOutcome, VecSink) {
         .run(&wf, &report, &mut stamper, &mut sink)
         .await
         .expect("clean run");
-    (outcome, sink)
+    (outcome, sink, played.captured_calls())
 }
 
 fn blocked_prompt() -> ToolResult {
@@ -1226,12 +1240,6 @@ tasks:
 /// HOME, a fresh store, and the project store still holds the first consumption.
 #[test]
 fn a_claim_in_any_bound_store_refuses_the_replay() {
-    let workflow = nika_schema::parse(
-        "nika: t\ntasks:\n  a:\n    exec: { command: [\"true\"] }\n",
-        nika_schema::FileId::new(0),
-        nika_schema::ParseMode::Strict,
-    )
-    .expect("parses");
     let hash = "e".repeat(64);
     let root = std::env::temp_dir().join(format!("nika-n5-claims-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -1256,8 +1264,7 @@ fn a_claim_in_any_bound_store_refuses_the_replay() {
             .expect("the run's store")
             .with_durable_claim_root(home)
             .expect("the operator's store");
-        let book = ApprovalBook::new();
-        book.begin_run(&workflow, nonce.clone());
+        let book = opened(ASK_WF, &nonce);
         book.set_paused(Some(paused));
         book.admit(
             "ask",
@@ -1276,3 +1283,5 @@ fn a_claim_in_any_bound_store_refuses_the_replay() {
     assert_eq!(refusal.attestation.why, Some("approval.replayed"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+mod binding;

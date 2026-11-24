@@ -297,6 +297,24 @@ const ROWS: &[(&str, &str)] = &[
          point the task at a real host, or own the failure with `on_error:`",
     ),
     (
+        "mcp-pins",
+        "a call to an MCP server that is registered but not approved, or to a \
+         tool its approved pins do not hold — the run refuses it before any \
+         spawn (NIKA-MCP-006). Review the server's tools, then `nika mcp \
+         approve <server>`. Advisory (`is_clean` ignores it)",
+    ),
+    (
+        "mcp-roles",
+        "an approved MCP tool with no declared role. A tool reads and sends on \
+         its server, outside `permits:`, so the TRIFECTA row (NIKA-SEC-009) \
+         cannot see a private read or an egress it performs: its verdict does \
+         not cover that tool. Declare each tool once, when approving it: \
+         `nika mcp approve <server> --reads-private <tool>` (returns data you \
+         hold private) · `--sends-out <tool>` (can send data outside this \
+         machine) · `--no-role <tool>` (neither). A role is kept while the \
+         tool's definition is unchanged. Advisory (`is_clean` ignores it)",
+    ),
+    (
         "skipped-read",
         "a read that steps into the value of a task that can be skipped \
          (`tasks.X.output.field` · `size(tasks.X.output)` · `with.out.field` \

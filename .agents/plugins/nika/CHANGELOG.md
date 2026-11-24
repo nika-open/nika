@@ -30,6 +30,17 @@ and a fetch still reaches its host, which `nika try` now names before the
 run. The language reference calls the `mock/text` refusal probe keyless
 for the same reason.
 
+For Claude Code only: the plugin plugs in the Nika language server
+(`.lsp.json`), adds `/nika:make` (a sentence becomes a checked file),
+`/nika:run` (a run under the spending cap asked once at install) and
+`/nika:pending` (the runs waiting for a person), a `nika-running` skill,
+session hooks that say what is waiting, a monitor for paused runs and six
+evaluations (`evals/`). A paused run is never answered for the person: the
+question is shown as written. The skills name each helper script by its
+full plugin path, teach one `nika` command per call (a chained line can be
+refused as a whole and a pipe hides exit 4), and the hook commands quote
+the plugin root so a path with a space still resolves.
+
 ## 0.124.5 — 2026-11-20
 
 Lockstep on the engine wave.

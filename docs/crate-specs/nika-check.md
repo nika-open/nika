@@ -71,6 +71,20 @@ depend on without pulling the CLI:
   advisory hint, never the blocking row. A plain `check()` resolves no call: its
   trifecta and consent lanes, like its composition and cost lanes, judge the
   caller's own tasks only.
+- **MCP tool roles** (`mcp_roles`) — an MCP tool's effects are server-side,
+  outside `permits.fs` and `permits.net`, so the trifecta lane armed only
+  its ingress leg from an `mcp:` call. The composed check reads the role the
+  operator declared for each approved tool from `.nika/mcp_pins.json`
+  (through the injected reader) into `CheckReport::mcp_tool_roles`, and
+  `trifecta::scan_trifecta_declared` arms leg ① from a `private-read` tool
+  and leg ③ from an `egress` tool: an `invoke:` target, an `agent:`
+  whitelist entry (globs matched), or, for a workflow call, the tool grants
+  its closure holds. A tool with no `roles` key is UNKNOWN: it arms nothing
+  more than before, and the `mcp-roles` hint names it, so the verdict says
+  what it did not judge. A `roles` value this engine cannot read counts as
+  both roles (fail-closed). The runtime trust gate re-derives the lane with
+  the roles the report carries. A plain `check()` reads no lockfile and
+  carries no role.
 - **the file channel** (`file_channel`, inside the content-taint pass) —
   under a declared `fs.read`, a task that reads a file a tainted write
   left carries that content on: an `exec:` whatever the file, once an

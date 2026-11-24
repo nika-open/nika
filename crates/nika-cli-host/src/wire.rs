@@ -324,7 +324,7 @@ fn plan_detected(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<
     targets
         .iter()
         .map(|one| {
-            config_path(*one, home, Path::new(dir))
+            settled_path(*one, home, Path::new(dir))
                 .and_then(|path| judged(*one, &path))
                 .unwrap_or_else(WireAction::Skipped)
         })
@@ -368,8 +368,22 @@ pub(crate) fn config_path(
     home: Option<&Path>,
     dir: &Path,
 ) -> Result<PathBuf, String> {
-    let join =
-        |base: &Path, parts: &[&str]| parts.iter().fold(base.to_path_buf(), |p, s| p.join(s));
+    config_place(target, home, dir).map(|(_, path)| path)
+}
+
+/// [`config_path`] with the folder that OWNS the config: the project for
+/// a file the writer places in it, the home for every other. The same
+/// arm says both, so a target cannot name a path without naming the
+/// folder a link in that path must stay inside ([`settled_path`]).
+fn config_place<'a>(
+    target: WireTarget,
+    home: Option<&'a Path>,
+    dir: &'a Path,
+) -> Result<(&'a Path, PathBuf), String> {
+    let join = |base: &'a Path, parts: &[&str]| {
+        let path = parts.iter().fold(base.to_path_buf(), |p, s| p.join(s));
+        (base, path)
+    };
     let user = || home.ok_or_else(no_home);
     Ok(match target {
         // The user-home `mcpServers` family — one shape, per-client paths
@@ -390,11 +404,11 @@ pub(crate) fn config_path(
         WireTarget::Vscode => join(dir, &[".vscode", "mcp.json"]),
         // Claude DESKTOP is a different app with a different config file
         // than Claude Code's ~/.claude.json — the wave-3 double gap (#449).
-        WireTarget::ClaudeDesktop => claude_desktop_config_path(home)?,
+        WireTarget::ClaudeDesktop => (user()?, claude_desktop_config_path(home)?),
         // Cline: the resolver below picks the live globalStorage file when
         // a host IDE has it, else the stable `~/.cline/data/settings/` home
         // (#449 wave-3b).
-        WireTarget::Cline => cline_settings_path(home)?,
+        WireTarget::Cline => (user()?, cline_settings_path(home)?),
         // Codex CLI, and Grok Build on the same TOML shape.
         WireTarget::Codex => join(user()?, &[".codex", "config.toml"]),
         WireTarget::Grok => join(user()?, &[".grok", "config.toml"]),
@@ -413,7 +427,7 @@ pub(crate) fn config_path(
         // least-privilege home (the repo the oracle serves).
         WireTarget::Opencode => join(dir, &["opencode.json"]),
         WireTarget::Hermes => join(user()?, &[".hermes", "config.yaml"]),
-        WireTarget::Lmstudio => lmstudio_mcp_path(home)?,
+        WireTarget::Lmstudio => (user()?, lmstudio_mcp_path(home)?),
         // Junie reads project-scope `.junie/mcp/mcp.json` (`mcpServers`
         // root · junie-cli-mcp-configuration.html); the global
         // `~/.junie/mcp/mcp.json` exists but the project file is the
@@ -433,13 +447,70 @@ fn no_home() -> String {
     "cannot find HOME/USERPROFILE for editor wiring".to_owned()
 }
 
+/// `target`'s config path, once it is known to stay inside the folder
+/// that owns it. A settings path can be a link, or sit under a linked
+/// folder, and a link is followed only while what it leads to is still
+/// in the project (a project file) or in the home (every other). A
+/// repository can ship `opencode.json` as a link to any file of the
+/// account's: followed, `wire` would write there. Refused instead, by
+/// the plan and by the run, before the writer reads or writes anything.
+fn settled_path(target: WireTarget, home: Option<&Path>, dir: &Path) -> Result<PathBuf, String> {
+    let (owner, path) = config_place(target, home, dir)?;
+    stays_inside(owner, &path).map_err(|why| format!("{}: {why}", target.id()))?;
+    Ok(path)
+}
+
+/// Does a write to `path` land inside `owner`? The file's real location
+/// when it is there; when it is not (or is a link whose target is gone,
+/// which the write replaces), the real location of the folder a creation
+/// would land in, so a linked folder cannot redirect a creation either.
+/// Real paths are compared by components, never as strings.
+fn stays_inside(owner: &Path, path: &Path) -> Result<(), String> {
+    let unreadable = |e: std::io::Error| format!("{}: {e}", path.display());
+    let inside = nearest_real(owner).map_err(unreadable)?;
+    let lands = match std::fs::canonicalize(path) {
+        Ok(real) => real,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            nearest_real(path.parent().unwrap_or(path)).map_err(unreadable)?
+        }
+        Err(e) => return Err(unreadable(e)),
+    };
+    if lands.starts_with(&inside) {
+        return Ok(());
+    }
+    Err(format!(
+        "{} leads to {}, outside {}; nika wire leaves it as it is: \
+         point the link inside that folder, or remove it",
+        path.display(),
+        lands.display(),
+        inside.display()
+    ))
+}
+
+/// The real location of `path`, or of the nearest folder above it that
+/// exists: nothing below that one is there to be a link.
+fn nearest_real(path: &Path) -> std::io::Result<PathBuf> {
+    for above in path.ancestors() {
+        match std::fs::canonicalize(above) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            found => return found,
+        }
+    }
+    // A relative path with nothing of it on disk yet: it starts here.
+    std::fs::canonicalize(".")
+}
+
 fn wire_one(
     target: WireTarget,
     home: Option<&Path>,
     dir: &str,
     dry_run: bool,
 ) -> Result<WireAction, String> {
-    wire_at(target, &config_path(target, home, Path::new(dir))?, dry_run)
+    wire_at(
+        target,
+        &settled_path(target, home, Path::new(dir))?,
+        dry_run,
+    )
 }
 
 /// The writer half of a wiring: patch the config at `path` the way
@@ -1134,11 +1205,11 @@ fn server_table<'a>(
 /// API keys); an existing file's mode is carried onto the temp file
 /// BEFORE the rename so the swap preserves it.
 ///
-/// A settings file that is a LINK (into a dotfiles folder, say) stays
-/// one: the temp file and the rename go beside the file the link leads
-/// to ([`write_target`]), so the link survives and what it points at is
-/// what changes. Renaming over the link itself left a regular file in
-/// its place, and the dotfiles copy stale.
+/// A settings file that is a LINK (into a dotfiles folder under the
+/// home, say) stays one: the temp file and the rename go beside the file
+/// the link leads to ([`write_target`]), so the link survives and what it
+/// points at is what changes. Renaming over the link itself left a
+/// regular file in its place, and the dotfiles copy stale.
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     // The failure is the settings file's: the temporary file beside it is
     // nika's own business, and a name the person has never seen.
@@ -1160,7 +1231,9 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 /// Where a write to `path` lands: the file itself, or the one it links
 /// to, however many links away. A path that names nothing yet is its own
 /// target, and so is a link whose target is gone: that write replaces
-/// the dead link, and never creates a file where it pointed.
+/// the dead link, and never creates a file where it pointed. Whether a
+/// link may be followed at all is settled before any writer runs
+/// ([`settled_path`]): only inside the folder that owns the config.
 fn write_target(path: &Path) -> std::io::Result<PathBuf> {
     match std::fs::canonicalize(path) {
         Ok(real) => Ok(real),

@@ -1296,13 +1296,22 @@ fn a_pinned_command_reads_wired_on_every_json_and_toml_host() {
 /// A settings path that is not a settings file (a directory, a FIFO, a
 /// link to `/dev/zero`, a file past the bound, one this account cannot
 /// read, an empty one) is refused with its reason, promptly, by the
-/// `detected` preview and by the run: its own skipped line, exit ENV.
+/// `detected` preview and by the run: its own skipped line that names
+/// the host and the file, exit ENV.
 fn detected_refuses(hazard: crate::detect::hazards::Hazard) {
     let home = temp_dir(&format!("hazard-{hazard:?}-home"));
     let dir = temp_dir(&format!("hazard-{hazard:?}-dir"));
     let path = home.join(".gemini").join("settings.json");
     let Some(reason) = hazard.plant(&path) else {
         return; // root reads through a 000 mode: nothing to stage
+    };
+    // A link out of the home is refused before anything is read: `wire`
+    // never opens the device. (The reader's own refusal of it is held by
+    // its unit test and by the doctor probe, which follows such a link.)
+    let (joint, reason) = if hazard == crate::detect::hazards::Hazard::DevZeroLink {
+        (" ", "leads to /dev/zero, outside")
+    } else {
+        (": ", reason)
     };
     for dry_run in [true, false] {
         let (home, dir) = (home.clone(), dir.clone());
@@ -1324,7 +1333,7 @@ fn detected_refuses(hazard: crate::detect::hazards::Hazard) {
             .find(|line| line.starts_with("✖ skipped"))
             .unwrap_or_default();
         assert!(
-            line.starts_with(&format!("✖ skipped gemini: {}: ", path.display()))
+            line.starts_with(&format!("✖ skipped gemini: {}{joint}", path.display()))
                 && line.contains(reason),
             "{hazard:?} (dry-run {dry_run}): {out:?}"
         );
@@ -1372,7 +1381,9 @@ fn detected_refuses_an_oversized_file() {
 /// link: nika writes beside the real file, so the link survives and its
 /// target is the one updated, with the mode it had and no temporary file
 /// left in either folder. Under `detected` and by name, in a JSON config
-/// and in Codex's TOML, through an absolute link and a relative one.
+/// and in Codex's TOML, through an absolute link and a relative one — a
+/// home config linked into a folder under the home, and a project config
+/// linked into a folder of the project.
 #[test]
 fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -1381,15 +1392,31 @@ fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
             WireTarget::Gemini,
             GEMINI_UNWIRED,
             "\"theme\": \"dark\"",
-            false,
+            None,
         ),
-        (WireTarget::Codex, "model = \"x\"\n", "model = \"x\"", true),
+        (
+            WireTarget::Codex,
+            "model = \"x\"\n",
+            "model = \"x\"",
+            Some("../dotfiles/settings"),
+        ),
+        (
+            WireTarget::Opencode,
+            "{\"model\":\"x\"}\n",
+            "\"model\": \"x\"",
+            Some("dotfiles/settings"),
+        ),
     ];
     for by_name in [false, true] {
         for (target, seed, kept, relative) in hosts {
             let home = temp_dir("linked-home");
             let dir = temp_dir("linked-dir");
-            let dotfiles = home.join("dotfiles");
+            let owner = if target == WireTarget::Opencode {
+                &dir
+            } else {
+                &home
+            };
+            let dotfiles = owner.join("dotfiles");
             let real = dotfiles.join("settings");
             std::fs::create_dir_all(&dotfiles).expect("dir");
             std::fs::write(&real, seed).expect("seed");
@@ -1397,11 +1424,7 @@ fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
             let path = config_path(target, Some(&home), &dir).expect("path");
             let folder = path.parent().expect("parent");
             std::fs::create_dir_all(folder).expect("dir");
-            let points_to = if relative {
-                PathBuf::from("../dotfiles/settings")
-            } else {
-                real.clone()
-            };
+            let points_to = relative.map_or_else(|| real.clone(), PathBuf::from);
             std::os::unix::fs::symlink(&points_to, &path).expect("link");
 
             let door = if by_name {
@@ -1432,15 +1455,213 @@ fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
             let mode = std::fs::metadata(&real).expect("stat").permissions().mode();
             assert_eq!(mode & 0o777, 0o640, "{door:?}: the target keeps its mode");
             for place in [folder, dotfiles.as_path()] {
-                let names: Vec<_> = std::fs::read_dir(place)
+                let litter = std::fs::read_dir(place)
                     .expect("list")
                     .map(|entry| entry.expect("entry").file_name())
-                    .collect();
-                assert_eq!(names.len(), 1, "{door:?}: nothing left beside: {names:?}");
+                    .filter(|name| name.to_string_lossy().starts_with(".nika-tmp-"))
+                    .count();
+                assert_eq!(litter, 0, "{door:?}: no temporary file left beside");
             }
             let _ = std::fs::remove_dir_all(home);
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+}
+
+/// A folder beside `owner` whose path, read as a string, starts with the
+/// owner's: inside by string prefix, outside by components.
+fn outside_of(owner: &Path) -> PathBuf {
+    let outside = PathBuf::from(format!("{}-outside", owner.display()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&outside).expect("outside");
+    outside
+}
+
+const OUTSIDE_FILE: &str = "{\"keep\":true}\n";
+
+/// A link is followed only inside the folder that owns the config: the
+/// project for a file the writer places in it, the home for the others.
+/// A repository can ship `opencode.json` as a link to any file of the
+/// account's, and following it would write there. Such a link is refused
+/// on its own line, naming the link, where it leads and the repair; the
+/// file outside is byte-identical and the link is still the link. Under
+/// `detected` the other host is wired; by name it is the strict refusal.
+/// Three ways out: a project file linked outside the project, a home
+/// file linked outside the home, and a home FOLDER linked outside.
+#[test]
+fn a_settings_link_that_leaves_its_folder_is_refused() {
+    #[derive(Debug, Clone, Copy)]
+    enum Way {
+        ProjectFile,
+        HomeFile,
+        HomeFolder,
+    }
+    for way in [Way::ProjectFile, Way::HomeFile, Way::HomeFolder] {
+        let home = temp_dir("leaves-home");
+        let dir = temp_dir("leaves-dir");
+        let (target, owner) = match way {
+            Way::ProjectFile => (WireTarget::Opencode, &dir),
+            Way::HomeFile | Way::HomeFolder => (WireTarget::Gemini, &home),
+        };
+        let outside = outside_of(owner);
+        let victim = outside.join("settings.json");
+        std::fs::write(&victim, OUTSIDE_FILE).expect("victim");
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        let folder = path.parent().expect("parent");
+        let (link, points_to) = match way {
+            Way::ProjectFile | Way::HomeFile => (path.clone(), victim.clone()),
+            Way::HomeFolder => (folder.to_path_buf(), outside.clone()),
+        };
+        std::fs::create_dir_all(link.parent().expect("parent")).expect("dir");
+        std::os::unix::fs::symlink(&points_to, &link).expect("link");
+        // A second host, healthy and not wired: `detected` still wires it.
+        let codex = home.join(".codex").join("config.toml");
+        std::fs::create_dir_all(codex.parent().expect("parent")).expect("dir");
+        std::fs::write(&codex, "model = \"x\"\n").expect("codex");
+
+        let refused = format!(
+            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
+            target.id(),
+            path.display(),
+            std::fs::canonicalize(&victim).expect("real").display(),
+            std::fs::canonicalize(owner).expect("real").display(),
+        );
+        for (door, dry_run) in [
+            (target, true),
+            (target, false),
+            (WireTarget::Detected, true),
+            (WireTarget::Detected, false),
+        ] {
+            let out = run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            );
+            assert_eq!(
+                out.code,
+                crate::output::exit::ENV,
+                "{way:?} {door:?}: {out:?}"
+            );
+            let skipped = out
+                .text
+                .lines()
+                .find(|row| row.starts_with(&refused))
+                .unwrap_or_default();
+            assert!(
+                skipped.ends_with("point the link inside that folder, or remove it"),
+                "{way:?} {door:?} (dry-run {dry_run}): {out:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&victim).expect("read"),
+                OUTSIDE_FILE,
+                "{way:?} {door:?}: the file outside is as it was"
+            );
+            assert_eq!(
+                std::fs::read_link(&link).expect("still the link"),
+                points_to
+            );
+        }
+        let other = format!("codex: {}", codex.display());
+        assert_eq!(
+            wire_at(WireTarget::Codex, &codex, true),
+            Ok(WireAction::Current(other)),
+            "{way:?}: `detected` wired the other host"
+        );
+        for place in [home, dir, outside] {
+            let _ = std::fs::remove_dir_all(place);
+        }
+    }
+}
+
+/// A linked FOLDER cannot redirect a creation either: with no config yet
+/// and `.gemini` (home) or `.junie` (project) linked outside, a wire by
+/// name is refused, by its preview too, and nothing appears outside.
+/// `detected` sees no host there: there is no file.
+#[test]
+fn a_linked_parent_folder_that_leaves_is_refused_on_creation() {
+    for (target, in_project) in [(WireTarget::Gemini, false), (WireTarget::Junie, true)] {
+        let home = temp_dir("redirect-home");
+        let dir = temp_dir("redirect-dir");
+        let owner = if in_project { &dir } else { &home };
+        let outside = outside_of(owner);
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        let link = owner.join(if in_project { ".junie" } else { ".gemini" });
+        std::os::unix::fs::symlink(&outside, &link).expect("link");
+        let run = |door, dry_run| {
+            run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        };
+
+        let refused = format!(
+            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
+            target.id(),
+            path.display(),
+            std::fs::canonicalize(&outside).expect("real").display(),
+            std::fs::canonicalize(owner).expect("real").display(),
+        );
+        for dry_run in [true, false] {
+            let out = run(target, dry_run);
+            assert_eq!(out.code, crate::output::exit::ENV, "{target:?}: {out:?}");
+            assert!(
+                out.text.lines().any(|line| line.starts_with(&refused)),
+                "{target:?} (dry-run {dry_run}): {out:?}"
+            );
+        }
+        let out = run(WireTarget::Detected, false);
+        assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+        assert_eq!(
+            std::fs::read_dir(&outside).expect("list").count(),
+            0,
+            "{target:?}: nothing was created outside"
+        );
+        assert_eq!(std::fs::read_link(&link).expect("still the link"), outside);
+        for place in [home, dir, outside] {
+            let _ = std::fs::remove_dir_all(place);
+        }
+    }
+}
+
+/// A FOLDER link whose target is gone is not followed into a new folder
+/// either: the creation fails where it stands, on a line that names the
+/// host and its settings file, and nothing appears outside.
+#[test]
+fn a_dangling_folder_link_takes_no_creation_outside() {
+    let home = temp_dir("dead-folder-home");
+    let dir = temp_dir("dead-folder-dir");
+    let outside = outside_of(&home);
+    let gone = outside.join("gemini");
+    let folder = home.join(".gemini");
+    std::os::unix::fs::symlink(&gone, &folder).expect("link");
+    let path = folder.join("settings.json");
+
+    let out = run_in(
+        WireTarget::Gemini,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    let refused = format!("✖ skipped gemini: {}: cannot write: ", path.display());
+    assert!(out.text.starts_with(&refused), "{out:?}");
+    assert_eq!(std::fs::read_link(&folder).expect("still the link"), gone);
+    assert_eq!(
+        std::fs::read_dir(&outside).expect("list").count(),
+        0,
+        "nothing was created outside"
+    );
+    for place in [home, dir, outside] {
+        let _ = std::fs::remove_dir_all(place);
     }
 }
 

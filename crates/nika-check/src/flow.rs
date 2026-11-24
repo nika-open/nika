@@ -185,19 +185,22 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
         .map(|(n, s)| (n.value.as_str(), s.value.egress.as_slice()))
         .collect();
     let permits = wf.permits.as_ref().map(|p| &p.value);
-    let id_of: BTreeMap<&str, usize> = wf
-        .tasks
-        .iter()
-        .enumerate()
-        .map(|(i, t)| (t.value.id.value.as_str(), i))
-        .collect();
+    let names = Names {
+        id_of: wf
+            .tasks
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.value.id.value.as_str(), i))
+            .collect(),
+        groups: crate::analyzer::edges::group_members(&wf.tasks),
+    };
 
     // Single topological pass = the least fixpoint (acyclic ⇒ no iteration).
     for wave in waves {
         for &idx in wave {
             let task = &wf.tasks[idx].value;
             propagate_task(
-                idx, task, &declared, &egress_of, permits, &id_of, &mut facts,
+                idx, task, &declared, &egress_of, permits, &names, &mut facts,
             );
         }
     }
@@ -219,7 +222,7 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
         }
         let task = &wf.tasks[idx].value;
         propagate_task(
-            idx, task, &declared, &egress_of, permits, &id_of, &mut facts,
+            idx, task, &declared, &egress_of, permits, &names, &mut facts,
         );
     }
 
@@ -242,7 +245,7 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
         if let Some(secret) = own {
             let trace = TaintTrace::source(&secret).via(OWN_VALUE.to_owned());
             facts.egress.insert(name.value.clone(), trace);
-        } else if let Some(trace) = taint_of_refs(refs, &declared, None, &id_of, &facts) {
+        } else if let Some(trace) = taint_of_refs(refs, &declared, None, &names, &facts) {
             let egress = egress_of.get(trace.secret.as_str()).copied().unwrap_or(&[]);
             if !egress.iter().any(|rule| rule.to == "outputs") {
                 let trace = trace.via("outputs".to_owned());
@@ -252,6 +255,28 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
     }
 
     facts
+}
+
+/// How a reference names the tasks it reads: `tasks.<id>` one task, `group.<name>` every task
+/// that declares `group: <name>` (spec 03 §group · the fold holds each member's record, so it
+/// carries whatever a member's output carries).
+struct Names<'a> {
+    id_of: BTreeMap<&'a str, usize>,
+    groups: BTreeMap<&'a str, Vec<usize>>,
+}
+
+impl Names<'_> {
+    /// The tasks whose records `r` reads; empty for any other reference.
+    fn producers(&self, r: &NamespaceRef) -> &[usize] {
+        match r {
+            NamespaceRef::Tasks { id, .. } => self
+                .id_of
+                .get(id.as_str())
+                .map_or(&[], std::slice::from_ref),
+            NamespaceRef::Group(name) => self.groups.get(name.as_str()).map_or(&[], Vec::as_slice),
+            _ => &[],
+        }
+    }
 }
 
 /// The last hop of an outputs entry that reads a secret's own value (E39 N7).
@@ -272,14 +297,14 @@ fn propagate_task(
     declared: &BTreeSet<&str>,
     egress_of: &BTreeMap<&str, &[EgressRule]>,
     permits: Option<&Permits>,
-    id_of: &BTreeMap<&str, usize>,
+    names: &Names<'_>,
     facts: &mut FlowFacts,
 ) {
     // 1. `with:` slot taints (scoped to this task). A with-value referencing
     //    a secret / a tainted upstream output taints that with-key.
     let mut with_taint: BTreeMap<&str, TaintTrace> = BTreeMap::new();
     for (key, value) in &task.with {
-        if let Some(trace) = taint_of_refs(refs_in_json(&value.value), declared, None, id_of, facts)
+        if let Some(trace) = taint_of_refs(refs_in_json(&value.value), declared, None, names, facts)
         {
             with_taint.insert(
                 key.value.as_str(),
@@ -292,7 +317,7 @@ fn propagate_task(
     //    slot, the loop-local `item` carries that taint within the task.
     let item_taint = task.for_each.as_ref().and_then(|f| match &f.value {
         nika_schema::raw::ForEachValue::Expression(src) => {
-            taint_of_refs(refs_in_str(src), declared, Some(&with_taint), id_of, facts)
+            taint_of_refs(refs_in_str(src), declared, Some(&with_taint), names, facts)
                 .map(|t| t.via(format!("item @ {}", task.id.value)))
         }
         nika_schema::raw::ForEachValue::List(_) => None, // literal list = no taint
@@ -302,7 +327,7 @@ fn propagate_task(
         )]
         _ => unreachable!("unknown for_each form"),
     });
-    let (with_taints, item_taints) = task_local_taints(task, declared, id_of, facts);
+    let (with_taints, item_taints) = task_local_taints(task, declared, names, facts);
 
     // 3. Effect taint: do this task's effect-carrying fields see a secret?
     let effect = action_effect_fields(&task.action)
@@ -313,7 +338,7 @@ fn propagate_task(
                 declared,
                 &with_taint,
                 item_taint.as_ref(),
-                id_of,
+                names,
                 facts,
             )
         });
@@ -325,7 +350,7 @@ fn propagate_task(
         declared,
         &with_taints,
         Some(&item_taints),
-        id_of,
+        names,
         facts,
     );
     if let Some(trace) = &effect {
@@ -350,7 +375,7 @@ fn propagate_task(
 fn task_local_taints<'a>(
     task: &'a RawTask,
     declared: &BTreeSet<&str>,
-    id_of: &BTreeMap<&str, usize>,
+    names: &Names<'_>,
     facts: &FlowFacts,
 ) -> (WithTaints<'a>, Taints) {
     let mut with_taints = WithTaints::new();
@@ -360,7 +385,7 @@ fn task_local_taints<'a>(
             declared,
             &WithTaints::new(),
             None,
-            id_of,
+            names,
             facts,
         )
         .into_iter()
@@ -383,7 +408,7 @@ fn task_local_taints<'a>(
         _ => unreachable!("unknown for_each form"),
     });
     let item_taints = item_refs
-        .map(|refs| all_taints_of_refs(refs, declared, &with_taints, None, id_of, facts))
+        .map(|refs| all_taints_of_refs(refs, declared, &with_taints, None, names, facts))
         .unwrap_or_default()
         .into_iter()
         .map(|(secret, trace)| (secret, trace.via(format!("item @ {}", task.id.value))))
@@ -506,7 +531,7 @@ fn taint_of_refs(
     refs: Vec<NamespaceRef>,
     declared: &BTreeSet<&str>,
     with_taint: Option<&BTreeMap<&str, TaintTrace>>,
-    id_of: &BTreeMap<&str, usize>,
+    names: &Names<'_>,
     facts: &FlowFacts,
 ) -> Option<TaintTrace> {
     taint_of_refs_full(
@@ -514,7 +539,7 @@ fn taint_of_refs(
         declared,
         with_taint.unwrap_or(&BTreeMap::new()),
         None,
-        id_of,
+        names,
         facts,
     )
 }
@@ -527,7 +552,7 @@ fn taint_of_refs_full(
     declared: &BTreeSet<&str>,
     with_taint: &BTreeMap<&str, TaintTrace>,
     item_taint: Option<&TaintTrace>,
-    id_of: &BTreeMap<&str, usize>,
+    names: &Names<'_>,
     facts: &FlowFacts,
 ) -> Option<TaintTrace> {
     for r in refs {
@@ -545,10 +570,9 @@ fn taint_of_refs_full(
                     return Some(trace.clone());
                 }
             }
-            NamespaceRef::Tasks { id, .. } => {
-                if let Some(&upstream) = id_of.get(id.as_str())
-                    && let Some(trace) = facts.output_taint.get(&upstream)
-                {
+            r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
+                let upstream = names.producers(&r);
+                if let Some(trace) = upstream.iter().find_map(|u| facts.output_taint.get(u)) {
                     return Some(trace.clone());
                 }
             }
@@ -569,7 +593,7 @@ fn all_taints_of_refs(
     declared: &BTreeSet<&str>,
     with_taints: &WithTaints<'_>,
     item_taints: Option<&Taints>,
-    id_of: &BTreeMap<&str, usize>,
+    names: &Names<'_>,
     facts: &FlowFacts,
 ) -> Taints {
     let mut out = BTreeMap::new();
@@ -593,12 +617,14 @@ fn all_taints_of_refs(
                     extend_first(&mut out, taints.values().cloned());
                 }
             }
-            NamespaceRef::Tasks { id, .. } if seen_tasks.insert(id.clone()) => {
-                if let Some(&upstream) = id_of.get(id.as_str())
-                    && let Some(trace) = facts.output_taint.get(&upstream)
-                {
-                    out.entry(trace.secret.clone())
-                        .or_insert_with(|| trace.clone());
+            r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
+                for &upstream in names.producers(&r) {
+                    if seen_tasks.insert(upstream)
+                        && let Some(trace) = facts.output_taint.get(&upstream)
+                    {
+                        out.entry(trace.secret.clone())
+                            .or_insert_with(|| trace.clone());
+                    }
                 }
             }
             _ => {}
@@ -1050,13 +1076,16 @@ tasks:
         // pass ever runs, so the guard cannot be reached end-to-end.)
         let declared: BTreeSet<&str> = BTreeSet::from(["api_key"]);
         let no_facts = FlowFacts::default();
-        let id_of: BTreeMap<&str, usize> = BTreeMap::new();
+        let names = Names {
+            id_of: BTreeMap::new(),
+            groups: BTreeMap::new(),
+        };
         let with_taint: BTreeMap<&str, TaintTrace> = BTreeMap::new();
 
         // Undeclared name → the guard fails → no taint.
         let undeclared = vec![NamespaceRef::Secrets("unknown".to_owned())];
         assert_eq!(
-            taint_of_refs_full(undeclared, &declared, &with_taint, None, &id_of, &no_facts),
+            taint_of_refs_full(undeclared, &declared, &with_taint, None, &names, &no_facts),
             None,
             "an undeclared secret name must NOT be classified as a live secret"
         );
@@ -1069,7 +1098,7 @@ tasks:
             &declared,
             &with_taint,
             None,
-            &id_of,
+            &names,
             &no_facts,
         )
         .expect("a declared secret name is tainted");

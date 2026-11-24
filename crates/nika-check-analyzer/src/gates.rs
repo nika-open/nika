@@ -11,7 +11,8 @@
 //! and the consent lane both judge `when:` gates, and the judgment ladder
 //! keeps the VERDICTS (which task is a sink · what refuses · what advises).
 //! The same substitution, with one listed choice in the answer's place, is
-//! how the trifecta lane reads a `mode: choice` gate ([`answer_tested_by`]).
+//! how the trifecta lane reads a `mode: choice` or `mode: input` gate
+//! ([`answer_tested_by`]).
 //!
 //! Two readings of one gate, and they are NOT interchangeable ·
 //!
@@ -28,7 +29,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nika_schema::expression::{Expr, Literal, NamespaceRef, RelOp, expr_refs, scan_templates};
-use nika_schema::raw::{RawAction, RawTask};
+use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
 use nika_schema::types::WhenGate;
 
 /// Kleene three-valued logic. `#[non_exhaustive]` per FCI-002: a consumer
@@ -191,29 +192,123 @@ pub fn affirmed_by(task: &RawTask, prompt: &str) -> bool {
         && gate_under(task, prompt, false, Some(Literal::Bool(true))) != Gate::Closed
 }
 
-/// The choice-gate reading, for a human gate whose answer is a string (`mode: choice`) rather
-/// than a typed yes: the task's own `when:` tests that answer. It reads an exact `with:` carrier
-/// of `tasks.<prompt>.output` (the shape [`affirmed_by`] reads), and it is NOT proven true under
-/// every answer `choices` lists, each substituted in turn (Kleene over the consent fragment): a
-/// guard true whatever the person picks (`with.pick != null` · `with.pick == 'send' || true` ·
-/// a membership of every choice) lets the task run on any answer. A guard the fragment cannot
-/// decide under some choice (`with.pick.startsWith('s')`) counts as a test: the read is there,
-/// and the check claims nothing it cannot evaluate. `None` (the choices are not a literal list
-/// of strings) keeps the read alone: the answers cannot be enumerated.
+/// The tasks of `wf` whose own `when:` tests the answer of the human gate `prompt`, for a gate
+/// whose answer is text rather than a typed yes (`mode: choice` · `mode: input`), as indices
+/// into `wf.tasks`. A guard tests the answer in one of two ways:
+///
+/// - **directly** — it reads an exact `with:` carrier of `tasks.<prompt>.output` (the shape
+///   [`affirmed_by`] reads), and it is NOT proven true under every answer `choices` lists, each
+///   substituted in turn (Kleene over the consent fragment): a guard true whatever the person
+///   picks (`with.pick != null` · `with.pick == 'send' || true` · a membership of every choice)
+///   lets the task run on any answer. A guard the fragment cannot decide under some choice
+///   (`with.pick.startsWith('s')`) counts: the read is there, and the check claims nothing it
+///   cannot evaluate. `None` (an input · choices that are not a literal list of strings) keeps
+///   the read alone: the answers cannot be enumerated;
+/// - **through a derived stage** — it reads a `with:` binding of `${{ tasks.<T>.output }}` or a
+///   field of it, where `T` is one of [`answer_derivations`]: a `nika:jq` transform of the
+///   answer. The substitution cannot run through jq, so the read alone counts, as for an input.
 #[must_use]
-pub fn answer_tested_by(task: &RawTask, prompt: &str, choices: Option<&[String]>) -> bool {
+pub fn answer_tested_by(wf: &RawWorkflow, prompt: &str, choices: Option<&[String]>) -> Vec<usize> {
+    let derived = answer_derivations(wf, prompt);
+    wf.tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| tests_answer(&t.value, prompt, choices, &derived))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The `nika:jq` tasks of `wf` whose value derives from the answer of `prompt`: one whose own
+/// `with:` binds exactly `${{ tasks.<prompt>.output }}`, or binds `${{ tasks.<T>.output }}` (or a
+/// field of it) for a task `T` already derived, to a fixpoint. Only a deterministic transform
+/// carries the answer on: an `invoke:` of `nika:jq`, with no `on_error:` (a recovered value is
+/// nobody's answer) and no `for_each:` (a list of results is not one answer). An `infer:`, an
+/// `agent:`, an `exec:` or any other tool is never a derived stage.
+#[must_use]
+pub fn answer_derivations(wf: &RawWorkflow, prompt: &str) -> BTreeSet<String> {
+    let mut derived = BTreeSet::new();
+    loop {
+        let found: Vec<String> = wf
+            .tasks
+            .iter()
+            .map(|t| &t.value)
+            .filter(|t| !derived.contains(&t.id.value) && pure_jq(t))
+            .filter(|t| {
+                t.with.iter().any(|(_, v)| {
+                    let serde_json::Value::String(s) = &v.value else {
+                        return false;
+                    };
+                    exact_carrier(s, "output").is_some_and(|id| id == prompt)
+                        || output_binding(s).is_some_and(|id| derived.contains(&id))
+                })
+            })
+            .map(|t| t.id.value.clone())
+            .collect();
+        if found.is_empty() {
+            return derived;
+        }
+        derived.extend(found);
+    }
+}
+
+/// One task's guard tests the answer of `prompt` — see [`answer_tested_by`].
+fn tests_answer(
+    task: &RawTask,
+    prompt: &str,
+    choices: Option<&[String]>,
+    derived: &BTreeSet<String>,
+) -> bool {
     let Some(WhenGate::Expr(src)) = task.when.as_ref().map(|w| &w.value) else {
         return false;
     };
     let Some(expr) = parse_gate(src) else {
         return false;
     };
-    reads_answer(task, &expr, prompt)
+    let direct = reads_answer(task, &expr, prompt)
         && choices.is_none_or(|choices| {
             choices.iter().any(|choice| {
                 gate_under(task, prompt, false, Some(Literal::Str(choice.clone()))) != Gate::Open
             })
+        });
+    direct
+        || expr_refs(&expr).iter().any(|r| {
+            let NamespaceRef::With(key) = r else {
+                return false;
+            };
+            task.with.iter().any(|(k, v)| {
+                k.value == *key
+                    && v.value
+                        .as_str()
+                        .and_then(output_binding)
+                        .is_some_and(|id| derived.contains(&id))
+            })
         })
+}
+
+/// An `invoke:` of `nika:jq` whose value nothing stands in for (no `on_error:`, no fan-out).
+fn pure_jq(task: &RawTask) -> bool {
+    let RawAction::Invoke(inv) = &task.action else {
+        return false;
+    };
+    task.on_error.is_none()
+        && task.for_each.is_none()
+        && inv.tool().is_some_and(|tool| tool.value == "nika:jq")
+}
+
+/// The with-value IS one bare island reading `tasks.<id>.output` or a field of it (member or
+/// literal-index steps): the id.
+fn output_binding(value: &str) -> Option<String> {
+    let mut e = sole_island(value)?;
+    loop {
+        if let Some(id) = record_field(&e, "output") {
+            return Some(id);
+        }
+        e = match e {
+            Expr::Member { base, .. } => *base,
+            Expr::Index { base, index } if matches!(index.as_ref(), Expr::Lit(_)) => *base,
+            _ => return None,
+        };
+    }
 }
 
 /// The gate expression reads an exact `with:` carrier of `tasks.<prompt>.output`.
@@ -805,10 +900,11 @@ mod tests {
             } else {
                 format!("    when: \"${{{{ {when} }}}}\"\n")
             };
-            answer_tested_by(
+            tests_answer(
                 &only_task(&format!("{with}{gate}"), "exec: { command: [\"true\"] }"),
                 "ask",
                 choices,
+                &BTreeSet::new(),
             )
         };
         for (with, when, listed, unlisted) in [
@@ -841,16 +937,86 @@ mod tests {
             assert_eq!(tested(with, when, None), unlisted, "{with}{when} · no list");
         }
         assert!(
-            !answer_tested_by(
+            !tests_answer(
                 &only_task(
                     &format!("{pick}    when: false\n"),
                     "exec: { command: [\"true\"] }"
                 ),
                 "ask",
                 Some(&choices),
+                &BTreeSet::new(),
             ),
             "a literal guard reads no answer"
         );
+    }
+
+    /// A `nika:jq` transform of the answer carries it on, directly or through another such
+    /// transform; any other verb or tool, a recovered value or a fan-out does not. An effect that
+    /// reads the derived output (or a field of it) in its guard tests the answer.
+    #[test]
+    fn a_jq_transform_of_the_answer_is_a_derived_stage() {
+        let wf = |stage: &str, reader: &str| {
+            let yaml = format!(
+                "nika: t\ntasks:\n  ask:\n    invoke: {{ tool: \"nika:prompt\", args: {{ mode: \
+                 choice, message: \"go?\", choices: [\"go\", \"no\"] }} }}\n{stage}  send:\n    \
+                 with: {{ plan: \"${{{{ tasks.{reader}.output }}}}\" }}\n    when: \"${{{{ \
+                 with.plan.go == true }}}}\"\n    exec: {{ command: [\"true\"] }}\n"
+            );
+            parse(&yaml, FileId::new(0), ParseMode::Strict).expect("fixture parses")
+        };
+        let jq = |id: &str, from: &str, extra: &str| {
+            format!(
+                "  {id}:\n{extra}    with: {{ a: \"${{{{ tasks.{from}.output }}}}\" }}\n    \
+                 invoke: {{ tool: \"nika:jq\", args: {{ input: \"${{{{ with.a }}}}\", \
+                 expression: \"{{go: (. != \\\"no\\\")}}\" }} }}\n"
+            )
+        };
+        let names = |w: &RawWorkflow| answer_derivations(w, "ask").into_iter().collect::<Vec<_>>();
+        let tested = |w: &RawWorkflow| {
+            answer_tested_by(w, "ask", Some(&["go".to_owned(), "no".to_owned()]))
+                .into_iter()
+                .filter_map(|i| w.tasks.get(i).map(|t| t.value.id.value.clone()))
+                .collect::<Vec<_>>()
+        };
+        let one = wf(&jq("plan", "ask", ""), "plan");
+        assert_eq!(names(&one), ["plan"]);
+        assert_eq!(tested(&one), ["send"]);
+        let chain = wf(
+            &format!("{}{}", jq("first", "ask", ""), jq("plan", "first", "")),
+            "plan",
+        );
+        assert_eq!(names(&chain), ["first", "plan"]);
+        assert_eq!(tested(&chain), ["send"]);
+        for (why, stage) in [
+            (
+                "a jq stage that binds the status, not the answer",
+                jq("plan", "ask", "").replace("tasks.ask.output", "tasks.ask.status"),
+            ),
+            (
+                "a recovered value",
+                jq("plan", "ask", "    on_error: { recover: { go: true } }\n"),
+            ),
+            (
+                "a fan-out",
+                jq("plan", "ask", "    for_each: { items: [1, 2] }\n"),
+            ),
+            (
+                "a model in between",
+                "  plan:\n    with: { a: \"${{ tasks.ask.output }}\" }\n    infer: { prompt: \
+                 \"${{ with.a }}\", max_tokens: 9 }\n"
+                    .to_owned(),
+            ),
+            (
+                "a subprocess in between",
+                "  plan:\n    with: { a: \"${{ tasks.ask.output }}\" }\n    exec: { command: \
+                 [\"echo\", \"${{ with.a }}\"] }\n"
+                    .to_owned(),
+            ),
+        ] {
+            let w = wf(&stage, "plan");
+            assert!(names(&w).is_empty(), "{why}: {:?}", names(&w));
+            assert!(tested(&w).is_empty(), "{why}: {:?}", tested(&w));
+        }
     }
 
     /// A human confirm: confirm mode (stated or by default), no defaulted yes, no recovered or

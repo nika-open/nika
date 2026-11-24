@@ -21,10 +21,10 @@ pub(super) fn trifecta_rung(out: &mut String, report: &CheckReport, wf: &RawWork
         // The tick is DERIVED, never asserted. This lane clears a sink
         // when a blocking `nika:prompt` dominates it — a syntactic credit
         // (`human_gate`: an invoke of the tool with no `default:` key, no
-        // route analysis), which for a `mode: choice` gate also needs the
-        // sink's own `when:` to test the answer. The consent lane runs the
-        // refusal-substitution walk and can PROVE a confirm gate lets the
-        // effect fire on 'no'.
+        // route analysis), which for a gate that answers with text (`mode:
+        // choice` or `input`) also needs the sink's own `when:` to test the
+        // answer. The consent lane runs the refusal-substitution walk and
+        // can PROVE a confirm gate lets the effect fire on 'no'.
         //
         // Measured 2026-08-20 on 0.111.0, one file, one card ·
         //
@@ -104,8 +104,8 @@ pub(super) fn trifecta_rung(out: &mut String, report: &CheckReport, wf: &RawWork
 /// credited gate are different facts: the first is safe by construction, the
 /// second only while the gate is real, so the tick names the gate it stands
 /// on. It says where the gate sits, not what a « no » does: the CONSENT lane
-/// judges that for a confirm gate, and a choice gate is credited only before
-/// a sink whose `when:` tests its answer.
+/// judges that for a confirm gate, and a choice or input gate is credited
+/// only before a sink whose `when:` tests its answer.
 fn guarded_by(report: &CheckReport) -> Option<String> {
     let mut gates: Vec<(&str, Vec<&str>)> = Vec::new();
     for m in &report.trifecta_mitigations {

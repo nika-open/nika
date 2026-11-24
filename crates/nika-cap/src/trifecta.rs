@@ -29,13 +29,14 @@
 //! [`crate::HUMAN_GATE_TOOL`] carrying NO `default:` arg (a default lets
 //! the run proceed unattended; the Rule of Two escape is the HUMAN
 //! decision, not a scripted fallback). **Dominance**, not mere ancestry: a
-//! gate a sibling branch bypasses mitigates nothing. A `mode: choice` gate
-//! answers with a string, not a yes: it counts only before an egress task
+//! gate a sibling branch bypasses mitigates nothing. Only a confirm gate
+//! counts by its position alone: a `mode: choice` or `mode: input` gate
+//! answers with text, not a yes, so it counts only before an egress task
 //! whose own `when:` tests that answer
 //! ([`TrifectaSubject::answer_tested_by`]), since a task that merely waits
-//! on it runs whichever answer is picked. One violation per ungated tainted
-//! egress task, message opening with the NEP's verbatim « lethal trifecta
-//! complete · human gate required ».
+//! on it runs whatever the answer. One violation per ungated tainted egress
+//! task, message opening with the NEP's verbatim « lethal trifecta complete
+//! · human gate required ».
 //!
 //! The judge is pure L0 (the same shape the dead `policy_violations`
 //! set): it
@@ -96,12 +97,12 @@ pub struct TrifectaSubject {
     /// egress when approving its pin (`nika mcp approve --sends-out`): the
     /// declaration arms leg ③ where `permits.net.http` cannot see it.
     pub declared_egress: bool,
-    /// For a gate whose answer is a string rather than a typed yes (a
-    /// `mode: choice` prompt): the subjects whose own `when:` tests that
-    /// answer (indices into the same slice). The judge credits such a gate
-    /// only before an egress task listed here: one that merely waits on the
-    /// gate runs whichever answer is picked. `None`: a gate credited wherever
-    /// it dominates (a confirm, whose « no » the consent lane judges).
+    /// For a gate whose answer is text rather than a typed yes (a `mode:
+    /// choice` or `mode: input` prompt): the subjects whose own `when:` tests
+    /// that answer (indices into the same slice). The judge credits such a
+    /// gate only before an egress task listed here: one that merely waits on
+    /// the gate runs whatever the answer. `None`: a gate credited wherever it
+    /// dominates (a confirm, whose « no » the consent lane judges).
     pub answer_tested_by: Option<Vec<usize>>,
     /// Direct predecessors (indices into the same subject slice).
     pub parents: Vec<usize>,
@@ -126,10 +127,10 @@ impl TrifectaSubject {
         }
     }
 
-    /// Mark the subject a gate whose answer is a string (a `mode: choice`
-    /// prompt) and list the subjects whose `when:` tests that answer (the
-    /// projection reads the guards; the judge credits the gate only before
-    /// those).
+    /// Mark the subject a gate whose answer is text (a `mode: choice` or
+    /// `mode: input` prompt) and list the subjects whose `when:` tests that
+    /// answer (the projection reads the guards; the judge credits the gate
+    /// only before those).
     #[must_use]
     pub fn with_answer_tested_by(mut self, tested_by: Vec<usize>) -> Self {
         self.answer_tested_by = Some(tested_by);
@@ -137,8 +138,8 @@ impl TrifectaSubject {
     }
 
     /// Whether this subject, a blocking gate, is credited before `sink`:
-    /// every such gate where it dominates, a choice gate only where `sink`
-    /// tests its answer.
+    /// a confirm wherever it dominates, a gate whose answer is text only
+    /// where `sink` tests that answer.
     fn credits(&self, sink: usize) -> bool {
         self.human_gate
             && self
@@ -509,7 +510,7 @@ fn refusal(
     source: Option<String>,
 ) -> TrifectaViolation {
     let id = subjects.get(sink).map_or("<sink>", |s| s.id.as_str());
-    // A choice gate that dominates the sink and is not credited there: the
+    // A text-answer gate that dominates the sink and is not credited there: the
     // why and the fix are its own (the placement is right, the guard is
     // missing), never the « no gate dominates » clause it would contradict.
     let untested = dom
@@ -563,14 +564,16 @@ fn refusal(
     }
 }
 
-/// WHY a choice gate that dominates the sink does not count there: its
-/// answer is a string, not a yes, and the sink's own guard does not test it.
+/// WHY a gate whose answer is text, dominating the sink, does not count
+/// there: only a confirm counts by position alone, and the sink's own guard
+/// does not test the answer.
 fn untested_answer_note(gate: &str, sink: &str) -> String {
     format!(
-        "the choice gate `{gate}` dominates `{sink}`, but `{sink}` does not test its answer: \
-         a choice is a string, not a yes, and unless the `when:` of `{sink}` reads \
-         `tasks.{gate}.output` through `with:` and some choice makes it false, `{sink}` runs \
-         whichever answer is picked, the one that declines included"
+        "the gate `{gate}` dominates `{sink}`, but `{sink}` does not test its answer: only a \
+         `mode: confirm` gate counts by its position alone, a choice or an input answers with \
+         text, and unless the `when:` of `{sink}` tests `tasks.{gate}.output`, bound through \
+         `with:` directly or through a `nika:jq` stage, `{sink}` runs whatever the answer, the \
+         one that declines included"
     )
 }
 
@@ -579,8 +582,8 @@ fn untested_answer_note(gate: &str, sink: &str) -> String {
 fn untested_answer_fix(gate: &str, sink: &str) -> String {
     format!(
         "test the answer in the `when:` of `{sink}` (`with: {{ pick: \"${{{{ \
-         tasks.{gate}.output }}}}\" }}` + `when: \"${{{{ with.pick == '<the choice that \
-         approves it>' }}}}\"`), so `{sink}` runs only on that choice, or make `{gate}` a \
+         tasks.{gate}.output }}}}\" }}` + `when: \"${{{{ with.pick == '<the answer that \
+         approves it>' }}}}\"`), so `{sink}` runs only on that answer, or make `{gate}` a \
          `mode: confirm` gate whose yes `{sink}` tests (bound as `go`: `when: \"${{{{ with.go \
          == true }}}}\"` · NIKA-SEC-014 refuses an effect a « no » reaches)"
     )
@@ -772,7 +775,7 @@ mod tests {
         assert_eq!(refused, ["copy"]);
         let d = &v.violations[0].detail;
         for part in [
-            "the choice gate `pick` dominates `copy`, but `copy` does not test its answer",
+            "the gate `pick` dominates `copy`, but `copy` does not test its answer",
             "test the answer in the `when:` of `copy`",
             "`mode: confirm`",
         ] {

@@ -105,19 +105,25 @@ depend on without pulling the CLI:
   path from the workspace, the home directory or above the workspace names
   a rooted file the rooted path ends with (holds anywhere, for a
   directory), and a rooted directory may hold any of them.
-- **choice gates** (`trifecta::scan_trifecta_declared`, judged by
-  `nika_cap::trifecta_verdict`) — a blocking `nika:prompt` in `mode: choice`
-  (or a `mode:` that names no literal mode) answers with a string, not a
-  yes, so it is credited only before an egress task whose own `when:`
-  tests its answer (`TrifectaSubject::answer_tested_by`, read by
+- **text-answer gates** (`trifecta::scan_trifecta_declared`, judged by
+  `nika_cap::trifecta_verdict`) — only a `mode: confirm` gate counts by its
+  position alone. A blocking `nika:prompt` in `mode: choice` or `mode:
+  input` (or a `mode:` that names no literal mode) answers with text, not a
+  yes, so it is credited only before an egress task whose own `when:` tests
+  its answer (`TrifectaSubject::answer_tested_by`, read by
   `analyzer::gates::answer_tested_by`): the guard reads an exact `with:`
   binding of `tasks.<gate>.output`, and some listed choice, substituted as
-  the answer, does not prove it true (with no literal `choices:` list, the
-  read alone). An egress task that only waits on the gate is refused as for
-  no gate, and the refusal names the gate, the task and the two repairs
-  (test the answer, or `mode: confirm`). A confirm keeps the dominance
-  credit: `NIKA-SEC-014` judges its « no ». It does NOT judge a test made
-  upstream, through a stage the answer skips (over-approximated: refused).
+  the answer, does not prove it true (for an input or a templated list, the
+  read alone); or it reads a binding of the output (or a field of it) of a
+  `nika:jq` stage whose `with:` binds the answer, directly or through
+  further such stages (`analyzer::gates::answer_derivations`: no
+  `on_error:`, no `for_each:`). An egress task that only waits on the gate
+  is refused as for no gate, and the refusal names the gate, the task and
+  the two repairs (test the answer, or `mode: confirm`). A confirm keeps
+  the dominance credit: `NIKA-SEC-014` judges its « no ». It does NOT judge
+  what the jq program computes from the answer it binds (the read of the
+  derived binding is the test), nor a test made through any other stage
+  (`infer:`, `agent:`, `exec:`, another tool): over-approximated, refused.
 - **branch steering** (`trifecta/steering.rs`, the advisory side of the
   trifecta lane) — the hint `branch-steering`, never a finding. With the
   three legs armed (`nika_cap::TrifectaVerdict::armed`, read off the verdict

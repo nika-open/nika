@@ -21,16 +21,18 @@
 //! - **blocking human gate** = an `invoke:` of `nika:prompt` with NO
 //!   `default:` arg (the NEP's escape is the HUMAN decision). Gated on a
 //!   valid DAG + a DECLARED `permits:` block (skipped, never wrong).
-//! - **a `mode: choice` gate** answers with a string, not a yes, so it is
+//! - **only a confirm gate counts by its position alone.** A gate in
+//!   `mode: choice` or `mode: input` answers with text, not a yes, so it is
 //!   credited only before an egress task whose own `when:` tests that
-//!   answer ([`crate::analyzer::gates::answer_tested_by`]: an exact
-//!   `with:` binding of its output that some listed choice makes false). A
-//!   task that only waits on it (`after: { ask: success }`) runs whichever
-//!   answer is picked, and is refused as for no gate. A confirm keeps the
-//!   dominance credit: the consent lane (`NIKA-SEC-014`) judges its « no ».
-//!   The test is read on the egress task itself, never through an upstream
-//!   stage the answer skips (an over-approximation: the repair is the
-//!   answer tested where the effect is).
+//!   answer ([`crate::analyzer::gates::answer_tested_by`]: an exact `with:`
+//!   binding of its output that some listed choice makes false, or a
+//!   binding of a `nika:jq` stage that transforms it). A task that only
+//!   waits on it (`after: { ask: success }`) runs whatever the answer, and
+//!   is refused as for no gate. A confirm keeps the dominance credit: the
+//!   consent lane (`NIKA-SEC-014`) judges its « no ». A test made by any
+//!   other upstream stage (a model, a subprocess, another tool) is not read
+//!   (an over-approximation: the repair is the answer tested where the
+//!   effect is).
 //! - **the advisory side** (`trifecta/steering.rs`) = legs armed, a `when:`
 //!   that reads untrusted content decides whether an egress task runs
 //!   without entering an argument. A hint, never this lane's refusal.
@@ -45,6 +47,8 @@ use nika_schema::raw::{RawAction, RawInvokeTarget, RawWorkflow};
 use nika_schema::source::Spanned;
 
 pub(crate) mod steering;
+#[cfg(test)]
+mod text_gate_tests;
 
 /// The advisory channel once the lane has ruled, in one call: a gate it
 /// credited keeps no `headless-prompt` hint
@@ -135,12 +139,14 @@ pub fn scan_trifecta_declared(
                     || call.is_some_and(|c| c.ingress.is_some()),
             )
             .with_declared_roles(declared.private_read, declared.egress);
-            match choice_gate(&task.action).filter(|_| gate) {
-                Some(choice) => subject.with_answer_tested_by(tested_by(
-                    wf,
-                    &task.id.value,
-                    choice.choices.as_deref(),
-                )),
+            match text_gate(&task.action).filter(|_| gate) {
+                Some(text) => {
+                    subject.with_answer_tested_by(crate::analyzer::gates::answer_tested_by(
+                        wf,
+                        &task.id.value,
+                        text.choices.as_deref(),
+                    ))
+                }
                 None => subject,
             }
         })
@@ -363,17 +369,16 @@ fn defaulted_gate(action: &RawAction) -> bool {
         .is_some_and(|o| o.contains_key("default"))
 }
 
-/// A `nika:prompt` whose answer is a string rather than a typed yes.
-struct ChoiceGate {
-    /// Its `choices:`, when they are a literal list of strings.
+/// A `nika:prompt` whose answer is text rather than a typed yes.
+struct TextGate {
+    /// Its `choices:`, when it is a choice whose list is literal strings.
     choices: Option<Vec<String>>,
 }
 
-/// The choice gate `action` is: its `mode:` is `choice`, or a value that
-/// names no literal mode (a template may resolve to `choice`, so it is read
-/// as one). A confirm (`mode:` absent or `confirm`) and an `input` are
-/// `None`.
-fn choice_gate(action: &RawAction) -> Option<ChoiceGate> {
+/// The text gate `action` is: any `mode:` but a confirm (`mode:` absent or
+/// `confirm`), so `choice`, `input`, or a value that names no literal mode
+/// (a template may resolve to either, so it is read as one).
+fn text_gate(action: &RawAction) -> Option<TextGate> {
     let RawAction::Invoke(inv) = action else {
         return None;
     };
@@ -382,8 +387,10 @@ fn choice_gate(action: &RawAction) -> Option<ChoiceGate> {
     }
     let args = inv.args.as_ref().and_then(|a| a.value.as_object());
     let mode = args.and_then(|o| o.get("mode"))?;
-    if matches!(mode.as_str(), Some("confirm" | "input")) {
-        return None;
+    match mode.as_str() {
+        Some("confirm") => return None,
+        Some("input") => return Some(TextGate { choices: None }),
+        _ => {}
     }
     let choices = args
         .and_then(|o| o.get("choices"))
@@ -393,18 +400,7 @@ fn choice_gate(action: &RawAction) -> Option<ChoiceGate> {
                 .map(|c| c.as_str().filter(|s| !s.contains("${{")).map(str::to_owned))
                 .collect::<Option<Vec<String>>>()
         });
-    Some(ChoiceGate { choices })
-}
-
-/// The tasks whose own `when:` tests the answer of the choice gate `gate`
-/// ([`crate::analyzer::gates::answer_tested_by`]), as subject indices.
-fn tested_by(wf: &RawWorkflow, gate: &str, choices: Option<&[String]>) -> Vec<usize> {
-    wf.tasks
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| crate::analyzer::gates::answer_tested_by(&t.value, gate, choices))
-        .map(|(i, _)| i)
-        .collect()
+    Some(TextGate { choices })
 }
 
 /// A BLOCKING `invoke: nika:prompt` (no `default:` arg) is the NEP's gate.
@@ -511,259 +507,6 @@ mod tests {
             "the gate dominates fetch_page AND leak: {:?}",
             r.trifecta_findings
         );
-    }
-
-    // ── a choice gate counts where the effect tests its answer ─────────
-
-    /// A private note and a fetched page, both shown to a `choice` gate,
-    /// then a POST of the answer that waits on the gate and tests nothing.
-    const CHOICE: &str = r#"nika: choice-gate
-permits:
-  tools: ["nika:read", "nika:fetch", "nika:prompt"]
-  net: { http: ["www.corp-news-example.com", "api.corp-hooks-example.com"] }
-  fs:
-    read: ["./notes/private.md"]
-tasks:
-  brief:
-    invoke: { tool: "nika:read", args: { path: "./notes/private.md" } }
-  page:
-    invoke: { tool: "nika:fetch", args: { url: "https://www.corp-news-example.com/today", mode: text } }
-  human:
-    with: { brief: "${{ tasks.brief.output }}", page: "${{ tasks.page.output }}" }
-    invoke:
-      tool: "nika:prompt"
-      args: { mode: "choice", message: "Send this? ${{ with.brief }} / ${{ with.page }}", choices: ["send", "no"] }
-  send:
-    after: { human: success }
-    with: { pick: "${{ tasks.human.output }}" }
-    invoke:
-      tool: "nika:fetch"
-      args: { url: "https://api.corp-hooks-example.com/hook", method: POST, body: { pick: "${{ with.pick }}" } }
-"#;
-
-    /// The `send` binding line of [`CHOICE`].
-    const SEND_PICK: &str = "    with: { pick: \"${{ tasks.human.output }}\" }\n    invoke:\n      tool: \"nika:fetch\"\n      args: { url: \"https://api.corp-hooks-example.com/hook\"";
-
-    /// One edit of a fixture, refused when the text it replaces is gone.
-    fn swap(yaml: &str, from: &str, to: &str) -> String {
-        assert_eq!(yaml.matches(from).count(), 1, "fixture drift on `{from}`");
-        yaml.replacen(from, to, 1)
-    }
-
-    /// [`CHOICE`] with `when` on `send`.
-    fn choice_with_guard(when: &str) -> String {
-        swap(
-            CHOICE,
-            SEND_PICK,
-            &SEND_PICK.replacen(
-                "\n    invoke:",
-                &format!("\n    when: {when}\n    invoke:"),
-                1,
-            ),
-        )
-    }
-
-    fn sinks(r: &crate::CheckReport) -> Vec<(&str, Option<&str>)> {
-        r.trifecta_findings
-            .iter()
-            .map(|v| (v.task.as_str(), v.source.as_deref()))
-            .collect()
-    }
-
-    /// The choice's answer does not guard `send`: it runs whichever answer
-    /// the person picks, « no » included, so the gate is not credited and
-    /// the trifecta is refused as for no gate, saying why and how to repair.
-    #[test]
-    fn a_choice_gate_whose_answer_the_effect_does_not_test_is_not_credited() {
-        let r = report(CHOICE);
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert_eq!(
-            sinks(&r),
-            [("send", Some("page"))],
-            "{:?}",
-            r.trifecta_findings
-        );
-        assert!(
-            r.trifecta_mitigations.is_empty(),
-            "{:?}",
-            r.trifecta_mitigations
-        );
-        let codes: Vec<String> = r
-            .extra_conformance_codes()
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        assert_eq!(
-            codes.iter().filter(|c| *c == "NIKA-SEC-009").count(),
-            1,
-            "{codes:?}"
-        );
-        assert!(!r.is_clean());
-        let d = &r.trifecta_findings[0].detail;
-        assert!(
-            d.starts_with("lethal trifecta complete · human gate required"),
-            "{d}"
-        );
-        for part in [
-            "the choice gate `human` dominates `send`, but `send` does not test its answer",
-            "`send` runs whichever answer is picked",
-            "test the answer in the `when:` of `send`",
-            "`with: { pick: \"${{ tasks.human.output }}\" }`",
-            "`mode: confirm`",
-        ] {
-            assert!(d.contains(part), "missing `{part}`: {d}");
-        }
-        assert!(
-            !d.contains("no blocking `invoke: nika:prompt` dominates"),
-            "the gate dominates, so the generic clause would be false: {d}"
-        );
-    }
-
-    /// The repair as taught: `send` tests the answer, the gate is credited
-    /// and named by the tick.
-    #[test]
-    fn a_choice_gate_whose_answer_the_effect_tests_is_credited() {
-        let r = report(&choice_with_guard("\"${{ with.pick == 'send' }}\""));
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
-        let credited: Vec<(&str, &str)> = r
-            .trifecta_mitigations
-            .iter()
-            .map(|m| (m.sink.as_str(), m.gate.as_str()))
-            .collect();
-        assert_eq!(credited, [("send", "human")]);
-        assert!(r.consent_findings.is_empty(), "{:?}", r.consent_findings);
-    }
-
-    /// The confirm twin keeps today's credit (the consent lane judges its
-    /// « no »): clean once `send` tests the yes.
-    #[test]
-    fn the_confirm_twin_stays_credited() {
-        let confirm = swap(
-            CHOICE,
-            "args: { mode: \"choice\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"send\", \"no\"] }",
-            "args: { mode: \"confirm\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\" }",
-        );
-        let confirm = swap(
-            &confirm,
-            SEND_PICK,
-            &SEND_PICK.replacen("pick:", "ok:", 1).replacen(
-                "\n    invoke:",
-                "\n    when: \"${{ with.ok == true }}\"\n    invoke:",
-                1,
-            ),
-        );
-        let confirm = swap(&confirm, "${{ with.pick }}\" }", "${{ with.ok }}\" }");
-        let r = report(&confirm);
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
-        assert!(r.consent_findings.is_empty(), "{:?}", r.consent_findings);
-        let credited: Vec<(&str, &str)> = r
-            .trifecta_mitigations
-            .iter()
-            .map(|m| (m.sink.as_str(), m.gate.as_str()))
-            .collect();
-        assert_eq!(credited, [("send", "human")]);
-    }
-
-    /// Two effects behind one choice gate: the one that tests the answer
-    /// keeps the credit, the one that only waits on the gate is refused by
-    /// name.
-    #[test]
-    fn each_effect_behind_a_choice_gate_must_test_its_answer() {
-        let two = choice_with_guard("\"${{ with.pick == 'send' }}\"");
-        let two = format!(
-            "{two}  copy:\n    after: {{ human: success }}\n    with: {{ pick: \"${{{{ tasks.human.output }}}}\" }}\n    invoke:\n      tool: \"nika:fetch\"\n      args: {{ url: \"https://api.corp-hooks-example.com/copy\", method: POST, body: {{ pick: \"${{{{ with.pick }}}}\" }} }}\n"
-        );
-        let r = report(&two);
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert_eq!(
-            sinks(&r),
-            [("copy", Some("page"))],
-            "{:?}",
-            r.trifecta_findings
-        );
-        let d = &r.trifecta_findings[0].detail;
-        assert!(
-            d.contains(
-                "the choice gate `human` dominates `copy`, but `copy` does not test its answer"
-            ),
-            "{d}"
-        );
-        let credited: Vec<(&str, &str)> = r
-            .trifecta_mitigations
-            .iter()
-            .map(|m| (m.sink.as_str(), m.gate.as_str()))
-            .collect();
-        assert_eq!(credited, [("send", "human")]);
-    }
-
-    /// What « tests its answer » means: a `when:` that reads an exact
-    /// binding of the gate's output and is not true for every listed
-    /// choice. A guard true whatever the person picks tests nothing; a
-    /// binding the substitution cannot resolve is not a test either.
-    #[test]
-    fn a_guard_true_on_every_choice_tests_nothing() {
-        for when in [
-            "\"${{ with.pick != 'no' }}\"",
-            "\"${{ with.pick == 'send' && with.pick != null }}\"",
-            "\"${{ with.pick in ['send'] }}\"",
-            "\"${{ with.pick.startsWith('s') }}\"",
-        ] {
-            let r = report(&choice_with_guard(when));
-            assert!(r.conformance.is_empty(), "{when}: {:?}", r.conformance);
-            assert!(
-                r.trifecta_findings.is_empty(),
-                "{when}: {:?}",
-                r.trifecta_findings
-            );
-        }
-        for when in [
-            "\"${{ with.pick != null }}\"",
-            "\"${{ with.pick == 'send' || true }}\"",
-            "\"${{ with.pick in ['send', 'no'] }}\"",
-            "\"${{ with.pick != 'maybe' }}\"",
-        ] {
-            let r = report(&choice_with_guard(when));
-            assert!(r.conformance.is_empty(), "{when}: {:?}", r.conformance);
-            assert_eq!(sinks(&r), [("send", Some("page"))], "{when}");
-        }
-        let unresolved = swap(
-            &choice_with_guard("\"${{ with.pick == 'send' }}\""),
-            "with: { pick: \"${{ tasks.human.output }}\" }",
-            "with: { pick: \"answer=${{ tasks.human.output }}\" }",
-        );
-        let r = report(&unresolved);
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert_eq!(sinks(&r), [("send", Some("page"))]);
-    }
-
-    /// A `mode:` the check cannot read as a literal may resolve to `choice`:
-    /// it is read as one (fail-closed), so the untested POST is refused and
-    /// the tested one is credited. Templated `choices:` cannot be listed, so
-    /// the read of the answer alone is the test.
-    #[test]
-    fn a_templated_mode_is_read_as_a_choice() {
-        let templated = |yaml: &str| {
-            let y = swap(
-                yaml,
-                "nika: choice-gate\n",
-                "nika: choice-gate\ninputs:\n  mode: { type: string, default: choice }\n  yes: { type: string, default: send }\n",
-            );
-            swap(
-                &y,
-                "args: { mode: \"choice\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"send\", \"no\"] }",
-                "args: { mode: \"${{ inputs.mode }}\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"${{ inputs.yes }}\", \"no\"] }",
-            )
-        };
-        let r = report(&templated(CHOICE));
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert_eq!(sinks(&r), [("send", Some("page"))]);
-        let r = report(&templated(&choice_with_guard(
-            "\"${{ with.pick != null }}\"",
-        )));
-        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
-        assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
     }
 
     /// Drop each leg in turn → clean (the Rule of Two holds unattended).

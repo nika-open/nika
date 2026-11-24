@@ -5,6 +5,16 @@ Versions move together across all manifests (the mirror gate pins it).
 
 ## Unreleased
 
+The run guard no longer bricks the editor when the `nika` binary is
+missing from its PATH. Inside a Nika project (a `nika.yaml` or a `.nika/`
+store in the host's project directory, the hook's working directory or
+above) it still refuses every shell command. Elsewhere it lets commands
+through and warns once, `guard_off` with exit 1, until the binary has
+been found again; meanwhile no run is judged there. The shim still never
+reads the payload. Each refusal now names its own cause: a command the
+judge could not see no longer tells the person to restore a binary that
+is present, and a broken judge points at `nika doctor`.
+
 The schedule teaching links the `nika arm` reference
 (https://docs.nika.sh/reference/arm) and, for the project file, the
 nika.yaml reference: the « Projects and schedules » guide the operating

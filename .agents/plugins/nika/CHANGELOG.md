@@ -5,6 +5,95 @@ Versions move together across all manifests (the mirror gate pins it).
 
 ## Unreleased
 
+The plugin carries one loop around a job. A new job goes from a plan the
+person approves once (phases, an effect card read off `nika check` and
+`nika inspect`, the cost per run) to a file built phase by phase, reviewed
+cold above eight tasks or when an effect leaves the machine, repaired at
+most twice and handed over with the check's verdict, quoted. Five roles do
+the work: `nika-author`, `nika-debugger` and `nika-migrator` gain a model
+they inherit from the session, an effort level, a turn cap and, for the
+first two, a small project memory; `nika-reviewer` judges a finished file
+from the person's sentence and the path alone; `nika-scout` gathers facts
+on a small model. Every page that can stop for the person names what needs
+their yes and what never waits for them. `scripts/nika-card.py` remembers
+the card the person approved and names every effect added after it.
+`bin/nika-kit` decides once which binary the helpers use and detects a
+feature by asking the binary; `nika-authoring` and `nika-running` print the
+binary's own builtins and routes when they load. `/nika:run` starts a long
+run in the background, shows a gate's question word for word and reads a
+stopped run before any second run; `/nika:report` builds one
+self-contained page from a run's record; `/nika:improve` proposes only
+what the recorded runs prove and never changes an effect; `/nika:connect`
+offers an MCP server before writing its declaration. A routing guide gives
+a method for choosing which model does which step, with no model name in
+it. `nika-operating` lays out four ways to run without the person. Two
+workflow scripts, `nika-forge` and `nika-audit`, are written and not yet
+run in a session, as are six new evaluation cases. In Claude Code three
+hooks and a second monitor repeat the loop's rules (the author's hand-over
+is checked, a run that ended red brings back a reminder, runs that wait
+survive a compaction, a run reports its failures and its spend); each rule
+is also the stated step of a skill, so it holds on hosts without them.
+
+The helpers hold on a project they have no reason to trust. A project
+never chooses the binary they run: a build found inside a repository is
+never picked, engine tree included. Names, paths and a gate's question read
+from a project or from a run's record reach the agent filtered, bounded and
+marked as data, and a path printed inside a suggested command is
+shell-quoted. `/nika:report` writes under the project's `out/` only and
+follows no link there. The stop gate keeps what it has checked across a
+second start of the same session and names a check that could not run as
+such; the author gate checks every changed file within a time budget and
+says which ones it did not reach. A trace line that is JSON without being
+an event is skipped by every reader, and the plain verdict, the list of
+waiting runs and the facts read at skill load give the binary a time
+limit. The script tests run under a temporary home
+folder, and the one that needs the real binary says SKIP when the `nika` it
+finds does not answer there.
+
+What the pages state was played on the 0.125.0 release, claim by claim. A
+rehearsal on the mock model is offered only for a job that sends nothing,
+reaches no host and pins no model on a task: a model pinned on a task is
+called for real under `--model mock/echo`, and the plan card names such
+models in a row of its own. A run refused before it started (exit 2 or 3)
+is told apart from a run that stopped (exit 1 or 130): nothing ran, no
+trace was written, and the latest trace is never read for it. A resume
+repeats the first run's model flag, and the list of waiting runs prints it.
+`/nika:connect` states the sandbox a declared server starts in and the two
+routes a key has today, with what each exposes. The evaluation graders read
+the shell command itself, know the bare `nika <file>.nika` form and both
+spellings of `--answer`, and every pattern is played on samples by the
+script tests.
+
+The plugin is ambitious about what one workflow can do, and careful
+about what it touches: ambition in craft, fidelity in effects. The
+authoring skill opens with a design step and three new references: a
+capability map (sources, data, decisions, models and seats, media, state,
+composition, time, MCP servers and hubs, serving), a job anatomy (the five
+phases, a depth bar, measured patterns for state between runs,
+idempotency keys, validation, budget assertions, a report that survives a
+failed run, fan-out, a dead source that fails or degrades the run instead
+of feeding it invented data), an engine-behaviors guide (secret taint,
+expression limits, field limits, binary downloads, stale files, mock
+answers, resume, two hints that cannot both clear) and a seats-and-images
+guide (`run.access`, `agent.images`, what mock can rehearse). Every workflow these references print was checked on 0.125.0.
+`/nika:make` adds an ambition pass and the subagent a design pass and a
+self-audit. The kit teaches « approve once, then let it run », stated once
+in the job anatomy and linked from every other page: a gate only where
+`nika check` requires one, before a send or before an effect that cannot
+be undone, cost bounded by an assertion and the ceiling, and a scheduled
+workflow that keeps a gate is said to pause at every fire. A craft addition
+that would bring a gate (a new read grant or a new program in a job that
+fetches or calls an MCP tool) is offered, not added. `/nika:ideas` reads the project and proposes
+five workflows; `/nika:capture` turns the conversation's recent work into
+a checked workflow; both are served as MCP prompts. The delegation rule
+and the intent hint reach for a workflow on wide jobs too (fan-outs,
+media, model comparisons, agent seats, crawls, watchers, exact
+reconciliations), in English and French. The edit hook judges with
+NIKA_BIN, else, inside the engine tree, the session's CARGO_TARGET_DIR
+build when that folder is absolute and outside the tree, else the PATH; a
+build under a tree's own `target/` is never picked. A seventh evaluation
+case, written and not yet run, covers a new job designed deep by default.
+
 The run guard no longer bricks the editor when the `nika` binary is
 missing from its PATH. Inside a Nika project (a `nika.yaml` or a `.nika/`
 store in the host's project directory, the hook's working directory or

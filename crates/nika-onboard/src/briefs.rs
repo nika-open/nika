@@ -345,6 +345,31 @@ const AGENT_DECISIONS_AND_EFFECTS: &str = include_str!(concat!(
     "/../../.agents/plugins/nika/skills/nika-authoring/references/decisions-and-effects.md"
 ));
 
+const AGENT_CAPABILITIES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/capabilities.md"
+));
+
+const AGENT_JOB_ANATOMY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/job-anatomy.md"
+));
+
+const AGENT_SEATS_AND_IMAGES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/seats-and-images.md"
+));
+
+const AGENT_ENGINE_BEHAVIORS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/engine-behaviors.md"
+));
+
+const AGENT_ROUTING: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/routing.md"
+));
+
 /// `.cursor/agents/nika-*.md` — the three kit subagents, project-side.
 /// Cursor's LOCAL plugin loader consumes MCP + skills ONLY (agents in a
 /// local plugin manifest are ignored; the marketplace path processes the
@@ -486,7 +511,7 @@ pub fn agents_md() -> &'static str {
 
 /// The scaffold set · (relative path, body). The ONE source of what `init`
 /// writes — `plan` and the docs both read it.
-pub(super) fn targets() -> [(&'static str, &'static str); 30] {
+pub(super) fn targets() -> [(&'static str, &'static str); 35] {
     [
         (".vscode/settings.json", VSCODE_SETTINGS),
         ("AGENTS.md", AGENTS_MD),
@@ -545,6 +570,26 @@ pub(super) fn targets() -> [(&'static str, &'static str); 30] {
         (
             ".agents/skills/nika-authoring/references/decisions-and-effects.md",
             AGENT_DECISIONS_AND_EFFECTS,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/capabilities.md",
+            AGENT_CAPABILITIES,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/job-anatomy.md",
+            AGENT_JOB_ANATOMY,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/seats-and-images.md",
+            AGENT_SEATS_AND_IMAGES,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/engine-behaviors.md",
+            AGENT_ENGINE_BEHAVIORS,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/routing.md",
+            AGENT_ROUTING,
         ),
         (".github/copilot-instructions.md", COPILOT_INSTRUCTIONS),
         ("CLAUDE.md", CLAUDE_MD),
@@ -1122,8 +1167,26 @@ mod tests {
     #[test]
     fn targets_names_every_brief_family() {
         let t = targets();
-        assert_eq!(t.len(), 30);
         let paths: Vec<&str> = t.iter().map(|(p, _)| *p).collect();
+        // The count is the return type's; asserting it again proves nothing.
+        // What can drift is the kit gaining a guide that init forgets, so
+        // the guides are read from the kit's own folder.
+        let guides = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.agents/plugins/nika/skills/nika-authoring/references");
+        let mut shipped = 0;
+        for entry in std::fs::read_dir(&guides).expect("the kit's references folder") {
+            let name = entry.expect("a directory entry").file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".md") {
+                shipped += 1;
+                let target = format!(".agents/skills/nika-authoring/references/{name}");
+                assert!(
+                    paths.contains(&target.as_str()),
+                    "the kit ships `{name}` and init does not write it"
+                );
+            }
+        }
+        assert!(shipped > 0, "no guide found under {guides:?}");
         for expected in [
             ".vscode/settings.json",
             "AGENTS.md",
@@ -1140,6 +1203,11 @@ mod tests {
             ".cursor/hooks-nika/check-on-edit.sh",
             ".cursor/hooks-nika/guard-run.sh",
             ".agents/skills/nika-authoring/SKILL.md",
+            ".agents/skills/nika-authoring/references/capabilities.md",
+            ".agents/skills/nika-authoring/references/job-anatomy.md",
+            ".agents/skills/nika-authoring/references/seats-and-images.md",
+            ".agents/skills/nika-authoring/references/engine-behaviors.md",
+            ".agents/skills/nika-authoring/references/routing.md",
             ".github/copilot-instructions.md",
             "CLAUDE.md",
         ] {

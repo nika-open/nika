@@ -32,6 +32,41 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^nika:nika-author$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/author-stop-gate.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/run-failed-hint.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/precompact-notes.py",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! The PROMPTS half of the oracle — the kit's five slash commands, served
+//! The PROMPTS half of the oracle — the kit's portable slash commands, served
 //! over MCP so every client gets them, not just the three with a plugin
 //! manifest.
 //!
@@ -16,9 +16,20 @@
 //!
 //! The bodies are `include_str!`d from `.agents/plugins/nika/commands/`,
 //! the same one-source law `nika-onboard` already follows for the rules,
-//! the subagents and the hooks. Those five files were the last kit surface
-//! the binary never read; now a wording fix in the kit reaches the MCP
-//! surface with no second copy to forget.
+//! the subagents and the hooks. Those files were the last kit surface the
+//! binary never read; now a wording fix in the kit reaches the MCP surface
+//! with no second copy to forget.
+//!
+//! Served: the five audit commands, plus `ideas` (propose workflows from the
+//! project) and `capture` (turn the conversation's recent work into a checked
+//! workflow). A command whose body calls a plugin helper script (`make`,
+//! `run`, `pending`) stays a plugin feature: an MCP client has no plugin root
+//! to run it from. `doctor` calls no helper and is simply not served: it
+//! diagnoses the client's own wiring, which the client's plugin surface owns.
+//!
+//! `ideas` and `capture` point at two authoring guides. An MCP-only client
+//! has neither the plugin nor a project `nika init` wrote, so both bodies
+//! say where the guides live and how to work from the oracle without them.
 
 use serde_json::{Value, json};
 
@@ -35,7 +46,7 @@ macro_rules! command {
 /// `(wire name, display title, the kit markdown)`. The description and the
 /// argument shape are READ from each file's frontmatter — the kit stays the
 /// single source, this table only orders them and names them for display.
-const COMMANDS: [(&str, &str, &str); 5] = [
+const COMMANDS: [(&str, &str, &str); 7] = [
     ("check", "Audit a workflow", command!("check.md")),
     (
         "explain",
@@ -56,6 +67,16 @@ const COMMANDS: [(&str, &str, &str); 5] = [
         "permits",
         "Infer the permits boundary",
         command!("permits.md"),
+    ),
+    (
+        "ideas",
+        "Propose workflows for this project",
+        command!("ideas.md"),
+    ),
+    (
+        "capture",
+        "Turn recent work into a workflow",
+        command!("capture.md"),
     ),
 ];
 
@@ -173,11 +194,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_five_kit_commands_are_served_in_order() {
+    fn the_portable_kit_commands_are_served_in_order() {
         let catalog = catalog();
         let listed = catalog.as_array().expect("the catalog is an array");
         let names: Vec<&str> = listed.iter().filter_map(|p| p["name"].as_str()).collect();
-        assert_eq!(names, ["check", "explain", "compile", "trace", "permits"]);
+        assert_eq!(
+            names,
+            [
+                "check", "explain", "compile", "trace", "permits", "ideas", "capture"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_served_command_never_needs_the_plugin_root() {
+        // An MCP client has no plugin root: a body that calls a helper
+        // script under it would hand the model a command it cannot run.
+        for (name, _, md) in COMMANDS {
+            assert!(
+                !md.contains("CLAUDE_PLUGIN_ROOT"),
+                "`{name}` calls a plugin helper and cannot be served over MCP"
+            );
+        }
+    }
+
+    #[test]
+    fn ideas_and_capture_write_nothing_before_the_person_chooses() {
+        // `ideas` proposes and writes nothing until a pick; `capture`
+        // checks and never runs. The bodies must keep saying so.
+        let ideas = render("ideas", None).expect("ideas renders bare");
+        let text = ideas["messages"][0]["content"]["text"]
+            .as_str()
+            .expect("a text block");
+        assert!(text.contains("Write nothing until they pick"), "{text}");
+        let capture = render("capture", None).expect("capture renders bare");
+        let text = capture["messages"][0]["content"]["text"]
+            .as_str()
+            .expect("a text block");
+        assert!(text.contains("never run"), "{text}");
+        assert!(text.contains("do not pass `--answer`"), "{text}");
+    }
+
+    #[test]
+    fn ideas_and_capture_stand_without_the_plugin_files() {
+        // An MCP-only client has no skill folder: a prompt that only says
+        // "read the guide" sends it to a file it does not have.
+        for name in ["ideas", "capture"] {
+            let got = render(name, None).expect("the prompt renders bare");
+            let text = got["messages"][0]["content"]["text"]
+                .as_str()
+                .expect("a text block");
+            for needed in [
+                ".agents/skills/nika-authoring/references/",
+                "nika_examples",
+                "Offer `nika init`",
+            ] {
+                assert!(text.contains(needed), "`{name}` lacks `{needed}`");
+            }
+        }
     }
 
     #[test]

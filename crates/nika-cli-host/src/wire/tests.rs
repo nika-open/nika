@@ -1293,6 +1293,75 @@ fn a_pinned_command_reads_wired_on_every_json_and_toml_host() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A settings path that is not a settings file (a directory, a FIFO, a
+/// link to `/dev/zero`, a file past the bound, one this account cannot
+/// read, an empty one) is refused with its reason, promptly, by the
+/// `detected` preview and by the run: its own skipped line, exit ENV.
+fn detected_refuses(hazard: crate::detect::hazards::Hazard) {
+    let home = temp_dir(&format!("hazard-{hazard:?}-home"));
+    let dir = temp_dir(&format!("hazard-{hazard:?}-dir"));
+    let path = home.join(".gemini").join("settings.json");
+    let Some(reason) = hazard.plant(&path) else {
+        return; // root reads through a 000 mode: nothing to stage
+    };
+    for dry_run in [true, false] {
+        let (home, dir) = (home.clone(), dir.clone());
+        let out = crate::detect::hazards::promptly(move || {
+            run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        });
+        assert_eq!(out.code, crate::output::exit::ENV, "{hazard:?}: {out:?}");
+        let line = out
+            .text
+            .lines()
+            .find(|line| line.starts_with("✖ skipped"))
+            .unwrap_or_default();
+        assert!(
+            line.contains(&path.display().to_string()) && line.contains(reason),
+            "{hazard:?} (dry-run {dry_run}): {out:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detected_refuses_a_directory() {
+    detected_refuses(crate::detect::hazards::Hazard::Directory);
+}
+
+#[test]
+fn detected_refuses_an_empty_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Empty);
+}
+
+#[test]
+fn detected_refuses_an_unreadable_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Unreadable);
+}
+
+#[test]
+fn detected_refuses_a_link_to_dev_zero() {
+    detected_refuses(crate::detect::hazards::Hazard::DevZeroLink);
+}
+
+#[test]
+fn detected_refuses_a_fifo() {
+    detected_refuses(crate::detect::hazards::Hazard::Fifo);
+}
+
+#[test]
+fn detected_refuses_an_oversized_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Oversized);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.

@@ -522,7 +522,7 @@ pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
 /// parse or holds no entry — and for Hermes, whose YAML its writer
 /// never rewrites and reads with a predicate of its own.
 fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
-    let body = std::fs::read_to_string(path).ok()?;
+    let body = crate::detect::read_config(path).ok()?;
     let table = match target {
         WireTarget::Codex | WireTarget::Grok => {
             let doc: toml_edit::DocumentMut = body.parse().ok()?;
@@ -791,7 +791,7 @@ fn patch_config(
 fn patch_toml_mcp(path: &Path, label: &str, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let body = if existed {
-        std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?
+        crate::detect::read_config(path)?
     } else {
         String::new()
     };
@@ -915,7 +915,7 @@ fn patch_hermes(path: &Path, dry_run: bool) -> Result<WireAction, String> {
         }
         return Ok(WireAction::Created(format!("hermes: {}", path.display())));
     }
-    let body = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let body = crate::detect::read_config(path)?;
     // CURRENT means the canonical block is present verbatim-modulo-indent
     // — the shared `detect::hermes_recognized` predicate (a `nika:` server
     // whose command line names the binary). Anything else is the
@@ -1057,7 +1057,7 @@ fn read_json(path: &Path) -> Result<Value, String> {
 /// A JSON config and its exact text, kept to restore it when a write does
 /// not read back.
 fn read_json_text(path: &Path) -> Result<(Value, String), String> {
-    let body = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let body = crate::detect::read_config(path)?;
     let value = serde_json::from_str(&body)
         .map_err(|e| format!("{}: malformed JSON: {e}", path.display()))?;
     Ok((value, body))
@@ -1150,8 +1150,7 @@ fn write_read_back(
     write: fn(&Path, &str) -> Result<(), String>,
 ) -> Result<(), String> {
     write(path, body)?;
-    // seam-bypass-ok: the readback of the host config just written
-    if std::fs::read_to_string(path).is_ok_and(|read| read == body) {
+    if crate::detect::read_config(path).is_ok_and(|read| read == body) {
         return Ok(());
     }
     let restored = match original {

@@ -699,6 +699,76 @@ fn a_codex_toml_probe_reads_current_stale_and_unwired() {
     let _ = std::fs::remove_dir_all(work);
 }
 
+/// `doctor` reads settings from the home AND from the repository it is
+/// run in, and a repository can ship anything at `./opencode.json`.
+/// Whatever sits at a settings path (a directory, a FIFO, a link to
+/// `/dev/zero` …), the read returns promptly: the host is there, and
+/// not wired. One project row read by its writer, one standing home row,
+/// and the YAML row.
+fn doctor_reads_past(hazard: crate::detect::hazards::Hazard) {
+    let home = temp_dir(&format!("hazard-{hazard:?}-home"));
+    let work = temp_dir(&format!("hazard-{hazard:?}-work"));
+    let rows = [
+        ("opencode", work.join("opencode.json")),
+        ("cursor", home.join(".cursor").join("mcp.json")),
+        ("hermes", home.join(".hermes").join("config.yaml")),
+    ];
+    for (_, path) in &rows {
+        if hazard.plant(path).is_none() {
+            return; // root reads through a 000 mode: nothing to stage
+        }
+    }
+    let probes = {
+        let (home, work) = (home.clone(), work.clone());
+        crate::detect::hazards::promptly(move || client_probes_in(Some(&home), &work))
+    };
+    for (id, path) in &rows {
+        assert_eq!(
+            probes.iter().find(|probe| probe.id == *id),
+            Some(&ClientProbe {
+                id: (*id).to_owned(),
+                path: path.display().to_string(),
+                present: true,
+                current: false,
+                stale: false,
+            }),
+            "{hazard:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(work);
+}
+
+#[test]
+fn doctor_reads_past_a_directory() {
+    doctor_reads_past(crate::detect::hazards::Hazard::Directory);
+}
+
+#[test]
+fn doctor_reads_past_an_empty_file() {
+    doctor_reads_past(crate::detect::hazards::Hazard::Empty);
+}
+
+#[test]
+fn doctor_reads_past_an_unreadable_file() {
+    doctor_reads_past(crate::detect::hazards::Hazard::Unreadable);
+}
+
+#[test]
+fn doctor_reads_past_a_link_to_dev_zero() {
+    doctor_reads_past(crate::detect::hazards::Hazard::DevZeroLink);
+}
+
+#[test]
+fn doctor_reads_past_a_fifo() {
+    doctor_reads_past(crate::detect::hazards::Hazard::Fifo);
+}
+
+#[test]
+fn doctor_reads_past_an_oversized_file() {
+    doctor_reads_past(crate::detect::hazards::Hazard::Oversized);
+}
+
 #[test]
 fn collect_offline_never_pings_and_never_binds_a_value() {
     // The default (welcome + doctor sans --ping) is fully offline:

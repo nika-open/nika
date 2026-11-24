@@ -180,6 +180,105 @@ pub(crate) fn hermes_recognized(body: &str) -> bool {
     body.contains("nika:") && body.contains("command: nika")
 }
 
+/// The most a host's settings file may weigh. Real ones are a few
+/// kilobytes, the largest a few hundred: past this, the path is not a
+/// settings file.
+const MAX_CONFIG_BYTES: usize = 4 * 1024 * 1024;
+
+/// The ONE reader of a host's settings file: `wire` and `probe` read
+/// through nothing else. A settings path is not ours to trust — `doctor`
+/// reads `./opencode.json` from whatever repository it is run in — and
+/// it may be a FIFO (opening one blocks forever) or a link to
+/// `/dev/zero` (reading one ends when memory does). So a link is
+/// followed, what it leads to must be a regular file, checked BEFORE it
+/// is opened, and at most 4 MiB are read, through a bounded reader and
+/// not on the size the metadata reports. Anything else is an error that
+/// says why.
+pub(crate) fn read_config(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let refuse = |why: &dyn std::fmt::Display| format!("{}: {why}", path.display());
+    let meta = std::fs::metadata(path).map_err(|e| refuse(&e))?;
+    if !meta.is_file() {
+        return Err(refuse(&"not a regular file"));
+    }
+    let file = std::fs::File::open(path).map_err(|e| refuse(&e))?;
+    let limit = u64::try_from(MAX_CONFIG_BYTES).unwrap_or(u64::MAX);
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| refuse(&e))?;
+    if bytes.len() > MAX_CONFIG_BYTES {
+        return Err(refuse(&"larger than 4 MiB"));
+    }
+    String::from_utf8(bytes).map_err(|_| refuse(&"not UTF-8 text"))
+}
+
+/// What a settings path can be besides a settings file — the fixtures
+/// the `wire` and `probe` tests share with this module's own.
+#[cfg(test)]
+pub(crate) mod hazards {
+    use std::path::Path;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Hazard {
+        Directory,
+        Empty,
+        Unreadable,
+        DevZeroLink,
+        Fifo,
+        Oversized,
+    }
+
+    impl Hazard {
+        /// Put the hazard at `path` and return the reason a JSON host's
+        /// writer must give for refusing it, or `None` when this machine
+        /// cannot stage it (root reads through a `000` mode).
+        pub(crate) fn plant(self, path: &Path) -> Option<&'static str> {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+            match self {
+                Self::Directory => std::fs::create_dir(path).expect("directory"),
+                Self::Empty => std::fs::write(path, "").expect("empty"),
+                Self::Unreadable => {
+                    std::fs::write(path, "{}").expect("seed");
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000))
+                        .expect("chmod");
+                    if std::fs::File::open(path).is_ok() {
+                        return None;
+                    }
+                }
+                Self::DevZeroLink => std::os::unix::fs::symlink("/dev/zero", path).expect("link"),
+                Self::Fifo => {
+                    nix::unistd::mkfifo(path, nix::sys::stat::Mode::S_IRWXU).expect("fifo");
+                }
+                // Sparse: 4 MiB and one byte on the meter, nothing on disk.
+                Self::Oversized => std::fs::File::create(path)
+                    .and_then(|file| file.set_len(4 * 1024 * 1024 + 1))
+                    .expect("oversized"),
+            }
+            Some(match self {
+                Self::Directory | Self::DevZeroLink | Self::Fifo => "not a regular file",
+                Self::Empty => "malformed JSON",
+                Self::Unreadable => "Permission denied",
+                Self::Oversized => "larger than 4 MiB",
+            })
+        }
+    }
+
+    /// Run `work` on a thread and fail the test when it has not returned
+    /// in twenty seconds: a read that blocks (a FIFO) or never ends
+    /// (`/dev/zero`) must fail a test, not hang the suite.
+    #[allow(clippy::disallowed_methods)] // a watchdog beside a read that may block, tests only
+    pub(crate) fn promptly<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(work());
+        });
+        wait.recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the read returned promptly")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +383,63 @@ mod tests {
         assert!(!is_stale_mcp_server(
             &serde_json::json!({"args": ["mcp", "serve"]})
         ));
+    }
+
+    /// The one reader, value by value: a link is followed, a regular
+    /// file of at most 4 MiB is read, and everything else comes back as
+    /// an error with its reason — promptly, FIFO and `/dev/zero` included.
+    #[test]
+    fn the_reader_takes_only_a_bounded_regular_file() {
+        use super::hazards::{Hazard, promptly};
+        let dir = tempfile::tempdir().expect("temp dir");
+        let read = |path: &Path| {
+            let path = path.to_path_buf();
+            promptly(move || read_config(&path))
+        };
+
+        let plain = dir.path().join("plain.json");
+        std::fs::write(&plain, "{\"a\":1}\n").expect("seed");
+        assert_eq!(read(&plain), Ok("{\"a\":1}\n".to_owned()));
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&plain, &link).expect("link");
+        assert_eq!(
+            read(&link),
+            Ok("{\"a\":1}\n".to_owned()),
+            "a link is followed"
+        );
+        let full = dir.path().join("full.json");
+        std::fs::write(&full, " ".repeat(MAX_CONFIG_BYTES)).expect("seed");
+        assert_eq!(read(&full).map(|text| text.len()), Ok(MAX_CONFIG_BYTES));
+        let binary = dir.path().join("binary.json");
+        std::fs::write(&binary, [0xff, 0xfe]).expect("seed");
+        assert_eq!(
+            read(&binary),
+            Err(format!("{}: not UTF-8 text", binary.display()))
+        );
+
+        for hazard in [
+            Hazard::Directory,
+            Hazard::Empty,
+            Hazard::Unreadable,
+            Hazard::DevZeroLink,
+            Hazard::Fifo,
+            Hazard::Oversized,
+        ] {
+            let path = dir.path().join(format!("{hazard:?}")).join("settings.json");
+            let Some(reason) = hazard.plant(&path) else {
+                continue; // root reads through a 000 mode: nothing to see
+            };
+            let got = read(&path);
+            if hazard == Hazard::Empty {
+                assert_eq!(got, Ok(String::new()), "an empty file is a file");
+                continue;
+            }
+            let why = got.expect_err("refused");
+            assert!(
+                why.starts_with(&format!("{}: ", path.display())) && why.contains(reason),
+                "{hazard:?}: {why}"
+            );
+        }
     }
 
     /// The Hermes predicate needs both halves — a `nika:` server AND the

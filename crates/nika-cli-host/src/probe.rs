@@ -673,7 +673,8 @@ fn client_probe(id: &str, path: &Path, server_path: &[&str; 2]) -> ClientProbe {
 fn hermes_probe(path: &Path) -> ClientProbe {
     let present = path.exists();
     let current = present
-        && std::fs::read_to_string(path).is_ok_and(|body| crate::detect::hermes_recognized(&body));
+        && crate::detect::read_config(path)
+            .is_ok_and(|body| crate::detect::hermes_recognized(&body));
     ClientProbe {
         id: "hermes".to_owned(),
         path: path.display().to_string(),
@@ -695,7 +696,7 @@ fn is_current_mcp_server(value: &Value) -> bool {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
-    let body = std::fs::read_to_string(path).ok()?;
+    let body = crate::detect::read_config(path).ok()?;
     serde_json::from_str(&body).ok()
 }
 

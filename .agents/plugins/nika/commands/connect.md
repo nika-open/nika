@@ -24,6 +24,11 @@ scripts: look for `--mcp` in `nika catalog --help`).
   server's own documentation, which the person points you to or confirms.
   Do not write a package name or a launch command from memory.
 
+Either way the server starts inside the sandbox of step 5. A documented
+command that downloads the server when it starts does not work there: the
+server is installed inside the project first, and the declaration starts
+that copy.
+
 When one key covers several needs (a hub that fronts many services), say so
 in one line: fewer keys and one grant, against one more party that sees the
 calls. The person chooses.
@@ -43,14 +48,29 @@ memory.
 - In the workflow, `permits.tools` for exactly the tools the tasks call,
   each by its name (`"mcp:<server>/<tool>"`), and nothing wider.
 
-**5 · The key.** On 0.125.0 a declared server starts with a cleaned
-environment: the keys exported in the person's shell are not passed to it,
-and the declaration has no field that points at a secret store. A value
-reaches the server only through its launch arguments. Never write a key's
-value into the declaration, a workflow or a message, and never move a key
-to another host or store yourself. Say this plainly and let the person
-choose how the key gets there, for example a small launcher of their own
-that reads it from their store and starts the server.
+**5 · The sandbox and the key.** Measured on 0.125.0 with
+`nika mcp approve`: a declared server starts inside a sandbox. It reads and
+writes inside the project folder only (a file in the home folder or
+anywhere else is refused), the network is denied unless the `network` arm
+grants it, and its environment is reduced to `HOME`, `PATH` and `PWD`: a
+key exported in the person's shell is not passed to it. A launcher that
+resolves or installs the server outside the project when it starts (a
+package runner with its cache in the home folder) fails there. The
+declaration has no field that points at a secret store. That leaves two
+routes for a key, and each exposes it:
+
+- in the launch arguments: the value is then written in
+  `.nika/mcp_servers.json`, copied into `.nika/mcp_pins.json` at approval,
+  and shown in the machine's process list;
+- in a file inside the project that the server reads: every workflow or
+  tool granted that path can read it, and it is committed unless the
+  project ignores it.
+
+Say both plainly, with what each exposes, and let the person choose one or
+refuse: a key that cannot reach the server on terms they accept is a reason
+to stop here. The person puts the value in place. Never write it into the
+declaration, a workflow or a message, and never move a key to another host
+or store yourself.
 
 **6 · Approving the tools is theirs.** `nika mcp approve <server>` starts
 the server once, prints its tools and pins their definitions; the person

@@ -160,7 +160,9 @@ service's own API.
 - **The shelf.** The binary carries a shelf of the MCP servers it knows, each
   with its package, the key variable it needs and its pricing class. 0.125.0
   prints no list of it: the server's own documentation gives its
-  launch command.
+  launch command. A package or a key variable named there is not a way to
+  start the server by itself: « The sandbox and the key » below says what
+  can start and how a key reaches it.
 - **Hubs.** One kind of server is a hub: one server and one key, behind which
   sit many providers. `firecrawl` is on the 0.125.0 shelf (package
   `firecrawl-mcp`, key `FIRECRAWL_API_KEY`, freemium): web search, scrape,
@@ -187,11 +189,19 @@ service's own API.
   `--sends-out <tool>`, `--no-role <tool>`. The lethal-trifecta row of check
   counts those roles; a tool with no role is unknown, not safe, and check
   says so with an `[mcp-roles]` hint.
-- **The key.** On 0.125.0 a declared server starts with a cleaned
-  environment and the declaration has no field that points at a secret
-  store: a value reaches the server only through its launch arguments. The
-  person chooses how their key gets there. Never write its value into the
-  declaration or a workflow.
+- **The sandbox and the key.** Measured on 0.125.0 with `nika mcp approve`:
+  a declared server starts inside a sandbox. It reads and writes inside the
+  project folder only, the network is denied unless the `network` arm grants
+  it, and its environment is reduced to `HOME`, `PATH` and `PWD`. A launcher
+  that resolves or installs the server outside the project when it starts
+  fails there: install the server inside the project. The declaration has
+  no field that points at a secret store, so a key reaches the server
+  through its launch arguments (the value is then written in the
+  declaration, copied into the pin file and shown in the process list) or
+  through a file inside the project that the server reads (readable by
+  whatever is granted that path, committed unless ignored). Each exposes
+  the key: the person chooses one, or refuses. Never write its value
+  yourself.
 - **Cost.** The engine does not price a call to an MCP tool, so
   `--max-cost-usd` does not bound what the service bills. Bound a fan-out
   over a billed tool yourself (`for_each.max_items`, a small `max_parallel`)

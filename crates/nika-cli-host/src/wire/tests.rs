@@ -737,6 +737,262 @@ fn detected_targets_cover_only_present_clients() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A home holding the configs of five hosts: Codex (TOML, another
+/// server, no `nika`), Gemini CLI (already wired), Copilot CLI, Amp and
+/// Kimi Code (another server).
+fn five_host_home(name: &str) -> PathBuf {
+    let home = temp_dir(name);
+    let seed = |parts: &[&str], body: &str| {
+        let path = parts.iter().fold(home.clone(), |p, part| p.join(part));
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, body).expect("seed");
+    };
+    seed(
+        &[".codex", "config.toml"],
+        "# my codex setup\n[mcp_servers.other]\ncommand = \"other\"\n",
+    );
+    seed(
+        &[".gemini", "settings.json"],
+        r#"{"mcpServers":{"nika":{"command":"nika","args":["mcp"]}}}"#,
+    );
+    seed(&[".copilot", "mcp-config.json"], r#"{"mcpServers":{}}"#);
+    seed(&[".config", "amp", "settings.json"], "{}");
+    seed(
+        &[".kimi-code", "mcp.json"],
+        r#"{"mcpServers":{"other":{"command":"x"}}}"#,
+    );
+    home
+}
+
+const FIVE_HOSTS: [WireTarget; 5] = [
+    WireTarget::Codex,
+    WireTarget::Gemini,
+    WireTarget::Kimi,
+    WireTarget::Copilot,
+    WireTarget::Amp,
+];
+
+/// `detected` sees every host `nika wire` can write, not a list of its
+/// own: a home holding five hosts lists exactly those, in row order, and
+/// an empty home lists none. (Those five once answered « no MCP client
+/// detected ».)
+#[test]
+fn detected_lists_exactly_the_hosts_this_home_holds() {
+    let dir = temp_dir("five-hosts-dir");
+    let bare = temp_dir("five-hosts-bare");
+    assert_eq!(
+        detected_targets_in(&bare, &dir),
+        Vec::<WireTarget>::new(),
+        "an empty home lists none"
+    );
+
+    let home = five_host_home("five-hosts-home");
+    assert_eq!(detected_targets_in(&home, &dir), FIVE_HOSTS);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(bare);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The preview of `detected` on that home: one line per host, each in
+/// its own writer's words, and not a byte written.
+#[test]
+fn detected_dry_run_plans_each_host_it_sees_and_writes_nothing() {
+    let home = five_host_home("five-hosts-plan-home");
+    let dir = temp_dir("five-hosts-plan-dir");
+    let at = |target| {
+        config_path(target, Some(&home), &dir)
+            .expect("a home-anchored path")
+            .display()
+            .to_string()
+    };
+    let bytes = || FIVE_HOSTS.map(|target| std::fs::read_to_string(at(target)).expect("read"));
+    let before = bytes();
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions {
+            dry_run: true,
+            ..WireOptions::default()
+        },
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             + would update codex: {}\n\
+             · current gemini: {}\n\
+             + would update kimi: {}\n\
+             + would update copilot: {}\n\
+             + would update amp: {}\n\
+             → re-run without --dry-run to apply",
+            at(WireTarget::Codex),
+            at(WireTarget::Gemini),
+            at(WireTarget::Kimi),
+            at(WireTarget::Copilot),
+            at(WireTarget::Amp),
+        )
+    );
+    assert_eq!(bytes(), before, "a preview never writes");
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A Codex config is TOML: with the `nika` server it reads current,
+/// without it reads to-update, and reading it changes nothing.
+#[test]
+fn a_codex_toml_reads_current_with_the_nika_server_and_to_update_without() {
+    let home = temp_dir("codex-detected-home");
+    let dir = temp_dir("codex-detected-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("codex: {}", path.display());
+
+    let unwired = "# my codex setup\n[mcp_servers.github]\ncommand = \"gh\"\n";
+    std::fs::write(&path, unwired).expect("seed");
+    let targets = detected_targets_in(&home, &dir);
+    assert_eq!(targets, [WireTarget::Codex]);
+    assert_eq!(
+        collect_plan(&targets, Some(&home), dir_str),
+        [WireAction::Updated(label.clone())]
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        unwired,
+        "a plan writes nothing"
+    );
+
+    let wired = format!("{unwired}\n[mcp_servers.nika]\ncommand = \"nika\"\nargs = [\"mcp\"]\n");
+    std::fs::write(&path, &wired).expect("seed");
+    assert_eq!(detected_targets_in(&home, &dir), [WireTarget::Codex]);
+    assert_eq!(
+        collect_plan(&targets, Some(&home), dir_str),
+        [WireAction::Current(label)]
+    );
+    assert_eq!(std::fs::read_to_string(&path).expect("read"), wired);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The real run on that home wires the five hosts it sees, keeps every
+/// other server they hold, and creates no config for a host that is not
+/// there.
+#[test]
+fn detected_wires_the_hosts_it_sees_and_creates_nothing_for_the_others() {
+    let home = five_host_home("five-hosts-run-home");
+    let dir = temp_dir("five-hosts-run-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let at = |target| config_path(target, Some(&home), &dir).expect("a path");
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "✔ updated codex: {}\n\
+             · current gemini: {}\n\
+             ✔ updated kimi: {}\n\
+             ✔ updated copilot: {}\n\
+             ✔ updated amp: {}",
+            at(WireTarget::Codex).display(),
+            at(WireTarget::Gemini).display(),
+            at(WireTarget::Kimi).display(),
+            at(WireTarget::Copilot).display(),
+            at(WireTarget::Amp).display(),
+        )
+    );
+
+    let codex: toml_edit::DocumentMut = std::fs::read_to_string(at(WireTarget::Codex))
+        .expect("read")
+        .parse()
+        .expect("toml");
+    assert_eq!(
+        codex["mcp_servers"]["nika"]["command"].as_str(),
+        Some("nika")
+    );
+    assert_eq!(
+        codex["mcp_servers"]["other"]["command"].as_str(),
+        Some("other"),
+        "the other Codex server is kept"
+    );
+    let kimi = read_json(&at(WireTarget::Kimi)).expect("json");
+    assert_eq!(kimi["mcpServers"]["nika"]["args"], json!(["mcp"]));
+    assert_eq!(
+        kimi["mcpServers"]["other"]["command"], "x",
+        "the other Kimi server is kept"
+    );
+    let copilot = read_json(&at(WireTarget::Copilot)).expect("json");
+    assert_eq!(copilot["mcpServers"]["nika"]["type"], "local");
+    let amp = read_json(&at(WireTarget::Amp)).expect("json");
+    assert_eq!(amp["amp.mcpServers"]["nika"]["command"], "nika");
+
+    for target in expand_target(WireTarget::All) {
+        if !FIVE_HOSTS.contains(&target) {
+            assert!(
+                !at(target).exists(),
+                "{} is not on this machine and got a config",
+                target.id()
+            );
+        }
+    }
+    assert_eq!(
+        collect_plan(&FIVE_HOSTS, Some(&home), dir_str),
+        FIVE_HOSTS.map(|target| WireAction::Current(format!(
+            "{}: {}",
+            target.id(),
+            at(target).display()
+        ))),
+        "a second run has nothing to do"
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A client cannot be wired without being seen: every client `nika
+/// wire` writes into a bare home is detected there afterwards, at the
+/// file it was written to. A wire target added without a detection row
+/// fails here.
+#[test]
+fn every_client_wired_into_a_bare_home_is_then_detected() {
+    let home = temp_dir("round-trip-home");
+    let dir = temp_dir("round-trip-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let all = expand_target(WireTarget::All);
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+
+    for target in &all {
+        let action = wire_one(*target, Some(&home), dir_str, false).expect("wire");
+        assert!(
+            matches!(action, WireAction::Created(_)),
+            "{}: {action:?}",
+            target.id()
+        );
+    }
+    let seen = detected_targets_in(&home, &dir);
+    for target in &all {
+        assert_eq!(
+            seen.iter().filter(|one| *one == target).count(),
+            1,
+            "{} was wired and is not detected",
+            target.id()
+        );
+    }
+    assert_eq!(seen.len(), all.len(), "nothing else is detected: {seen:?}");
+    for action in collect_plan(&seen, Some(&home), dir_str) {
+        assert!(matches!(action, WireAction::Current(_)), "{action:?}");
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.
@@ -965,6 +1221,7 @@ fn detected_wire_writes_nothing_when_one_client_is_malformed() {
     std::fs::write(dir.join("opencode.json"), opencode).expect("seed");
     let out = wire_targets(
         &[WireTarget::Vscode, WireTarget::Opencode, WireTarget::Junie],
+        None,
         dir.to_str().expect("utf8"),
         false,
     );
@@ -983,6 +1240,7 @@ fn detected_wire_writes_nothing_when_one_client_is_malformed() {
     std::fs::write(dir.join("opencode.json"), "{}").expect("repair");
     let out = wire_targets(
         &[WireTarget::Vscode, WireTarget::Opencode, WireTarget::Junie],
+        None,
         dir.to_str().expect("utf8"),
         false,
     );

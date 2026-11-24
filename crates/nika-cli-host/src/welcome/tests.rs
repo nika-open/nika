@@ -1171,10 +1171,21 @@ mod front_door_oracle {
         probe
     }
 
+    /// The shipped shape as the pre-move renderer was run on it: the six
+    /// hosts the probe list held at capture. The list has grown since and
+    /// [`shipped_shape_probe`] follows it (the 80-column ratchet measures
+    /// the widest true roster); the digests below are of the inputs they
+    /// were captured on, the six rows that still lead that list.
+    fn shipped_at_capture() -> Probe {
+        let mut probe = shipped_shape_probe();
+        probe.clients.truncate(6);
+        probe
+    }
+
     fn probes() -> [(&'static str, Probe); 3] {
         [
             ("synthetic", synthetic_probe()),
-            ("shipped", shipped_shape_probe()),
+            ("shipped", shipped_at_capture()),
             ("unicode", unicode_probe()),
         ]
     }

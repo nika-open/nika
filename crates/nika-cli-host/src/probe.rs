@@ -435,20 +435,34 @@ pub fn collect(ping: bool) -> Probe {
 /// The probe LIST derives from the vendored client registry (H6): a
 /// client is probed only while the matrix claims its wire target — the
 /// hard-coded set is gone, and the per-target MECHANISM (which file,
-/// which key) rides the shared [`crate::detect`] table `wire` derives
+/// read how) rides the shared [`crate::detect`] rows `wire` derives
 /// from too (one truth). Row order is the historical one
 /// ([`clients_registry::PROBE_MECHANISMS`] mirrors it): findings and
 /// receipts ride probe order.
 fn client_probes() -> Vec<ClientProbe> {
-    crate::detect::sights(home_dir().as_deref(), Path::new("."))
+    client_probes_in(home_dir().as_deref(), Path::new("."))
+}
+
+/// [`client_probes`] on a named home and workspace. A standing row is
+/// reported whether or not its host is there (the six historical rows,
+/// as before); every other client `wire` can write is reported once this
+/// machine shows its config — the hosts `nika wire detected` sees, and
+/// no « not wired » line for a host that is not installed.
+fn client_probes_in(home: Option<&Path>, work: &Path) -> Vec<ClientProbe> {
+    crate::detect::sights(home, work)
         .iter()
-        .filter_map(|sight| match sight.kind {
-            crate::detect::ConfigKind::Json => {
-                Some(client_probe_any(sight.id, &sight.paths, &sight.server_path))
-            }
-            // Hermes is YAML — the JSON probe cannot see it (H2): the
-            // substring predicate carries recognition.
-            crate::detect::ConfigKind::Yaml => sight.paths.first().map(|path| hermes_probe(path)),
+        .filter_map(|sight| {
+            let path = sight.paths.first()?;
+            let probe = match sight.reading {
+                crate::detect::Reading::Json(server_path) => {
+                    client_probe_any(&sight.id, &sight.paths, &server_path)
+                }
+                // Hermes is YAML — the JSON probe cannot see it (H2): the
+                // substring predicate carries recognition.
+                crate::detect::Reading::Yaml => hermes_probe(path),
+                crate::detect::Reading::Writer => writer_probe(sight, path),
+            };
+            (sight.standing || probe.present).then_some(probe)
         })
         .collect()
 }
@@ -583,6 +597,27 @@ fn version_key(v: &str) -> Option<(u64, u64, u64)> {
     let min = parts.next()?.parse().ok()?;
     let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     Some((maj, min, patch))
+}
+
+/// A client read by its own writer (Codex TOML, Amp's dotted key, the
+/// `opencode.json` shape …): `current` is « a wire would change
+/// nothing », `stale` « it would migrate the old argv ». The writer is
+/// asked for its plan and writes nothing; an absent config is never
+/// opened.
+fn writer_probe(sight: &crate::detect::ClientSight, path: &Path) -> ClientProbe {
+    let present = path.exists();
+    let (current, stale) = if present {
+        crate::wire::reads(sight.target, path)
+    } else {
+        (false, false)
+    };
+    ClientProbe {
+        id: sight.id.clone(),
+        path: path.display().to_string(),
+        present,
+        current,
+        stale,
+    }
 }
 
 /// Probe one client at every path its config may live (home · workspace):

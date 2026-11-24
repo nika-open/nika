@@ -21,10 +21,35 @@ use std::sync::OnceLock;
 /// The vendored snapshot — ONE source, embedded at compile time.
 const VENDORED: &str = include_str!("../data/clients.registry.yaml");
 
-/// The wire targets doctor has a CONCRETE config probe for, in the
-/// historical doctor row order (the render order is load-bearing —
-/// findings and receipts ride probe order).
-pub const PROBE_MECHANISMS: &[&str] = &["cursor", "windsurf", "claude", "zed", "hermes", "vscode"];
+/// The wire targets doctor has a CONCRETE config probe for, in doctor
+/// row order (the render order is load-bearing — findings and receipts
+/// ride probe order): the six historical rows first, then every other
+/// client `nika wire` writes, in its declaration order. The probe rows
+/// are derived from the wire targets; this list is the pin a test holds
+/// them to, so a new client moves it deliberately.
+pub const PROBE_MECHANISMS: &[&str] = &[
+    "cursor",
+    "windsurf",
+    "claude",
+    "zed",
+    "hermes",
+    "vscode",
+    "claude-desktop",
+    "cline",
+    "codex",
+    "continue",
+    "opencode",
+    "gemini",
+    "qwen",
+    "lmstudio",
+    "junie",
+    "grok",
+    "antigravity",
+    "kimi",
+    "kiro",
+    "copilot",
+    "amp",
+];
 
 /// The wire targets whose kit landing doctor can read (class A today),
 /// in the historical kit row order. Consumed by the matrix-coherence
@@ -228,12 +253,14 @@ mod tests {
             "every wireable client is probed or honestly declared: {cov:?}"
         );
         // The audit's complaint (5 hand-listed probes on 19+ wireable)
-        // is the floor this derivation beats — and the not-probed are
-        // named, not dropped.
-        assert!(cov.probed >= 6, "got {}", cov.probed);
-        assert!(
-            !cov.declared_not_probed.is_empty(),
-            "the matrix wires more than the engine can probe today — the gap must be named"
+        // is closed, not merely beaten: every client the matrix wires
+        // is probed. A wire target the engine could not probe would be
+        // NAMED declared-not-probed, never dropped — none is today.
+        assert!(cov.probed >= 21, "got {}", cov.probed);
+        assert_eq!(
+            cov.declared_not_probed,
+            Vec::<String>::new(),
+            "every client the matrix wires has a probe row today"
         );
         // A wire-pending row is declared, never wireable.
         let pending = registry

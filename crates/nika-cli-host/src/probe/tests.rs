@@ -536,6 +536,122 @@ fn hermes_yaml_probe_recognizes_the_wire_contract() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// `doctor` reports the hosts `nika wire detected` sees. A bare machine
+/// keeps the six standing rows and nothing else; a client outside them
+/// earns its row once its config is there, appended in row order.
+#[test]
+fn the_probe_reports_a_wire_only_host_once_its_config_is_there() {
+    let home = temp_dir("rows-home");
+    let work = temp_dir("rows-work");
+    let ids = |rows: &[ClientProbe]| rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+
+    let bare = client_probes_in(Some(&home), &work);
+    assert_eq!(
+        ids(&bare),
+        ["cursor", "windsurf", "claude", "zed", "hermes", "vscode"],
+        "no row for a host that is not on the machine"
+    );
+    assert!(
+        bare.iter().all(|r| !r.present && !r.current && !r.stale),
+        "{bare:?}"
+    );
+
+    let codex = home.join(".codex").join("config.toml");
+    let gemini = home.join(".gemini").join("settings.json");
+    let opencode = work.join("opencode.json");
+    std::fs::create_dir_all(codex.parent().expect("parent")).expect("dir");
+    std::fs::create_dir_all(gemini.parent().expect("parent")).expect("dir");
+    std::fs::write(&codex, "[mcp_servers.other]\ncommand = \"x\"\n").expect("seed");
+    std::fs::write(
+        &gemini,
+        r#"{"mcpServers":{"nika":{"command":"nika","args":["mcp"]}}}"#,
+    )
+    .expect("seed");
+    std::fs::write(
+        &opencode,
+        r#"{"mcp":{"nika":{"type":"local","command":["nika","mcp"],"enabled":true}}}"#,
+    )
+    .expect("seed");
+
+    let rows = client_probes_in(Some(&home), &work);
+    assert_eq!(
+        ids(&rows),
+        [
+            "cursor", "windsurf", "claude", "zed", "hermes", "vscode", "codex", "opencode",
+            "gemini"
+        ],
+        "the standing rows keep their place, the rest is appended"
+    );
+    let row = |id: &str, path: &Path, current: bool| ClientProbe {
+        id: id.to_owned(),
+        path: path.display().to_string(),
+        present: true,
+        current,
+        stale: false,
+    };
+    assert_eq!(rows[6], row("codex", &codex, false));
+    assert_eq!(
+        rows[7],
+        row("opencode", &opencode, true),
+        "a shape of its own is read by its own writer"
+    );
+    assert_eq!(rows[8], row("gemini", &gemini, true));
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(work);
+}
+
+/// A Codex config is TOML: the probe reads it current with the `nika`
+/// server, stale with the old argv, unwired without it or when it does
+/// not parse — and never changes a byte of it.
+#[test]
+fn a_codex_toml_probe_reads_current_stale_and_unwired() {
+    let home = temp_dir("codex-home");
+    let work = temp_dir("codex-work");
+    let path = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let codex = || {
+        client_probes_in(Some(&home), &work)
+            .into_iter()
+            .find(|r| r.id == "codex")
+    };
+    let read = |current: bool, stale: bool| {
+        Some(ClientProbe {
+            id: "codex".to_owned(),
+            path: path.display().to_string(),
+            present: true,
+            current,
+            stale,
+        })
+    };
+    assert_eq!(codex(), None, "no config, no row");
+
+    let cases = [
+        ("[mcp_servers.other]\ncommand = \"x\"\n", false, false),
+        (
+            "[mcp_servers.nika]\ncommand = \"nika\"\nargs = [\"mcp\", \"serve\", \"--stdio\"]\n",
+            false,
+            true,
+        ),
+        (
+            "# mine\n[mcp_servers.nika]\ncommand = \"nika\"\nargs = [\"mcp\"]\n",
+            true,
+            false,
+        ),
+        ("mcp_servers = [\n", false, false),
+    ];
+    for (body, current, stale) in cases {
+        std::fs::write(&path, body).expect("seed");
+        assert_eq!(codex(), read(current, stale), "{body}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            body,
+            "a probe never writes"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(work);
+}
+
 #[test]
 fn collect_offline_never_pings_and_never_binds_a_value() {
     // The default (welcome + doctor sans --ping) is fully offline:
@@ -570,7 +686,7 @@ fn the_real_probe_derives_registry_coverage_from_the_vendored_matrix() {
         cov.wireable,
         "{cov:?}"
     );
-    assert!(cov.probed >= 6, "the 6 known mechanisms, got {cov:?}");
+    assert!(cov.probed >= 21, "every wire target is probed, got {cov:?}");
     for client in &probe.clients {
         assert!(
             clients_registry::registry_wires(&client.id),

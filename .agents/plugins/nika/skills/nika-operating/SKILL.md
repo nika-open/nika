@@ -17,6 +17,15 @@ Judge `clean` (the exit's verdict under the flags you passed; under
 repeats `clean`), `paid_ready` and resolved-child coverage separately, with
 the engine/spec identity that produced the report.
 
+**What needs the person, and what never does.** Their yes is needed to arm a
+schedule, to raise a ceiling, to change where a secret may go, to move a
+workflow to a paid or cloud model, to change what their CI runs, to export
+traces to a host and to answer a gate. Checking, reading every beat with
+`nika arm` (it fires nothing), proposing permits with `--infer-permits`,
+pinning a golden for a workflow without effects and showing a plan with
+`nika run <file> --dry-run` never wait for them. A yes covers what it names,
+once: do not ask twice.
+
 ## Spend (the envelope is part of the contract)
 
 - `nika check <file>` estimates output-token cost BEFORE any token: `≤ $X`

@@ -26,8 +26,10 @@ Take every fact from the binary, never from reading the YAML by eye:
 - `nika check <file> --json --native-strict`: verdict, findings, blockers,
   hints, the permits needed and declared, the cost.
 - `nika inspect <file> --format json`: the tasks and the edges between them.
-- `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py" <file>` puts both on one
-  page: the effect tiers, the depth counts and the cost.
+- Where the kit's scripts are installed,
+  `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py" <file>` puts both on one
+  page: the effect tiers, the depth counts and the cost. Without it, the
+  two commands above carry the same facts.
 
 ## Five questions
 

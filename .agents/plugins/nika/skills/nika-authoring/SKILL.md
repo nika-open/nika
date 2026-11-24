@@ -34,6 +34,16 @@ change the result or an effect
 instruction covers each effect it names (saving, running, activating a beat)
 once: carry it out without asking again.
 
+**What needs the person, and what never does.** Their yes is needed for the
+plan of a new job (once), the answer to a human gate, an effect they did not
+name (a send, a host, a program, an MCP server, a write outside their
+folder), a paid model route, and publishing anything. Nothing else waits for
+them: checking, repairing a finding, adding validation, state or a report,
+writing the workflow and what it produces under the project's `out/`, a
+rehearsal on the mock model of a job that sends nothing and reaches no host,
+and `nika run <file> --dry-run` of any job (the plan, no effect). Do the
+second list without asking, and never the first without a yes.
+
 ## Design before you write
 
 Nika is an automation engine: crawls and feeds, bounded fan-outs, state
@@ -60,7 +70,22 @@ job, or one the person wants to grow, design before the first line:
    grounds the gate rule gives
    ([job anatomy](references/job-anatomy.md), « Approve once, then let it
    run »), and a cost assertion instead of a gate when the risk is cost.
-5. Before handing over, run the thin-workflow checklist and report the counts.
+5. Show the plan and take one yes for the whole job: the phases, then what
+   the job reads, writes in the project, sends out of the machine, spends
+   and runs, and its cost per run. Those lines come from `nika check` and
+   `nika inspect` on a first version of the file, never from reading it by
+   eye (in the plugin, `scripts/nika-card.py <file> --plan` prints them).
+   Three answers: build, revise, drop.
+6. Build by phase: write one phase, `nika check`, repair, then the next. A
+   finding met on three tasks has one cause; met on twenty it has several.
+7. Have it reviewed cold when it has more than eight tasks or an effect that
+   leaves the machine: a reviewer that received only the person's sentence
+   and the file path (the `nika-reviewer` role where the host has subagents)
+   returns asked versus delivered, depth, effects versus permits, the cost
+   line and what it could not verify. With no second agent, answer those
+   five questions from the binary's output and say the review was not
+   independent. Repair what it finds, for two rounds at most.
+8. Before handing over, run the thin-workflow checklist and report the counts.
 
 A small edit to an existing workflow keeps its scope and skips the design.
 
@@ -111,7 +136,14 @@ tool and read grants, or explicitly supply the required files as context.
 For authoring, report the file, actual check verdict, effect scope and remaining
 blockers, with the design, the counts (tasks, distinct builtins, branch points,
 state, report, gates), the craft additions you made and the effect upgrades
-you only proposed. A thin job says why it is thin. For an authorized run, retain its session and exact trace, read
+you only proposed. A thin job says why it is thin. Done means three things:
+the check is clean, the job was rehearsed (on the mock model when nothing
+leaves the machine, with `--dry-run` otherwise), and every file the rehearsal
+wrote was opened and parsed. A review's verdict is passed on in the
+reviewer's own words, gaps included. The last lines of every hand-over are
+the verdict of `nika check <file> --json --native-strict` on the file as it
+now stands, quoted: the path, `clean`, each finding left with its code. Say
+this whether or not the host checks the file again on its side. For an authorized run, retain its session and exact trace, read
 back what it wrote or created and inspect that against the task's expected
 result, and report the exit status and verified evidence tier. Reconcile partial effects before any retry. A golden
 is suitable only for the simulated plane that supports the workflow; a green

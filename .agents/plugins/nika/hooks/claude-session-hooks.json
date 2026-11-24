@@ -32,6 +32,18 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^nika:nika-author$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/author-stop-gate.py",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }

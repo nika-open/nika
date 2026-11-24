@@ -22,6 +22,13 @@ nothing chained to it (no `&&`, no `|`, no `; echo`). A chained line is
 judged as a whole and can be refused. A pipe also hides the exit code,
 and exit 4 is how you learn that a run is waiting for an answer.
 
+## What needs the person, and what never does
+
+Their yes is needed to start a run with its ceiling (once per run), to answer
+a gate, to raise a ceiling or move to a paid model, and to switch a schedule
+on. Checking, saying the verdict, reading a trace, listing the runs that wait
+and showing a plan with `nika run <file> --dry-run` never wait for them.
+
 ## The seven rules
 
 0. **Their sentence first.** When a workflow has to be created, hand the

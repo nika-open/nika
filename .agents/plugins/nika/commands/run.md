@@ -8,6 +8,12 @@ Run the workflow for a person who should never have to read engine
 output. Target: `$ARGUMENTS` (no file? `Glob` for `*.nika` — one match
 runs, several ask which).
 
+**What needs the person, and what never does.** Their yes is needed to
+start the run with its ceiling (once), to answer a gate, and to raise the
+ceiling or change the model to a paid one. Checking, reading a trace,
+repairing a finding and showing a plan with `--dry-run` never wait for
+them.
+
 **1 · Say what it will do, in plain words.** Run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-verdict.py" <file>` and show its
 lines as they are: what it reads, what it can reach, the model, the cost,

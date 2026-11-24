@@ -4,9 +4,27 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Finish, RawTask, SettleAs, TaskRecord, Value, bind_outputs, declassify_evidence,
-    filter_leaky_resume,
+    Finish, RawTask, SettleAs, TaskRecord, Value, approval_refusal_finish, bind_outputs,
+    declassify_evidence, filter_leaky_resume,
 };
+use crate::approval::Journaled;
+
+/// NEP-0013 law 1 on a cache hit: a gate the journal serves carries its
+/// journaled decision on only while the gate binds the content that decision
+/// bound (the hash is re-stamped on the hit, so the next resume judges it the
+/// same way). Otherwise the gate fails typed and no task waiting on it starts.
+pub(super) fn served_decision(verdict: Journaled, mut finish: Finish, task: &RawTask) -> Finish {
+    match verdict {
+        Journaled::NotPrompt => finish,
+        Journaled::Bound(hash) => {
+            if let Some(stamp) = finish.resume.as_mut() {
+                stamp.approval = Some(hash);
+            }
+            finish
+        }
+        Journaled::Refused(refusal) => approval_refusal_finish(finish.id, task, *refusal),
+    }
+}
 
 /// Assemble the `Finish` of a RAN task (the output bindings spec 04 ·
 /// the resume filter · the F-O1 declassify evidence · the F-P4 approval
@@ -35,7 +53,13 @@ pub(super) fn assemble_ran_finish(
     // binding (the value on success · `Null` on a non-success ·
     // defined-null reads).
     let named = bind_outputs(task, &mut settle, jq_clock);
-    let resume = filter_leaky_resume(resume, &settle, resume_ctx);
+    let mut resume = filter_leaky_resume(resume, &settle, resume_ctx);
+    // NEP-0013 law 1 · a decided gate's checkpoint names the content its
+    // decision bound: a later resume serves the decision only over it.
+    let decided = approval.as_ref().filter(|attested| attested.why.is_none());
+    if let (Some(stamp), Some(decided)) = (resume.as_mut(), decided) {
+        stamp.approval = Some(decided.shown_hash.clone());
+    }
     // F-O1 PR-3 · the task RAN — the door was used: the receipt
     // carries one `declassify` event per declared entry (the settle
     // spine emits them after `task_started`).

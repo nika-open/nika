@@ -740,13 +740,9 @@ tasks:
     assert_refused(&first, &resumed, "approval.content_mismatch", "write_note");
 }
 
-/// Not bound: a decision already journaled. A resume serves a decided gate from its journal
-/// and consults no ticket for it, so a task behind that gate, edited afterwards, runs again
-/// under the journaled decision: here `write_a`, edited while the run waits at its second
-/// gate. The ticket binds the answer a pause collects, nothing a later resume replays.
-#[tokio::test]
-async fn a_journaled_decision_is_replayed_on_resume_and_no_ticket_rebinds_it() {
-    const CHAIN_WF: &str = r#"nika: bound-chain
+/// Two gates in a chain: `approve` decides `write_a` and the second gate `confirm_b`, which
+/// decides `write_b`.
+const CHAIN_WF: &str = r#"nika: bound-chain
 permits:
   fs: { write: ["./out/a.txt", "./out/b.txt", "./out/elsewhere.txt"] }
   tools: ["nika:prompt", "nika:write"]
@@ -773,13 +769,31 @@ tasks:
       tool: "nika:write"
       args: { path: "./out/b.txt", content: "b" }
 "#;
-    let ok = || ToolResult::success("tc", "ok");
+
+/// `write_a` rewritten to another file while the run waits at its second gate.
+fn chain_with_write_a_edited() -> String {
+    let edited = CHAIN_WF.replace("./out/a.txt\"", "./out/elsewhere.txt\"");
+    assert!(edited.contains("path: \"./out/elsewhere.txt\""));
+    assert!(
+        edited.contains("message: \"Write a?\""),
+        "the first question is the one the human answered"
+    );
+    edited
+}
+
+fn wrote() -> ToolResult {
+    ToolResult::success("tc", "ok")
+}
+
+/// The first two legs of [`CHAIN_WF`]: the run pauses at `approve`, is resumed with `true`,
+/// writes `a`, and now waits at `confirm_b`. Returns that second leg's journal.
+async fn decided_then_waiting() -> VecSink {
     let first = pause_at_the_gate(CHAIN_WF, vec![], Composed::default()).await;
-    let (second, second_sink, _) = answer_yes(
+    let (second, sink, _) = answer_yes(
         CHAIN_WF,
         &first,
         paused_from(&first),
-        (vec![], vec![said_yes(), ok(), blocked_prompt()]),
+        (vec![], vec![said_yes(), wrote(), blocked_prompt()]),
         Composed::default(),
     )
     .await;
@@ -788,46 +802,296 @@ tasks:
         Some("confirm_b"),
         "the first answer bound, `write_a` ran, and the run waits at its second gate"
     );
+    sink
+}
 
-    let edited = CHAIN_WF.replace("./out/a.txt\"", "./out/elsewhere.txt\"");
-    assert!(edited.contains("path: \"./out/elsewhere.txt\""));
-    let (third, third_sink, calls) = run_composed(
+/// A leg of `yaml` resumed over `plan`: `confirm_b=true` answered under the ticket `journal`
+/// paused on, when it paused.
+async fn resume_chain(
+    yaml: &str,
+    journal: &VecSink,
+    plan: ResumePlan,
+    tool: Vec<ToolResult>,
+) -> Leg {
+    let waiting = journal
+        .events()
+        .iter()
+        .any(|e| e.kind == EventKind::WorkflowPaused);
+    run_composed(
+        yaml,
+        Seams {
+            shell: vec![],
+            tool,
+            pause: true,
+            plan: Some(plan),
+            answers: if waiting {
+                BTreeMap::from([("confirm_b".to_owned(), Value::Bool(true))])
+            } else {
+                BTreeMap::new()
+            },
+            paused: waiting.then(|| paused_from(journal)),
+        },
+        Composed::default(),
+    )
+    .await
+}
+
+/// One string field of the `kind` frame naming `task`.
+fn frame_field<'a>(sink: &'a VecSink, kind: EventKind, task: &str, key: &str) -> Option<&'a str> {
+    (sink.events().iter())
+        .find(|e| e.kind == kind && str_field(e, "task") == Some(task))
+        .and_then(|e| str_field(e, key))
+}
+
+/// The journaled decision of `approve` was refused under `why`: the gate fails typed under one
+/// engine deny that names no ticket (none was asked), the error teaches how to ask again, and
+/// nothing behind the gate starts, the second gate included.
+fn assert_journaled_refused((outcome, sink, calls): &Leg, why: &str) -> String {
+    assert!(!outcome.ok, "the refused decision halts the run");
+    assert!(
+        outcome.paused.is_none(),
+        "a refusal never re-asks in silence"
+    );
+    assert!(
+        !outcome.cache_hits.contains(&"approve".to_owned()),
+        "the journal does not serve the gate: {:?}",
+        outcome.cache_hits
+    );
+    let error = outcome.records["approve"]
+        .error
+        .as_ref()
+        .expect("the typed refusal");
+    assert_eq!(error.code, APPROVAL_CODE);
+    assert!(error.message.starts_with("task 'approve' · "), "{error:?}");
+    assert!(error.message.contains(why), "{error:?}");
+    assert!(
+        error
+            .message
+            .contains("resume with `--from approve` to ask it again"),
+        "the refusal says how to proceed: {error:?}"
+    );
+    let ds = decisions(sink);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    let deny = &ds[0];
+    assert_eq!(
+        (
+            deny.task.as_str(),
+            deny.decision.as_str(),
+            deny.source.as_str()
+        ),
+        ("approve", "deny", "engine")
+    );
+    assert_eq!(deny.why.as_deref(), Some(why));
+    assert_eq!(deny.answer, None, "nothing was decided");
+    assert_eq!(
+        deny.digest, None,
+        "no ticket was minted or held for the gate"
+    );
+    assert_eq!(deny.shown_hash.len(), 64, "the deny names the content now");
+    for gated in ["write_a", "confirm_b", "write_b"] {
+        assert!(!started(sink, gated), "`{gated}` never starts");
+        assert!(
+            frame_field(sink, EventKind::TaskCancelled, gated, "task").is_some(),
+            "`{gated}` settles cancelled behind the refused gate"
+        );
+    }
+    assert!(calls.is_empty(), "no tool ran: {calls:?}");
+    error.message.clone()
+}
+
+/// A decision already journaled is bound like a paused answer. The second leg journals, on the
+/// first gate's record, the content hash its decision bound; `write_a` is then edited while the
+/// run waits at its second gate. Resuming with the second answer no longer serves the first
+/// decision: the first gate fails `approval.content_mismatch`, so neither the edited write nor
+/// the second gate starts. `--from approve` asks the first gate again, over the edited write.
+#[tokio::test]
+async fn a_journaled_decision_never_carries_over_to_a_gated_task_edited_after_it() {
+    let second = decided_then_waiting().await;
+    let journaled = frame_field(
+        &second,
+        EventKind::TaskCompleted,
+        "approve",
+        fields::APPROVAL_SHOWN_HASH,
+    )
+    .expect("the decided gate's record names the content its decision bound");
+    let allow = decisions(&second);
+    assert_eq!(
+        (allow[0].task.as_str(), allow[0].decision.as_str()),
+        ("approve", "allow")
+    );
+    assert_eq!(
+        journaled, allow[0].shown_hash,
+        "the record names what the decision signed"
+    );
+    assert_eq!(
+        frame_field(
+            &second,
+            EventKind::TaskCompleted,
+            "write_a",
+            fields::APPROVAL_SHOWN_HASH
+        ),
+        None,
+        "only a gate's record carries a decision"
+    );
+
+    let edited = chain_with_write_a_edited();
+    let refused = resume_chain(&edited, &second, plan_from(&second), vec![]).await;
+    let message = assert_journaled_refused(&refused, "approval.content_mismatch");
+    assert!(
+        message.contains(&format!("bound content `{journaled}`")),
+        "the refusal names the content the decision bound: {message}"
+    );
+    assert_ne!(decisions(&refused.1)[0].shown_hash, journaled);
+
+    // `--from approve` drops the gate and every task after it from the plan: here, all of it.
+    // The gate runs again and, headless, asks again about the write as it is now.
+    let (reasked, sink, calls) = run_composed(
         &edited,
         Seams {
             shell: vec![],
-            tool: vec![ok(), said_yes(), ok()],
+            tool: vec![blocked_prompt()],
             pause: true,
-            plan: Some(plan_from(&second_sink)),
-            answers: BTreeMap::from([("confirm_b".to_owned(), Value::Bool(true))]),
-            paused: Some(paused_from(&second_sink)),
+            plan: Some(ResumePlan::new()),
+            answers: BTreeMap::new(),
+            paused: Some(paused_from(&second)),
         },
         Composed::default(),
     )
     .await;
-    assert!(third.ok, "the run completes");
-    assert!(
-        third.cache_hits.contains(&"approve".to_owned()),
-        "the first gate is served from the journal: {:?}",
-        third.cache_hits
-    );
-    let ds = decisions(&third_sink);
     assert_eq!(
-        ds.len(),
-        1,
-        "one decision this leg, the second gate's: {ds:?}"
+        reasked.paused.as_ref().map(|pause| pause.task.as_str()),
+        Some("approve"),
+        "the first gate asks again"
     );
-    assert_eq!(
-        (ds[0].task.as_str(), ds[0].decision.as_str()),
-        ("confirm_b", "allow")
+    assert!(decisions(&sink).is_empty(), "nothing is decided by asking");
+    assert_ne!(
+        pause_field(&sink, "approval_shown_hash"),
+        journaled,
+        "the new question binds the edited write"
     );
     assert_eq!(
         calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-        ["nika:write", "nika:prompt", "nika:write"]
+        ["nika:prompt"]
+    );
+}
+
+/// Over the content it bound, a journaled decision is served as before, and its cache hit
+/// carries the content hash on: a trace resumed from that leg binds the decision the same way.
+#[tokio::test]
+async fn a_journaled_decision_over_unchanged_content_is_served_and_carried_forward() {
+    let second = decided_then_waiting().await;
+    let journaled = frame_field(
+        &second,
+        EventKind::TaskCompleted,
+        "approve",
+        fields::APPROVAL_SHOWN_HASH,
+    )
+    .expect("the decided gate's record names its content")
+    .to_owned();
+
+    let third = resume_chain(
+        CHAIN_WF,
+        &second,
+        plan_from(&second),
+        vec![said_yes(), wrote()],
+    )
+    .await;
+    assert!(third.0.ok, "the run completes");
+    assert_eq!(third.0.cache_hits, ["approve", "write_a"]);
+    let ds = decisions(&third.1);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    assert_eq!(
+        (
+            ds[0].task.as_str(),
+            ds[0].decision.as_str(),
+            ds[0].source.as_str()
+        ),
+        ("confirm_b", "allow", "resume")
     );
     assert_eq!(
-        calls[0].input["path"],
-        json!("./out/elsewhere.txt"),
-        "today the edited `write_a` runs again under the first gate's journaled decision"
+        third.2.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["nika:prompt", "nika:write"]
+    );
+    assert_eq!(third.2[1].input["path"], json!("./out/b.txt"));
+    assert_eq!(
+        frame_field(
+            &third.1,
+            EventKind::TaskCacheHit,
+            "approve",
+            fields::APPROVAL_SHOWN_HASH
+        ),
+        Some(journaled.as_str()),
+        "the served gate carries the content its decision bound"
+    );
+
+    // Resumed from the leg that served it, the decision is judged against the hash carried on.
+    let edited = chain_with_write_a_edited();
+    let refused = resume_chain(&edited, &third.1, plan_from(&third.1), vec![]).await;
+    assert_journaled_refused(&refused, "approval.content_mismatch");
+    let (fourth, sink, calls) = resume_chain(CHAIN_WF, &third.1, plan_from(&third.1), vec![]).await;
+    assert!(fourth.ok, "the unedited run completes from its journal");
+    assert_eq!(
+        fourth.cache_hits,
+        ["approve", "write_a", "confirm_b", "write_b"]
+    );
+    assert!(decisions(&sink).is_empty(), "no gate is decided again");
+    assert!(calls.is_empty(), "{calls:?}");
+}
+
+/// An earlier engine journaled a decision without the content it bound. Nothing ties that
+/// decision to the tasks behind the gate as they are now, so it meets the same law as a
+/// paused ticket of an earlier recipe: `approval.content_mismatch`, a halt, never a replay.
+#[tokio::test]
+async fn a_journaled_decision_without_its_content_hash_halts_with_content_mismatch() {
+    let second = decided_then_waiting().await;
+    let mut plan = plan_from(&second);
+    let prior = plan
+        .get_mut("approve")
+        .expect("the decided gate is in the plan");
+    assert!(prior.approval_shown_hash.is_some());
+    prior.approval_shown_hash = None;
+
+    let refused = resume_chain(CHAIN_WF, &second, plan, vec![]).await;
+    let message = assert_journaled_refused(&refused, "approval.content_mismatch");
+    assert!(
+        message.contains("journals no content hash for the decision of this gate"),
+        "{message}"
+    );
+}
+
+/// The judgment, law by law: a journaled decision binds only the content hash the gate binds
+/// now, and only over a closure the engine names whole.
+#[test]
+fn a_journaled_decision_binds_its_own_content_over_a_closure_named_whole() {
+    let book = opened(WRITE_WF, "00000000-0000-0000-0000-000000000001");
+    assert!(
+        (book.journaled_refusal("approve", "confirm", "same", Some("same"))).is_none(),
+        "the same content over a named closure binds"
+    );
+    for (journaled, teach) in [
+        (Some("then"), "bound content `then`, not the content `now`"),
+        (None, "journals no content hash"),
+    ] {
+        let refused = (book.journaled_refusal("approve", "confirm", "now", journaled))
+            .expect("other content is refused");
+        assert_eq!(refused.attestation.why, Some("approval.content_mismatch"));
+        assert_eq!(refused.attestation.decision, "deny");
+        assert_eq!(refused.attestation.source, "engine");
+        assert_eq!(refused.attestation.shown_hash, "now");
+        assert_eq!(refused.attestation.digest, None);
+        assert!(refused.detail.contains(teach), "{}", refused.detail);
+        assert!(refused.detail.ends_with(&format!("({APPROVAL_CODE})")));
+    }
+
+    // A child call whose closure digest no composer resolved has no identity.
+    let book = opened(CHILD_WF, "00000000-0000-0000-0000-000000000001");
+    let refused = (book.journaled_refusal("approve", "confirm", "same", Some("same")))
+        .expect("an unnamed closure task is refused");
+    assert_eq!(refused.attestation.why, Some("approval.content_unhashable"));
+    assert!(
+        refused.detail.contains("task `release`"),
+        "{}",
+        refused.detail
     );
 }
 

@@ -1130,6 +1130,112 @@ fn a_named_list_still_writes_nothing_when_one_config_is_refused() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A `nika` entry that pins an absolute command and carries a key of its
+/// own is wired: a desktop application does not inherit the shell's
+/// PATH, and the bare name would break what works. `detected` plans no
+/// change and leaves the file byte-identical; the same entry with other
+/// args is to update. A client wired BY NAME keeps the strict writer.
+#[test]
+fn detected_leaves_a_pinned_entry_alone_and_updates_other_args() {
+    let home = temp_dir("pinned-home");
+    let dir = temp_dir("pinned-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = config_path(WireTarget::ClaudeDesktop, Some(&home), &dir).expect("path");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("claude-desktop: {}", path.display());
+    let entry = |args: &str| {
+        format!(
+            r#"{{"mcpServers":{{"nika":{{"command":"/opt/nika/bin/nika","args":{args},"env":{{"NIKA_HOME":"/data"}}}}}}}}"#
+        )
+    };
+    let detected = |dry_run| {
+        run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir_str,
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+
+    let pinned = entry(r#"["mcp"]"#);
+    std::fs::write(&path, &pinned).expect("seed");
+    assert_eq!(
+        detected(true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             · current {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let out = detected(false);
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(out.text, format!("· current {label}"));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        pinned,
+        "a wired entry is left byte-identical"
+    );
+    assert_eq!(
+        wire_one(WireTarget::ClaudeDesktop, Some(&home), dir_str, true),
+        Ok(WireAction::Updated(label.clone())),
+        "wired by name, the writer stays strict"
+    );
+
+    std::fs::write(&path, entry(r#"["mcp","--verbose"]"#)).expect("seed");
+    assert_eq!(
+        detected(true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             + would update {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The reader cannot drift from the writers: on every host its writer
+/// reads for `doctor`, what the writer wrote still reads wired once its
+/// command is pinned to an absolute path, in that host's own shape.
+#[test]
+fn a_pinned_command_reads_wired_on_every_writer_read_host() {
+    let home = temp_dir("pinned-all-home");
+    let dir = temp_dir("pinned-all-dir");
+    let hosts: Vec<WireTarget> = crate::detect::sights(Some(&home), &dir)
+        .iter()
+        .filter(|sight| !sight.standing)
+        .map(|sight| sight.target)
+        .collect();
+    assert_eq!(hosts.len(), 15, "every host beyond the six standing rows");
+
+    for target in hosts {
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        wire_at(target, &path, false).expect("wire");
+        let written = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(reads(target, &path), (true, false), "{}", target.id());
+        let pinned = written
+            .replace(
+                "\"command\": \"nika\"",
+                "\"command\": \"/opt/nika/bin/nika\"",
+            )
+            .replace("\"nika\",", "\"/opt/nika/bin/nika\",")
+            .replace("command = \"nika\"", "command = \"/opt/nika/bin/nika\"");
+        assert_ne!(pinned, written, "{}: no command was pinned", target.id());
+        std::fs::write(&path, &pinned).expect("pin");
+        assert_eq!(reads(target, &path), (true, false), "{}", target.id());
+        assert!(
+            matches!(wire_at(target, &path, true), Ok(WireAction::Updated(_))),
+            "{}: wired by name, the writer stays strict",
+            target.id()
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.

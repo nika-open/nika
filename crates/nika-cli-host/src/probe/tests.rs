@@ -600,6 +600,53 @@ fn the_probe_reports_a_wire_only_host_once_its_config_is_there() {
     let _ = std::fs::remove_dir_all(work);
 }
 
+/// One meaning of « wired » on every row: a `nika` entry carrying the
+/// args `wire` writes, whatever its `command` (a desktop application
+/// does not inherit the shell's PATH, so its entry pins an absolute
+/// binary) and whatever keys of its own it holds. Other args are not
+/// wired; the old argv is stale.
+#[test]
+fn a_pinned_command_and_extra_keys_still_read_wired() {
+    let home = temp_dir("pinned-home");
+    let work = temp_dir("pinned-work");
+    let path = crate::wire::config_path(crate::wire::WireTarget::ClaudeDesktop, Some(&home), &work)
+        .expect("path");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let row = || {
+        client_probes_in(Some(&home), &work)
+            .into_iter()
+            .find(|r| r.id == "claude-desktop")
+    };
+    let read = |current: bool, stale: bool| {
+        Some(ClientProbe {
+            id: "claude-desktop".to_owned(),
+            path: path.display().to_string(),
+            present: true,
+            current,
+            stale,
+        })
+    };
+    let cases = [
+        (r#"["mcp"]"#, true, false),
+        (r#"["mcp","--verbose"]"#, false, false),
+        (r#"["mcp","serve","--stdio"]"#, false, true),
+    ];
+    for (args, current, stale) in cases {
+        let body = format!(
+            r#"{{"mcpServers":{{"nika":{{"command":"/opt/nika/bin/nika","args":{args},"env":{{"NIKA_HOME":"/data"}}}}}}}}"#
+        );
+        std::fs::write(&path, &body).expect("seed");
+        assert_eq!(row(), read(current, stale), "{args}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            body,
+            "a probe never writes"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(work);
+}
+
 /// A Codex config is TOML: the probe reads it current with the `nika`
 /// server, stale with the old argv, unwired without it or when it does
 /// not parse — and never changes a byte of it.

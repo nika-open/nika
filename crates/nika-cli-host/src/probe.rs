@@ -599,11 +599,12 @@ fn version_key(v: &str) -> Option<(u64, u64, u64)> {
     Some((maj, min, patch))
 }
 
-/// A client read by its own writer (Codex TOML, Amp's dotted key, the
-/// `opencode.json` shape …): `current` is « a wire would change
-/// nothing », `stale` « it would migrate the old argv ». The writer is
-/// asked for its plan and writes nothing; an absent config is never
-/// opened.
+/// A client read through its own writer (Codex TOML, Amp's dotted key,
+/// the `opencode.json` shape …): `current` is a `nika` entry carrying
+/// the args `wire` writes, whatever its `command` and extra keys — the
+/// standing rows' meaning ([`is_current_mcp_server`]) — and `stale` « a
+/// wire would migrate the old argv ». Nothing is written; an absent
+/// config is never opened.
 fn writer_probe(sight: &crate::detect::ClientSight, path: &Path) -> ClientProbe {
     let present = path.exists();
     let (current, stale) = if present {

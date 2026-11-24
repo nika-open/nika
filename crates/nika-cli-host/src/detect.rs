@@ -35,8 +35,8 @@ pub(crate) enum Reading {
     /// YAML (Hermes) — no parser round-trips user YAML, the
     /// [`hermes_recognized`] substring predicate carries recognition.
     Yaml,
-    /// The client's own writer reads it ([`crate::wire::reads`]): TOML,
-    /// a dotted key, a shape of its own. No second description of the
+    /// Read beside the client's own writer ([`crate::wire::reads`]):
+    /// TOML, a dotted key, a shape of its own. No description of the
     /// format lives here to drift from the one that writes it.
     Writer,
 }

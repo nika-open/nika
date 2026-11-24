@@ -175,7 +175,7 @@ fn wire_detected(
     dir: &str,
     dry_run: bool,
 ) -> VerbOutput {
-    let mut actions = collect_plan(targets, home, dir);
+    let mut actions = plan_detected(targets, home, dir);
     if !dry_run {
         for (one, action) in targets.iter().zip(&mut actions) {
             // Refused or already wired: left exactly as it is.
@@ -317,8 +317,22 @@ fn detected_targets_in(home: &Path, dir: &Path) -> Vec<WireTarget> {
         .collect()
 }
 
-/// The plan half of a run: every outcome, zero writes (the interactive
-/// `all` preview reads it before asking).
+/// What `detected` would do to each host it sees, nothing written: each
+/// host as [`judged`], so an entry that already works is current as it
+/// stands and the run leaves it alone.
+fn plan_detected(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<WireAction> {
+    targets
+        .iter()
+        .map(|one| {
+            config_path(*one, home, Path::new(dir))
+                .and_then(|path| judged(*one, &path))
+                .unwrap_or_else(WireAction::Skipped)
+        })
+        .collect()
+}
+
+/// The plan half of a named run: every outcome, zero writes (the
+/// interactive `all` preview reads it before asking).
 fn collect_plan(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<WireAction> {
     targets
         .iter()
@@ -468,17 +482,88 @@ fn wire_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction,
     }
 }
 
-/// How `target`'s own writer reads the config at `path`, as
-/// `(current, stale)`: current when a wire would change nothing, stale
-/// when it would migrate the old `mcp serve --stdio` argv. A plan only,
-/// nothing is written. Detection asks this instead of keeping a second
-/// description of each format — the copy that would drift.
-pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
+/// `target`'s plan at `path` as `doctor` and the `detected` door judge
+/// it: the writer's own plan, nothing written, except that an entry the
+/// writer would only respell is current. A `nika` entry carrying the
+/// args `wire` writes is wired whatever its `command` and whatever keys
+/// of its own it holds — the meaning the six standing rows have always
+/// had. A desktop application does not inherit the shell's PATH, so its
+/// entry pins an absolute binary on purpose: replacing it with the bare
+/// name can break a setup that works. (A client wired BY NAME keeps the
+/// strict writer: the person asked for nika's own spelling.)
+fn judged(target: WireTarget, path: &Path) -> Result<WireAction, String> {
     match wire_at(target, path, true) {
+        Ok(WireAction::Updated(_))
+            if entry_args(target, path).is_some_and(|args| args == NIKA_MCP_ARGS) =>
+        {
+            let label = format!("{}: {}", target.id(), path.display());
+            Ok(WireAction::Current(label))
+        }
+        planned => planned,
+    }
+}
+
+/// How the config at `path` reads for `target`, as `(current, stale)`:
+/// [`judged`] current, or stale when the writer would migrate the old
+/// `mcp serve --stdio` argv. Nothing is written.
+pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
+    match judged(target, path) {
         Ok(WireAction::Current(_)) => (true, false),
         Ok(WireAction::Migrated(_)) => (false, true),
         _ => (false, false),
     }
+}
+
+/// The args of the `nika` entry `target`'s host reads at `path`: each
+/// writer's table and shape, read back (a test wires every such host
+/// and holds this reader to its writer). `None` when the file does not
+/// parse or holds no entry — and for the six standing rows, which
+/// [`crate::detect`] reads its own way and whose plan under `detected`
+/// stays the writer's own, as it was.
+fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
+    let body = std::fs::read_to_string(path).ok()?;
+    let table = match target {
+        WireTarget::Codex | WireTarget::Grok => {
+            let doc: toml_edit::DocumentMut = body.parse().ok()?;
+            return doc.get("mcp_servers")?.get("nika").map(toml_args);
+        }
+        WireTarget::Opencode => "mcp",
+        WireTarget::Amp => "amp.mcpServers",
+        WireTarget::ClaudeDesktop
+        | WireTarget::Cline
+        | WireTarget::Continue
+        | WireTarget::Gemini
+        | WireTarget::Qwen
+        | WireTarget::Lmstudio
+        | WireTarget::Junie
+        | WireTarget::Antigravity
+        | WireTarget::Kimi
+        | WireTarget::Kiro
+        | WireTarget::Copilot => "mcpServers",
+        WireTarget::Cursor
+        | WireTarget::Windsurf
+        | WireTarget::Claude
+        | WireTarget::Zed
+        | WireTarget::Hermes
+        | WireTarget::Vscode
+        | WireTarget::All
+        | WireTarget::Detected => return None,
+    };
+    let root: Value = serde_json::from_str(&body).ok()?;
+    let entry = root.get(table)?.get("nika")?;
+    // OpenCode keeps the whole argv in `command`: its args are the tail.
+    let (key, skip) = if target == WireTarget::Opencode {
+        ("command", 1)
+    } else {
+        ("args", 0)
+    };
+    entry
+        .get(key)?
+        .as_array()?
+        .iter()
+        .skip(skip)
+        .map(|arg| arg.as_str().map(str::to_owned))
+        .collect()
 }
 
 /// LM Studio documents `~/.lmstudio/mcp.json` (blog v0.3.17 · macOS+Linux ·

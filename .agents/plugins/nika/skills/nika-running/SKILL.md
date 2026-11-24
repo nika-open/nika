@@ -13,7 +13,7 @@ here serves that.
 ## What this machine has, right now
 
 In the plugin, the line below runs when this skill loads and prints the
-binary in use, its model routes and how many runs wait for an answer. If
+binary in use, the model names it knows and how many runs wait for an answer. If
 nothing follows it (the host does not run it, or a policy disabled it), ask
 the binary yourself: `nika --version`, `nika catalog`, `nika trace ls`.
 
@@ -34,8 +34,8 @@ and exit 4 is how you learn that a run is waiting for an answer.
 ## What needs the person, and what never does
 
 Their yes is needed to start a run with its ceiling (once per run), to answer
-a gate, to raise a ceiling or move to a paid model, and to switch a schedule
-on. Checking, saying the verdict, reading a trace, listing the runs that wait
+a gate, to raise a ceiling or move to a paid model, to run or resume again a
+run that stopped, and to switch a schedule on. Checking, saying the verdict, reading a trace, listing the runs that wait
 and showing a plan with `nika run <file> --dry-run` never wait for them.
 
 ## The seven rules
@@ -57,8 +57,12 @@ and showing a plan with `nika run <file> --dry-run` never wait for them.
    `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-verdict.py" <file>`; it reads
    `nika check --json` and invents nothing. No raw check output, no `NIKA-…` code unless asked.
 2. **One yes.** Ask once, with the verdict above the question. The yes
-   includes a spending cap: `--max-cost-usd ${user_config.max_cost_usd}`
-   unless the user names another one, and you say the number.
+   includes a spending cap, said as a number and passed as
+   `--max-cost-usd <n>`. The cap set for this plugin is
+   « ${user_config.max_cost_usd} »: use it when that reads as a number. When
+   it reads as a placeholder, this host did not fill it in: never pass it,
+   and take a number at or above the cost line of the verdict. The user can
+   always name another one.
 3. **You choose the model.**
    `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-pick-model.sh"` prints the flags
    that work on this machine. If nothing is ready, offer the two or three
@@ -67,8 +71,9 @@ and showing a plan with `nika run <file> --dry-run` never wait for them.
 4. **Questions are asked here.** When a run pauses (exit 4), read the
    question from the paused frame, show it with the real destination and
    cost, and wait for the person's own answer. Resume at once, with the
-   same `--var` values: an answer is accepted for 15 minutes after the
-   pause. You never answer a gate yourself, never pass `--answer` on your
+   same flags as the first run (its `--model` or `--access` route among
+   them: a resume that drops it is refused, exit 3) and the same `--var`
+   values: an answer is accepted for 15 minutes after the pause. You never answer a gate yourself, never pass `--answer` on your
    own initiative, and permission to run is not an answer.
    The gate rule is stated once, in the `nika-authoring` skill's
    `references/job-anatomy.md` under « Approve once, then let it run ». A
@@ -88,19 +93,28 @@ Start a long run in the background when the host's shell tool can do that
 and tell you when it ends. Say the ceiling, say you will come back when the
 run ends or asks something, and carry on with what the person asked next.
 When it ends, the exit code comes first: 0 it settled, 4 it waits for an
-answer, anything else it stopped. Where the host cannot run in the
-background, run it in the foreground: nothing else changes.
+answer, 2 or 3 it was refused before anything ran, 1 or 130 it stopped.
+Where the host cannot run in the background, run it in the foreground:
+nothing else changes.
 
-## A run that stopped
+## A run that was refused, a run that stopped
 
-Read it before any second run. The first run already had effects (files
-written, calls paid, maybe something sent) and a run from the start repeats
-them. `nika trace outputs <trace> --json` names the task that stopped and its
-code; `nika explain <code>` teaches the fix. After the repair, check the
-file, then prefer `nika run <file> --resume <trace>`, which skips what
-settled, and read its first line: a trace that « carries no resume keys »
-runs everything again. This is the last step of every run that ends red,
-whether or not the host reminded you of it.
+Exit 2 or 3 is a refusal before anything ran: no step ran, nothing was
+paid, and the run left no trace. Do not read a trace for it: with no trace
+named, `nika trace outputs` reads the latest one in the project, which is
+an older run. Exit 2 is the file (the findings `nika check` prints, or a
+cost floor above the ceiling), exit 3 the environment (most often no model
+route, `NIKA-1800`). Fix that and run from the start.
+
+Exit 1 or 130 is a run that stopped. Read it before any second run. It
+already had effects (files written, calls paid, maybe something sent) and a
+run from the start repeats them. `nika trace outputs <trace> --json` names
+the task that stopped and its code; `nika explain <code>` teaches the fix.
+After the repair, check the file. Running again is the person's yes; with
+it, prefer `nika run <file> <same flags and vars> --resume <trace>`, which
+skips what settled, and read its first line: a trace that « carries no
+resume keys » runs everything again. This is the last step of every run
+that stopped, whether or not the host reminded you of it.
 
 ## Runs that wait
 
@@ -141,13 +155,14 @@ and keep asking at each gate.
 - **A run that stopped comes back with a reminder** to read its trace before
   a second run.
 
-These three exist in interactive Claude Code sessions. Everything above
-holds without them: they repeat a rule, they do not replace it.
 - **A repeatable request is flagged once, already read.** When a prompt
   sounds like a schedule, a batch or "do it again", you get one hint per
   session. When the engine can read the sentence, the hint already holds
   its reading (pieces, schedule, questions). Offer once; if the user says
   no, drop it.
+
+These exist in interactive Claude Code sessions. Everything above holds
+without them: they repeat a rule, they do not replace it.
 
 ## Words
 

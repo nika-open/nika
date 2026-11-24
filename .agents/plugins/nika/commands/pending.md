@@ -9,7 +9,8 @@ left during lunch. Find them and let the user answer in one step.
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py" $ARGUMENTS`
    (add `--json` to read it as data). Exit 0 means nothing waits: say so
-   in one line and stop. Without the kit's scripts, use
+   in one line and stop. Exit 3 means the runs could not be listed: say
+   that, never « nothing waits ». Without the kit's scripts, use
    `nika trace ls --json` and read the `workflow_paused` frame of each
    paused trace; a paused trace whose run id appears as another trace's
    `resumed_from` was already answered.
@@ -17,9 +18,12 @@ left during lunch. Find them and let the user answer in one step.
    question as it was asked, and how long ago. Several runs asking the
    same question? Show them together and ask once.
 3. Wait for the user's own answer. **Never answer for them.**
-4. Resume with the line the script printed. It needs the same `--var`
-   values as the original run: the trace keeps where each input came
-   from, not its value. If you do not have them, ask.
+4. Resume with the line the script printed. It carries the model the
+   first run was given on its command line; add any other flag that run
+   had (`--access`, the ceiling) and the same `--var` values: the trace
+   keeps where each input came from, not its value. If you do not have
+   them, ask. A resume that drops the first run's model route is refused
+   (exit 3), and says which one to repeat.
 5. If the answer window has closed (15 minutes after the pause), say it
    plainly: resuming will ask again, and the user answers right away.
 6. Report the result of the resumed run, then one line on cost and where

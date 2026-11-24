@@ -9,10 +9,11 @@ output. Target: `$ARGUMENTS` (no file? `Glob` for `*.nika` — one match
 runs, several ask which).
 
 **What needs the person, and what never does.** Their yes is needed to
-start the run with its ceiling (once), to answer a gate, and to raise the
-ceiling or change the model to a paid one. Checking, reading a trace,
-repairing a finding and showing a plan with `--dry-run` never wait for
-them.
+start the run with its ceiling (once), to answer a gate, to raise the
+ceiling or change the model to a paid one, and to run or resume again a
+run that stopped (a request to recover it already is that yes, once).
+Checking, reading a trace, repairing a finding and showing a plan with
+`--dry-run` never wait for them.
 
 **1 · Say what it will do, in plain words.** Run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-verdict.py" <file>` and show its
@@ -33,9 +34,13 @@ ways out: offer them as a short choice, and offer a rehearsal
 leave the user in front of a provider error.
 
 **4 · One yes, with its ceiling.** Ask once, with the verdict lines above
-it: "Run it?" The ceiling is part of the yes: add `--max-cost-usd <n>` at
-or above the cost line, and say the number. Calls already started when the
-ceiling is crossed still finish and count.
+it: "Run it?" The ceiling is part of the yes, as a number you say: the cap
+set for this plugin when the host shows one (the `max_cost_usd` setting,
+which the `nika-running` skill prints), else a number at or above the cost
+line, unless the person names another. A cost line above the cap is said
+before asking: the person raises the ceiling, or the run does not start.
+Add it as `--max-cost-usd <n>`, a number and never a placeholder. Calls
+already started when the ceiling is crossed still finish and count.
 
 **5 · Start it, and do not make the person watch.**
 `nika run <file> --json <flags> [--var key=value ...]`, as its own
@@ -45,8 +50,8 @@ shell tool can run a command in the background and tell you when it ends,
 start the run that way, say the ceiling and that you will come back when
 it ends or asks something, and go on with what the person asked next.
 When it cannot, run it in the foreground. Either way the exit code comes
-first when it ends: 0 it settled, 4 it waits for an answer, anything else
-it stopped.
+first when it ends: 0 it settled, 4 it waits for an answer, 2 or 3 it was
+refused before anything ran, 1 or 130 it stopped.
 
 **6 · It settled (exit 0).** Read the last `run_settled` line: `status`,
 `outputs`, `spend`, `receipt.trace_path`. Reply with the result first, then
@@ -68,16 +73,28 @@ on none of the grounds the gate rule gives (the authoring skill's
 `references/job-anatomy.md`, « Approve once, then let it run »), say so
 after the run and offer to design it out, so the next run does not stop.
 
-**8 · It stopped (any other exit). Read before any second run.** The run
+**8 · It was refused before anything ran (exit 2 or 3).** No step ran,
+nothing was paid, and this run left no trace. Do not look for one:
+`nika trace outputs` with no trace named reads the latest trace of the
+project, which belongs to an older run, and resuming it would continue
+that older run. Exit 2 is the file: the findings `nika check` prints, or a
+cost floor above the ceiling (repair as in step 2, or ask for a higher
+ceiling). Exit 3 is the environment: most often no model route is ready
+(`NIKA-1800`, back to step 3). One sentence, the one fix, then run from
+the start.
+
+**9 · It stopped (exit 1 or 130). Read before any second run.** The run
 already had effects: files written, calls paid, maybe something sent. Find
-its trace (`receipt.trace_path`, or `nika trace ls`), then
+its trace (`receipt.trace_path` on its last line, or `nika trace ls`), then
 `nika trace outputs <trace> --json` names the task that stopped and its
 code. Say one sentence on what stopped and the one fix; offer the detail
 (`nika explain <code>`) instead of printing it. After the repair, check
-the file, then prefer `nika run <file> --resume <trace>`, which skips what
+the file. Running it again repeats or continues effects, so it needs the
+person's yes; with it, prefer
+`nika run <file> <same flags and vars> --resume <trace>`, which skips what
 settled. Do this whether or not the host reminded you to.
 
-**9 · An approval the person gives every time.** After they answered the
+**10 · An approval the person gives every time.** After they answered the
 same gate of the same workflow more than once, look whether this binary
 can remember an approval: `"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit" --has consent`
 (without the kit's scripts: `nika consent --help` answers, or it does not). When
@@ -87,6 +104,8 @@ and keep asking at each gate.
 
 **Without the kit's scripts** the steps are the same with the binary alone:
 the verdict is `nika check <file> --json` retold in plain words, the model
-route is a provider that `nika catalog` shows as resolving, and a waiting
-run is listed by `nika trace ls`, its question read from the paused frame of
-its trace.
+route is one whose `access_plan[].resolved` is true in
+`nika check <file> --json --model <provider/model>` (`nika catalog` lists
+the providers the binary knows, not the ones that have a key here), and a
+waiting run is listed by `nika trace ls`, its question read from the paused
+frame of its trace.

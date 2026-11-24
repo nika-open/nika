@@ -5,7 +5,9 @@
 # hides a run that waits · an answer of another shape from the binary is
 # an empty list, not a crash · a binary that does not answer in time is
 # said, exit 3, and is not « nothing waits » · the search for the workflow
-# file is bounded: no directory link is followed, four levels deep.
+# file is bounded: no directory link is followed, four levels deep · the
+# resume line repeats the model the first run was given on its command
+# line, and a model name that is not plain is never printed in it.
 #
 # Usage: nika-pending.test.sh  (exit 0 = all green)
 set -uo pipefail
@@ -46,10 +48,10 @@ printf '%s\n' \
   '"a line that is JSON and not an event"' \
   '7' \
   '{"kind":"workflow_started","execution":"not an object","fields":"not a list"}' \
-  '{"kind":"workflow_started","execution":{"uuid":"e1"},"fields":[{"key":"inputs","value":"[1, 2]"}]}' \
+  '{"kind":"workflow_started","execution":{"uuid":"e1"},"fields":[{"key":"inputs","value":"[1, 2]"},{"key":"model_override","value":"mock/echo"}]}' \
   '{"kind":"workflow_paused","fields":[{"key":"message","value":"Send the weekly digest?"}, 5, {"key":["odd"],"value":1}]}' \
   >"$P/.nika/traces/odd.ndjson"
-printf '{"kind":"workflow_started","execution":{"uuid":"e2"},"fields":[]}\n{"kind":"workflow_paused","fields":[{"key":"message","value":"Publish the page?"}]}\n' \
+printf '{"kind":"workflow_started","execution":{"uuid":"e2"},"fields":[{"key":"model_override","value":"acme/x; touch pwned"}]}\n{"kind":"workflow_paused","fields":[{"key":"message","value":"Publish the page?"}]}\n' \
   >"$P/.nika/traces/deep.ndjson"
 printf 'nika: weekly-digest\ntasks: {}\n' >"$P/workflows/digest.nika"
 printf 'nika: too-deep\ntasks: {}\n' >"$P/a/b/c/d/deep.nika"
@@ -76,7 +78,9 @@ rc_is "a trace with lines of other shapes still lists its run" 4 $?
 check "the run is named with its question" "$out" "weekly-digest is waiting at \`approve\`"
 check "its question is shown" "$out" "Send the weekly digest?"
 check "the workflow file is found by its name" "$out" "nika run workflows/digest.nika"
-check "a file past four levels is not searched for" "$out" "nika run <file.nika> --resume .nika/traces/deep.ndjson"
+check "the model the first run was given is repeated" "$out" "nika run workflows/digest.nika --model mock/echo --resume .nika/traces/odd.ndjson"
+check "a file past four levels is not searched for" "$out" "nika run <file.nika> --model <the same model as before> --resume .nika/traces/deep.ndjson"
+refuse "a model name that is not plain is never printed" "$out" "touch pwned"
 refuse "a directory link is never followed" "$out" "loop/"
 
 out="$(pending other-shape)"

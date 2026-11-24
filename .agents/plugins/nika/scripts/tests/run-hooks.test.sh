@@ -4,9 +4,11 @@
 # the notes kept through a compaction (PreCompact).
 #
 # Laws under test:
-#   · a failed run is told to read its trace before a second run, and the
-#     newest trace is named; exit 4 is told apart as a pause; any other
-#     failed command draws nothing; a broken payload is said, never fatal;
+#   · a run that stopped is told to read its trace before a second run, and
+#     the newest trace is named; exit 4 is told apart as a pause; exit 2 and
+#     exit 3 are told apart as a refusal before anything ran, with no trace
+#     named, since the newest one is an older run's; any other failed
+#     command draws nothing; a broken payload is said, never fatal;
 #   · the compaction notes name the run that waits and the workflow changed
 #     in the session, never the question's text; nothing to keep is silence;
 #     a missing binary is said in the notes.
@@ -77,6 +79,16 @@ rm -f "$P/.nika/traces/9999-a-link-that-leads-nowhere.ndjson"
 out="$(failure 'nika run workflows/a.nika' 4 "$P" | hint)"
 check "exit 4 is a pause, not a failure" "$out" "is a pause, not a failure"
 check "a pause is never answered by the agent" "$out" "Never answer it yourself"
+check "a second run of a stopped run is the person's yes" "$(failure 'nika run workflows/a.nika' 1 "$P" | hint)" "needs the person's yes"
+for code in 2 3; do
+  out="$(failure 'nika run workflows/a.nika --json' "$code" "$P" | hint)"
+  check "exit $code is a refusal before anything ran" "$out" "is a refusal before anything ran"
+  check "exit $code says no trace was left" "$out" "left no trace"
+  refuse "exit $code never names the newest trace, an older run's" "$out" "$TRACE"
+  refuse "exit $code is not told to resume" "$out" "--resume"
+done
+check "exit 2 is the file" "$(failure 'nika run workflows/a.nika' 2 "$P" | hint)" "Exit 2 is the file"
+check "exit 3 is the environment" "$(failure 'nika run workflows/a.nika' 3 "$P" | hint)" "Exit 3 is the environment"
 silent "a failed check is not a failed run" "$(failure 'nika check workflows/a.nika' 2 "$P" | hint)"
 silent "another failed command draws nothing" "$(failure 'cargo test' 101 "$P" | hint)"
 out="$(printf 'not json' | hint)"

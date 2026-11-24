@@ -14,6 +14,10 @@ identifier is left out of the resume line, every path in that line is
 shell-quoted, a trace outside `.nika/traces/` is ignored, and the question
 is shown as quoted text.
 
+A run started with `--model` on its command line is resumed with the same
+flag (the binary refuses a resume that drops it), so the resume line
+carries the model the trace recorded, when its name is a plain one.
+
 A trace line that is JSON without being an event is skipped: it never
 hides a run that waits. The search for the workflow file a run names is
 bounded: no directory link is followed, four levels deep, a few hundred
@@ -38,6 +42,8 @@ import time
 
 # A task, workflow or input name the resume line may carry as it is.
 PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+# A model route the resume line may carry as it is (`provider/model`).
+PLAIN_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,63}/[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,119}$")
 # The search for a workflow file, bounded.
 SKIP = {".nika", "node_modules", ".git", "target", "dist"}
 MAX_DEPTH = 4
@@ -204,6 +210,12 @@ def pending(project):
         file = files.get(workflow) if isinstance(workflow, str) else None
         named = plain(task) and all(plain(name) for name in inputs)
         resume = f"nika run {shlex.quote(file) if file else '<file.nika>'}"
+        override = started.get("model_override")
+        model = override if isinstance(override, str) and PLAIN_MODEL.match(override) else None
+        if model:
+            resume += f" --model {model}"
+        elif override:
+            resume += " --model <the same model as before>"
         resume += "".join(
             f" --var {name}=<same value as before>" for name in inputs if plain(name)
         )
@@ -221,6 +233,7 @@ def pending(project):
             "trace": trace.get("path"),
             "file": file,
             "inputs_to_repeat": inputs,
+            "model_to_repeat": model,
             "resume": resume,
         })
     return waiting

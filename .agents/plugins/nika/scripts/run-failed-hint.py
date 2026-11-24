@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """run-failed-hint — PostToolUseFailure: read the trace before a second run.
 
-A failed `nika run` already had effects: files written, calls paid, maybe a
-message sent. The reflex after a red exit is to run again; that repeats
-them. This hook hands the agent the trace to read first, and tells a pause
-(exit 4) from a failure, because a pause is answered by the person and not
-retried.
+A `nika run` that stopped (exit 1, or 130 when it was cancelled) already
+had effects: files written, calls paid, maybe a message sent. The reflex
+after a red exit is to run again; that repeats them. This hook hands the
+agent the trace to read first. It tells two other exits apart: a pause
+(exit 4) is answered by the person and not retried, and a refusal before
+anything ran (exit 2, the file; exit 3, the environment) left no trace, so
+the newest trace in the project is an older run's and is not named.
 
 It reads the hook payload on stdin and the trace folder; it never calls
 the binary. Any other failed command draws no output. It cannot block and
@@ -60,6 +62,18 @@ def main():
             f"resume with `--resume <trace> --answer <task>=<their answer>` on {where}. "
             "Never answer it yourself and do not start the run again."
         )
+    elif code in (2, 3):
+        cause = (
+            "the file: the findings `nika check` prints, or a cost floor above the ceiling"
+            if code == 2
+            else "the environment: most often no model route is ready (`NIKA-1800`)"
+        )
+        text = (
+            f"Exit {code} from `nika run` is a refusal before anything ran: no step ran, nothing "
+            "was paid, and this run left no trace. Do not read a trace for it: the newest one in "
+            f"the project belongs to an older run. Exit {code} is {cause}. Say one sentence, make "
+            "the one fix, then run from the start."
+        )
     else:
         said = f"exit {code}" if code is not None else "a red exit"
         text = (
@@ -67,9 +81,10 @@ def main():
             f"`nika trace outputs <trace> --json` on {where} names the task that failed and its "
             "code, and `nika explain <code>` teaches the fix. A run from the start repeats every "
             "effect the first one already had (files written, calls paid, anything sent). After "
-            "the repair, `nika check` the file, then prefer `nika run <file> --resume <trace>`, "
-            "which skips what settled, and read its first line: a trace that « carries no resume "
-            "keys » runs everything again."
+            "the repair, `nika check` the file. Running again needs the person's yes; with it, "
+            "prefer `nika run <file> <same flags and vars> --resume <trace>`, which skips what "
+            "settled, and read its first line: a trace that « carries no resume keys » runs "
+            "everything again."
         )
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": text}}))
     return 0

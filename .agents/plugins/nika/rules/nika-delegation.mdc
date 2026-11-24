@@ -113,9 +113,12 @@ available and authorized. A skill route does not require delegation.
   with its `--max-cost-usd` and declared effects. `nika guard` judges at the
   configured hook. Never a spontaneous run. Do not ask again for the same
   permission, or treat a green check as new authorization.
-- A run that ended red is read before it is run again: its trace names the
-  task that stopped and what already happened. A second run from the start
-  repeats every effect of the first.
+- A run that stopped (exit 1 or 130) is read before it is run again: its
+  trace names the task that stopped and what already happened. A second run
+  from the start repeats every effect of the first. A run refused before it
+  started (exit 2 or 3) ran nothing and left no trace: fix the file or the
+  model route, and never read the latest trace for it, which is an older
+  run's.
 - The human gate is theirs alone: never pre-fill `--answer`. A paused
   run's question goes back to the conversation, verbatim; you resume
   only with the answer they gave. A waiting run is state on disk, not

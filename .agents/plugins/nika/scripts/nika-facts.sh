@@ -73,7 +73,7 @@ try:
 except Exception:
     rows = []
 routes = ["%s/%s%s" % (p.get("id"), p.get("cheap_model") or p.get("default_model"), " (local)" if p.get("local") else "") for p in rows]
-print("- model routes, one per provider this binary resolves (its cheaper model; `nika catalog` lists every model): " + ("; ".join(routes)[:1500] if routes else "not listed here; read `nika catalog`"))'
+print("- model names this binary knows, one per provider (its cheaper model; `nika catalog` lists every model). A name here is not a key on this machine: `access_plan` in `nika check <file> --json` says which route is ready: " + ("; ".join(routes)[:1500] if routes else "not listed here; read `nika catalog`"))'
   waiting="$(limited "$here/nika-pending.py" "$project" --json | python3 -c 'import json, sys
 try:
     listed = json.load(sys.stdin)

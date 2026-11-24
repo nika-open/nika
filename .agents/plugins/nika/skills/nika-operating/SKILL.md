@@ -21,7 +21,7 @@ the engine/spec identity that produced the report.
 
 - `nika check <file>` estimates output-token cost BEFORE any token: `≤ $X`
   bounds that output estimate, not prompt/input cost or the entire invoice.
-  `≥ $X FLOOR` means at least one task is unbounded — fix
+  `est unbounded` means at least one task is uncapped or unpriced — fix
   the reason (a missing `max_tokens`, an uncataloged model, an
   expression fan-out). Before unattended use, state the exposure and
   applicable controls; unpriced compute must not be called a bounded USD cost.

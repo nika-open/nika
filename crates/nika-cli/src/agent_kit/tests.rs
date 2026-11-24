@@ -233,3 +233,33 @@ fn operating_mock_rehearsal_names_the_fetch_it_keeps() {
         "the offline promise returned"
     );
 }
+
+/// The kit teaches the cost wording the engine prints. The `≥ $X FLOOR`
+/// marker left the COST line, the verdict line and `nika explain <file>`,
+/// which print `bounded portion $X no total ceiling` and `est unbounded`
+/// (measured on 0.124.5, 2026-11-23), so an agent told to look for it
+/// never found it.
+#[test]
+fn the_kit_teaches_the_cost_wording_the_engine_prints() {
+    for rel in [
+        "commands/check.md",
+        "skills/nika-authoring/references/paid-inference.md",
+        "skills/nika-authoring/references/validation-and-execution.md",
+        "skills/nika-operating/SKILL.md",
+    ] {
+        assert!(
+            !read(rel).contains("FLOOR"),
+            "`{rel}` teaches the retired cost floor"
+        );
+    }
+    let reference = read("skills/nika-authoring/references/validation-and-execution.md");
+    let folded = reference.split_whitespace().collect::<Vec<_>>().join(" ");
+    for printed in [
+        "`$X – $Y worst-case output ceiling`",
+        "`est out ≤$Y`",
+        "`bounded portion $X no total ceiling`",
+        "`est unbounded`",
+    ] {
+        assert!(folded.contains(printed), "the reference names {printed}");
+    }
+}

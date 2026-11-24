@@ -171,7 +171,7 @@ builtins. Copy, fill, check.
 
 ## Cost honesty (never hide unknown spend)
 - `nika check` estimates output-token cost before execution. Input billing
-  is not included; `≥ $X FLOOR` signals an unbounded or unpriced component.
+  is not included; `est unbounded` signals an uncapped or unpriced task.
   Name the reason; never round unknown costs to $0.
 - A local model is unpriced compute, **never « free »**.
 - `nika run <file> --max-cost-usd <n>` stops new admissions after crossing

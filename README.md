@@ -287,20 +287,20 @@ curl -LsSf https://nika.sh/install.sh | sh
   `node_modules/.bin`). The package bundles the engine of its own version:
   check `nika --version`.
 - **A container** (Linux, amd64 and arm64), built from the same release
-  binaries: `docker run --rm ghcr.io/nika-open/nika:0.125.0 --version`.
+  binaries: `docker run --rm ghcr.io/nika-open/nika:0.125.1 --version`.
   Mount a project to check or run its files, for example
-  `docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika:0.125.0 check hello.nika`.
+  `docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika:0.125.1 check hello.nika`.
   Images up to 0.124.4 stay at `ghcr.io/supernovae-st/nika`.
 - **A release archive:** download one from the
   [latest release](https://github.com/nika-open/nika/releases/latest).
   Every release ships a checksum manifest, a GitHub attestation and SLSA
   provenance; [RELEASING.md](RELEASING.md#what-a-user-can-prove) gives the
   three verification commands, for example
-  `gh attestation verify nika-macos-arm64-0.125.0.tar.gz --repo nika-open/nika`.
+  `gh attestation verify nika-macos-arm64-0.125.1.tar.gz --repo nika-open/nika`.
   Releases up to 0.124.4 were built in `supernovae-st/nika`, and that
   organization serves their attestations: verify one of them with
   `--owner supernovae-st --signer-repo supernovae-st/nika` instead of `--repo`.
-- **Nix:** `nix profile install github:nika-open/nika/v0.125.0` builds
+- **Nix:** `nix profile install github:nika-open/nika/v0.125.1` builds
   the release from the repository's flake. Without the tag, the flake builds
   the default branch, which can be ahead of the latest release.
 - **Windows:** use WSL2 and the Linux binary. Native Windows binaries are
@@ -566,9 +566,9 @@ sizing, an upgrade that keeps a way back and a support retry.
   read a page or a model's answer for injected instructions, and a person
   who answers yes approves what follows. On a harness seat, what `permits:`
   covers is listed per seat ([harness agents](docs/usage/harness-agents.md)).
-- **This README describes the released 0.125.0.** Compare `nika --version`
+- **This README describes the released 0.125.1.** Compare `nika --version`
   with the [changelog](CHANGELOG.md), which lists what each release
-  changed. Until the next release, each change merged after 0.125.0 is
+  changed. Until the next release, each change merged after 0.125.1 is
   described in its own file under [`changelog.d/`](changelog.d/README.md),
   and the release folds those files into the changelog.
 

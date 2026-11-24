@@ -28,11 +28,12 @@ for the two codes that print it, and the engine's SDK guard reads what the publi
 
 Some workflows that 0.125.0 ran are now refused.
 
-- A `command:` or `shell:` line that deletes recursively (`rm -r`, `rm -rf`, `find … -delete`)
-  an absolute path, or one that climbs above the working directory with `..`, meets
-  `NIKA-SEC-001` at `nika check`, and the run refuses the same command before spawn. A delete
-  inside the working directory stays admitted: name the path relative to it (`cwd:` sets it), or
-  use `nika:remove_file` under a `permits.fs.write` bound.
+- A `command:` argv that deletes recursively (`rm -r`, `rm -rf`, `find … -delete`) an absolute
+  path, or one that climbs above the working directory with `..`, meets `NIKA-SEC-001` at
+  `nika check`, and the run refuses it before spawn. On a `shell:` line, the run refuses the same
+  delete before spawn, wherever it sits in the line. A delete inside the working directory stays
+  admitted: name the path relative to it (`cwd:` sets it), or use `nika:remove_file` under a
+  `permits.fs.write` bound.
 
 The file format, the embedded spec (`2edc285`), the model catalog and the SDK machine protocol are
 unchanged. The known limits of 0.125.0 still hold, each with a way around it:

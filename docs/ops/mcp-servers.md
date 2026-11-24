@@ -62,6 +62,47 @@ project; never hand-edit it (a pin that no longer matches its snapshot is
 Re-run `approve` after a deliberate server upgrade — a changed or added
 tool is otherwise a drift refusal at run.
 
+### Declare what each tool does
+
+An MCP tool reads and sends **on its server**. `permits:` cannot see it: a
+tool that reads your inbox uses no `fs.read`, and a tool that sends an email
+uses no `net.http`. So the lethal-trifecta row of `nika check`
+(`NIKA-SEC-009`) cannot tell, from the workflow alone, that an MCP tool is
+a private read or an egress. You tell it, once, in the review you are
+already doing:
+
+```sh
+nika mcp approve mail --reads-private read_inbox --sends-out send_email --no-role add
+# approved 3 tool(s) from MCP server `mail` — the lockfile now pins the CURRENT definitions
+#   lockfile: .nika/mcp_pins.json · pinned_at 2026-11-23T10:02:11Z
+#   add  blake3:9c1f…  role: none (declared)
+#   read_inbox  blake3:41aa…  role: private-read
+#   send_email  blake3:d07b…  role: egress
+```
+
+| Flag | Declares | The check then counts a call to it as |
+|---|---|---|
+| `--reads-private <tool>` | the tool returns data you hold private (an inbox, a database, internal files) | the private read of the trifecta |
+| `--sends-out <tool>` | the tool can send data outside this machine (an email, a message, a web request) | the external egress of the trifecta |
+| `--no-role <tool>` | the tool does neither | nothing more (and the tool is no longer reported as unknown) |
+
+Each flag repeats, and one tool may carry both roles. The lockfile records
+them beside the pin, as `"roles": ["private-read", "egress"]` (`[]` for
+`--no-role`).
+
+- **A tool with no declared role is unknown, not safe.** The check keeps its
+  earlier verdict and adds a `[mcp-roles]` hint naming the tool: the
+  trifecta row does not cover what it reads or sends.
+- **A role follows the definition.** Approving again without flags keeps a
+  tool's role while its pin is unchanged. When the definition changed, the
+  role is dropped and the receipt says so: read the new definition, then
+  declare it again.
+- **A role is a declaration, not a proof.** Nika cannot verify what a server
+  does. The role is outside the pin hash, and is reviewed like `permits:`:
+  in the diff of the lockfile.
+- A role naming a tool the server does not serve pins nothing (a typo must
+  not leave the real tool undeclared).
+
 ## 3 · Run — what the dispatch guarantees
 
 | Situation | Refusal | Where |

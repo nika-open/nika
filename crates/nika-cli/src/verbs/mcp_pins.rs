@@ -25,7 +25,56 @@ pub enum McpAction {
     Approve {
         /// The server name from `.nika/mcp_servers.json`.
         server: String,
+        /// Declare that TOOL returns data you hold private (an inbox, a
+        /// database, internal files). `nika check` then counts a call to it
+        /// as the private read of the lethal trifecta (NIKA-SEC-009).
+        #[arg(long = "reads-private", value_name = "TOOL")]
+        reads_private: Vec<String>,
+        /// Declare that TOOL can send data outside this machine (an email,
+        /// a message, a web request). `nika check` then counts a call to it
+        /// as the external egress of the lethal trifecta (NIKA-SEC-009).
+        #[arg(long = "sends-out", value_name = "TOOL")]
+        sends_out: Vec<String>,
+        /// Declare that TOOL neither reads private data nor sends anything
+        /// out. Without any of the three flags a tool's role stays unknown
+        /// and `nika check` says it does not judge that tool.
+        #[arg(long = "no-role", value_name = "TOOL")]
+        no_role: Vec<String>,
     },
+}
+
+/// The roles the three `approve` flags declare, by tool name.
+///
+/// # Errors
+///
+/// The tools named both by `--no-role` and by a role flag: the two
+/// declarations contradict each other.
+pub(crate) fn declared_roles(
+    reads_private: &[String],
+    sends_out: &[String],
+    no_role: &[String],
+) -> Result<RoleDeclarations, Vec<String>> {
+    let mut declared = RoleDeclarations::new();
+    for tool in reads_private {
+        let roles = declared.entry(tool.clone()).or_default();
+        *roles = roles.union(McpToolRoles::new(true, false));
+    }
+    for tool in sends_out {
+        let roles = declared.entry(tool.clone()).or_default();
+        *roles = roles.union(McpToolRoles::new(false, true));
+    }
+    let contradicted: Vec<String> = no_role
+        .iter()
+        .filter(|tool| declared.contains_key(*tool))
+        .cloned()
+        .collect();
+    if !contradicted.is_empty() {
+        return Err(contradicted);
+    }
+    for tool in no_role {
+        declared.insert(tool.clone(), McpToolRoles::default());
+    }
+    Ok(declared)
 }
 
 /// The MCP wire (the clap arm of `--transport`).
@@ -52,7 +101,27 @@ pub fn mcp_verb(
     bind: &str,
 ) -> u8 {
     match action {
-        Some(McpAction::Approve { server }) => return emit(&approve(&server)),
+        Some(McpAction::Approve {
+            server,
+            reads_private,
+            sends_out,
+            no_role,
+        }) => {
+            return emit(
+                &match declared_roles(&reads_private, &sends_out, &no_role) {
+                    Ok(declared) => approve(&server, &declared),
+                    Err(contradicted) => VerbOutput::env(format!(
+                        "`--no-role` and a role flag both name {}: a tool either has a role or \
+                     has none — nothing was pinned",
+                        contradicted
+                            .iter()
+                            .map(|t| format!("`{t}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
+                },
+            );
+        }
         None => {}
     }
     let served = match transport {
@@ -109,19 +178,36 @@ fn emit(out: &VerbOutput) -> u8 {
 use std::path::Path;
 
 use nika_mcp::client::{
-    McpServerConfig, StdioMcpClient, ToolsListDyn, approve_server, load_server_configs,
+    ApproveError, McpServerConfig, StdioMcpClient, ToolsListDyn, approve_server_declaring,
+    load_server_configs,
 };
-use nika_mcp::pin::{PINS_PATH, PinError};
+use nika_mcp::pin::{McpToolRoles, PINS_PATH, PinError, RoleDeclarations};
 
 use super::VerbOutput;
 
-/// `nika mcp approve <server>` — re-pin after human review, production client.
+/// `nika mcp approve <server>` — re-pin after human review, production client,
+/// recording the roles the operator declares for the tools they reviewed.
 #[must_use]
-pub fn approve(server: &str) -> VerbOutput {
+pub fn approve(server: &str, declared: &RoleDeclarations) -> VerbOutput {
     let dir = Path::new(".");
     match resolve_config(server, dir) {
-        Ok(config) => approve_with(&config, &StdioMcpClient::new(&config), dir, now_epoch()),
+        Ok(config) => approve_with(
+            &config,
+            &StdioMcpClient::new(&config),
+            dir,
+            declared,
+            now_epoch(),
+        ),
         Err(out) => out,
+    }
+}
+
+/// One receipt cell: what `nika check` will read for the tool.
+fn role_cell(roles: Option<McpToolRoles>) -> String {
+    match roles {
+        None => "role: not declared".to_owned(),
+        Some(roles) if roles.tokens().is_empty() => "role: none (declared)".to_owned(),
+        Some(roles) => format!("role: {}", roles.tokens().join(" + ")),
     }
 }
 
@@ -131,9 +217,10 @@ pub(crate) fn approve_with<C: ToolsListDyn + ?Sized>(
     config: &McpServerConfig,
     client: &C,
     dir: &Path,
+    declared: &RoleDeclarations,
     now: u64,
 ) -> VerbOutput {
-    match approve_server(config, client, dir, now) {
+    match approve_server_declaring(config, client, dir, declared, now) {
         Ok(report) => {
             use std::fmt::Write as _;
             let mut text = format!(
@@ -151,14 +238,31 @@ pub(crate) fn approve_with<C: ToolsListDyn + ?Sized>(
                 report.pinned_at
             );
             for (name, pin) in &report.pins {
-                let _ = write!(text, "\n  {name}  {pin}");
+                let role = role_cell(report.roles.get(name).copied().flatten());
+                let _ = write!(text, "\n  {name}  {pin}  {role}");
             }
             if report.pins.is_empty() {
                 text.push_str("\n  (the server exposes no tools — nothing to pin)");
             }
+            if !report.dropped_roles.is_empty() {
+                let _ = write!(
+                    text,
+                    "\n  role dropped (the definition changed since it was declared): {} — \
+                     declare it again after reading the new definition",
+                    report.dropped_roles.join(", ")
+                );
+            }
+            if report.roles.values().any(Option::is_none) {
+                text.push_str(
+                    "\n  a tool with no declared role is not judged by the TRIFECTA row of \
+                     `nika check`: declare each with `--reads-private <tool>`, `--sends-out \
+                     <tool>` or `--no-role <tool>`",
+                );
+            }
             VerbOutput::ok(text)
         }
-        Err(err) => pin_error_output(&err),
+        Err(ApproveError::Pin(err)) => pin_error_output(&err),
+        Err(err) => VerbOutput::env(format!("{err}")),
     }
 }
 
@@ -221,6 +325,34 @@ mod tests {
         )]
     }
 
+    /// No role declared: the pre-existing approve behaviour.
+    fn none() -> RoleDeclarations {
+        RoleDeclarations::new()
+    }
+
+    fn mail_tools() -> Vec<McpToolDef> {
+        vec![
+            McpToolDef::new("read_inbox", "Read the unread emails", json!({})),
+            McpToolDef::new("send_email", "Send an email", json!({})),
+            McpToolDef::new("add", "Add two numbers", json!({})),
+        ]
+    }
+
+    /// The roles the lockfile records for server `postgres`, by tool.
+    fn recorded_roles(dir: &Path) -> serde_json::Value {
+        let text = std::fs::read_to_string(dir.join(PINS_PATH)).expect("lockfile");
+        let file: serde_json::Value = serde_json::from_str(&text).expect("lockfile is JSON");
+        let tools = file["servers"]["postgres"]["tools"]
+            .as_object()
+            .expect("tools")
+            .clone();
+        tools
+            .into_iter()
+            .map(|(name, pin)| (name, pin.get("roles").cloned().unwrap_or(json!("absent"))))
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    }
+
     fn tmp(tag: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("nika-cli-mcppin-{tag}-{}", std::process::id()));
@@ -232,7 +364,7 @@ mod tests {
     #[test]
     fn approve_repins_and_prints_the_pin_set() {
         let dir = tmp("approve");
-        approve_with(&config(), &Mock { tools: tools() }, &dir, 1);
+        approve_with(&config(), &Mock { tools: tools() }, &dir, &none(), 1);
         let upgraded = Mock {
             tools: vec![
                 McpToolDef::new(
@@ -243,7 +375,7 @@ mod tests {
                 McpToolDef::new("explain", "Plan a query", json!({})),
             ],
         };
-        let out = approve_with(&config(), &upgraded, &dir, 1_700_000_000);
+        let out = approve_with(&config(), &upgraded, &dir, &none(), 1_700_000_000);
         assert_eq!(out.code, exit::OK, "{}", out.text);
         assert!(out.text.contains("approved 2 tool(s)"), "{}", out.text);
         assert!(out.text.contains("explain  blake3:"), "{}", out.text);
@@ -313,7 +445,13 @@ mod tests {
             }
         }
         let dir = tmp("confined");
-        let out = approve_with(&config(), &Confined(Mock { tools: tools() }), &dir, 1);
+        let out = approve_with(
+            &config(),
+            &Confined(Mock { tools: tools() }),
+            &dir,
+            &none(),
+            1,
+        );
         assert_eq!(out.code, exit::OK, "{}", out.text);
         assert!(
             out.text
@@ -321,7 +459,7 @@ mod tests {
             "{}",
             out.text
         );
-        let bare = approve_with(&config(), &Mock { tools: tools() }, &dir, 1);
+        let bare = approve_with(&config(), &Mock { tools: tools() }, &dir, &none(), 1);
         assert!(bare.text.starts_with("approved 1 tool(s)"), "{}", bare.text);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -329,10 +467,143 @@ mod tests {
     #[test]
     fn a_zero_tool_server_says_nothing_to_pin() {
         let dir = tmp("zero");
-        let out = approve_with(&config(), &Mock { tools: Vec::new() }, &dir, 1);
+        let out = approve_with(&config(), &Mock { tools: Vec::new() }, &dir, &none(), 1);
         assert_eq!(out.code, exit::OK, "{}", out.text);
         assert!(out.text.contains("approved 0 tool(s)"), "{}", out.text);
         assert!(out.text.contains("nothing to pin"), "{}", out.text);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The three flags become the lockfile's `roles`, and the receipt says
+    /// what `nika check` will read for each tool.
+    #[test]
+    fn approve_records_the_declared_roles_and_prints_them() {
+        let dir = tmp("roles");
+        let declared = declared_roles(
+            &["read_inbox".to_owned()],
+            &["send_email".to_owned()],
+            &["add".to_owned()],
+        )
+        .expect("no contradiction");
+        let server = Mock {
+            tools: mail_tools(),
+        };
+        let out = approve_with(&config(), &server, &dir, &declared, 1);
+        assert_eq!(out.code, exit::OK, "{}", out.text);
+        assert_eq!(
+            recorded_roles(&dir),
+            json!({"add": [], "read_inbox": ["private-read"], "send_email": ["egress"]})
+        );
+        for line in [
+            "  role: none (declared)",
+            "  role: private-read",
+            "  role: egress",
+        ] {
+            assert!(out.text.contains(line), "`{line}` in:\n{}", out.text);
+        }
+        assert!(
+            !out.text.contains("not judged by the TRIFECTA row"),
+            "every tool is declared, so nothing is left unjudged: {}",
+            out.text
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tool nobody declared stays unknown: no `roles` key, and the
+    /// receipt says the check does not judge it.
+    #[test]
+    fn an_undeclared_tool_stays_unknown_and_the_receipt_says_so() {
+        let dir = tmp("undeclared");
+        let declared =
+            declared_roles(&[], &["send_email".to_owned()], &[]).expect("no contradiction");
+        let server = Mock {
+            tools: mail_tools(),
+        };
+        let out = approve_with(&config(), &server, &dir, &declared, 1);
+        assert_eq!(out.code, exit::OK, "{}", out.text);
+        assert_eq!(
+            recorded_roles(&dir),
+            json!({"add": "absent", "read_inbox": "absent", "send_email": ["egress"]})
+        );
+        assert!(out.text.contains("role: not declared"), "{}", out.text);
+        assert!(
+            out.text
+                .contains("a tool with no declared role is not judged by the TRIFECTA row"),
+            "{}",
+            out.text
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Approving again without flags keeps a role while the definition is
+    /// the same, and drops it, loudly, once the definition changed.
+    #[test]
+    fn a_role_survives_reapproval_only_while_the_definition_is_unchanged() {
+        let dir = tmp("carry");
+        let declared = declared_roles(&["read_inbox".to_owned()], &["send_email".to_owned()], &[])
+            .expect("no contradiction");
+        let server = Mock {
+            tools: mail_tools(),
+        };
+        approve_with(&config(), &server, &dir, &declared, 1);
+        // Same definitions, no flag: both roles stay.
+        let out = approve_with(&config(), &server, &dir, &none(), 2);
+        assert_eq!(out.code, exit::OK, "{}", out.text);
+        assert_eq!(
+            recorded_roles(&dir),
+            json!({"add": "absent", "read_inbox": ["private-read"], "send_email": ["egress"]})
+        );
+        assert!(!out.text.contains("role dropped"), "{}", out.text);
+        // `send_email` changes its definition: its role is not carried over.
+        let mut changed = mail_tools();
+        changed[1] = McpToolDef::new("send_email", "Send an email to anyone", json!({}));
+        let out = approve_with(&config(), &Mock { tools: changed }, &dir, &none(), 3);
+        assert_eq!(out.code, exit::OK, "{}", out.text);
+        assert_eq!(
+            recorded_roles(&dir),
+            json!({"add": "absent", "read_inbox": ["private-read"], "send_email": "absent"})
+        );
+        assert!(
+            out.text.contains(
+                "role dropped (the definition changed since it was declared): send_email"
+            ),
+            "{}",
+            out.text
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A role declared for a tool the server does not serve pins nothing:
+    /// a typo must not leave the intended tool undeclared.
+    #[test]
+    fn a_role_for_a_tool_the_server_does_not_serve_pins_nothing() {
+        let dir = tmp("typo");
+        let declared =
+            declared_roles(&[], &["send_mail".to_owned()], &[]).expect("no contradiction");
+        let server = Mock {
+            tools: mail_tools(),
+        };
+        let out = approve_with(&config(), &server, &dir, &declared, 1);
+        assert_eq!(out.code, exit::ENV, "{}", out.text);
+        assert_eq!(
+            out.text,
+            "MCP server `postgres` serves no tool named `send_mail` — nothing was pinned \
+             (it serves: `add`, `read_inbox`, `send_email`)"
+        );
+        assert!(!dir.join(PINS_PATH).exists(), "no lockfile was written");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One tool under two role flags carries both; `--no-role` on a tool
+    /// that also has a role flag is a contradiction the verb refuses.
+    #[test]
+    fn the_flags_combine_and_a_contradiction_is_named() {
+        let both = declared_roles(&["sync".to_owned()], &["sync".to_owned()], &[])
+            .expect("no contradiction");
+        assert_eq!(both.get("sync"), Some(&McpToolRoles::new(true, true)));
+        assert_eq!(
+            declared_roles(&["a".to_owned()], &["b".to_owned()], &["b".to_owned()]),
+            Err(vec!["b".to_owned()])
+        );
     }
 }

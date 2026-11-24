@@ -143,6 +143,7 @@ mod flow;
 mod hints;
 mod lift;
 mod literal_credential;
+pub mod mcp_roles;
 pub mod native_first;
 mod order;
 mod permit_taint;
@@ -532,6 +533,14 @@ pub struct CheckReport {
     /// [`check_composed`] fills it. Additive, absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub composed_calls: Vec<ComposedCall>,
+    /// The role the operator declared for each approved MCP tool this file
+    /// can reach, keyed by tool id (`mcp:<server>/<tool>` · read from the
+    /// pin lockfile). The trifecta lane arms its private-read and egress
+    /// legs from them. A tool with no entry has no declared role: the lane
+    /// does not judge what it reads or sends, and a `mcp-roles` hint names
+    /// it. Only [`check_composed`] fills it. Additive, absent when empty.
+    #[serde(default, skip_serializing_if = "mcp_roles::McpRoleMap::is_empty")]
+    pub mcp_tool_roles: mcp_roles::McpRoleMap,
     /// Project files (spec 02 §Project files): what [`check_project`] could not compose. A plain
     /// [`check`] reads no files. Additive, and absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -691,6 +700,7 @@ fn gated_scans(
     edges: &[analyzer::Edge],
     topo_waves: &[Vec<usize>],
     calls: &[ComposedCall],
+    roles: &mcp_roles::McpRoleMap,
 ) -> (
     nika_cap::TrifectaVerdict,
     consent::ConsentScan,
@@ -704,7 +714,7 @@ fn gated_scans(
         );
     }
     (
-        trifecta::scan_trifecta_composed(wf, edges, topo_waves, calls),
+        trifecta::scan_trifecta_declared(wf, edges, topo_waves, calls, roles),
         consent::scan_consent(wf, edges, topo_waves, calls),
         order::scan_order(wf, edges),
     )
@@ -735,11 +745,16 @@ fn dag_facts(
 
 #[must_use]
 pub fn check(wf: &RawWorkflow) -> CheckReport {
-    check_calls(wf, Vec::new())
+    check_calls(wf, Vec::new(), mcp_roles::McpRoleMap::new())
 }
 
-/// [`check`] over the child calls a composed check resolved (NIK-273).
-pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -> CheckReport {
+/// [`check`] over the child calls a composed check resolved (NIK-273) and
+/// the MCP tool roles it read from the pin lockfile.
+pub(crate) fn check_calls(
+    wf: &RawWorkflow,
+    composed_calls: Vec<ComposedCall>,
+    mcp_tool_roles: mcp_roles::McpRoleMap,
+) -> CheckReport {
     let (conformance, topo_waves, edges) = dag_facts(wf);
     // One IFC pass over the DAG — the taint fact base both leak reports
     // read. An empty wave order (conformance failure) taints nothing:
@@ -758,8 +773,14 @@ pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -
     // scans, and the legal-zero hint. Both must answer from the same fact,
     // and a predicate spelled twice is a place for them to drift apart.
     let conforms = conformance.is_empty();
-    let (trifecta, mut consent_scan, order_findings) =
-        gated_scans(wf, conforms, &edges, &topo_waves, &composed_calls);
+    let (trifecta, mut consent_scan, order_findings) = gated_scans(
+        wf,
+        conforms,
+        &edges,
+        &topo_waves,
+        &composed_calls,
+        &mcp_tool_roles,
+    );
     hints.extend(std::mem::take(&mut consent_scan.hints));
     hints.extend(skipped_read::hints(wf, conforms, &edges, &topo_waves));
     hints::credit_gates(&mut hints, &trifecta.mitigations);
@@ -768,7 +789,7 @@ pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -
     let cost = cost::ceiling(wf);
     let (schema_findings, unverifiable_output_refs) = schema_typing::scan_types(wf);
     let schema_findings = drop_refs_the_coded_walk_refused(schema_findings, &conformance);
-    let mut report = CheckReport {
+    let report = CheckReport {
         report_version: REPORT_VERSION,
         conformance,
         energy: energy::reading(&cost),
@@ -817,6 +838,7 @@ pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -
         // the resolved half needs a reader — `check_composed`
         composition: composition::scan_static(wf),
         composed_calls,
+        mcp_tool_roles,
         project_files: Vec::new(),
         hints,
         waves: topo_waves,
@@ -825,8 +847,12 @@ pub(crate) fn check_calls(wf: &RawWorkflow, composed_calls: Vec<ComposedCall>) -
         failure_plan: Vec::new(),
         workflow_semantic: None,
     };
-    // The class-erased list folds the FINISHED report (one truth, read
-    // back) — every consumer (CLI --json · MCP nika_check) gets it free.
+    with_findings(wf, report)
+}
+
+/// The class-erased list folds the FINISHED report (one truth, read back):
+/// every consumer (CLI `--json` · MCP `nika_check`) gets it free.
+fn with_findings(wf: &RawWorkflow, mut report: CheckReport) -> CheckReport {
     report.findings = findings::collect(&report);
     report.failure_plan = failure_plan::collect(wf, &report);
     report

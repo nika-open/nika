@@ -53,7 +53,7 @@ use crate::fit::lexically_normalize;
 #[non_exhaustive]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "four independent facts the projection asserts and the judge reads (egress-capable · blocking gate · defaulted gate · untrusted ingress); an enum for the gate pair would change the public surface every consumer builds by `new` and the builders"
+    reason = "six independent facts the projection asserts and the judge reads (egress-capable · blocking gate · defaulted gate · untrusted ingress · declared private read · declared egress); an enum for the gate pair would change the public surface every consumer builds by `new` and the builders"
 )]
 pub struct TrifectaSubject {
     /// The task id (the witness a violation names).
@@ -82,6 +82,16 @@ pub struct TrifectaSubject {
     /// final message is attacker-influenced even with a clean prompt).
     /// v1's granted-but-never-invoked arming is gone: ② needs one of these.
     pub ingress_source: bool,
+    /// Whether the task calls an MCP tool the operator DECLARED a private
+    /// read when approving its pin (`nika mcp approve --reads-private`).
+    /// A tool's effects are server-side, so `permits.fs.read` says nothing
+    /// about them: the declaration is what arms leg ① for it. A tool with
+    /// no declared role arms nothing here (the lane says so in a hint).
+    pub declared_private_read: bool,
+    /// Whether the task calls an MCP tool the operator DECLARED an external
+    /// egress when approving its pin (`nika mcp approve --sends-out`): the
+    /// declaration arms leg ③ where `permits.net.http` cannot see it.
+    pub declared_egress: bool,
     /// Direct predecessors (indices into the same subject slice).
     pub parents: Vec<usize>,
 }
@@ -98,6 +108,8 @@ impl TrifectaSubject {
             human_gate,
             defaulted_gate: false,
             ingress_source: false,
+            declared_private_read: false,
+            declared_egress: false,
             parents: Vec::new(),
         }
     }
@@ -115,6 +127,16 @@ impl TrifectaSubject {
     #[must_use]
     pub fn with_ingress_source(mut self, ingress_source: bool) -> Self {
         self.ingress_source = ingress_source;
+        self
+    }
+
+    /// Mark what the operator declared the task's MCP tools do (the
+    /// projection reads the pin lockfile's roles; the judge's ① and ③ read
+    /// them). Declarations only ADD legs: an undeclared tool changes nothing.
+    #[must_use]
+    pub fn with_declared_roles(mut self, private_read: bool, egress: bool) -> Self {
+        self.declared_private_read = private_read;
+        self.declared_egress = egress;
         self
     }
 }
@@ -240,7 +262,10 @@ fn grants_untrusted_ingress(tools: &[String]) -> bool {
 /// born_ingress` — a subprocess imports content the workflow did not
 /// author, so `exec` allowed arms leg ② exactly like a fetch grant).
 fn legs(permits: &Permits, subjects: &[TrifectaSubject]) -> (bool, bool, bool) {
-    let private_read = permits.fs.as_ref().is_some_and(|fs| !fs.read.is_empty());
+    // An MCP tool reads and sends server-side, where no `permits:` field
+    // sees it: the role its operator declared on the pin is the leg.
+    let private_read = permits.fs.as_ref().is_some_and(|fs| !fs.read.is_empty())
+        || subjects.iter().any(|s| s.declared_private_read);
     let ingress_granted = permits.allows_exec()
         || permits
             .tools
@@ -252,8 +277,18 @@ fn legs(permits: &Permits, subjects: &[TrifectaSubject]) -> (bool, bool, bool) {
             .fs
             .as_ref()
             .is_some_and(|fs| fs.write.iter().any(|g| write_glob_escapes(g)))
-        || permits.allows_exec();
+        || permits.allows_exec()
+        || subjects.iter().any(|s| s.declared_egress);
     (private_read, untrusted_ingress, external_egress)
+}
+
+/// The tasks carrying one declared role, backticked, in declaration order.
+fn declared_by(subjects: &[TrifectaSubject], role: fn(&TrifectaSubject) -> bool) -> Vec<String> {
+    subjects
+        .iter()
+        .filter(|s| role(s))
+        .map(|s| format!("`{}`", s.id))
+        .collect()
 }
 
 /// WHY the three legs are legs HERE — one clause per leg, naming the
@@ -279,20 +314,39 @@ fn leg_reasons(permits: &Permits, subjects: &[TrifectaSubject]) -> String {
     }
     let mut egress_by = Vec::new();
     if permits.net.as_ref().is_some_and(|n| !n.http.is_empty()) {
-        egress_by.push("`permits.net.http`");
+        egress_by.push("`permits.net.http`".to_owned());
     }
     if permits
         .fs
         .as_ref()
         .is_some_and(|fs| fs.write.iter().any(|g| write_glob_escapes(g)))
     {
-        egress_by.push("an `fs.write` grant outside `./`");
+        egress_by.push("an `fs.write` grant outside `./`".to_owned());
     }
     if permits.allows_exec() {
-        egress_by.push("`permits.exec` (a program reaches anywhere)");
+        egress_by.push("`permits.exec` (a program reaches anywhere)".to_owned());
+    }
+    let senders = declared_by(subjects, |s| s.declared_egress);
+    if !senders.is_empty() {
+        egress_by.push(format!(
+            "an MCP tool declared an egress on its pin (task {})",
+            senders.join(", ")
+        ));
+    }
+    let mut read_by = Vec::new();
+    if permits.fs.as_ref().is_some_and(|fs| !fs.read.is_empty()) {
+        read_by.push("`permits.fs.read`".to_owned());
+    }
+    let readers = declared_by(subjects, |s| s.declared_private_read);
+    if !readers.is_empty() {
+        read_by.push(format!(
+            "an MCP tool declared a private read on its pin (task {})",
+            readers.join(", ")
+        ));
     }
     format!(
-        "legs here: private read = `permits.fs.read` · untrusted ingress = {} via {} · external egress via {}",
+        "legs here: private read = {} · untrusted ingress = {} via {} · external egress via {}",
+        read_by.join(" and "),
         if sources.is_empty() {
             "an ingress task".to_owned()
         } else {
@@ -659,6 +713,107 @@ mod tests {
             TaintWitness::new(true, Some("fetch_page".to_owned())),
         ];
         (subjects, witnesses)
+    }
+
+    /// An MCP-only boundary: two tools granted, no `fs`, no `net`, no
+    /// `exec`. The tool grant arms ② and nothing in `permits:` can arm ①
+    /// or ③ for effects that happen on the server.
+    fn mcp_only_boundary() -> Permits {
+        Permits {
+            fs: None,
+            net: None,
+            exec: None,
+            tools: Some(vec![
+                "mcp:mail/read_inbox".to_owned(),
+                "mcp:mail/send_email".to_owned(),
+            ]),
+            env: None,
+        }
+    }
+
+    /// inbox (an MCP read, the realized ingress) → send (an MCP call the
+    /// inbox content reaches).
+    fn mcp_pair(read_role: bool, send_role: bool) -> (Vec<TrifectaSubject>, Vec<TaintWitness>) {
+        let inbox = TrifectaSubject::new("inbox".to_owned(), true, false)
+            .with_ingress_source(true)
+            .with_declared_roles(read_role, false);
+        let mut send = TrifectaSubject::new("send".to_owned(), true, false)
+            .with_declared_roles(false, send_role);
+        send.parents.push(0);
+        let witnesses = vec![
+            TaintWitness::clean(),
+            TaintWitness::new(true, Some("inbox".to_owned())),
+        ];
+        (vec![inbox, send], witnesses)
+    }
+
+    /// The roles an operator declared on the pins are legs: a private-read
+    /// tool arms ①, an egress tool arms ③, with no `fs` and no `net` grant.
+    #[test]
+    fn declared_mcp_roles_arm_the_private_read_and_egress_legs() {
+        let permits = mcp_only_boundary();
+        let (undeclared, _) = mcp_pair(false, false);
+        assert_eq!(
+            legs(&permits, &undeclared),
+            (false, true, false),
+            "an undeclared tool arms the ingress leg only"
+        );
+        let (read_only, _) = mcp_pair(true, false);
+        assert_eq!(legs(&permits, &read_only), (true, true, false));
+        let (send_only, _) = mcp_pair(false, true);
+        assert_eq!(legs(&permits, &send_only), (false, true, true));
+        let (both, _) = mcp_pair(true, true);
+        assert_eq!(legs(&permits, &both), (true, true, true));
+    }
+
+    /// The MCP-only exfiltration shape (private mail in, mail out) is the
+    /// trifecta once both roles are declared, and the refusal names the
+    /// declarations as the legs. Undeclared, the judge claims nothing.
+    #[test]
+    fn an_mcp_only_flow_is_refused_once_both_roles_are_declared() {
+        let permits = mcp_only_boundary();
+        let (subjects, witnesses) = mcp_pair(false, false);
+        assert_eq!(
+            trifecta_verdict(&permits, &subjects, &witnesses, &topo(&subjects)),
+            TrifectaVerdict::default(),
+            "no declared role: a leg is absent, nothing is judged"
+        );
+        let (subjects, witnesses) = mcp_pair(true, true);
+        let violations = trifecta_violations(&permits, &subjects, &witnesses, &topo(&subjects));
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        assert_eq!(violations[0].task, "send");
+        assert_eq!(violations[0].source.as_deref(), Some("inbox"));
+        for clause in [
+            "private read = an MCP tool declared a private read on its pin (task `inbox`)",
+            "external egress via an MCP tool declared an egress on its pin (task `send`)",
+        ] {
+            assert!(
+                violations[0].detail.contains(clause),
+                "the refusal names `{clause}`: {}",
+                violations[0].detail
+            );
+        }
+    }
+
+    /// A blocking gate upstream of the MCP read clears the declared-role
+    /// trifecta exactly as it clears the `permits:` one, and is credited.
+    #[test]
+    fn a_dominating_gate_clears_a_declared_role_trifecta() {
+        let permits = mcp_only_boundary();
+        let (mut subjects, mut witnesses) = mcp_pair(true, true);
+        subjects.insert(0, TrifectaSubject::new("ask".to_owned(), false, true));
+        witnesses.insert(0, TaintWitness::clean());
+        subjects[1].parents = vec![0];
+        subjects[2].parents = vec![1];
+        let verdict = trifecta_verdict(&permits, &subjects, &witnesses, &topo(&subjects));
+        assert!(verdict.violations.is_empty(), "{:?}", verdict.violations);
+        assert_eq!(
+            verdict.mitigations,
+            vec![TrifectaMitigation {
+                sink: "send".to_owned(),
+                gate: "ask".to_owned(),
+            }]
+        );
     }
 
     #[test]

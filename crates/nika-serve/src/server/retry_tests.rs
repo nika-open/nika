@@ -1170,6 +1170,26 @@ pub(super) fn journal_of(dir: &Path, job: &Value) -> Option<PathBuf> {
     )
 }
 
+/// Wait until the journal of `job` records that `first` completed. The wait
+/// ends on that record; its bound, one minute, only names a run that never
+/// got there. With a five-second bound the three tests that stop a resident
+/// after its first task refused a push on a loaded machine (a full test run
+/// beside three builds) and passed thirty times out of thirty alone.
+pub(super) async fn until_first_completes(journals: &Path, job: &Value) {
+    let mut seen = Vec::new();
+    for _ in 0..6_000 {
+        seen = journal_of(journals, job).map_or_else(Vec::new, |path| journal_lines(&path));
+        if names_task(&seen, "task_completed", "first") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        names_task(&seen, "task_completed", "first"),
+        "the first task completes within a minute, before the stop: {job} {seen:?}"
+    );
+}
+
 /// A job of [`TWO_TASKS`] that states `resume`, lost by a resident stopped
 /// past its grace once `first` completed: its id and its lost attempt.
 async fn lost_after_its_first_task(world: &TestWorld, journals: &Path) -> (String, Value) {
@@ -1180,18 +1200,7 @@ async fn lost_after_its_first_task(world: &TestWorld, journals: &Path) -> (Strin
     let server = world.start(backend, dropping(OnInterrupted::Off)).await;
     let body = json!({"workflow": "two.nika", "retry": {"on_interrupted": "resume"}});
     let (id, first) = running_job(&server, &body.to_string(), "resume-1").await;
-    let mut seen = Vec::new();
-    for _ in 0..500 {
-        seen = journal_of(journals, &first).map_or_else(Vec::new, |path| journal_lines(&path));
-        if names_task(&seen, "task_completed", "first") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        names_task(&seen, "task_completed", "first"),
-        "the first task completed before the stop: {first} {seen:?}"
-    );
+    until_first_completes(journals, &first).await;
     // The stop outlives its grace while `second` waits: the run is lost.
     let _stopped = server.stop().await;
     let stored = stored_jobs(world);

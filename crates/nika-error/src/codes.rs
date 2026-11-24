@@ -429,7 +429,7 @@ fn run_code_help(num: u16) -> &'static str {
             "The workflow's unavoidable cost floor already exceeds the budget it was launched under (cheapest static path · gates closed · first-try) — raise the budget, trim the workflow, or read the envelope with `nika check`. Under composition the budget is inherited (`min(parent remaining, child declared)` · spec 14 law 6): the parent's remaining at call time was already too small for the child's floor."
         }
         1710 => {
-            "The sandbox policy requires OS confinement this host cannot provide: a `permits:`-declaring workflow with `exec:` children refuses to run unjailed. Install the backend (Debian/Ubuntu: `apt install bubblewrap`), or waive explicitly with `NIKA_SANDBOX=off` — the waiver is attested on the journal's opening frame."
+            "The sandbox policy requires OS confinement this host cannot provide: a `permits:`-declaring workflow with `exec:` children refuses to run unjailed, and an MCP server is not started (`nika mcp approve`, or the `nika run` task that names it). Install the backend (Debian/Ubuntu: `apt install bubblewrap`), or waive explicitly with `NIKA_SANDBOX=off` — the waiver is attested on the journal's opening frame."
         }
         1711 => {
             "`NIKA_SANDBOX` held an unknown word — expected exactly `auto`, `require`, or `off`. A typo'd security knob refuses to start rather than loudly default (fail-closed)."

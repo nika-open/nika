@@ -925,6 +925,12 @@ pub const NIKA_1709: NikaCode = NikaCode {
 /// (`NIKA_SANDBOX=off`, attested on the journal's opening frame). The
 /// launch-refusal class (the NIKA-1708/1709 precedent): run-abort, never
 /// a task failure — no `on_codes` ladder exists for it by design.
+/// The MCP server spawn rides the same switch (ADR-080 Q4.B, 2026-11-24):
+/// a server always runs inside a boundary, so on such a host `auto` and
+/// `require` refuse to start it, with no process started. That refusal
+/// is the spawn's own, not the run's: `nika mcp approve` exits
+/// environment-class, and under `nika run` the task naming the server
+/// fails with this code, never transient.
 pub const NIKA_1710: NikaCode = NikaCode {
     num: 1710,
     category: Category::Runtime,

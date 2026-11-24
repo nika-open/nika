@@ -324,6 +324,8 @@ pub struct Runtime<S, T, H, P, D, C> {
     access_plan: Option<nika_providers::ExecutionAccessPlan>,
     /// Live `nika:inspect` cell (ADR-088). Shared with the dispatcher.
     inspect: Option<Arc<nika_builtin::LiveInspect>>,
+    /// An MCP plane is installed: the run can start MCP servers (the waiver reads it).
+    mcp_plane: bool,
     /// The run's SOURCE identity — sha256 hex over the exact bytes the
     /// operator ran (computed by the composer that read the file; the
     /// runtime never re-reads). Stamped on `workflow_started` so every
@@ -452,6 +454,7 @@ impl<S, T, H, P, D, C> Runtime<S, T, H, P, D, C> {
             cancel: None,
             access_plan: None,
             inspect: None,
+            mcp_plane: false,
         }
     }
 
@@ -462,13 +465,13 @@ impl<S, T, H, P, D, C> Runtime<S, T, H, P, D, C> {
         self
     }
 
-    /// Install the MCP plane on the invoke seam (#1575): from now on an
-    /// `mcp:<server>/<tool>` task resolves against the project registry +
-    /// the approved pins instead of the builtin dispatcher. Installed once;
-    /// a second plane is ignored (the verb keeps the first).
+    /// Install the MCP plane on the invoke seam (#1575): an `mcp:<server>/<tool>` task now
+    /// resolves against the project registry + the approved pins, not the builtin dispatcher.
+    /// Installed once (a second plane is ignored): either way the verb holds a plane.
     #[must_use]
-    pub fn with_mcp_plane(self, plane: McpPlane) -> Self {
+    pub fn with_mcp_plane(mut self, plane: McpPlane) -> Self {
         let _installed = self.invoke.install_mcp_plane(plane);
+        self.mcp_plane = true;
         self
     }
 
@@ -981,7 +984,7 @@ where
             self.source_sha256_lf.as_deref(),
             self.config.sandbox_backend.as_deref(),
             self.config.sandbox_policy.as_deref(),
-            self.config.sandbox_waived,
+            prologue::witnessed_waiver(&self.config, self.mcp_plane, wf),
             self.config.project_root_fingerprint.as_deref(),
             &self.input_origins,
             self.resume_compat.as_deref(),

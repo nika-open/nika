@@ -65,7 +65,7 @@ run starts, and the runtime enforces the same boundary again.
 | `NIKA-SEC-011` | Preview-commit divergence | the bytes about to fire differ from the previewed ones |
 | `NIKA-SEC-012` | Unordered shared writes | two tasks with no order between them write the same target |
 | `NIKA-SEC-015` | Order law | an `exec:` task runs downstream of a network effect |
-| `NIKA-1710` · `NIKA-1711` | OS sandbox | `exec` children and MCP servers run confined (macOS Seatbelt · Linux bubblewrap); a host that cannot confine a `permits:`-declaring workflow with `exec:` children refuses to run it, and a mistyped `NIKA_SANDBOX` refuses to start |
+| `NIKA-1710` · `NIKA-1711` | OS sandbox | `exec` children and MCP servers run confined (macOS Seatbelt · Linux bubblewrap); a host that cannot confine a `permits:`-declaring workflow with `exec:` children refuses to run it, a host that cannot confine an MCP server refuses to start that server, unless `NIKA_SANDBOX=off` waives confinement (attested on the run journal), and a mistyped `NIKA_SANDBOX` refuses to start |
 | `NIKA-MCP-003` · `NIKA-MCP-004` · `NIKA-MCP-005` · `NIKA-MCP-006` | MCP definition pins | `nika mcp approve <server>` pins each tool's definition ([docs/ops/mcp-servers.md](docs/ops/mcp-servers.md)); before any tool call, a run refuses a server whose definitions drifted from its pins, a pin lockfile it cannot trust, a server the OS sandbox cannot confine and a tool that was never approved |
 
 Without a code `nika explain` resolves:

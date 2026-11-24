@@ -93,6 +93,18 @@ pub fn sandbox_policy_from_env() -> Result<SandboxPolicy, SandboxPolicyParseErro
     parse_policy_env(raw.as_deref())
 }
 
+/// The verdict one MCP server spawn rides — the exec composition's judge,
+/// applied at the spawn site (`nika-mcp`) and by the opening frame's
+/// waiver attestation. A configured server always runs inside a boundary
+/// (the project tree · its registry `network` arm), so it is judged as an
+/// `exec:` child under declared `permits:`: with no backend, `auto` and
+/// `require` refuse it (NIKA-1710) and only the explicit `off` waiver
+/// starts it unconfined.
+#[must_use]
+pub fn mcp_server_verdict(policy: SandboxPolicy, confined: bool) -> SandboxVerdict {
+    policy.judge(confined, true)
+}
+
 /// The typed launch refusal when confinement is required and the platform
 /// answers noop (#889 · NIKA-1710 — the NIKA-1708/1709 launch-refusal
 /// precedent: run-abort BEFORE the prologue, zero events, zero spend, no
@@ -202,6 +214,36 @@ mod tests {
             SandboxPolicy::Off.judge(false, true),
             SandboxVerdict::Waived,
             "only the explicit, journalled off posture reaches Noop"
+        );
+    }
+
+    /// An MCP server always runs inside a boundary (the project tree · its
+    /// registry `network` arm): with no backend, `auto` refuses it as it
+    /// refuses an `exec:` child under `permits:`, `require` refuses it, and
+    /// only the explicit `off` waiver starts it. A backend confines it under
+    /// every policy.
+    #[test]
+    fn an_mcp_server_is_judged_as_a_declared_boundary() {
+        for policy in [
+            SandboxPolicy::Auto,
+            SandboxPolicy::Require,
+            SandboxPolicy::Off,
+        ] {
+            assert_eq!(mcp_server_verdict(policy, true), SandboxVerdict::Confined);
+        }
+        assert_eq!(
+            mcp_server_verdict(SandboxPolicy::Auto, false),
+            SandboxVerdict::Refused,
+            "the default arm never starts an unconfined server"
+        );
+        assert_eq!(
+            mcp_server_verdict(SandboxPolicy::Require, false),
+            SandboxVerdict::Refused
+        );
+        assert_eq!(
+            mcp_server_verdict(SandboxPolicy::Off, false),
+            SandboxVerdict::Waived,
+            "only the explicit waiver starts it unconfined"
         );
     }
 

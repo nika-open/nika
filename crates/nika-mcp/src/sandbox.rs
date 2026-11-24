@@ -17,6 +17,13 @@
 //!   Linux, the deliberate loud
 //!   [`NoopSandbox`](nika_kernel::command_sandbox::NoopSandbox)
 //!   elsewhere (named by the note on every connect — never silent).
+//! - **Policy** — the ONE knob the exec composition reads (`NIKA_SANDBOX`
+//!   · #889), judged before any process starts ([`admit_spawn`]). A server
+//!   always runs inside a boundary, so it is judged as an `exec:` child
+//!   under `permits:`: with no backend, `auto` (the default) and `require`
+//!   refuse it (NIKA-1710) and only the explicit `off` waiver starts it
+//!   unconfined, named on every connect; a mistyped knob refuses every
+//!   spawn (NIKA-1711).
 //! - **Filesystem** — [`McpServerConfig::sandbox_spec`] anchors the
 //!   boundary at the project dir (the same boundary the exec sandbox
 //!   computes for the run root): read + write confined to the project tree,
@@ -42,8 +49,10 @@ use std::sync::Arc;
 
 use nika_kernel::command_sandbox::CommandSandbox;
 use nika_kernel::process::{NetPolicy, SandboxSpec};
+use nika_runtime::sandbox_select::{SandboxPolicy, SandboxVerdict, mcp_server_verdict};
 
 use crate::client::McpServerConfig;
+use crate::pin::PinError;
 
 /// The OS command sandbox for this platform — delegates to the ONE
 /// selection every composition root rides
@@ -59,12 +68,36 @@ pub fn platform_sandbox() -> Arc<dyn CommandSandbox> {
     nika_runtime::sandbox_select::select_command_sandbox().into_sandbox()
 }
 
+/// The policy gate of one spawn, BEFORE any process starts: the backend
+/// confines the server, or the operator waived confinement
+/// (`NIKA_SANDBOX=off`) on a host with none; otherwise the typed NIKA-1710
+/// refusal ([`mcp_server_verdict`] · the exec composition's judge). The
+/// `noop` id is the one unconfined backend (`SandboxDecision::is_confined`).
+pub(crate) fn admit_spawn(
+    server: &str,
+    backend: &str,
+    policy: SandboxPolicy,
+) -> Result<(), PinError> {
+    match mcp_server_verdict(policy, backend != "noop") {
+        SandboxVerdict::Confined | SandboxVerdict::Waived => Ok(()),
+        // A server always carries its boundary, so the permit-less
+        // best-effort cell is never reached: refused if it ever were.
+        SandboxVerdict::Refused | SandboxVerdict::PermitlessBestEffort => {
+            Err(PinError::SandboxRequired {
+                server: server.to_owned(),
+                policy,
+            })
+        }
+    }
+}
+
 /// The one-line sandbox mode note printed on every connect/verify —
 /// `sandboxed (seatbelt · net deny)` style. The allowlist arm names its
 /// enforcement: the declared hosts, through the loopback egress proxy the
-/// spawn starts. A `noop` backend is the deliberate unconfined choice and
-/// the note SCREAMS it — "unconfined" is always a visible decision, never
-/// an accident.
+/// spawn starts. A `noop` backend starts a server only under the explicit
+/// `NIKA_SANDBOX=off` waiver ([`admit_spawn`]) and the note SCREAMS it,
+/// naming the waiver — "unconfined" is always a visible decision, never an
+/// accident.
 pub(crate) fn sandbox_note(backend: &str, net: &NetPolicy) -> String {
     let net_text = match net {
         NetPolicy::Deny => "net deny".to_owned(),
@@ -79,7 +112,9 @@ pub(crate) fn sandbox_note(backend: &str, net: &NetPolicy) -> String {
     };
     if backend == "noop" {
         format!(
-            "UNSANDBOXED (no seatbelt/landlock on this host — the server runs unconfined · {net_text})"
+            "UNSANDBOXED (no seatbelt/landlock on this host — the server runs unconfined under \
+             the {}=off waiver · {net_text})",
+            SandboxPolicy::ENV_VAR
         )
     } else {
         format!("sandboxed ({backend} · {net_text})")
@@ -154,12 +189,14 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    use nika_kernel::command_sandbox::CommandSandboxError;
+    use nika_kernel::command_sandbox::{CommandSandboxError, NoopSandbox};
     use nika_kernel::process::{EgressAllowlist, ShellCommand};
+    use nika_runtime::sandbox_select::{SandboxPolicy, SandboxRefusal, parse_policy_env};
 
     use super::*;
     use crate::client::{StdioMcpClient, ToolsListDyn};
     use crate::pin::PinError;
+    use crate::session::{McpConnectDyn, StdioConnector};
 
     /// The shell's own bookkeeping vars — set by `sh` itself at startup,
     /// never inherited (carved out of the scrub assertion).
@@ -600,11 +637,183 @@ printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ping","descri
                 && !allow.contains("confined as allow"),
             "the note names the proxy that enforces the hosts: {allow}"
         );
-        let loud = sandbox_note("noop", &NetPolicy::Deny);
-        assert!(
-            loud.starts_with("UNSANDBOXED"),
-            "the deliberate unconfined choice screams: {loud}"
+        assert_eq!(
+            sandbox_note("noop", &NetPolicy::Deny),
+            WAIVER_NOTE,
+            "the deliberate unconfined choice screams and names its waiver"
         );
+    }
+
+    /// What a server started unconfined under `NIKA_SANDBOX=off` says on
+    /// every connect: the approve receipt and the run's opening call.
+    const WAIVER_NOTE: &str = "UNSANDBOXED (no seatbelt/landlock on this host — the server runs \
+                               unconfined under the NIKA_SANDBOX=off waiver · net deny)";
+
+    /// The per-OS first exit of the no-backend refusal (the independent
+    /// oracle: restated from the contract, not read from the code).
+    fn host_fix() -> &'static str {
+        if cfg!(target_os = "linux") {
+            "install bubblewrap (apt install bubblewrap) and retry"
+        } else if cfg!(target_os = "macos") {
+            "macOS ships sandbox-exec with the OS, so a missing launcher means a broken host"
+        } else {
+            "this platform ships without an OS sandbox backend"
+        }
+    }
+
+    /// The exact NIKA-1710 refusal for the `mock` server under `policy`.
+    fn required_text(policy: &str) -> String {
+        format!(
+            "[NIKA-1710] MCP server `mock` was NOT started: no OS sandbox backend on this host \
+             can confine it to the project tree, and NIKA_SANDBOX={policy} refuses to run it \
+             unconfined\n  {} · or set NIKA_SANDBOX=off to start it unconfined: the waiver is \
+             named on every connect and attested on the run journal",
+            host_fix()
+        )
+    }
+
+    /// A client over the mock server on a host with NO backend: the
+    /// deliberate `NoopSandbox` the one selection answers there.
+    fn no_backend_client(dir: &Path, policy: SandboxPolicy) -> StdioMcpClient {
+        StdioMcpClient::new(&mock_server(dir))
+            .with_project_dir(dir.to_path_buf())
+            .with_sandbox(Arc::new(NoopSandbox))
+            .with_sandbox_policy(policy)
+    }
+
+    /// The spawn the server would have made left no trace.
+    fn never_started(dir: &Path) -> bool {
+        !dir.join("env.txt").exists() && !dir.join("argv.txt").exists()
+    }
+
+    /// The gap this closes: with no backend, `auto` (the default) and
+    /// `require` refuse the spawn with the `exec` verb's code, NIKA-1710,
+    /// and no process starts. The same door `nika mcp approve` rides.
+    #[cfg(unix)]
+    #[test]
+    fn no_backend_under_auto_or_require_is_nika_1710_and_no_process_starts() {
+        for policy in [SandboxPolicy::Auto, SandboxPolicy::Require] {
+            let dir = tmp(&format!("no-backend-{}", policy.as_str()));
+            let err = no_backend_client(&dir, policy)
+                .tools_list()
+                .expect_err("no backend, no waiver: refused");
+            assert_eq!(
+                err,
+                PinError::SandboxRequired {
+                    server: "mock".to_owned(),
+                    policy,
+                }
+            );
+            assert_eq!(err.code(), Some("NIKA-1710"));
+            assert_eq!(err.to_string(), required_text(policy.as_str()));
+            // The exec verb's refusal family: the same code leads its text.
+            let exec = SandboxRefusal::for_policy(policy, true).to_string();
+            assert!(exec.starts_with("NIKA-1710 · "), "{exec}");
+            assert!(never_started(&dir), "the server was NEVER started");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// The runtime session refuses the same way: the connector the run's
+    /// dispatch rides (`McpToolPlane::lazy`) starts nothing either.
+    #[cfg(unix)]
+    #[test]
+    fn the_run_connector_refuses_with_no_backend_under_auto() {
+        let dir = tmp("connector-auto");
+        let connector = StdioConnector::new(dir.clone())
+            .with_sandbox(Arc::new(NoopSandbox))
+            .with_sandbox_policy(SandboxPolicy::Auto);
+        let Err(err) = connector.connect(&mock_server(&dir)) else {
+            panic!("no backend under auto must not connect");
+        };
+        assert_eq!(err.code(), Some("NIKA-1710"));
+        assert_eq!(err.to_string(), required_text("auto"));
+        assert!(never_started(&dir), "the server was NEVER started");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The explicit waiver: `off` starts the server unconfined as before,
+    /// and the note names the waiver on the approve receipt and on the
+    /// session's unconfined receipt (the run's warning lane).
+    #[cfg(unix)]
+    #[test]
+    fn no_backend_under_off_starts_unconfined_and_names_the_waiver() {
+        let dir = tmp("no-backend-off");
+        let client = no_backend_client(&dir, SandboxPolicy::Off);
+        assert_eq!(client.sandbox_note(), WAIVER_NOTE);
+        let tools = client.tools_list().expect("the waiver starts the server");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "ping");
+        assert!(dir.join("env.txt").exists(), "the server ran");
+        assert_eq!(client.confinement().as_deref(), Some(WAIVER_NOTE));
+        let connector = StdioConnector::new(dir.clone())
+            .with_sandbox(Arc::new(NoopSandbox))
+            .with_sandbox_policy(SandboxPolicy::Off);
+        let Ok(session) = connector.connect(&mock_server(&dir)) else {
+            panic!("the waiver starts the server");
+        };
+        assert_eq!(session.unconfined_note().as_deref(), Some(WAIVER_NOTE));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A present backend is unchanged under every policy: the CONFINED
+    /// command spawns and no unconfined receipt is raised.
+    #[cfg(unix)]
+    #[test]
+    fn a_present_backend_spawns_confined_under_every_policy() {
+        for policy in [
+            SandboxPolicy::Auto,
+            SandboxPolicy::Require,
+            SandboxPolicy::Off,
+        ] {
+            let dir = tmp(&format!("backend-{}", policy.as_str()));
+            let rec = Arc::new(RecordingSandbox::default());
+            let client = StdioMcpClient::new(&mock_server(&dir))
+                .with_project_dir(dir.clone())
+                .with_sandbox(rec.clone())
+                .with_sandbox_policy(policy);
+            assert_eq!(client.sandbox_note(), "sandboxed (recording · net deny)");
+            let tools = client.tools_list().expect("the confined server answers");
+            assert_eq!(tools.len(), 1);
+            let argv = std::fs::read_to_string(dir.join("argv.txt")).expect("argv dump");
+            assert!(argv.contains("--sbx-confined"), "{argv}");
+            let connector = StdioConnector::new(dir.clone())
+                .with_sandbox(rec)
+                .with_sandbox_policy(policy);
+            let Ok(session) = connector.connect(&mock_server(&dir)) else {
+                panic!("a confined server connects under {}", policy.as_str());
+            };
+            assert_eq!(session.unconfined_note(), None);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// A mistyped knob refuses every spawn, confined or not (NIKA-1711 ·
+    /// the knob's own refusal): a typo never falls back to `auto`.
+    #[cfg(unix)]
+    #[test]
+    fn a_mistyped_policy_is_nika_1711_and_no_process_starts() {
+        let typo = parse_policy_env(Some("requrie"));
+        let backends: [Arc<dyn CommandSandbox>; 2] =
+            [Arc::new(NoopSandbox), Arc::new(RecordingSandbox::default())];
+        for sandbox in backends {
+            let dir = tmp(&format!("typo-{}", sandbox.backend()));
+            let connector = StdioConnector::new(dir.clone())
+                .with_sandbox(sandbox)
+                .with_policy_read(typo.clone());
+            let Err(err) = connector.connect(&mock_server(&dir)) else {
+                panic!("a mistyped knob must not connect");
+            };
+            assert_eq!(err.code(), Some("NIKA-1711"));
+            assert_eq!(
+                err.to_string(),
+                "[NIKA-1711] MCP server `mock` was NOT started: invalid NIKA_SANDBOX value \
+                 \"requrie\" — expected auto | require | off\n  a mistyped security knob \
+                 refuses rather than defaults: fix the value, then retry"
+            );
+            assert!(never_started(&dir), "the server was NEVER started");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

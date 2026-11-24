@@ -46,10 +46,12 @@ pub struct RuntimeConfig {
     /// the confinement mode reads WITH its posture; `None` = unrecorded
     /// (older composers), never guessed.
     pub sandbox_policy: Option<String>,
-    /// True when this run proceeds UNCONFINED with `permits:` declared
-    /// under `NIKA_SANDBOX=off` (#889) — the witnessed waiver: journaled
-    /// on `workflow_started` so a sealed trace SHOWS the operator chose
-    /// it. `false` in every other posture (nothing was waived).
+    /// True when this run's `exec:` children proceed UNCONFINED with
+    /// `permits:` declared under `NIKA_SANDBOX=off` (#889) — the witnessed
+    /// waiver: journaled on `workflow_started` so a sealed trace SHOWS the
+    /// operator chose it. `false` in every other posture. The opening frame
+    /// also attests it for an MCP server the run can start unconfined, read
+    /// from `sandbox_backend` + `sandbox_policy` (the prologue's own half).
     pub sandbox_waived: bool,
     /// The fingerprint of the project root this run belongs to (blake3 of
     /// the canonical root path · [`project_root_fingerprint`]): stamped on

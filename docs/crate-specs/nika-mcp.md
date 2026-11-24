@@ -141,9 +141,14 @@ invokes (`invoke: { tool: "mcp:<server>/<tool>" }`). The operator guide is
 - **`session`** — `StdioSession`: spawn CONFINED (the exec verb's
   `CommandSandbox` · fs = the project tree · net = the entry's arm · env =
   the runner floor), handshake, bounded request/reply, SIGKILL on drop
-  (INV-011). The child's **stderr tail** (4 KiB) and the confinement note
-  ride every transport failure (#1376 · a launcher dying under the sandbox
-  reads its own cause). Two seams: `McpConnectDyn` (entry → session) and
+  (INV-011). Before any process starts, `StdioConnector` judges the spawn
+  under the exec verb's `NIKA_SANDBOX` policy (read once, parsed by
+  `nika_runtime::sandbox_select`, judged by `mcp_server_verdict`): with no
+  backend, `auto` and `require` refuse (`NIKA-1710`), `off` starts the
+  server unconfined and its note names the waiver; a mistyped knob refuses
+  every spawn (`NIKA-1711`). The child's **stderr tail** (4 KiB) and the
+  confinement note ride every transport failure (#1376 · a launcher dying
+  under the sandbox reads its own cause). Two seams: `McpConnectDyn` (entry → session) and
   `McpSessionDyn` (`tools_list` · `tools_call` → `CallOutcome` = text
   blocks · `structuredContent` · `isError` · `tools_call_until`, the same
   call watching a stop, `CallOutcome::stopped` when the run stopped it).
@@ -186,8 +191,9 @@ invokes (`invoke: { tool: "mcp:<server>/<tool>" }`). The operator guide is
 Codes: `NIKA-MCP-001` (not reachable · not configured) and `NIKA-MCP-002`
 (the tool call failed) are the spec's; `003` drift · `004` corrupt lockfile
 · `005` sandbox refusal · `006` unapproved are the pin family's own, each
-naming its remedy in the text. A stopped call fails the spec's
-`NIKA-CANCEL-001`.
+naming its remedy in the text. A spawn the sandbox policy refuses carries
+the exec verb's own codes, `NIKA-1710` (no backend) and `NIKA-1711` (a
+mistyped knob). A stopped call fails the spec's `NIKA-CANCEL-001`.
 
 ---
 

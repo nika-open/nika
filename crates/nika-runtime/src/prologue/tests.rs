@@ -209,6 +209,45 @@ fn the_waiver_is_attested_on_the_opening_frame() {
     );
 }
 
+/// The MCP half of the witnessed waiver: a workflow that names an `mcp:`
+/// tool (an `invoke` target or a granted agent `tools:` entry) under a
+/// recorded `off` posture on a host with no backend can start a server
+/// unconfined, so the waiver is attested; every other cell claims nothing.
+#[test]
+fn an_mcp_server_the_run_can_start_unconfined_is_a_waiver() {
+    let parse = |yaml: &str| {
+        nika_schema::parse(
+            yaml,
+            nika_schema::FileId::new(0),
+            nika_schema::ParseMode::Strict,
+        )
+        .expect("fixture parses")
+    };
+    let invoke = parse("nika: w\ntasks:\n  a:\n    invoke: { tool: \"mcp:s/ping\" }\n");
+    let agent = parse(
+        "nika: w\nmodel: mock/echo\ntasks:\n  a:\n    agent: { prompt: \"go\", tools: [\"mcp:s/*\"] }\n",
+    );
+    let denied = parse(
+        "nika: w\nmodel: mock/echo\ntasks:\n  a:\n    agent: { prompt: \"go\", tools: [\"!mcp:s/*\"] }\n",
+    );
+    let none = parse("nika: w\ntasks:\n  a:\n    exec: { command: [\"echo\", \"x\"] }\n");
+    for wf in [&invoke, &agent] {
+        assert!(super::mcp_server_waived(wf, Some("noop"), Some("off")));
+        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("auto")));
+        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("require")));
+        assert!(!super::mcp_server_waived(wf, Some("seatbelt"), Some("off")));
+        assert!(!super::mcp_server_waived(wf, None, Some("off")));
+        assert!(!super::mcp_server_waived(wf, Some("noop"), None));
+        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("requrie")));
+    }
+    for wf in [&denied, &none] {
+        assert!(
+            !super::mcp_server_waived(wf, Some("noop"), Some("off")),
+            "a run that names no MCP tool starts no server"
+        );
+    }
+}
+
 /// F-P13 (NEP-0014 law 2) — the boot manifest journals the origin of
 /// every input the run binds (`inputs` = one JSON map field), and a run
 /// without origins carries NO claim (absent is honest).

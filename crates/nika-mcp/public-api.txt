@@ -198,6 +198,7 @@ pub fn nika_mcp::client::StdioMcpClient::new(config: &nika_mcp::client::McpServe
 pub fn nika_mcp::client::StdioMcpClient::sandbox_note(&self) -> alloc::string::String
 pub fn nika_mcp::client::StdioMcpClient::with_project_dir(self, project_dir: impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn nika_mcp::client::StdioMcpClient::with_sandbox(self, sandbox: alloc::sync::Arc<dyn nika_kernel_core::io::command_sandbox::CommandSandbox>) -> Self
+pub fn nika_mcp::client::StdioMcpClient::with_sandbox_policy(self, policy: nika_types::sandbox_policy::SandboxPolicy) -> Self
 pub fn nika_mcp::client::StdioMcpClient::with_timeout(self, timeout: core::time::Duration) -> Self
 impl nika_mcp::client::ToolsListDyn for nika_mcp::client::StdioMcpClient
 pub fn nika_mcp::client::StdioMcpClient::confinement(&self) -> core::option::Option<alloc::string::String>
@@ -365,6 +366,12 @@ pub nika_mcp::pin::PinError::Malformed::why: alloc::string::String
 pub nika_mcp::pin::PinError::Sandbox
 pub nika_mcp::pin::PinError::Sandbox::server: alloc::string::String
 pub nika_mcp::pin::PinError::Sandbox::why: alloc::string::String
+pub nika_mcp::pin::PinError::SandboxPolicyInvalid
+pub nika_mcp::pin::PinError::SandboxPolicyInvalid::error: nika_types::sandbox_policy::SandboxPolicyParseError
+pub nika_mcp::pin::PinError::SandboxPolicyInvalid::server: alloc::string::String
+pub nika_mcp::pin::PinError::SandboxRequired
+pub nika_mcp::pin::PinError::SandboxRequired::policy: nika_types::sandbox_policy::SandboxPolicy
+pub nika_mcp::pin::PinError::SandboxRequired::server: alloc::string::String
 pub nika_mcp::pin::PinError::Transport
 pub nika_mcp::pin::PinError::Transport::server: alloc::string::String
 pub nika_mcp::pin::PinError::Transport::why: alloc::string::String
@@ -712,6 +719,7 @@ pub fn nika_mcp::session::StdioConnector::new(project_dir: impl core::convert::I
 pub fn nika_mcp::session::StdioConnector::sandbox_note(&self, config: &nika_mcp::client::McpServerConfig) -> alloc::string::String
 pub fn nika_mcp::session::StdioConnector::with_call_timeout(self, timeout: core::time::Duration) -> Self
 pub fn nika_mcp::session::StdioConnector::with_sandbox(self, sandbox: alloc::sync::Arc<dyn nika_kernel_core::io::command_sandbox::CommandSandbox>) -> Self
+pub fn nika_mcp::session::StdioConnector::with_sandbox_policy(self, policy: nika_types::sandbox_policy::SandboxPolicy) -> Self
 pub fn nika_mcp::session::StdioConnector::with_timeout(self, timeout: core::time::Duration) -> Self
 impl nika_mcp::session::McpConnectDyn for nika_mcp::session::StdioConnector
 pub fn nika_mcp::session::StdioConnector::connect(&self, config: &nika_mcp::client::McpServerConfig) -> core::result::Result<alloc::boxed::Box<dyn nika_mcp::session::McpSessionDyn>, nika_mcp::pin::PinError>
@@ -743,7 +751,7 @@ impl<T> typenum::type_operators::Same for nika_mcp::session::StdioConnector
 pub type nika_mcp::session::StdioConnector::Output = T
 pub struct nika_mcp::session::StdioSession
 impl nika_mcp::session::StdioSession
-pub fn nika_mcp::session::StdioSession::open(config: &nika_mcp::client::McpServerConfig, sandbox: &alloc::sync::Arc<dyn nika_kernel_core::io::command_sandbox::CommandSandbox>, project_dir: &std::path::Path, timeout: core::time::Duration, call_timeout: core::time::Duration) -> core::result::Result<Self, nika_mcp::pin::PinError>
+pub fn nika_mcp::session::StdioSession::open(config: &nika_mcp::client::McpServerConfig, sandbox: &alloc::sync::Arc<dyn nika_kernel_core::io::command_sandbox::CommandSandbox>, policy: nika_types::sandbox_policy::SandboxPolicy, project_dir: &std::path::Path, timeout: core::time::Duration, call_timeout: core::time::Duration) -> core::result::Result<Self, nika_mcp::pin::PinError>
 impl nika_mcp::session::McpSessionDyn for nika_mcp::session::StdioSession
 pub fn nika_mcp::session::StdioSession::tools_call(&mut self, tool: &str, arguments: &serde_json::value::Value) -> core::result::Result<nika_mcp::session::CallOutcome, nika_mcp::pin::PinError>
 pub fn nika_mcp::session::StdioSession::tools_call_until(&mut self, tool: &str, arguments: &serde_json::value::Value, stop: &nika_types::cancel::CancelCtx) -> core::result::Result<nika_mcp::session::CallOutcome, nika_mcp::pin::PinError>

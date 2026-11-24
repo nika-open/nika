@@ -122,9 +122,11 @@ pub(crate) fn permits_banner(wf: &RawWorkflow) -> &'static str {
 /// #889 — the policy posture + the witnessed waiver: `sandbox_policy`
 /// names the knob the run was judged under (every composed run — the
 /// `sandbox:` backend field's sibling, always attested); `sandbox_waived`
-/// rides ONLY when the run proceeds unconfined with `permits:` declared
-/// under `NIKA_SANDBOX=off` — a sealed trace SHOWS the choice. Additive:
-/// older readers ignore them, newer say "unrecorded", never guess.
+/// rides ONLY when the run proceeds unconfined under `NIKA_SANDBOX=off`
+/// with a boundary to void — `exec:` children under declared `permits:`,
+/// or an MCP server the run can start ([`witnessed_waiver`]) — a sealed
+/// trace SHOWS the choice. Additive: older readers ignore them, newer say
+/// "unrecorded", never guess.
 pub(crate) fn sandbox_policy_fields(
     policy: Option<&str>,
     waived: bool,
@@ -137,6 +139,55 @@ pub(crate) fn sandbox_policy_fields(
         fields.push(("sandbox_waived", s("true")));
     }
     fields
+}
+
+/// The witnessed waiver the opening frame carries (#889): the exec
+/// composition's own verdict, or an MCP server this run can start
+/// unconfined — an installed MCP plane (`mcp_plane`) and
+/// [`mcp_server_waived`] over the recorded posture.
+pub(crate) fn witnessed_waiver(
+    config: &crate::RuntimeConfig,
+    mcp_plane: bool,
+    wf: &RawWorkflow,
+) -> bool {
+    config.sandbox_waived
+        || (mcp_plane
+            && mcp_server_waived(
+                wf,
+                config.sandbox_backend.as_deref(),
+                config.sandbox_policy.as_deref(),
+            ))
+}
+
+/// The MCP half of the waiver: the workflow names an `mcp:` tool (an
+/// `invoke` target or a granted agent `tools:` entry) and the recorded
+/// posture lets its server start unconfined — `NIKA_SANDBOX=off` on a host
+/// whose backend is the deliberate `noop` (the spawn site's own judge,
+/// [`mcp_server_verdict`](crate::sandbox_select::mcp_server_verdict)). An
+/// unrecorded or unparsable posture claims nothing.
+pub(crate) fn mcp_server_waived(
+    wf: &RawWorkflow,
+    sandbox_backend: Option<&str>,
+    sandbox_policy: Option<&str>,
+) -> bool {
+    use crate::sandbox_select::{SandboxPolicy, SandboxVerdict, mcp_server_verdict};
+    let (Some(backend), Some(Ok(policy))) = (
+        sandbox_backend,
+        sandbox_policy.map(str::parse::<SandboxPolicy>),
+    ) else {
+        return false;
+    };
+    // `SandboxDecision::is_confined`: only the deliberate `noop` confines nothing.
+    mcp_server_verdict(policy, backend != "noop") == SandboxVerdict::Waived
+        && wf.tasks.iter().any(|task| match &task.value.action {
+            nika_schema::raw::RawAction::Invoke(invoke) => invoke
+                .tool()
+                .is_some_and(|tool| tool.value.starts_with("mcp:")),
+            nika_schema::raw::RawAction::Agent(agent) => {
+                (agent.tools.iter()).any(|grant| grant.value.starts_with("mcp:"))
+            }
+            _ => false,
+        })
 }
 
 /// The NEP-0014 boot-manifest fields (F-P13 · F-P21) — additive, the

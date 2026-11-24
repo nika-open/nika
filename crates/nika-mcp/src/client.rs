@@ -49,6 +49,7 @@ use std::time::Duration;
 
 use nika_kernel::command_sandbox::CommandSandbox;
 use nika_kernel::process::{EgressAllowlist, NetPolicy};
+use nika_runtime::sandbox_select::SandboxPolicy;
 use serde::Deserialize;
 
 use crate::pin::{
@@ -591,7 +592,8 @@ pub struct StdioMcpClient {
 impl StdioMcpClient {
     /// A client over the config's stdio transport — confined by the
     /// platform's OS sandbox ([`crate::sandbox::platform_sandbox`]) anchored
-    /// at the current directory (the `.nika/` convention's project root).
+    /// at the current directory (the `.nika/` convention's project root),
+    /// judged under the `NIKA_SANDBOX` policy of the process environment.
     #[must_use]
     pub fn new(config: &McpServerConfig) -> Self {
         Self {
@@ -612,6 +614,14 @@ impl StdioMcpClient {
     #[must_use]
     pub fn with_sandbox(mut self, sandbox: Arc<dyn CommandSandbox>) -> Self {
         self.connector = self.connector.with_sandbox(sandbox);
+        self
+    }
+
+    /// Override the `NIKA_SANDBOX` policy the spawn is judged under — the
+    /// seam for tests and for a wiring layer that already read the knob.
+    #[must_use]
+    pub fn with_sandbox_policy(mut self, policy: SandboxPolicy) -> Self {
+        self.connector = self.connector.with_sandbox_policy(policy);
         self
     }
 

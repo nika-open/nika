@@ -39,9 +39,107 @@ secret-marker scope and task `with:` bindings as the approval content hash.
 Thus headless CLI consumers can review the resolved question before answering;
 the resumed decision attests the same question. Secret references remain
 markers, not resolved values. An unresolved binding retains the existing raw
-argument fallback and does not relax execution errors. The wire fields and
-approval content recipe are unchanged. This does not add a remote approval
-payload to Serve's conservative service projection.
+argument fallback and does not relax execution errors. That rendering changed
+neither the wire fields nor the approval content recipe, which the next
+section specifies. This does not add a remote approval payload to Serve's
+conservative service projection.
+
+
+## Approval content recipe
+
+The ticket of a `nika:prompt` gate is content-bound (NEP-0013 law 1): its
+`content_hash`, journaled as `approval_shown_hash` on the pause frame and as
+`shown_hash` on `approval_decided`, is the BLAKE3 hash of the JCS form
+(RFC 8785) of this value. This is recipe 3.
+
+```json
+{ "v": 3,
+  "approval": {
+    "action":     { "tool": "nika:prompt", "verb": "invoke" },
+    "choices":    [],
+    "definition": { "def_hash": "<hex>", "group": null, "lift": [], "returns": null },
+    "effects":    ["tools"],
+    "gated": [
+      { "classes":    ["tools", "write"],
+        "definition": { "def_hash": "<hex>", "group": null, "lift": [], "returns": null },
+        "task":       "<task id>" }
+    ],
+    "message": "<the question as rendered>",
+    "mode":    "confirm",
+    "step":    "<gate id>" } }
+```
+
+- `message`, `mode` and `choices` are the question as rendered over the
+  secret-marker scope (the section above); `effects` are the gate's own effect
+  classes.
+- `definition` is the gate as written.
+- `gated` holds the gate's closure, sorted by task id: every task that reads
+  the gate or runs after it, directly or through other tasks, whether or not it
+  carries an effect class. A task enters through a `with:` reference, an
+  `after:` edge, a `tasks.<id>` read, or the fold of a group a closure task
+  belongs to. The closure stops at the next `nika:prompt` gate, which is
+  included and not crossed: that gate's own answer owns what follows it.
+  `classes` are the task's sorted effect classes (empty for an `infer`, an
+  `agent` or a child workflow call).
+- A `definition` names a task by `def_hash`, the definition hash its settled
+  success journals on `task_completed` (ADR-099), beside the three authored
+  fields that hash leaves out: `group`, `lift` (each door as `because`, `from`,
+  `law`) and `returns`. `def_hash` covers the behavior-bearing fields as
+  written (the verb body, `with:`, `when:`, `after:`, `for_each:` and its
+  knobs, `retry:`, `on_error:`, `timeout:`, `extract:`); for an `infer` or
+  `agent` task the effective default model, the access pin and the access
+  lane; for an agent the texts of its skills; for an `invoke: workflow:` call
+  the composer's closure digest of the child (the source text of the child and
+  of every workflow below it). It reads no span and no value the run
+  produces: a comment, a layout change or a key reordering keeps it, while any
+  byte of a child workflow file changes it.
+- A `definition` is `null` when the engine holds no identity for the task: a
+  form this recipe does not know, an agent skill whose text the composer did
+  not hand over, or a child call without a closure digest (an embedder that
+  never called `with_child_closures`, a `registry:` target, a child that does
+  not resolve or parse).
+
+A resumed run recomputes this value from the files it executes. A paused
+answer is admitted in this order: the ticket's run scope
+(`approval.scope_mismatch`), its content hash (`approval.content_mismatch`),
+its expiry (an expired ticket asks again and binds nothing), the identity of
+the closure (`approval.content_unhashable` when a `definition` is `null`: the
+gate may ask, a paused answer may not bind), then single use
+(`approval.replayed`, `approval.claim_unavailable`). Each refusal fails the
+gate under `NIKA-SEC-010` and journals one engine `approval_decided` deny whose
+`digest` is the paused ticket's; no task that waits on the gate's success
+starts.
+
+The ticket digest keeps its own recipe (`"v": 2` over the mint fields), so the
+`approval_digest` a pause frame journaled stays the digest its refusal signs.
+
+Recipe 2 bound the question and, for each effectful closure task, `classes`
+and `task` only. A pause frame records no recipe version, so a ticket minted
+under recipe 2 cannot be told from an answer over edited content: its answer
+halts with `approval.content_mismatch`. Resuming that run without an answer
+asks again under a recipe 3 ticket.
+
+What the ticket does not bind:
+
+- A value a closure task reads from outside the closure's definitions, unless
+  the question renders it: a constant, an input (supplied or defaulted), the
+  store reference behind a `secrets.<name>`, the run's facts, the output of a
+  task outside the closure (one a gated task reads included), and the
+  membership of a group a closure task folds when the member sits outside the
+  closure.
+- Workflow-level fields beside the default model: `permits:`, `types:`,
+  `outputs:`.
+- Below a child call, anything but workflow sources: the closure digest folds
+  the text of the child workflows, not the skill texts their agents carry.
+- Whatever an effect reads when it runs (a file a command opens, a server's
+  state).
+- A decision already journaled. A resume serves a decided gate from its
+  journal and consults no ticket for it (a resume that waives chain
+  verification asks again instead), so a task behind that gate that is edited
+  afterwards runs again under the journaled decision.
+- An answer given to a gate that holds no paused ticket (`--answer` on a fresh
+  run, or for a gate the resumed trace never asked): it binds to the workflow
+  it is supplied with.
 
 
 ## 1 · Role

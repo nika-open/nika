@@ -54,7 +54,6 @@ fn started_fields_full(
     .expect("fixture parses");
     let mut stamper = DeterministicStamper::new();
     let mut sink = VecSink::new();
-    let book = crate::approval::ApprovalBook::new();
     let opening_stamp = stamper.next();
     emit_prologue(
         &wf,
@@ -73,7 +72,6 @@ fn started_fields_full(
         model_override,
         Vec::new(),
         None,
-        &book,
         opening_stamp,
         None,
         &mut stamper,
@@ -487,7 +485,6 @@ fn prologue_names_the_trace_a_leg_resumed() {
     .expect("fixture parses");
     let mut stamper = DeterministicStamper::new();
     let mut sink = VecSink::new();
-    let book = crate::approval::ApprovalBook::new();
     let opening_stamp = stamper.next();
     emit_prologue(
         &wf,
@@ -506,7 +503,6 @@ fn prologue_names_the_trace_a_leg_resumed() {
         None,
         Vec::new(),
         None,
-        &book,
         opening_stamp,
         None,
         &mut stamper,

@@ -5,6 +5,10 @@
 //! hash-bound to one run and step, tickets expire and are single-use, each
 //! run has a mint limit, and every decision is journaled. A resumed answer is
 //! validated before binding; refusing or abandoning it grants no authority.
+//!
+//! The bound content is the question as shown, the gate as written, and the
+//! definition of every task the answer unleashes: a paused answer never
+//! carries over to one of those tasks edited after the question.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -12,11 +16,12 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
+use nika_schema::raw::{LiftLaw, RawAction, RawTask, RawWorkflow};
 use serde_json::{Value, json};
 
 use crate::expr::{self, Scope};
 use crate::record::TaskRecord;
+use crate::resume::ResumeContext;
 
 /// Fresh-consent window (NEP-0013 law 2).
 pub const APPROVAL_TTL_SECONDS: u32 = 15 * 60;
@@ -27,8 +32,16 @@ pub const APPROVAL_MAX_TICKETS_PER_RUN: u32 = 5;
 /// Wire code for non-transient approval-capability refusals.
 pub const APPROVAL_CODE: &str = "NIKA-SEC-010";
 
-/// Bump when the canonical shown-content shape changes.
-const CONTENT_RECIPE_VERSION: u32 = 2;
+/// Bump when the canonical shown-content shape changes. A ticket minted under
+/// another recipe carries another content hash, so its answer meets
+/// `approval.content_mismatch`: recipe 2 named each effectful descendant by id
+/// and class only, recipe 3 binds every descendant's definition.
+const CONTENT_RECIPE_VERSION: u32 = 3;
+
+/// The ticket digest's own recipe (its mint fields). It does not move with the
+/// content recipe: the digest a pause frame journaled stays the digest its
+/// refusal signs.
+const TICKET_DIGEST_VERSION: u32 = 2;
 
 /// What a ticket resolved to (NEP-0013 law 4 · the wire vocabulary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +114,7 @@ impl ApprovalTicket {
     #[must_use]
     pub fn digest(&self) -> Option<String> {
         crate::resume::jcs_blake3_hex(&json!({
-            "v": CONTENT_RECIPE_VERSION,
+            "v": TICKET_DIGEST_VERSION,
             "ticket": {
                 "content_hash": self.content_hash,
                 "run_nonce": self.run_nonce,
@@ -313,11 +326,34 @@ pub(crate) struct Refusal {
     pub attestation: ApprovalAttestation,
 }
 
-/// One action in a prompt's unleashed closure.
+/// One task a prompt's answer unleashes.
 #[derive(Debug, Clone)]
 struct GatedAction {
     task: String,
     classes: Vec<&'static str>,
+    /// The task as written ([`bound_definition`]); `None` = no identity.
+    definition: Option<Value>,
+}
+
+/// What one prompt's answer is bound to beside its question: the gate as
+/// written, and every task downstream of it up to and including the next gate.
+#[derive(Debug, Clone, Default)]
+struct Closure {
+    /// The gate's own definition ([`bound_definition`]); `None` = no identity.
+    gate: Option<Value>,
+    gated: Vec<GatedAction>,
+}
+
+impl Closure {
+    /// The first task, the gate `step` included, that no definition names.
+    fn unbound<'a>(&'a self, step: &'a str) -> Option<&'a str> {
+        if self.gate.is_none() {
+            return Some(step);
+        }
+        (self.gated.iter())
+            .find(|gated| gated.definition.is_none())
+            .map(|gated| gated.task.as_str())
+    }
 }
 
 /// Per-content mint state.
@@ -341,7 +377,7 @@ struct BookInner {
     /// This run's `workflow_started` event id.
     nonce: String,
     /// Prompt step → its unleashed closure (computed once per run).
-    gated: BTreeMap<String, Vec<GatedAction>>,
+    gated: BTreeMap<String, Closure>,
     /// Content hash → mint state.
     minted: BTreeMap<String, MintedApproval>,
     /// Prompt step → its entry.
@@ -427,11 +463,13 @@ impl ApprovalBook {
         }
     }
 
-    /// Stamp the nonce and precompute each prompt's static closure.
-    pub(crate) fn begin_run(&self, wf: &RawWorkflow, nonce: String) {
+    /// Stamp the nonce and bind each prompt's closure over the definitions
+    /// this run executes (a resumed run recomputes them from its own files).
+    pub(crate) fn begin_run(&self, wf: &RawWorkflow, nonce: String, ctx: &ResumeContext) {
+        let gated = gated_closures(wf, ctx);
         let mut inner = self.lock();
         inner.nonce = nonce;
-        inner.gated = gated_closures(wf);
+        inner.gated = gated;
     }
 
     /// Inject folded resume authority (`None` for a fresh run).
@@ -444,8 +482,8 @@ impl ApprovalBook {
         self.lock().steps.get(step).map(|e| e.ticket.clone())
     }
 
-    /// One prompt's unleashed closure (empty for a non-prompt step).
-    fn gated_for(&self, step: &str) -> Vec<GatedAction> {
+    /// One prompt's unleashed closure (empty, unnamed, for a step with none).
+    fn closure_for(&self, step: &str) -> Closure {
         self.lock().gated.get(step).cloned().unwrap_or_default()
     }
 
@@ -591,6 +629,9 @@ fn admit_resumed(
             inner, step, mode, shown_hash, now_ms, None, source, question,
         ));
     }
+    if let Some(refused) = unnamed_refusal(inner, step, mode, shown_hash, &ticket, now_ms) {
+        return Some(refused);
+    }
     if let Err(error) = paused.consume() {
         let (why, detail) = match error {
             ClaimError::Consumed => (
@@ -623,6 +664,38 @@ fn admit_resumed(
     Some(Admit::Run {
         bind: Some(answer.clone()),
     })
+}
+
+/// Refuse to bind a paused answer over a closure the ticket could not name
+/// whole: a task (the gate included) the engine holds no definition for, or a
+/// step with no closure on record. The hashes agree, yet nothing ties the
+/// answer to what that task is now.
+fn unnamed_refusal(
+    inner: &BookInner,
+    step: &str,
+    mode: &str,
+    shown_hash: &str,
+    ticket: &ApprovalTicket,
+    now_ms: i64,
+) -> Option<Admit> {
+    let unnamed = match inner.gated.get(step) {
+        Some(closure) => closure.unbound(step)?,
+        None => step,
+    };
+    Some(Admit::refused(refusal(
+        inner,
+        step,
+        mode,
+        shown_hash,
+        ticket.digest(),
+        ticket.ttl_remaining_seconds(now_ms),
+        "approval.content_unhashable",
+        format!(
+            "task '{step}' · approval.content_unhashable — the engine holds no definition \
+             identity for task `{unnamed}`, which this answer would unleash: a paused answer \
+             never binds to a task its ticket could not name ({APPROVAL_CODE})"
+        ),
+    )))
 }
 
 /// Admit a live ticket; decided tickets re-mint, in-flight twins may share.
@@ -807,52 +880,98 @@ fn effect_classes_of(task: &RawTask) -> Vec<&'static str> {
     names
 }
 
-/// Effectful descendants unleashed before another prompt boundary.
-fn gated_closures(wf: &RawWorkflow) -> BTreeMap<String, Vec<GatedAction>> {
-    let mut downstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
+/// A task's definition as a ticket binds it: the definition hash its settled
+/// success journals (`def_hash` — the behavior-bearing fields as written, an
+/// inference's effective model and access, its skills' texts, the closure
+/// digest of the child workflow it calls), with the authored fields that hash
+/// leaves out. It reads no value the run produces and no span, so a comment or
+/// a layout edit keeps it. `None` = the engine holds no identity for the task.
+fn bound_definition(task: &RawTask, ctx: &ResumeContext) -> Option<Value> {
+    let lift = (task.lift.iter())
+        .map(|door| {
+            let law = match door.law.value {
+                LiftLaw::Taint => "taint",
+                LiftLaw::DataAsCode => "data-as-code",
+                _ => return None, // a door this recipe does not know
+            };
+            Some(json!({
+                "because": door.because.value,
+                "from": door.from.as_ref().map(|from| &from.value),
+                "law": law,
+            }))
+        })
+        .collect::<Option<Vec<Value>>>()?;
+    Some(json!({
+        "def_hash": crate::resume::definition_digest(task, ctx)?,
+        "group": task.group.as_ref().map(|group| &group.value),
+        "lift": lift,
+        "returns": task.returns.as_ref().map(|returns| &returns.value),
+    }))
+}
+
+/// Each task's direct readers: who names it in a `with:` reference, an
+/// `after:` edge or a `tasks.<id>` read, and who folds a group it belongs to.
+fn readers_of(wf: &RawWorkflow, ctx: &ResumeContext) -> BTreeMap<String, Vec<String>> {
+    let mut readers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for task in &wf.tasks {
-        for up in crate::resume::referenced_upstreams(&task.value) {
-            downstream
-                .entry(up)
-                .or_default()
-                .push(task.value.id.value.clone());
+        let mut reads = crate::resume::referenced_upstreams(&task.value);
+        let mut folds = Vec::new();
+        for (_key, value) in &task.value.with {
+            nika_check::analyzer::edges::group_refs_in_value(&value.value, &mut folds);
+        }
+        for members in folds.iter().filter_map(|name| ctx.groups().get(name)) {
+            reads.extend(members.iter().cloned());
+        }
+        for read in reads {
+            let reader = task.value.id.value.clone();
+            readers.entry(read).or_default().push(reader);
         }
     }
+    readers
+}
+
+/// Every prompt's closure: the gate, and each task downstream of it up to and
+/// including the next gate, which owns what follows it. A task enters whether
+/// or not it carries an effect class: an inference that feeds an effect decides
+/// what the effect sends.
+fn gated_closures(wf: &RawWorkflow, ctx: &ResumeContext) -> BTreeMap<String, Closure> {
+    let tasks: BTreeMap<&str, &RawTask> = (wf.tasks.iter())
+        .map(|task| (task.value.id.value.as_str(), &task.value))
+        .collect();
+    let readers = readers_of(wf, ctx);
+    let mut named: BTreeMap<&str, Option<Value>> = BTreeMap::new();
     let mut out = BTreeMap::new();
-    for task in &wf.tasks {
-        let prompt = &task.value;
-        if !is_prompt_task(prompt) {
-            continue;
-        }
-        let mut seen = BTreeSet::new();
-        let mut queue = vec![prompt.id.value.clone()];
+    for (&step, &prompt) in tasks.iter().filter(|(_, task)| is_prompt_task(task)) {
+        let mut seen = BTreeSet::from([step]);
+        let mut queue = vec![step];
         let mut gated = Vec::new();
         while let Some(id) = queue.pop() {
-            let Some(children) = downstream.get(&id) else {
-                continue;
-            };
-            for next in children.clone() {
-                if !seen.insert(next.clone()) {
-                    continue;
-                }
-                let Some(next_task) = wf.tasks.iter().find(|t| t.value.id.value == next) else {
+            for reader in readers.get(id).into_iter().flatten() {
+                let Some((&next, &task)) = tasks.get_key_value(reader.as_str()) else {
                     continue;
                 };
-                if is_prompt_task(&next_task.value) {
-                    continue; // another gate — it owns its own closure
+                if !seen.insert(next) {
+                    continue;
                 }
-                let classes = effect_classes_of(&next_task.value);
-                if !classes.is_empty() {
-                    gated.push(GatedAction {
-                        task: next.clone(),
-                        classes,
-                    });
+                let definition = named
+                    .entry(next)
+                    .or_insert_with(|| bound_definition(task, ctx));
+                gated.push(GatedAction {
+                    task: next.to_owned(),
+                    classes: effect_classes_of(task),
+                    definition: definition.clone(),
+                });
+                if !is_prompt_task(task) {
+                    queue.push(next);
                 }
-                queue.push(next);
             }
         }
         gated.sort_by(|a, b| a.task.cmp(&b.task));
-        out.insert(prompt.id.value.clone(), gated);
+        let gate = named
+            .entry(step)
+            .or_insert_with(|| bound_definition(prompt, ctx))
+            .clone();
+        out.insert(step.to_owned(), Closure { gate, gated });
     }
     out
 }
@@ -922,23 +1041,27 @@ pub(crate) fn prompt_fields(rendered: &Value) -> (String, Option<String>, Vec<St
     (mode, message, choices)
 }
 
-/// Canonical shown content over the secret-marker scope (NEP-0013 law 1).
-fn canonical_content(task: &RawTask, gated: &[GatedAction], scope: &Scope<'_>) -> (String, Value) {
+/// Canonical bound content (NEP-0013 law 1): the question as shown, over the
+/// secret-marker scope, then the gate as written and each task its answer
+/// unleashes — by id, effect classes and definition. A value those tasks read
+/// from elsewhere (a constant, an input, the output of a task outside the
+/// closure) is bound only where the question shows it.
+fn canonical_content(task: &RawTask, closure: &Closure, scope: &Scope<'_>) -> (String, Value) {
     let RawAction::Invoke(invoke) = &task.action else {
         // The gate guarantees invoke; keep this helper total regardless.
         return ("confirm".to_owned(), Value::Null);
     };
     let rendered = render_prompt_args(task, invoke.args.as_ref().map(|a| &a.value), scope);
     let (mode, message, choices) = prompt_fields(&rendered);
-    let gated_json: Vec<Value> = gated
-        .iter()
-        .map(|g| json!({ "classes": g.classes, "task": g.task }))
+    let gated_json: Vec<Value> = (closure.gated.iter())
+        .map(|g| json!({ "classes": g.classes, "definition": g.definition, "task": g.task }))
         .collect();
     let content = json!({
         "v": CONTENT_RECIPE_VERSION,
         "approval": {
             "action": { "tool": "nika:prompt", "verb": task.action.verb() },
             "choices": choices,
+            "definition": closure.gate,
             "effects": effect_classes_of(task),
             "gated": gated_json,
             "message": message,
@@ -979,8 +1102,8 @@ where
         let base =
             Scope::workflow_with_value_authorities(records, inputs, consts, resume_ctx.markers())
                 .with_run(resume_ctx.run_value());
-        let gated = self.approvals.gated_for(step);
-        let (mode, content) = canonical_content(task, &gated, &base);
+        let closure = self.approvals.closure_for(step);
+        let (mode, content) = canonical_content(task, &closure, &base);
         let question = content["approval"]["message"].as_str().map(str::to_owned);
         let Some(shown_hash) = crate::resume::jcs_blake3_hex(&content) else {
             // The content shape is canonicalizable; still fail closed.

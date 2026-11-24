@@ -1256,11 +1256,14 @@ fn detected_leaves_a_pinned_cursor_entry_alone_and_a_named_wire_rewrites_it() {
 /// The reader cannot drift from the writers: on every host whose config
 /// is JSON or TOML (all but Hermes, whose YAML is never rewritten), what
 /// the writer wrote still reads wired once its command is pinned to an
-/// absolute path, in that host's own table and shape.
+/// absolute path, in that host's own table and shape. And the real
+/// `detected` door, run over that whole home, leaves every one of those
+/// files byte-identical: one row of this table per host `wire` rewrites.
 #[test]
-fn a_pinned_command_reads_wired_on_every_json_and_toml_host() {
+fn detected_leaves_a_pinned_entry_byte_identical_on_every_rewritten_host() {
     let home = temp_dir("pinned-all-home");
     let dir = temp_dir("pinned-all-dir");
+    let mut table = Vec::new();
     let hosts: Vec<WireTarget> = crate::detect::sights(Some(&home), &dir)
         .iter()
         .map(|sight| sight.target)
@@ -1288,6 +1291,40 @@ fn a_pinned_command_reads_wired_on_every_json_and_toml_host() {
             "{}: wired by name, the writer stays strict",
             target.id()
         );
+        table.push((target, path, pinned));
+    }
+
+    for dry_run in [true, false] {
+        let out = run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        );
+        assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+        let current: Vec<&str> = out
+            .text
+            .lines()
+            .filter(|line| line.starts_with("· current "))
+            .collect();
+        assert_eq!(
+            current.len(),
+            table.len(),
+            "every host, nothing else: {out:?}"
+        );
+        for (target, path, pinned) in &table {
+            let line = format!("· current {}: {}", target.id(), path.display());
+            assert!(current.contains(&line.as_str()), "{line}: {out:?}");
+            assert_eq!(
+                &std::fs::read_to_string(path).expect("read"),
+                pinned,
+                "{} (dry-run {dry_run}): byte-identical",
+                target.id()
+            );
+        }
     }
     let _ = std::fs::remove_dir_all(home);
     let _ = std::fs::remove_dir_all(dir);
@@ -1946,7 +1983,8 @@ fn all_consent_truth_table() {
 /// the refusal names the right door (preview · detected · --yes).
 #[test]
 fn wire_all_without_consent_is_refused_naming_the_path() {
-    let out = run_with(WireTarget::All, ".", WireOptions::default());
+    // Refused at the door: no home is asked for, none is handed.
+    let out = run_in(WireTarget::All, None, ".", WireOptions::default());
     assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
     assert!(out.text.contains("--dry-run"), "{out:?}");
     assert!(out.text.contains("wire detected"), "{out:?}");
@@ -1954,35 +1992,44 @@ fn wire_all_without_consent_is_refused_naming_the_path() {
 }
 
 /// H7 · `wire all --dry-run` is the preview — no consent needed,
-/// nothing written (the temp workspace stays empty). The exit code
-/// PREDICTS the run's: a client whose existing config is unreadable
-/// is a `✖ skipped` line and flips the code to ENV — on a machine
-/// with all-healthy configs the preview exits OK.
+/// nothing written. On a home of its own (never the account's), bare:
+/// every client is planned as a creation, the exit code is the run's
+/// (OK: nothing is refused), and neither the home nor the workspace
+/// holds a file afterwards.
 #[test]
 fn wire_all_dry_run_previews_without_consent() {
+    let home = temp_dir("all-dry-run-home");
     let dir = temp_dir("all-dry-run");
-    let out = run_with(
+    let out = run_in(
         WireTarget::All,
+        Some(&home),
         dir.to_str().expect("utf8"),
         WireOptions {
             dry_run: true,
             ..WireOptions::default()
         },
     );
-    assert!(
-        out.code == crate::output::exit::OK
-            || (out.code == crate::output::exit::ENV && out.text.contains("skipped")),
-        "the exit code predicts the run's (skips included): {out:?}"
-    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
     assert!(out.text.contains("dry-run"), "{out:?}");
-    assert!(
-        out.text.contains("opencode.json"),
-        "the workspace-scope client is planned: {out:?}"
+    let planned = out
+        .text
+        .lines()
+        .filter(|line| line.starts_with("+ would create "))
+        .count();
+    assert_eq!(planned, expand_target(WireTarget::All).len(), "{out:?}");
+    let workspace = format!(
+        "+ would create opencode: {}",
+        dir.join("opencode.json").display()
     );
-    assert!(
-        !dir.join("opencode.json").exists(),
-        "a preview never writes"
-    );
+    assert!(out.text.contains(&workspace), "{out:?}");
+    for place in [&home, &dir] {
+        assert_eq!(
+            std::fs::read_dir(place).expect("list").count(),
+            0,
+            "a preview never writes"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
     let _ = std::fs::remove_dir_all(dir);
 }
 

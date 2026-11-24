@@ -9,12 +9,14 @@
 //! it, never a cancel it reports failed after the engine applied it.
 //!
 //! `published_sdk.json` holds that SDK's closed sets, read from its published `dist`
-//! (`@supernovae-st/nika@0.124.0`). It moves only when a newer SDK is published. That SDK also
+//! (`@nika-open/nika@0.125.0`). It moves only when a newer SDK is published. That SDK also
 //! reads the generation-2 compile outcome with the same checks: `CompileOutcomeV2` points at
 //! `CompileOutcome`'s own status, questions, diagnostics and check preview, so the
 //! `CompileOutcome` entries hold them, and only its own provenance is listed under its name.
 //! It reads an `ArtifactManifest` and its entries open, a later key riding through, except the
-//! manifest's `verdict`, which it closes to the two sealed tiers.
+//! manifest's `verdict`, which it closes to the two sealed tiers. It closes an access offer's keys
+//! and states (`AccessOffer`, its routes and their listings), but reads the declared route's
+//! `protocol`, `fallback` and `service_tier` as any non-empty text, so those are not listed.
 
 use serde_json::Value;
 

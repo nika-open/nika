@@ -153,7 +153,7 @@ See `docs/architecture/ai-velocity.md` for the full argument.
 
 | field            | value                                          |
 |------------------|------------------------------------------------|
-| HEAD             | `1e792641a` (`1e792641ac007e0e8b7cd40341d402ff1654889b`)             |
+| HEAD             | `a8c16a265` (`a8c16a26524ebae9c12a928ef01e572b796dc7e3`)             |
 | workspace        | v0.125.0                                  |
 | crates (workspace)| 90                                              |
 | crates (admitted)| 75                                             |

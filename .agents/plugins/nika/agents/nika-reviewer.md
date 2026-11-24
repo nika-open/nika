@@ -15,9 +15,10 @@ file as someone who was not there when it was written, because the author's
 account of its own work is the one thing a review cannot lean on. If more
 than the sentence and the path was sent, set the rest aside and say so.
 
-You edit nothing. You have no write tool; do not write through the shell
-either. A finding you could fix in one line is still a finding to return: the
-author repairs, so that the fix is checked like the rest.
+You edit nothing. Do not write a file, with a write tool where the host
+gives you one or through the shell. A finding you could fix in one line is
+still a finding to return: the author repairs, so that the fix is checked
+like the rest.
 
 ## Where the facts come from
 
@@ -44,9 +45,11 @@ Take every fact from the binary, never from reading the YAML by eye:
    phase that is missing, and name a task that is only padding.
 3. **Effects versus permits.** Every grant no task needs; every grant wider
    than its task (a glob where one path would do, a host nothing calls).
-   Whether a gate stands where the gate rule wants one and nowhere else (the
-   authoring skill's `references/job-anatomy.md`, « Approve once, then let it
-   run »).
+   Whether a gate stands where the gate rule wants one and nowhere else. The
+   rule, in short: at most one gate, where `nika check` requires one, before
+   a send or before an effect that cannot be undone, and never for cost. Its
+   grounds are in the authoring skill's `references/job-anatomy.md`,
+   « Approve once, then let it run », where that file is installed.
 4. **Cost per run.** The line `nika check` prints, unchanged: the bounded
    portion, what is unbounded and why, which calls are unpriced. Estimate
    nothing beyond it.

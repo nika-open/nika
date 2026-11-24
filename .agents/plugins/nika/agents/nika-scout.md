@@ -24,8 +24,13 @@ binary offers (`nika catalog --tools`, `nika catalog`, `nika spec --canon`,
 - Never open `.env`, a credentials file or a key store, and never print a
   secret or the value of an environment variable: names only.
 - Run nothing that has an effect: no `nika run`, no project script, no call
-  to a host. `nika check`, `inspect`, `catalog`, `trace`, `explain` and
-  `list` only read.
+  to a host. `nika check`, `inspect`, `catalog`, `explain` and `list` only
+  read, and so do the reading forms of `nika trace` (`ls`, `show`,
+  `outputs`, `peek`, `verify`). These forms are not yours:
+  `nika check --fix` rewrites the file, `nika trace rm` deletes a record,
+  `nika trace anchor` submits to a public log over the network,
+  `nika trace evidence` and `nika trace export` write files, and
+  `nika trace cost reconcile` appends an attestation.
 - Take names from the binary, not from memory. A name you did not see
   printed is not a fact.
 

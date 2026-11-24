@@ -98,7 +98,7 @@ in the published specification. Names come from `nika catalog --tools`,
 
 | Field or builtin | Reach for it when | Shown in |
 |---|---|---|
-| `model: <provider>/<name>` (envelope or task) | choose who answers; `nika catalog` lists the providers | `01-hello` |
+| `model: <provider>/<name>` on the envelope, or inside one task's `infer:` or `agent:` | choose who answers; a `model:` set directly on a task is refused (`NIKA-PARSE-005`); `nika catalog` lists the providers | `01-hello` |
 | `ollama/…`, `lmstudio/…`, `llamacpp/…`, `localai/…`, `vllm/…` | the data must stay on the machine (`nika model` manages local models) | `contract-guard` |
 | `infer:` with `schema:` and `max_tokens:` | a model answer is data, with a ceiling the checker can price | `04-schema-retry` |
 | `returns:` | a task's typed output contract | `09-returns-typed-door` |
@@ -174,9 +174,10 @@ service's own API.
   `"mcp:<server>/*"`. The tool's structured answer is the task's typed output.
   An `agent:` whose `tools:` names an `mcp:` glob is offered those tools.
 - **Declaration.** The server is declared in the project's
-  `.nika/mcp_servers.json` (`"mcp_servers_format": 1`, one stdio `command`
-  with `args`, and a `network` arm: absent denies, `"allow"`, or
-  `{ "allowlist": [hosts] }`). A workflow naming an undeclared server fails
+  `.nika/mcp_servers.json`, under the `servers` key:
+  `{"mcp_servers_format": 1, "servers": {"<name>": {"command": "…", "args": […]}}}`.
+  Each server has one stdio `command` with `args`, and a `network` arm:
+  absent denies, `"allow"`, or `{ "allowlist": [hosts] }`. A workflow naming an undeclared server fails
   check `NIKA-INVOKE-001`; a declared one draws the `[mcp-pins]` hint until it
   is approved.
 - **Pinning.** `nika mcp approve <server>` starts the server once, prints its

@@ -28,14 +28,19 @@ Never open `.env` or credential files, never quote a secret, and never run
 the project's scripts.
 
 **2 · Scan what Nika can do.** The kit ships two guides for this, `capabilities.md` and
-`job-anatomy.md`: in the `nika-authoring` skill's `references/` folder where
-the plugin is installed, or under `.agents/skills/nika-authoring/references/`
-in a project where `nika init` ran. With neither (a client that only has the
-MCP server), say the guides are missing and work from the oracle instead:
-`nika catalog --tools` or `nika_tools` for the builtins, and `nika_examples`
-for the deep examples (`release-radar`, `config-drift-sentinel`,
-`competitor-radar`, `ceo-monday-brief`). Offer `nika init` as the way to get
-the guides; do not run it unasked, since it writes files in the project.
+`job-anatomy.md`, in the `nika-authoring` skill's `references/` folder where
+the plugin is installed. A project where `nika init` ran holds the
+references its binary carried, under
+`.agents/skills/nika-authoring/references/`: list that folder before you
+count on a guide, since a binary can carry fewer of them than the plugin
+(0.125.0 writes neither of these two). Without the two guides (the folder
+lacks them, or a client only has the MCP server), say so and work from the
+oracle instead: `nika catalog --tools` or `nika_tools` for the builtins, and
+`nika_examples` for the deep examples (`release-radar`,
+`config-drift-sentinel`, `competitor-radar`, `ceo-monday-brief`). `nika init`
+adds the references of the installed binary, whatever they are: offer it as
+that and not as the way to get these two guides, and do not run it unasked,
+since it writes files in the project.
 
 Prefer the
 jobs where a workflow is the right tool: a fan-out over many items (pages,

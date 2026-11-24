@@ -218,11 +218,14 @@ fsync durability or that a detached write has stopped.
 ## MCP servers and definition drift
 
 A configured MCP server that changes its tool definitions after you
-approved them is the rug pull. Nika pins every tool on first contact
-(TOFU) into `.nika/mcp_pins.json` beside a reviewable snapshot: first
-contact enrolls loudly, a match proceeds silently, ANY drift fails
-closed with a diff naming the CHANGED field and returns no tools. A
-hand-edited lockfile is `NIKA-MCP-004`, never a silent re-TOFU.
+approved them is the rug pull. Nika pins a server's tools when the person
+approves them: `nika mcp approve <server>` starts the server once and
+writes their definitions into `.nika/mcp_pins.json`, where they can be
+reviewed. Nothing is pinned on first contact: a run that names a tool
+which was never approved is refused (`NIKA-MCP-006`) and the server is
+not started. After approval a match proceeds silently, and ANY drift
+fails closed (`NIKA-MCP-003`): no tool from that server reaches the run. A
+hand-edited lockfile is `NIKA-MCP-004`, never read as empty.
 Re-pin after human review: `nika mcp approve <server>`.
 
 A pin detects changes relative to the enrolled definitions. It does not

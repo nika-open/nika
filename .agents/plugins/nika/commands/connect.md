@@ -41,8 +41,9 @@ reach, which key it needs and how that key will reach it. Wait for the yes.
 `references/capabilities.md`, « MCP servers »; read them there, not from
 memory.
 
-- The declaration, in the project's `.nika/mcp_servers.json`: the server's
-  name, its `command` and `args`, and its `network` arm. An absent arm
+- The declaration, in the project's `.nika/mcp_servers.json`, under its
+  `servers` key (`{"mcp_servers_format": 1, "servers": {"<name>": {…}}}`):
+  the server's name, its `command` and `args`, and its `network` arm. An absent arm
   denies the network; grant the list of hosts the server needs rather than
   `"allow"`.
 - In the workflow, `permits.tools` for exactly the tools the tasks call,

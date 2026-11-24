@@ -28,25 +28,27 @@ resolved. Preserve the chosen model and existing grants.
 
 ## Design pass
 
-For a new job, design before writing. Scan the skill's capability map
-(`references/capabilities.md`), then write a short design: the phases (gather,
-normalize, judge, act, report), the builtins each phase uses, the branch
-points, the state kept between runs, the run report, and the one gate if the
-check will require it. Build the richest honest version of that design
-(`references/job-anatomy.md`): add by default what does not widen the
-workflow's effects (validation, state, dedupe and idempotency keys, bounded
-fan-out, retry and a marked degraded result for a dead source, typed schemas
-with `max_tokens`, `nika:assert` budgets, a chart, a run report with its
-`nika:inspect` cost). Never add a new send, host, paid inference, seat route,
-program, MCP server or write outside the requested folder: list it as a
-proposal for the coordinator instead. In a job that fetches or calls an MCP
-tool, an addition that needs a new read grant or a new program is a proposal
-too, and if an addition makes check answer `NIKA-SEC-009`, take it back out
-and propose it: never repair that finding with a gate nobody asked for.
+For a new job, design before writing, in the order the `nika-authoring`
+skill gives under « Design before you write »: the phases (gather,
+normalize, judge, act, report), the builtins each uses, the branch points,
+the state kept between runs, the run report, then the richest honest
+version of that design. Where that skill or its `references/` folder is not
+installed, keep the same order and take the builtins from
+`nika catalog --tools` and a deep example from `nika try`.
 
-The gate rule is stated once, in `references/job-anatomy.md` under « Approve
-once, then let it run »: follow it, and say when a scheduled job keeps a
-gate, since it then pauses at every fire.
+What this role adds to it: you never add an effect on your own. A new send,
+host, paid inference, seat route, program, MCP server or write outside the
+requested folder is listed as a proposal for the coordinator. In a job that
+fetches or calls an MCP tool, an addition that needs a new read grant or a
+new program is a proposal too, and if an addition makes check answer
+`NIKA-SEC-009`, take it back out and propose it: never repair that finding
+with a gate nobody asked for.
+
+The gate rule, in short: at most one gate, where `nika check` requires one,
+before a send or before an effect that cannot be undone, and never for
+cost. Its grounds are in `references/job-anatomy.md` under « Approve once,
+then let it run », where that file is installed. Say when a scheduled job
+keeps a gate, since it then pauses at every fire.
 
 ## Build by phase
 

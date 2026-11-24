@@ -8,6 +8,12 @@ json`; nothing is judged by reading the YAML. Where the binary does not say
 (it names a host, not whether a call there reads or sends), the card says
 so instead of guessing.
 
+One more `nika check`, asked with `--model mock/echo`, names the models a
+run on the mock model would still call. The mock replaces the workflow's
+own model and nothing else: a model a task pins is called for real, and
+billed, under a mock run. The card says so in words, since a job like that
+is read with `--dry-run` and never rehearsed on the mock model.
+
 Usage:
   nika-card.py <file.nika> [--json]
   nika-card.py <file.nika> --plan         also remember these effects as the
@@ -40,6 +46,7 @@ TIERS = (
     ("leaves_the_machine", "leaves the machine"),
     ("spends", "spends"),
     ("unpriced_models", "unpriced model"),
+    ("called_on_mock", "called even on a mock run"),
     ("runs_programs", "runs a program"),
 )
 
@@ -116,6 +123,21 @@ def effects(report):
         "unpriced_models": unpriced,
         "runs_programs": programs,
     }
+
+
+def called_on_mock(proc):
+    """Models a run on the mock model would still call, or None when the binary did not say."""
+    try:
+        ends = (json.loads(proc.stdout).get("data_journey") or {}).get("model_endpoints")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(ends, list):
+        return None
+    return [
+        f"{end.get('model')} ({end.get('task')})"
+        for end in ends
+        if isinstance(end, dict) and not str(end.get("model") or "").startswith("mock/")
+    ]
 
 
 def depth(graph, report):
@@ -226,6 +248,11 @@ def render(card):
     lines.append(row("spends", eff["spends"]))
     if eff["unpriced_models"]:
         lines.append(row("unpriced, never free", eff["unpriced_models"]))
+    pinned = eff.get("called_on_mock")
+    lines.append(row("called even on mock", pinned if pinned is not None else ["this binary did not say"]))
+    if pinned:
+        lines.append("    a model a task pins is called for real, and billed, under --model mock/echo:")
+        lines.append("    read this job's plan with --dry-run, never rehearse it on the mock model")
     lines.append(row("runs programs", eff["runs_programs"]))
     lines.append("Depth     (from nika inspect)")
     lines.append(
@@ -267,6 +294,9 @@ def main(argv):
         "depth": depth(graph, report),
         "cost": cost(report, text),
     }
+    card["effects"]["called_on_mock"] = called_on_mock(
+        call([nika, "check", path, "--json", "--native-strict", "--model", "mock/echo"])
+    )
     card["review"] = review(card)
     added = None
     replaced = None

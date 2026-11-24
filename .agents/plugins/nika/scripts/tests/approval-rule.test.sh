@@ -7,6 +7,10 @@
 # leaves open what does need a yes. Each entry page names both lists; the
 # session map carries the short form for hosts that load nothing else.
 #
+# The rehearsal that never waits is bounded the same way on every page that
+# states it: a model pinned on a task is called for real under the mock
+# model, so a job that pins one is read with a dry run.
+#
 # Usage: approval-rule.test.sh  (exit 0 = all green)
 set -uo pipefail
 
@@ -29,6 +33,21 @@ for page in commands/make.md commands/run.md rules/nika-delegation.mdc \
   case "$folded" in
     *"gate"*) ;;
     *) bad "$page lists what needs the person and leaves out the answer to a gate" ;;
+  esac
+done
+
+for page in commands/make.md commands/improve.md rules/nika-delegation.mdc \
+  skills/nika-authoring/SKILL.md skills/nika-migration/SKILL.md \
+  agents/nika-reviewer.md; do
+  folded="$(tr '\n' ' ' <"$KIT/$page" | tr -s ' ')"
+  case "$folded" in
+    *"pins no model on a task"* | *"no task pins a model"* | *"pins a model on a task"*) echo "ok   $page bounds the mock rehearsal by a pinned model" ;;
+    *) bad "$page lets a job that pins a model on a task be rehearsed on the mock model" ;;
+  esac
+  case "$folded" in
+    *"The mock replaces the model and nothing else"* | *"A mock model replaces the model only"*)
+      bad "$page says the mock replaces every model, which a pinned model contradicts"
+      ;;
   esac
 done
 

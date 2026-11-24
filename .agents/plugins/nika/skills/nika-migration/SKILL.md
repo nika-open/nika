@@ -14,7 +14,9 @@ the port against real data or real destinations, to add an effect the source
 did not have, to choose a paid model route, to answer a gate and to retire
 the source. Reading the source and its callers, writing the port beside it,
 checking it, rehearsing on the mock model a port that sends nothing and
-comparing outputs on fixtures never wait for them.
+pins no model on a task (a pinned model is called for real even under
+`--model mock/echo`: such a port is read with `--dry-run`) and comparing
+outputs on fixtures never wait for them.
 
 ## When to migrate (and when not to)
 

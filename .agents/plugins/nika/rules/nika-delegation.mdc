@@ -72,11 +72,13 @@ nothing, and say in the hand-over that the job was not rehearsed.
 - **Never needs it:** checking; repairing a finding; adding validation,
   state or a report; writing the workflow and its outputs under the
   project's `out/`; a rehearsal on the mock model of a job that sends
-  nothing and reaches no host; `nika run <file> --dry-run` of any job.
+  nothing, reaches no host and pins no model on a task;
+  `nika run <file> --dry-run` of any job.
 
-Do the second list without asking. A mock model replaces the model only:
-tools, writes and sends stay real, so a mock rehearsal of a job that sends
-is a run, and a run is theirs to start. `--dry-run` shows the plan and
+Do the second list without asking. A mock model replaces the workflow's own
+model only: tools, writes and sends stay real, and a model pinned on a task
+is still called for real, so a mock rehearsal of a job that sends or pins a
+model is a run, and a run is theirs to start. `--dry-run` shows the plan and
 executes no effect.
 
 ## Choose the relevant skill or bounded role

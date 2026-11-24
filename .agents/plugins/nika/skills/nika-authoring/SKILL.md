@@ -53,8 +53,10 @@ name (a send, a host, a program, an MCP server, a write outside their
 folder), a paid model route, and publishing anything. Nothing else waits for
 them: checking, repairing a finding, adding validation, state or a report,
 writing the workflow and what it produces under the project's `out/`, a
-rehearsal on the mock model of a job that sends nothing and reaches no host,
-and `nika run <file> --dry-run` of any job (the plan, no effect). Do the
+rehearsal on the mock model of a job that sends nothing, reaches no host and
+pins no model on a task (a pinned model is called for real even under
+`--model mock/echo`), and `nika run <file> --dry-run` of any job (the plan,
+no effect). Do the
 second list without asking, and never the first without a yes.
 
 ## Design before you write
@@ -152,7 +154,8 @@ blockers, with the design, the counts (tasks, distinct builtins, branch points,
 state, report, gates), the craft additions you made and the effect upgrades
 you only proposed. A thin job says why it is thin. Done means three things:
 the check is clean, the job was rehearsed (on the mock model when nothing
-leaves the machine, with `--dry-run` otherwise), and every file the rehearsal
+leaves the machine and no task pins a model, with `--dry-run` otherwise:
+the mock does not replace a pinned model), and every file the rehearsal
 wrote was opened and parsed. When the person said not to run it, do not rehearse on the mock model
 either: read the plan with `nika run <file> --dry-run`, which executes
 nothing, and say in the hand-over that the job was not rehearsed. A review's verdict is passed on in the

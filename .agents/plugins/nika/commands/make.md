@@ -15,8 +15,8 @@ their folder), a paid model route, and publishing anything. Nothing else
 waits for them: checking, drawing the card, repairing a finding, adding
 validation, state or a report, writing the workflow and what it produces
 under the project's `out/`, a rehearsal on the mock model of a job whose
-card shows nothing leaving the machine, and a `--dry-run` of any job (it
-shows the plan and executes no effect). Do the second list without asking;
+card shows nothing leaving the machine and no model called even on mock,
+and a `--dry-run` of any job (it shows the plan and executes no effect). Do the second list without asking;
 never do the first without a yes.
 
 **Without the kit's scripts** (a host that does not resolve
@@ -101,11 +101,14 @@ send or before an effect that cannot be undone, and never for cost.
 **8 · Done means three things.** The check is clean
 (`nika check <file> --json --native-strict`); the job was rehearsed; every
 file the rehearsal wrote was opened and parsed. A job whose card shows
-nothing leaving the machine is rehearsed with
-`nika run <file> --model mock/echo --max-cost-usd 0.10`. The mock replaces
-the model and nothing else, so a job that sends or reaches a host gets
-`nika run <file> --dry-run` instead, and the hand-over says its effects were
-not exercised. When the person said not to run it, do not rehearse on the mock model
+nothing leaving the machine and no model called even on mock is rehearsed
+with `nika run <file> --model mock/echo --max-cost-usd 0.10`. The mock
+replaces the workflow's own model and nothing else: tools, writes and sends
+stay real, and a model pinned on a task is still called for real and billed
+(`nika check` prints an `envelope-model` hint for each such task). So a job
+that sends, reaches a host or pins a model on a task gets
+`nika run <file> --dry-run` instead, never a mock run, and the hand-over
+says its effects were not exercised. When the person said not to run it, do not rehearse on the mock model
 either: read the plan with `nika run <file> --dry-run`, which executes
 nothing, and say in the hand-over that the job was not rehearsed. Then run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py" <file> --since-plan`: an

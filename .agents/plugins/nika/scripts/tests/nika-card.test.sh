@@ -5,8 +5,9 @@
 # Laws under test: every line is read off `nika check` and `nika inspect`,
 # never off the YAML · a host, a write outside the project and a program
 # are named as effects · a review is asked for above eight tasks or when an
-# effect leaves the machine · an unpriced model is never called free · the
-# exit code tells a clean check (0) from a refused one (2), no card (3) and
+# effect leaves the machine · an unpriced model is never called free · a
+# model a task pins is named as called even on a mock run, the workflow's
+# own model, which the mock replaces, is not · the exit code tells a clean check (0) from a refused one (2), no card (3) and
 # no binary (127).
 #
 # Usage: nika-card.test.sh  (exit 0 = all green)
@@ -50,6 +51,10 @@ case "$1 $(basename "$file" .nika)" in
   "inspect small") echo '{"workflow":"small","nodes":[{"id":"a","kind":"task","tool":"nika:read"},{"id":"b","kind":"task","tool":"nika:jq"}],"edges":[{"from":"a","to":"b","kind":"data"}]}' ;;
   "check wide")
     case " $* " in
+      *" --model mock/echo "*)
+        echo '{"clean":false,"data_journey":{"model_endpoints":[{"model":"mock/echo","task":"draft","provider":"mock","priced":false},{"model":"home/tiny","task":"label","priced":false}]}}'
+        exit 2
+        ;;
       *" --json "*)
         echo '{"clean":false,"native_strict_clean":false,"paid_ready":false,"findings":[{"code":"NIKA-SEC-009","message":"private data, outside content and a way out"}],"hints":[{"kind":"unbounded_output","task":"draft"}],"verdicts":{"blockers":[]},"permits":{"needed":{"exec":["git"],"fs":{"read":["./state/seen.json"],"write":["./state/seen.json","/tmp/elsewhere.txt"]},"net":{"http":["api.example.com"]},"tools":["nika:fetch","nika:notify","mcp:tracker/create"]}},"cost":{"bounded_total_usd":0.42,"tasks":[{"task":"draft","unbounded_reason":"no max_tokens"}]},"data_journey":{"sources":[{"kind":"fs.read","target":"./state/seen.json"}],"writes":["./state/seen.json"],"model_endpoints":[{"model":"acme/large","task":"draft","priced":true},{"model":"home/tiny","task":"label","priced":false}]}}'
         exit 2
@@ -75,6 +80,7 @@ check "the depth counts come from inspect" "$out" "tasks 2 · builtins 2"
 check "no gate is said in plain words" "$out" "none: a run never waits for a person"
 check "the cost line is the one check prints" "$out" "COST   no model call"
 check "a small local job leaves the review optional" "$out" "Review    optional"
+check "a job with no model says no model is called on mock" "$out" "called even on mock   no"
 
 out="$(card "$ROOT/wide.nika")"
 rc_is "a refused check is exit 2" 2 $?
@@ -85,6 +91,12 @@ check "a write outside the project leaves the machine" "$out" "write outside the
 check "a notification and an MCP tool leave the machine" "$out" "tool nika:notify, tool mcp:tracker/create"
 check "a priced model is spend" "$out" "acme/large (draft)"
 check "an unpriced model is never called free" "$out" "unpriced, never free  home/tiny (label)"
+check "a model a task pins is called even on a mock run" "$out" "called even on mock   home/tiny (label)"
+check "and the card says what that means for a rehearsal" "$out" "never rehearse it on the mock model"
+if printf '%s' "$out" | grep -F "called even on mock" | grep -qF "acme/large"; then
+  echo "FAIL the workflow's own model, which the mock replaces, is listed as called on mock"
+  FAILS=$((FAILS + 1))
+else echo "ok   the workflow's own model, which the mock replaces, is not listed"; fi
 check "a program is named" "$out" "runs programs         git"
 check "a path both read and written is state between runs" "$out" "./state/seen.json"
 check "branches, failure routes, joins, fan-outs and gates are counted" "$out" "when: 1 · failure routes 1 · joins 1 · fan-outs 1 · gates 1"

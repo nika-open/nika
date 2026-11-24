@@ -40,9 +40,14 @@ first, when they said to go ahead):
 - make the one edit, keeping the old lines in your reply so it can be put
   back;
 - `nika check <file> --json --native-strict`, then rehearse as the job
-  allows (mock when nothing leaves the machine, `--dry-run` otherwise);
+  allows: on the mock model only when nothing leaves the machine and no
+  task pins a model, `--dry-run` otherwise. A model pinned on a task is
+  called for real, and billed, under `--model mock/echo`, so after an edit
+  that pins one the rehearsal is `--dry-run`, never a mock run;
 - `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py" <file> --since-plan`: exit 4
-  means the edit added an effect. Take it back out.
+  means the edit added an effect. Take it back out, unless it is the model
+  route the person just said yes to (a pin shows as « spends » and
+  « called even on a mock run »).
 
 Then the next observation. A change that did not help comes back out.
 

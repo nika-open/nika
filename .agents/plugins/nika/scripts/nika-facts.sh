@@ -43,7 +43,8 @@ routes = ["%s/%s%s" % (p.get("id"), p.get("cheap_model") or p.get("default_model
 print("- model routes, one per provider this binary resolves (its cheaper model; `nika catalog` lists every model): " + ("; ".join(routes) if routes else "not listed here; read `nika catalog`"))'
   waiting="$("$here/nika-pending.py" "$project" --json 2>/dev/null | python3 -c 'import json, sys
 try:
-    print(len(json.load(sys.stdin).get("waiting", [])))
+    listed = json.load(sys.stdin)
+    print("unknown" if listed.get("error") else len(listed.get("waiting", [])))
 except Exception:
     print("unknown")' 2>/dev/null)"
   echo "- runs waiting for an answer in $project: ${waiting:-unknown}"

@@ -14,13 +14,20 @@ identifier is left out of the resume line, every path in that line is
 shell-quoted, a trace outside `.nika/traces/` is ignored, and the question
 is shown as quoted text.
 
+A trace line that is JSON without being an event is skipped: it never
+hides a run that waits. The search for the workflow file a run names is
+bounded: no directory link is followed, four levels deep, a few hundred
+files, the first lines of each, once per call.
+
 Usage:
   nika-pending.py [project-dir] [--json]
 
-Exit code: 0 nothing waits · 4 at least one run waits (the engine's own
+Exit code: 0 nothing waits · 3 the runs could not be listed (the binary
+did not answer in time) · 4 at least one run waits (the engine's own
 "paused" code) · 127 nika missing.
+
+NIKA_KIT_TIMEOUT_SECONDS replaces the 30 s given to the binary (tests).
 """
-import glob
 import json
 import os
 import re
@@ -31,6 +38,15 @@ import time
 
 # A task, workflow or input name the resume line may carry as it is.
 PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+# The search for a workflow file, bounded.
+SKIP = {".nika", "node_modules", ".git", "target", "dist"}
+MAX_DEPTH = 4
+MAX_FILES = 500
+HEAD_LINES = 40
+
+
+class CouldNotList(Exception):
+    """The binary did not list the runs."""
 
 
 def plain(name):
@@ -65,34 +81,54 @@ def nika_bin(location):
     return os.environ.get("NIKA_BIN") or "nika"
 
 
+def seconds():
+    try:
+        return float(os.environ.get("NIKA_KIT_TIMEOUT_SECONDS") or 30)
+    except ValueError:
+        return 30.0
+
+
 def trace_store(project):
     try:
         proc = subprocess.run(
             [nika_bin(project), "trace", "ls", "--json"],
-            capture_output=True, text=True, check=False, cwd=project,
+            capture_output=True, text=True, check=False, cwd=project, timeout=seconds(),
         )
     except FileNotFoundError:
         print("nika is not installed: curl -LsSf https://nika.sh/install.sh | sh")
         sys.exit(127)
+    except subprocess.TimeoutExpired:
+        raise CouldNotList(f"`nika trace ls` did not answer within {seconds():g} s") from None
     try:
-        return json.loads(proc.stdout).get("traces", [])
+        listed = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return []
+    rows = listed.get("traces") if isinstance(listed, dict) else None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
 def frames(path):
     started, paused = {}, {}
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                fields = {f.get("key"): f.get("value") for f in event.get("fields", [])}
+                if not isinstance(event, dict):
+                    continue
+                rows = event.get("fields")
+                fields = {
+                    f.get("key"): f.get("value")
+                    for f in (rows if isinstance(rows, list) else [])
+                    if isinstance(f, dict) and isinstance(f.get("key"), str)
+                }
                 if event.get("kind") == "workflow_started":
                     started = fields
-                    started["_execution"] = (event.get("execution") or {}).get("uuid", "")
+                    execution = event.get("execution")
+                    uuid = execution.get("uuid") if isinstance(execution, dict) else ""
+                    started["_execution"] = uuid if isinstance(uuid, str) else ""
                 elif event.get("kind") == "workflow_paused":
                     paused = fields
     except OSError:
@@ -100,21 +136,30 @@ def frames(path):
     return started, paused
 
 
-def find_workflow_file(project, name):
-    for path in glob.glob(os.path.join(project, "**", "*.nika"), recursive=True):
-        if os.sep + ".nika" + os.sep in path:
-            continue
-        try:
-            with open(path, encoding="utf-8") as handle:
-                for line in handle:
-                    text = line.strip()
-                    if text.startswith("nika:"):
-                        if text.split(":", 1)[1].split("#")[0].strip() == name:
-                            return os.path.relpath(path, project)
-                        break
-        except OSError:
-            continue
-    return None
+def workflow_files(project):
+    """{workflow name: relative path} for the project's .nika files, read once and bounded."""
+    found, looked = {}, 0
+    for folder, dirs, files in os.walk(project, followlinks=False):
+        inside = os.path.relpath(folder, project)
+        deep = inside != "." and inside.count(os.sep) >= MAX_DEPTH - 2
+        dirs[:] = [] if deep else sorted(d for d in dirs if d not in SKIP)
+        for name in sorted(files):
+            if not name.endswith(".nika"):
+                continue
+            looked += 1
+            if looked > MAX_FILES:
+                return found
+            path = os.path.join(folder, name)
+            try:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    for _, line in zip(range(HEAD_LINES), handle):
+                        text = line.strip()
+                        if text.startswith("nika:"):
+                            found.setdefault(text.split(":", 1)[1].split("#")[0].strip(), os.path.relpath(path, project))
+                            break
+            except OSError:
+                continue
+    return found
 
 
 def ago(seconds):
@@ -128,8 +173,9 @@ def ago(seconds):
 
 def pending(project):
     traces = trace_store(project)
-    answered = {t.get("resumed_from") for t in traces if t.get("resumed_from")}
+    answered = {t.get("resumed_from") for t in traces if isinstance(t.get("resumed_from"), str) and t.get("resumed_from")}
     waiting = []
+    files = None
     for trace in traces:
         if trace.get("state") != "paused":
             continue
@@ -137,7 +183,7 @@ def pending(project):
         if path is None:
             continue
         started, paused = frames(path)
-        execution = started.get("_execution", "").replace("-", "")
+        execution = str(started.get("_execution") or "").replace("-", "")
         if execution and execution in answered:
             continue
         try:
@@ -149,11 +195,13 @@ def pending(project):
         left = (ttl - age) if (age is not None and ttl) else None
         try:
             inputs = sorted(json.loads(started.get("inputs") or "{}").keys())
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, TypeError):
             inputs = []
         workflow = trace.get("workflow") or paused.get("workflow") or "unknown"
         task = trace.get("paused_task") or paused.get("task") or "unknown"
-        file = find_workflow_file(project, workflow)
+        if files is None:
+            files = workflow_files(project)
+        file = files.get(workflow) if isinstance(workflow, str) else None
         named = plain(task) and all(plain(name) for name in inputs)
         resume = f"nika run {shlex.quote(file) if file else '<file.nika>'}"
         resume += "".join(
@@ -181,7 +229,14 @@ def pending(project):
 def main(argv):
     args = [a for a in argv if not a.startswith("--")]
     project = os.path.abspath(args[0]) if args else os.getcwd()
-    waiting = pending(project)
+    try:
+        waiting = pending(project)
+    except CouldNotList as err:
+        if "--json" in argv:
+            print(json.dumps({"waiting": [], "error": str(err)}))
+        else:
+            print(f"The runs that wait could not be listed: {err}.")
+        return 3
     if "--json" in argv:
         print(json.dumps({"waiting": waiting}))
         return 4 if waiting else 0

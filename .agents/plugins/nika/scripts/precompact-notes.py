@@ -35,11 +35,13 @@ def waiting_runs(cwd):
         proc = subprocess.run(
             [sys.executable, helper, cwd, "--json"], capture_output=True, text=True, check=False, timeout=20
         )
+        if proc.returncode not in (0, 4):
+            raise OSError("the list was not read")
         rows = json.loads(proc.stdout).get("waiting", [])
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError, AttributeError):
         return [], "Runs may be waiting here and could not be listed (no nika binary answered): list them with `nika trace ls` once it does."
     lines = []
-    for row in rows[:8]:
+    for row in [r for r in rows if isinstance(r, dict)][:8] if isinstance(rows, list) else []:
         lines.append(
             f"A run of {plain(row.get('workflow'), 'a workflow')} is waiting for the person's answer at task "
             f"{plain(row.get('task'), '(read the trace)')} (trace {plain(row.get('trace'), 'named by nika trace ls')}). "

@@ -362,7 +362,7 @@ pub fn recursive_delete_refusal<S: AsRef<str>>(
     }?;
     Some(ArgvFloorRefusal::RecursiveDelete {
         base,
-        target: target.to_owned(),
+        target: String::from(target),
     })
 }
 

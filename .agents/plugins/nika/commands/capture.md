@@ -45,10 +45,10 @@ count on a guide, since a binary can carry fewer of them than the plugin
 lacks them, or a client only has the MCP server), say so and work from the
 oracle instead: `nika catalog --tools` or `nika_tools` for the builtins, and
 `nika_examples` for the deep examples (`release-radar`,
-`config-drift-sentinel`, `competitor-radar`, `ceo-monday-brief`). `nika init`
-adds the references of the installed binary, whatever they are: offer it as
-that and not as the way to get these two guides, and do not run it unasked,
-since it writes files in the project.
+`config-drift-sentinel`, `competitor-radar`, `ceo-monday-brief`).
+Offer `nika init` for what it gives, the references of the installed binary,
+whatever they are, and not as the way to get these two guides; do not run it
+unasked, since it writes files in the project.
 
 Add by default what does not widen the effects the conversation had:
 validation of what it reads, state between runs when it will repeat,

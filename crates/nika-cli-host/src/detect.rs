@@ -10,11 +10,14 @@
 //! [`sights`]: one row per wire target, one registry gate, one stale
 //! predicate, one Hermes recognition predicate.
 //!
-//! No path is written here. A row looks where its wire target writes
-//! ([`crate::wire::config_path`]), and every wire target is a row: this
-//! module once listed six clients' paths beside a `wire` that wrote
-//! twenty-one, and a machine with only the other fifteen answered « no
-//! MCP client detected ».
+//! Every wire target is a row, and a row's first path is the one its
+//! wire target writes ([`crate::wire::config_path`]): this module once
+//! listed six clients' paths beside a `wire` that wrote twenty-one, and
+//! a machine with only the other fifteen answered « no MCP client
+//! detected ». The one path named here is the project `.cursor/mcp.json`
+//! Cursor also reads: `doctor` reports that sighting, `nika wire
+//! detected` does not act on it (it wires a host only when the file its
+//! writer patches is there).
 
 use std::path::{Path, PathBuf};
 
@@ -48,21 +51,14 @@ pub(crate) struct ClientSight {
     pub(crate) target: WireTarget,
     /// How the config is read — the probe path differs per reading.
     pub(crate) reading: Reading,
-    /// Every path the config may live at, most-wired first: the one
-    /// `wire` writes, then any other the host also reads.
+    /// Every path the config may live at: the one `wire` writes, then
+    /// any other the host also reads (`doctor` reports those, `nika wire
+    /// detected` counts only the first).
     pub(crate) paths: Vec<PathBuf>,
     /// A standing row is reported whether or not its host is on the
     /// machine (the six historical rows — findings and receipts ride
     /// them). Any other row is reported once the machine shows it.
     pub(crate) standing: bool,
-}
-
-impl ClientSight {
-    /// The machine shows this client: one of its config files exists.
-    /// Presence only, whatever the file holds.
-    pub(crate) fn present(&self) -> bool {
-        self.paths.iter().any(|path| path.exists())
-    }
 }
 
 /// A standing row: how the historical probe reads the client, and the

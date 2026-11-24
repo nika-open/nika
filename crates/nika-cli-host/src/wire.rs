@@ -257,12 +257,14 @@ fn resolve_targets(target: WireTarget, home: Option<&Path>, dir: &str) -> Vec<Wi
     }
 }
 
-/// The clients this machine SHOWS — the same presence truth `doctor`
-/// reports. Both ride the shared [`crate::detect`] rows: one registry
-/// gate (a client dropped from the matrix leaves BOTH lists — never
-/// wire-visible but doctor-invisible), and one path per client, the one
-/// [`config_path`] hands the writer. Presence only, never a guess: the
-/// config exists, whatever it holds — the writer reads it next.
+/// The clients this machine SHOWS: those whose config — the one file
+/// [`config_path`] hands the writer — is already there, whatever it
+/// holds. They ride the shared [`crate::detect`] rows for the registry
+/// gate (a client dropped from the matrix leaves `doctor` and `wire`
+/// together), but not for every path a row knows: `doctor` also reports
+/// the project `.cursor/mcp.json` Cursor reads, and a repository that
+/// ships one does not put Cursor on this machine. Wiring on that
+/// sighting would create a home config for a host that is absent.
 fn detected_targets(home: Option<&Path>, dir: &str) -> Vec<WireTarget> {
     home.map(|home| detected_targets_in(home, Path::new(dir)))
         .unwrap_or_default()
@@ -271,8 +273,8 @@ fn detected_targets(home: Option<&Path>, dir: &str) -> Vec<WireTarget> {
 fn detected_targets_in(home: &Path, dir: &Path) -> Vec<WireTarget> {
     crate::detect::sights(Some(home), dir)
         .iter()
-        .filter(|sight| sight.present())
         .map(|sight| sight.target)
+        .filter(|target| config_path(*target, Some(home), dir).is_ok_and(|path| path.exists()))
         .collect()
 }
 

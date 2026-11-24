@@ -993,6 +993,37 @@ fn every_client_wired_into_a_bare_home_is_then_detected() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// `detected` means the file the writer would patch is there. Cursor
+/// also reads a project `.cursor/mcp.json` (`doctor` reports that
+/// sighting), but a repository that ships one does not put Cursor on
+/// this machine: nothing is planned for it and no home config is created.
+#[test]
+fn detected_plans_nothing_for_cursor_from_a_project_file_alone() {
+    let home = temp_dir("project-cursor-home");
+    let dir = temp_dir("project-cursor-dir");
+    let project = dir.join(".cursor").join("mcp.json");
+    std::fs::create_dir_all(project.parent().expect("parent")).expect("dir");
+    let shipped = r#"{"mcpServers":{"other":{"command":"x"}}}"#;
+    std::fs::write(&project, shipped).expect("seed");
+
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+    assert!(
+        !home.join(".cursor").exists(),
+        "no home config is created for a host that is not there"
+    );
+    assert_eq!(std::fs::read_to_string(&project).expect("read"), shipped);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.

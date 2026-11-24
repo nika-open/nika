@@ -1168,8 +1168,12 @@ fn first_nonempty_env(names: &[String]) -> Option<String> {
 /// machine has a signed-in harness seat (NIKA-1800 at admission ·
 /// NIKA-INFER-001 at the call). Census-derived: printed only when it
 /// is TRUE, naming the live pin token — never the retired ACP wrapper
-/// id. The collector is presence-only (no ping, no spawn), cheap enough
-/// for a refusal path.
+/// id. The census is not free: it reads the provider keys of the
+/// environment and launches the login command of every agentic CLI
+/// found on `PATH` (`claude auth status` · `codex login status`),
+/// together, each bounded, and waits for the slowest. No handshake, no
+/// model call. Call it once the line is known to print: a refusal that
+/// earned it, or a page that carries it.
 #[must_use]
 pub fn seat_escape_tail() -> Option<String> {
     AccessCensus::collect(nika_runtime::compose::config_from_env()).seat_escape()
@@ -1235,13 +1239,34 @@ pub fn print_seat_escape<'a, W: std::io::Write>(
 /// the L4 renderer can).
 #[must_use]
 pub fn with_seat_tail(code: &str, tail: Option<&str>, text: String) -> String {
-    if !matches!(code, "NIKA-INFER-001" | "NIKA-1800") {
+    if !carries_seat_tail(code) {
         return text;
     }
     match tail {
         Some(tail) => format!("{text}\n  {tail}\n"),
         None => text,
     }
+}
+
+/// The codes whose page carries the seat escape line.
+fn carries_seat_tail(code: &str) -> bool {
+    matches!(code, "NIKA-INFER-001" | "NIKA-1800")
+}
+
+/// [`with_seat_tail`] over a tail computed on demand: `tail` is called
+/// for a code whose page carries the line, and for no other. Passing
+/// [`seat_escape_tail`] keeps its census (the programs it launches, the
+/// keys it reads) off every other page.
+#[must_use]
+pub(crate) fn with_seat_tail_from(
+    code: &str,
+    tail: impl FnOnce() -> Option<String>,
+    text: String,
+) -> String {
+    if !carries_seat_tail(code) {
+        return text;
+    }
+    with_seat_tail(code, tail().as_deref(), text)
 }
 
 /// `~/.nika/config.toml` when it exists (presence only · never read). `HOME` is

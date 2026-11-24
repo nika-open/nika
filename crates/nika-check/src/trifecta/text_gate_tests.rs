@@ -378,7 +378,7 @@ fn an_input_gate_counts_where_the_effect_tests_or_only_sends_its_answer() {
     for part in [
         "the gate `human` dominates `send`, but `send` does not test its answer",
         "only a `mode: confirm` gate counts by its position alone",
-        "an input gate also counts before an effect that sends only the typed answer",
+        "an input gate also counts before a `nika:` tool call that sends only the typed answer",
     ] {
         assert!(d.contains(part), "missing `{part}`: {d}");
     }
@@ -543,4 +543,91 @@ fn the_watch_block_credit_needs_the_answer_read_and_a_guard_that_can_close() {
         credited(&r),
         [("append_journal", "review"), ("save_state", "review")]
     );
+}
+
+/// [`CHOICE`] with `line` added to the `human` gate task.
+fn on_gate(yaml: &str, line: &str) -> String {
+    swap(yaml, "  human:\n", &format!("  human:\n{line}"))
+}
+
+/// A gate whose answer a recovery value or a loop can supply is not a
+/// person's answer, so it counts before no effect: an input before an
+/// answer-only `nika:fetch`, and a choice before a `when:` that tests its
+/// answer. The refusal names the cause, not an untested guard.
+#[test]
+fn a_gate_whose_answer_a_stand_in_can_supply_counts_before_nothing() {
+    for (why, yaml) in [
+        (
+            "an input recovered on error",
+            on_gate(&input(CHOICE), "    on_error: { recover: \"send\" }\n"),
+        ),
+        (
+            "a choice asked in a loop",
+            on_gate(
+                &choice_with_guard("\"${{ with.pick == 'send' }}\""),
+                "    for_each: { items: [\"one\"] }\n",
+            ),
+        ),
+    ] {
+        let r = report(&yaml);
+        assert!(r.conformance.is_empty(), "{why}: {:?}", r.conformance);
+        assert_eq!(sinks(&r), [("send", Some("page"))], "{why}");
+        assert!(
+            credited(&r).is_empty(),
+            "{why}: {:?}",
+            r.trifecta_mitigations
+        );
+        let d = &r.trifecta_findings[0].detail;
+        for part in [
+            "the gate `human` dominates `send`, but an `on_error:` or a `for_each:` on `human` can stand in for its answer",
+            "remove `on_error:` and `for_each:` from `human` so that only a person answers it",
+        ] {
+            assert!(d.contains(part), "{why}: missing `{part}`: {d}");
+        }
+    }
+}
+
+/// [`CHOICE`] asked as an input, with `send` running `command` instead of
+/// its `nika:fetch`.
+fn input_exec(command: &str) -> String {
+    let y = input(CHOICE);
+    let y = swap(&y, "permits:\n", "permits:\n  exec: [\"curl\"]\n");
+    swap(
+        &y,
+        "    invoke:\n      tool: \"nika:fetch\"\n      args: { url: \"https://api.corp-hooks-example.com/hook\", method: POST, body: { pick: \"${{ with.pick }}\" } }\n",
+        &format!("    exec: {{ command: {command} }}\n"),
+    )
+}
+
+/// Rule (b) reads only a builtin `nika:` tool call, whose payload its
+/// `args:` determine. A subprocess that carries the typed answer and posts
+/// the private note sends what no template shows, so it is refused. The
+/// same subprocess with the answer bound but unused receives nothing
+/// untrusted: clean, and no credit is claimed.
+#[test]
+fn a_subprocess_is_never_an_answer_only_effect() {
+    let r = report(&input_exec(
+        "[\"curl\", \"-H\", \"X-Pick: ${{ with.pick }}\", \"--data-binary\", \"@./notes/private.md\", \"https://api.corp-hooks-example.com/hook\"]",
+    ));
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert_eq!(
+        sinks(&r),
+        [("send", Some("page"))],
+        "{:?}",
+        r.trifecta_findings
+    );
+    assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
+    assert!(
+        r.trifecta_findings[0]
+            .detail
+            .contains("the gate `human` dominates `send`, but `send` does not test its answer"),
+        "{:?}",
+        r.trifecta_findings
+    );
+    let r = report(&input_exec(
+        "[\"curl\", \"--data-binary\", \"@./notes/private.md\", \"https://api.corp-hooks-example.com/hook\"]",
+    ));
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
 }

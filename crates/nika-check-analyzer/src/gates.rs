@@ -193,7 +193,7 @@ pub fn affirmed_by(task: &RawTask, prompt: &str) -> bool {
 }
 
 mod answer;
-pub use answer::{answer_derivations, answer_sent_by, answer_tested_by};
+pub use answer::{answer_derivations, answer_sent_by, answer_stands_alone, answer_tested_by};
 
 /// The gate expression reads an exact `with:` carrier of `tasks.<prompt>.output`.
 fn reads_answer(task: &RawTask, expr: &Expr, prompt: &str) -> bool {

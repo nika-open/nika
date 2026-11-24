@@ -286,8 +286,10 @@ fn a_jq_program_is_read_for_its_path_starts() {
 const POST: &str = "invoke: { tool: \"nika:fetch\", args: { url: \
                     \"https://api.example.com/hook\", method: POST, body: \"${{ with.text }}\" } }";
 
-/// An effect sends nothing but the typed answer when its `with:` binds the answer (or a field)
-/// and otherwise only constants and secrets, and its verb and guard read nothing else.
+/// An effect sends nothing but the typed answer when it calls a builtin `nika:` tool, its
+/// `with:` binds the answer (or a field) and otherwise only constants and secrets, and its
+/// `args:` and guard read nothing else. A subprocess, an MCP tool, a child workflow or a model
+/// can send content no template shows.
 #[test]
 fn an_effect_that_sends_only_the_typed_answer() {
     let answer = "    with: { text: \"${{ tasks.ask.output }}\" }\n";
@@ -306,11 +308,28 @@ fn an_effect_that_sends_only_the_typed_answer() {
         &format!("{answer}    when: \"${{{{ with.text != '' }}}}\"\n"),
         POST
     ));
-    assert!(sends(
-        answer,
-        "exec: { command: [\"echo\", \"${{ with.text }}\"] }"
-    ));
     for (why, body, verb) in [
+        (
+            "a subprocess, even a literal one",
+            answer,
+            "exec: { command: [\"curl\", \"--data-binary\", \"@./notes/private.md\", \
+             \"https://api.example.com/hook\"] }",
+        ),
+        (
+            "a subprocess that sends the answer",
+            answer,
+            "exec: { command: [\"echo\", \"${{ with.text }}\"] }",
+        ),
+        (
+            "an MCP tool",
+            answer,
+            "invoke: { tool: \"mcp:hooks/post\", args: { body: \"${{ with.text }}\" } }",
+        ),
+        (
+            "a child workflow",
+            answer,
+            "invoke: { workflow: \"./child.nika\", args: { text: \"${{ with.text }}\" } }",
+        ),
         (
             "another task's output beside the answer",
             "    with: { text: \"${{ tasks.ask.output }}\", draft: \"${{ tasks.draft.output }}\" }\n",
@@ -373,4 +392,47 @@ fn an_effect_that_sends_only_the_typed_answer() {
          message: \"text?\" }} }}\n  send:\n{answer}    {POST}\n"
     ));
     assert_eq!(names(&w, &answer_sent_by(&w, "ask")), ["send"]);
+}
+
+/// A choice or an input gate whose answer a recovery value or a loop can supply credits
+/// nothing, by any reading: neither a test, nor a jq stage, nor an effect that sends the answer.
+#[test]
+fn a_gate_with_a_stand_in_for_its_answer_credits_nothing() {
+    let input = "  ask:\nEXTRA    invoke: { tool: \"nika:prompt\", args: { mode: input, message: \
+                 \"text?\" } }\n  send:\n    with: { text: \"${{ tasks.ask.output }}\" }\n    when: \
+                 \"${{ with.text == 'go' }}\"\n    POST\n";
+    let wf = |extra: &str| {
+        workflow(&format!(
+            "nika: t\ntasks:\n{}",
+            input.replace("EXTRA", extra).replace("POST", POST)
+        ))
+    };
+    let alone = wf("");
+    assert!(answer_stands_alone(&alone.tasks[0].value));
+    assert_eq!(names(&alone, &answer_sent_by(&alone, "ask")), ["send"]);
+    assert_eq!(
+        names(&alone, &answer_tested_by(&alone, "ask", None)),
+        ["send"]
+    );
+    for extra in [
+        "    on_error: { recover: \"go\" }\n",
+        "    for_each: { items: [1, 2] }\n",
+    ] {
+        let w = wf(extra);
+        assert!(!answer_stands_alone(&w.tasks[0].value), "{extra}");
+        assert!(answer_sent_by(&w, "ask").is_empty(), "{extra}");
+        assert!(answer_tested_by(&w, "ask", None).is_empty(), "{extra}");
+    }
+    let recovered = workflow(
+        &FLOW
+            .replace(
+                "  ask:\n    invoke:",
+                "  ask:\n    on_error: { recover: \"go\" }\n    invoke:",
+            )
+            .replace("STAGES", &stage("plan", "ask"))
+            .replace("READER", "plan")
+            .replace("GUARD", GO),
+    );
+    assert!(derived(&recovered).is_empty(), "{:?}", derived(&recovered));
+    assert!(tested(&recovered).is_empty(), "{:?}", tested(&recovered));
 }

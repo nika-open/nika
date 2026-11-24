@@ -34,10 +34,12 @@
 //! answers with text, not a yes, so it counts only before an egress task
 //! whose own `when:` tests that answer
 //! ([`TrifectaSubject::answer_tested_by`]), since a task that merely waits
-//! on it runs whatever the answer; an input gate also counts before an
-//! egress task that sends only the typed answer. One violation per ungated
-//! tainted egress task, message opening with the NEP's verbatim « lethal
-//! trifecta complete · human gate required ».
+//! on it runs whatever the answer; an input gate also counts before a
+//! `nika:` tool call that sends only the typed answer, and neither counts
+//! when an `on_error:` or a `for_each:` can stand in for its answer
+//! ([`TrifectaSubject::answer_stood_in`]). One violation per ungated tainted
+//! egress task, message opening with the NEP's verbatim « lethal trifecta
+//! complete · human gate required ».
 //!
 //! The judge is pure L0 (the same shape the dead `policy_violations`
 //! set): it
@@ -106,6 +108,11 @@ pub struct TrifectaSubject {
     /// the gate runs whatever the answer. `None`: a gate credited wherever it
     /// dominates (a confirm, whose « no » the consent lane judges).
     pub answer_tested_by: Option<Vec<usize>>,
+    /// For such a gate: an `on_error:` or a `for_each:` on the gate task can
+    /// stand in for its answer (a recovered value, a list of answers), so the
+    /// projection lists no subject in [`Self::answer_tested_by`] and the
+    /// refusal names the cause instead of an untested guard.
+    pub answer_stood_in: bool,
     /// Direct predecessors (indices into the same subject slice).
     pub parents: Vec<usize>,
 }
@@ -125,6 +132,7 @@ impl TrifectaSubject {
             declared_private_read: false,
             declared_egress: false,
             answer_tested_by: None,
+            answer_stood_in: false,
             parents: Vec::new(),
         }
     }
@@ -137,6 +145,14 @@ impl TrifectaSubject {
     #[must_use]
     pub fn with_answer_tested_by(mut self, tested_by: Vec<usize>) -> Self {
         self.answer_tested_by = Some(tested_by);
+        self
+    }
+
+    /// Mark whether an `on_error:` or a `for_each:` on this text-answer gate
+    /// can stand in for its answer (the judge's wording reads it).
+    #[must_use]
+    pub fn with_answer_stood_in(mut self, stood_in: bool) -> Self {
+        self.answer_stood_in = stood_in;
         self
     }
 
@@ -529,7 +545,13 @@ fn refusal(
     // feeding the sink from pre-gate tasks are paths too. Upstream of the
     // ingress, EVERY path (order and data alike) crosses the gate.
     let why = untested
-        .map(|gate| untested_answer_note(&gate.id, id))
+        .map(|gate| {
+            if gate.answer_stood_in {
+                stood_in_note(&gate.id, id)
+            } else {
+                untested_answer_note(&gate.id, id)
+            }
+        })
         .or_else(|| bypass_note(dom, subjects, sink))
         .or_else(|| defaulted_gate_note(subjects))
         .unwrap_or_else(|| {
@@ -551,7 +573,13 @@ fn refusal(
                 crate::HUMAN_GATE_TOOL,
             )
         },
-        |gate| untested_answer_fix(&gate.id, id),
+        |gate| {
+            if gate.answer_stood_in {
+                stood_in_fix(&gate.id, id)
+            } else {
+                untested_answer_fix(&gate.id, id)
+            }
+        },
     );
     let legs = leg_reasons(permits, subjects);
     TrifectaViolation {
@@ -576,8 +604,28 @@ fn untested_answer_note(gate: &str, sink: &str) -> String {
          `mode: confirm` gate counts by its position alone, a choice or an input answers with \
          text, and unless the `when:` of `{sink}` tests `tasks.{gate}.output`, bound through \
          `with:` directly or through a `nika:jq` stage that reads it, `{sink}` runs whatever the \
-         answer, the one that declines included (an input gate also counts before an effect that \
-         sends only the typed answer)"
+         answer, the one that declines included (an input gate also counts before a `nika:` tool \
+         call that sends only the typed answer)"
+    )
+}
+
+/// WHY a text-answer gate whose answer something else can supply counts
+/// before no effect: a recovered value or a list of answers is nobody's.
+fn stood_in_note(gate: &str, sink: &str) -> String {
+    format!(
+        "the gate `{gate}` dominates `{sink}`, but an `on_error:` or a `for_each:` on `{gate}` \
+         can stand in for its answer: a recovered value or a list of answers is not a person's \
+         answer, so a choice or an input gate that carries one counts before no effect"
+    )
+}
+
+/// The repair for [`stood_in_note`]: only a person answers the gate, and the
+/// effect tests that answer.
+fn stood_in_fix(gate: &str, sink: &str) -> String {
+    format!(
+        "remove `on_error:` and `for_each:` from `{gate}` so that only a person answers it, then \
+         test that answer in the `when:` of `{sink}`, or make `{gate}` a `mode: confirm` gate \
+         whose yes `{sink}` tests"
     )
 }
 
@@ -805,6 +853,22 @@ mod tests {
         let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
         assert!(v.violations.is_empty(), "{:?}", v.violations);
         assert_eq!(v.mitigations.len(), 2);
+
+        // A gate whose answer a recovery or a loop can supply: the refusal
+        // names that cause and its repair, not an untested guard.
+        subjects[1].answer_tested_by = Some(Vec::new());
+        subjects[1].answer_stood_in = true;
+        let v = trifecta_verdict(&full_boundary(), &subjects, &witnesses, &topo(&subjects));
+        assert_eq!(v.violations.len(), 2);
+        let d = &v.violations[0].detail;
+        for part in [
+            "the gate `pick` dominates `send`, but an `on_error:` or a `for_each:` on `pick` can \
+             stand in for its answer",
+            "remove `on_error:` and `for_each:` from `pick` so that only a person answers it",
+        ] {
+            assert!(d.contains(part), "missing `{part}`: {d}");
+        }
+        assert!(!d.contains("does not test its answer"), "{d}");
     }
 
     /// The violations half, for batteries whose subject is the refusal.

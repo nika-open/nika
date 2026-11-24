@@ -121,11 +121,17 @@ depend on without pulling the CLI:
   `for_each:`, `args.input` reads a `with:` key bound to the answer or to
   such a stage, and the literal `expression` starts a `.` path, the field
   that carries it when the input is an object, read as text). A literal
-  input gate is also credited before an egress task that sends only the
-  typed answer (`analyzer::gates::answer_sent_by`: every `with:` value is
-  the answer, a field of it, or `const.*`/`secrets.*` only, and the verb and
-  the `when:` read nothing else; never an `infer:`, an `agent:` or a
-  `for_each:`). An egress task that only waits on the gate is refused as for
+  input gate is also credited before a builtin `nika:` tool call that sends
+  only the typed answer (`analyzer::gates::answer_sent_by`: every `with:`
+  value is the answer, a field of it, or `const.*`/`secrets.*` only, and the
+  `args:` and the `when:` read nothing else; never an `exec:`, an `mcp:`
+  tool, a child `workflow:`, an `infer:`, an `agent:` or a `for_each:`,
+  whose payload can carry content no template shows). None of these
+  readings credits a choice or an input gate with an `on_error:` or a
+  `for_each:` (`analyzer::gates::answer_stands_alone`, the conditions
+  `human_confirm` puts on a confirm): a recovered value or a list of answers
+  is not a person's answer, and the refusal names that cause. An egress
+  task that only waits on the gate is refused as for
   no gate, and the refusal names the gate, the task and the two repairs
   (test the answer, or `mode: confirm`). A confirm keeps the dominance
   credit: `NIKA-SEC-014` judges its « no ». It does NOT judge what the jq

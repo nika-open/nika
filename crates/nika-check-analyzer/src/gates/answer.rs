@@ -7,6 +7,9 @@
 //! the effects that send nothing but the typed answer ([`answer_sent_by`], which the caller reads
 //! for an input gate only).
 //!
+//! Every reading credits nothing unless the gate task answers alone ([`answer_stands_alone`]):
+//! the conditions [`super::human_confirm`] puts on a confirm beyond its mode and default.
+//!
 //! What is NOT judged: what a jq stage computes from the answer it reads. The stage is read
 //! syntactically (its `args.input` carries the answer, its `expression` reads that value), never
 //! run, so a program that reads the answer and then ignores it is credited.
@@ -14,7 +17,7 @@
 use std::collections::BTreeSet;
 
 use nika_schema::expression::{Expr, Literal, NamespaceRef, RelOp, expr_refs};
-use nika_schema::raw::{RawAction, RawCommand, RawTask, RawWorkflow};
+use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
 use nika_schema::types::WhenGate;
 
 use super::{
@@ -42,6 +45,9 @@ use super::{
 ///   itself (`with.plan != null`) is no read (a jq stage always yields a value).
 #[must_use]
 pub fn answer_tested_by(wf: &RawWorkflow, prompt: &str, choices: Option<&[String]>) -> Vec<usize> {
+    if !gate_alone(wf, prompt) {
+        return Vec::new();
+    }
     let derived = answer_derivations(wf, prompt);
     indices(wf, |task| tests_answer(task, prompt, choices, &derived))
 }
@@ -64,6 +70,9 @@ pub fn answer_tested_by(wf: &RawWorkflow, prompt: &str, choices: Option<&[String
 #[must_use]
 pub fn answer_derivations(wf: &RawWorkflow, prompt: &str) -> BTreeSet<String> {
     let mut derived = BTreeSet::new();
+    if !gate_alone(wf, prompt) {
+        return derived;
+    }
     loop {
         let found: Vec<String> = wf
             .tasks
@@ -84,14 +93,38 @@ pub fn answer_derivations(wf: &RawWorkflow, prompt: &str) -> BTreeSet<String> {
 /// content reaches it without passing through a human's hands. The caller reads it for a
 /// `mode: input` gate only (a choice's answer is one of the author's strings, not content).
 ///
-/// The task binds `${{ tasks.<prompt>.output }}` (or a field of it) in `with:`, every other
-/// `with:` value reads nothing but `const.*` and `secrets.*`, and every template its verb and its
-/// `when:` hold reads nothing but those keys, `const.*` and `secrets.*`: no other task's output,
-/// no `inputs.*`, no loop-local, no `run.*` fact. A `for_each:` task, an `infer:` or an `agent:`
-/// (a model writes what they send) and a template that does not scan never qualify.
+/// The task is an `invoke:` of a builtin `nika:` tool, whose payload its `args:` determine; it
+/// binds `${{ tasks.<prompt>.output }}` (or a field of it) in `with:`, every other `with:` value
+/// reads nothing but `const.*` and `secrets.*`, and every template its `args:` and its `when:`
+/// hold reads nothing but those keys, `const.*` and `secrets.*`: no other task's output, no
+/// `inputs.*`, no loop-local, no `run.*` fact. An `exec:` (a literal command can read a file and
+/// send it), an `mcp:` tool, a child `workflow:`, an `infer:` or an `agent:` (their payload can
+/// carry content no template shows), a `for_each:` task and a template that does not scan never
+/// qualify: only a `when:` test credits the gate before them.
 #[must_use]
 pub fn answer_sent_by(wf: &RawWorkflow, prompt: &str) -> Vec<usize> {
+    if !gate_alone(wf, prompt) {
+        return Vec::new();
+    }
     indices(wf, |task| sends_only_answer(task, prompt))
+}
+
+/// Nothing but a person answers the gate task: no `on_error:` (a recovered value is nobody's
+/// answer) and no `for_each:` (a list of answers is not one answer), the conditions
+/// [`super::human_confirm`] puts on a confirm beyond its mode and default. A choice or an input
+/// gate that fails them is credited before no effect.
+#[must_use]
+pub fn answer_stands_alone(task: &RawTask) -> bool {
+    task.on_error.is_none() && task.for_each.is_none()
+}
+
+/// The gate task `prompt` of `wf` exists and [`answer_stands_alone`].
+fn gate_alone(wf: &RawWorkflow, prompt: &str) -> bool {
+    wf.tasks
+        .iter()
+        .map(|t| &t.value)
+        .find(|t| t.id.value == prompt)
+        .is_some_and(answer_stands_alone)
 }
 
 fn indices(wf: &RawWorkflow, keep: impl Fn(&RawTask) -> bool) -> Vec<usize> {
@@ -353,33 +386,22 @@ fn sends_only_answer(task: &RawTask, prompt: &str) -> bool {
     !answer.is_empty() && with_ok && when_ok && reads_ok(action_refs(&task.action))
 }
 
-/// Every root the verb's own templates read: `None` for a model verb (what it sends is what a
-/// model writes) or a template that does not scan.
+/// Every root the `args:` of a builtin `nika:` tool call read: `None` for any other verb or
+/// target (see [`answer_sent_by`]) or a template that does not scan.
 fn action_refs(action: &RawAction) -> Option<Vec<NamespaceRef>> {
-    let texts = |items: Vec<&str>| {
-        items.into_iter().try_fold(Vec::new(), |mut all, s| {
-            all.extend(refs_of(&serde_json::Value::String(s.to_owned()))?);
-            Some(all)
-        })
+    let RawAction::Invoke(inv) = action else {
+        return None;
     };
-    match action {
-        RawAction::Invoke(inv) => inv
-            .args
-            .as_ref()
-            .map_or_else(|| Some(Vec::new()), |a| refs_of(&a.value)),
-        RawAction::Exec(ex) => {
-            let mut items: Vec<&str> = match &ex.command {
-                RawCommand::Shell(s) => vec![s.value.as_str()],
-                RawCommand::Argv(argv) => argv.iter().map(|s| s.value.as_str()).collect(),
-                _ => return None,
-            };
-            items.extend(ex.cwd.iter().map(|s| s.value.as_str()));
-            items.extend(ex.env.iter().map(|(_, v)| v.value.as_str()));
-            items.extend(ex.stdin.iter().map(|s| s.value.as_str()));
-            texts(items)
-        }
-        _ => None,
+    let builtin = inv
+        .tool()
+        .and_then(|tool| tool.value.strip_prefix("nika:"))
+        .is_some_and(|path| !path.is_empty());
+    if !builtin {
+        return None;
     }
+    inv.args
+        .as_ref()
+        .map_or_else(|| Some(Vec::new()), |a| refs_of(&a.value))
 }
 
 /// The with-value IS one bare island reading `tasks.<id>.output` or a field of it (member or

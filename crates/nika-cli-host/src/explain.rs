@@ -533,8 +533,11 @@ fn security_fix_hint(code: &str) -> Option<&'static str> {
              a `with:` binding of its output, or on the output of a `nika:jq` \
              stage whose program reads it), and an effect that only waits on \
              it runs whatever the answer, so it is refused as if no gate stood \
-             there. An input gate also counts before an effect that sends only \
-             the typed answer: what it sends is what the person typed",
+             there. An input gate also counts before a `nika:` tool call that \
+             sends only the typed answer: what it sends is what the person \
+             typed. A choice or an input gate with an `on_error:` or a \
+             `for_each:` counts before no effect: a recovered value or a list \
+             of answers is not a person's answer",
         ),
         _ => None,
     }
@@ -838,7 +841,8 @@ mod tests {
             "it counts only before an effect whose own `when:` tests that answer",
             "or on the output of a `nika:jq` stage whose program reads it",
             "an effect that only waits on it runs whatever the answer",
-            "An input gate also counts before an effect that sends only the typed answer",
+            "An input gate also counts before a `nika:` tool call that sends only the typed answer",
+            "A choice or an input gate with an `on_error:` or a `for_each:` counts before no effect",
         ] {
             assert!(cli.text.contains(fact), "`{fact}` missing:\n{}", cli.text);
         }

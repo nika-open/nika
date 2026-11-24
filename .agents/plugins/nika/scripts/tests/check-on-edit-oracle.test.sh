@@ -98,6 +98,28 @@ if [ -x "$HERE/../../bin/nika-kit" ]; then echo "ok   the plugin pass went throu
   fails=$((fails + 1))
 fi
 
+# A folder name is data from the project: the command the hook tells the
+# reader to run carries it shell-quoted, so pasting the line runs the check
+# and nothing the name holds.
+# shellcheck disable=SC2016 # the literal $(…) is the hostile name under test
+ODD="$ROOT/"'$(touch pwned) flows'
+mkdir -p "$ODD" "$ROOT/paste"
+printf 'nika: flow\npermits: {}\ntasks: {}\n' >"$ODD/flow.nika"
+for HOOK in "$HERE/../check-on-edit.sh" "$ROOT/lone/check-on-edit.sh"; do
+  case "$HOOK" in "$ROOT"/*) where="lone copy" ;; *) where="in the plugin" ;; esac
+  payload="$(printf '{"hook_event_name":"PostToolUse","tool_input":{"file_path":"%s"}}' "$ODD/flow.nika")"
+  out="$(printf '%s' "$payload" | env -u NIKA_BIN -u CARGO_TARGET_DIR PATH="$ROOT/path-bin:/usr/bin:/bin" bash "$HOOK" 2>&1)"
+  line="$(printf '%s\n' "$out" | grep -A1 're-check with the same oracle' | tail -n 1)"
+  (cd "$ROOT/paste" && PATH="$ROOT/path-bin:/usr/bin:/bin" bash -c "$line" >"$ROOT/paste/out" 2>&1)
+  if [ -n "$line" ] && [ ! -e "$ROOT/paste/pwned" ] && grep -qF "finding from path-bin" "$ROOT/paste/out"; then
+    printf 'ok   %s · the suggested command runs the check and nothing a folder name holds\n' "$where"
+  else
+    printf 'FAIL %s · pasting the suggested command: %s\n' "$where" "$line"
+    fails=$((fails + 1))
+    rm -f "$ROOT/paste/pwned"
+  fi
+done
+
 if [ "$fails" -eq 0 ]; then
   echo "all green"
 else

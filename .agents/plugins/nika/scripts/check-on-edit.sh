@@ -199,12 +199,15 @@ printf '%s\n' "$findings" | head -c 2000 >&2
 # Name the FLAG, not just the verb. A reader told to "re-run nika check"
 # runs the bare form, reads a green that this hook does not accept, and
 # loops against a gate it cannot see.
+#
+# Every path inside the command is shell-quoted (%q): a folder or file name
+# comes from the project, and the reader is told to run the line.
 if [ "$kind" = project ]; then
-  printf '\nre-check with the same oracle this hook used (activate a beat only once it reads READY):\n  cd %s && %s check nika.yaml && %s arm --json\n' \
+  printf '\nre-check with the same oracle this hook used (activate a beat only once it reads READY):\n  cd %q && %q check nika.yaml && %q arm --json\n' \
     "$project_dir" "$oracle" "$oracle" >&2
   printf 'the beat, its zone and its activation: https://docs.nika.sh/reference/arm\n' >&2
 else
-  printf '\nre-check with the same oracle this hook used:\n  %s check --native-strict %s\n' "$oracle" "$file" >&2
+  printf '\nre-check with the same oracle this hook used:\n  %q check --native-strict %q\n' "$oracle" "$file" >&2
 fi
 printf 'oracle: %s (tag %s · a tag does not say what the build contains)\n' \
   "$oracle" "${tag:-unknown}" >&2

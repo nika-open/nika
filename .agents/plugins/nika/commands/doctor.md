@@ -11,9 +11,11 @@ can be distinct operations.
 
 When a check and a run seem to disagree, look at which binary answers each.
 Where the kit's scripts are installed, `"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit"`
-prints the binary the kit's helpers resolved, why (a `NIKA_BIN` pin, an
-engine build, the PATH), its version, and a note when the run guard, which
-always judges with the PATH's `nika`, uses another one. Without the kit's
+prints the binary the kit's helpers resolved, why (a `NIKA_BIN` pin, the
+session's build folder inside the engine tree, the PATH), its version, and a
+note when the run guard, which always judges with the PATH's `nika`, uses
+another one. A build under the project's own `target/` is never picked: the
+output names it and the `NIKA_BIN` pin that selects it. Without the kit's
 scripts, compare `command -v nika` and `nika --version` with what `NIKA_BIN` names.
 
 This command is diagnostic: its allowed tools do not install or mutate config.

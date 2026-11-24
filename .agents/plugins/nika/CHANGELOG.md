@@ -60,7 +60,8 @@ and the intent hint reach for a workflow on wide jobs too (fan-outs,
 media, model comparisons, agent seats, crawls, watchers, exact
 reconciliations), in English and French. The edit hook judges with
 NIKA_BIN, else, inside the engine tree, the session's CARGO_TARGET_DIR
-build, then the tree's own build, else the PATH. A seventh evaluation
+build when that folder is absolute and outside the tree, else the PATH; a
+build under a tree's own `target/` is never picked. A seventh evaluation
 case, written and not yet run, covers a new job designed deep by default.
 
 The run guard no longer bricks the editor when the `nika` binary is

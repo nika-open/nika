@@ -52,26 +52,24 @@ case "$file" in
   *) done_quiet ;;
 esac
 
-# The oracle order (F14 · 2026-07-30). NIKA_BIN wins when set — the
-# seatbelt judges with the binary the WORK targets, not only whatever the
-# PATH serves. Proven need 2026-07-27: the E-split window, where every
-# ratified-grammar file on this machine drew a cry from the PATH's 0.105
-# while engine main already spoke the new forms. When NIKA_BIN is unset
-# AND the edited file lives in a tree that builds its own nika, the
-# tree's build IS the binary the work targets — the hook judges with it
-# by default, because the PATH binary can lag the tree (the wrong-judge
-# class: a green from the release the tree is in the middle of fixing).
-# Everywhere else falls back to the PATH's nika. Same capability-honesty:
-# an unset or broken NIKA_BIN and a missing binary fall back to silence,
-# never to a failure.
+# The oracle order. NIKA_BIN wins when set: the seatbelt judges with the
+# binary the WORK targets, not only whatever the PATH serves. Proven need
+# 2026-07-27: the E-split window, where every ratified-grammar file on this
+# machine drew a cry from the PATH's 0.105 while engine main already spoke
+# the new forms.
 #
-# The tree build has two homes. A checkout that builds into its own
-# `target/` keeps it there; a worktree whose session points
-# CARGO_TARGET_DIR outside the tree (one build folder per lane) keeps it
-# under that folder. The session's folder counts only inside the engine
-# tree (the tree holds `crates/nika-cli`): elsewhere it may hold another
-# project's build. A project outside the engine names its judge with
-# NIKA_BIN in the environment the client gives its hooks.
+# A project never chooses the judge. This hook runs on its own after every
+# edit, in any repository the editor opens, so nothing the repository holds
+# is ever run: a build under the tree's own `target/` is not picked, engine
+# tree included. Inside the engine tree (the tree holds `crates/nika-cli`),
+# a session that points CARGO_TARGET_DIR at an absolute folder outside the
+# tree (one build folder per lane) is judged by that folder's build: the
+# session chose it, the repository did not. Elsewhere that folder may hold
+# another project's build and is not looked at. Everything else falls back
+# to the PATH's nika; to judge with another build, name it with NIKA_BIN in
+# the environment the client gives its hooks. Same capability-honesty: an
+# unset or broken NIKA_BIN and a missing binary fall back to silence, never
+# to a failure.
 NIKA="${NIKA_BIN:-}"
 kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../bin/nika-kit"
 if [ -x "$kit" ]; then
@@ -81,15 +79,23 @@ if [ -x "$kit" ]; then
   NIKA="$("$kit" --path "$(dirname "$file")" 2>/dev/null || true)"
   [ -n "$NIKA" ] || NIKA="${NIKA_BIN:-nika}"
 elif [ -z "$NIKA" ]; then
-  root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -n "$root" ] && [ -f "$root/crates/nika-cli/Cargo.toml" ] \
-    && [ -n "${CARGO_TARGET_DIR:-}" ] && [ -x "$CARGO_TARGET_DIR/debug/nika" ]; then
-    NIKA="$CARGO_TARGET_DIR/debug/nika"
-  elif [ -n "$root" ] && [ -x "$root/target/debug/nika" ]; then
-    NIKA="$root/target/debug/nika"
-  else
-    NIKA="nika"
-  fi
+  NIKA="nika"
+  case "${CARGO_TARGET_DIR:-}" in
+    /*)
+      root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
+      if [ -n "$root" ] && [ -f "$root/crates/nika-cli/Cargo.toml" ] \
+        && [ -f "$CARGO_TARGET_DIR/debug/nika" ] && [ -x "$CARGO_TARGET_DIR/debug/nika" ]; then
+        build="$(cd "$CARGO_TARGET_DIR/debug" 2>/dev/null && pwd -P || true)"
+        tree="$(cd "$root" 2>/dev/null && pwd -P || true)"
+        if [ -n "$build" ] && [ -n "$tree" ]; then
+          case "$build/" in
+            "$tree"/*) ;;
+            *) NIKA="$CARGO_TARGET_DIR/debug/nika" ;;
+          esac
+        fi
+      fi
+      ;;
+  esac
 fi
 
 if [ ! -f "$file" ] || ! command -v "$NIKA" >/dev/null 2>&1; then
@@ -202,7 +208,7 @@ else
 fi
 printf 'oracle: %s (tag %s · a tag does not say what the build contains)\n' \
   "$oracle" "${tag:-unknown}" >&2
-printf 'the judge: NIKA_BIN when set, else inside the engine tree its build (the session CARGO_TARGET_DIR, then target/debug), else the PATH; to name another, set NIKA_BIN=<path-to-nika> where the client starts its hooks\n' >&2
+printf 'the judge: NIKA_BIN when set, else inside the engine tree the session build under CARGO_TARGET_DIR (an absolute folder outside the tree), else the PATH; a build inside a project is never picked. To name another, set NIKA_BIN=<path-to-nika> where the client starts its hooks\n' >&2
 if [ -n "$cc" ]; then
   # PostToolUse exit 2 = stderr fed to Claude, edit already applied.
   exit 2

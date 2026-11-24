@@ -2,9 +2,11 @@
 # check-on-edit-oracle.test.sh: which binary the edit hook judges with.
 #
 # The order under test: NIKA_BIN when set; else, inside the engine tree,
-# the session's CARGO_TARGET_DIR build, then the tree's target/debug build;
-# else the PATH's `nika`. The session folder never judges a file outside
-# the engine tree: there it may hold another project's build.
+# the session's CARGO_TARGET_DIR build when that folder is absolute and
+# outside the tree; else the PATH's `nika`. A build under a tree's own
+# target/ never judges, engine tree included: a project does not choose
+# its judge. The session folder never judges a file outside the engine
+# tree: there it may hold another project's build.
 #
 # Stub binaries stand in for the real ones, so this runs with no engine
 # build. Each stub refuses every file and names itself in its finding; the
@@ -15,8 +17,10 @@ set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(mktemp -d)"
+ROOT="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$ROOT"' EXIT
+export HOME="$ROOT/home"
+mkdir -p "$HOME"
 fails=0
 
 # stub <dir> <name>: an executable `nika` that refuses every check as <name>
@@ -77,9 +81,13 @@ for HOOK in "$HERE/../check-on-edit.sh" "$ROOT/lone/check-on-edit.sh"; do
     NIKA_BIN="$ROOT/explicit/nika" CARGO_TARGET_DIR="$ROOT/session-target"
   judge "$where · inside the engine, the session target folder judges" "$ENGINE/flows/flow.nika" session-target \
     CARGO_TARGET_DIR="$ROOT/session-target"
-  judge "$where · inside the engine, no session folder: the tree build judges" "$ENGINE/flows/flow.nika" tree-build
-  judge "$where · a session folder with no build falls back to the tree build" "$ENGINE/flows/flow.nika" tree-build \
+  judge "$where · inside the engine, no session folder: the PATH judges, never the tree's own build" "$ENGINE/flows/flow.nika" path-bin
+  judge "$where · a session folder with no build falls back to the PATH" "$ENGINE/flows/flow.nika" path-bin \
     CARGO_TARGET_DIR="$ROOT/empty-target"
+  judge "$where · a session folder inside the repository never judges" "$ENGINE/flows/flow.nika" path-bin \
+    CARGO_TARGET_DIR="$ENGINE/target"
+  judge "$where · a relative session folder never judges" "$ENGINE/flows/flow.nika" path-bin \
+    CARGO_TARGET_DIR="target"
   judge "$where · outside the engine, the session folder never judges" "$PROJECT/flow.nika" path-bin \
     CARGO_TARGET_DIR="$ROOT/session-target"
   judge "$where · outside the engine, NIKA_BIN names the judge" "$PROJECT/flow.nika" explicit \

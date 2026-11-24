@@ -34,6 +34,22 @@ is checked, a run that ended red brings back a reminder, runs that wait
 survive a compaction, a run reports its failures and its spend); each rule
 is also the stated step of a skill, so it holds on hosts without them.
 
+The helpers hold on a project they have no reason to trust. A project
+never chooses the binary they run: a build found inside a repository is
+never picked, engine tree included. Names, paths and a gate's question read
+from a project or from a run's record reach the agent filtered, bounded and
+marked as data, and a path printed inside a suggested command is
+shell-quoted. `/nika:report` writes under the project's `out/` only and
+follows no link there. The stop gate keeps what it has checked across a
+second start of the same session and names a check that could not run as
+such; the author gate checks every changed file within a time budget and
+says which ones it did not reach. A trace line that is JSON without being
+an event is skipped by every reader, and the plain verdict, the list of
+waiting runs and the facts read at skill load give the binary a time
+limit. The script tests run under a temporary home
+folder, and the one that needs the real binary says SKIP when the `nika` it
+finds does not answer there.
+
 The plugin is ambitious about what one workflow can do, and careful
 about what it touches: ambition in craft, fidelity in effects. The
 authoring skill opens with a design step and three new references: a

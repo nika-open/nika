@@ -9,19 +9,56 @@
 #   · a paused run is listed with its question; once answered it is no
 #     longer listed (the engine's `trace ls` still calls it paused);
 #   · the model picker prints a route when a key is present and advice,
-#     exit 1, when nothing is ready; it never prints a key value.
+#     exit 1, when nothing is ready; it never prints a key value, and its
+#     probe of a local model server asks the local address only.
 #
-# Usage: nika-run-helpers.test.sh  (exit 0 = all green · 77 = nika absent)
+# Every run happens under a HOME of its own: nothing here reads or writes
+# the caller's settings, credentials or trace stores. The binary is the
+# real one, most specific first: NIKA_BIN, the session's build, this tree's
+# own build, the PATH. It must answer under that HOME. A PATH launcher that
+# finds its binary through HOME does not: the test then says SKIP visibly,
+# since asserting on a launcher's error text would prove nothing.
+#
+# Usage: nika-run-helpers.test.sh
+#   exit 0 = all green, or SKIP · 77 = no nika binary at all
 set -euo pipefail
 
-command -v nika >/dev/null 2>&1 || {
-  echo "skip: nika not on PATH"
-  exit 77
-}
-
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$HERE/../../../.." && pwd)"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
+export HOME="$ROOT/home"
+mkdir -p "$HOME" "$ROOT/bin"
+
+JUDGE=""
+SEEN=0
+for candidate in \
+  "${NIKA_BIN:-}" \
+  "${CARGO_TARGET_DIR:+$CARGO_TARGET_DIR/debug/nika}" \
+  "$REPO/target/debug/nika" \
+  "$(command -v nika 2>/dev/null || true)"; do
+  [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+  SEEN=1
+  if "$candidate" --version 2>/dev/null | grep -q '^nika [0-9]'; then
+    JUDGE="$candidate"
+    break
+  fi
+done
+if [ "$SEEN" -eq 0 ]; then
+  echo "skip: no nika binary (set NIKA_BIN, build target/debug/nika, or put nika on PATH)"
+  exit 77
+fi
+if [ -z "$JUDGE" ]; then
+  echo "SKIP nika-run-helpers.test: the nika found does not answer under a temporary HOME (a launcher that reads HOME); set NIKA_BIN to a nika binary. Nothing was asserted"
+  exit 0
+fi
+# That binary is the first `nika` on the PATH from here on, for the runs
+# below and for every helper. No pin and no session folder is inherited: a
+# later case steers the helpers through the PATH, which a pin would beat.
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$JUDGE" >"$ROOT/bin/nika"
+chmod +x "$ROOT/bin/nika"
+unset NIKA_BIN CARGO_TARGET_DIR
+export PATH="$ROOT/bin:$PATH"
 FAILS=0
 check() { # check <label> <haystack> <needle>
   if printf '%s' "$2" | grep -qF -- "$3"; then echo "ok   $1"; else
@@ -154,8 +191,22 @@ check "picker reads the model name from the binary's catalog" "$out" "--model op
 out="$(env -i PATH="/usr/bin:/bin" NIKA_BIN="$PICK/nika" MISTRAL_API_KEY=sk-test-value "$HERE/nika-pick-model.sh" || true)"
 check "picker keeps a known name when the catalog has no row" "$out" "--model mistral/mistral-small-latest"
 rm -rf "$PICK"
+# The probe of a local model server is played by a stub `curl`, so the
+# result does not depend on what listens on this machine.
+mkdir -p "$ROOT/no-server" "$ROOT/server"
+cat >"$ROOT/no-server/curl" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >>"$ROOT/asked"
+exit 7
+STUB
+cat >"$ROOT/server/curl" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >>"$ROOT/asked"
+printf '%s' '{"models":[{"name":"small-local:4b"}]}'
+STUB
+chmod +x "$ROOT/no-server/curl" "$ROOT/server/curl"
 set +e
-out="$(env -i PATH="/usr/bin:/bin" "$HERE/nika-pick-model.sh")"
+out="$(env -i PATH="$ROOT/no-server:/usr/bin:/bin" "$HERE/nika-pick-model.sh")"
 code=$?
 set -e
 check "picker gives advice when nothing is ready" "$out" "No model is ready"
@@ -163,6 +214,14 @@ if [ "$code" -eq 1 ]; then
   echo "ok   picker exits 1 with no route"
 else
   echo "FAIL picker exit code $code"
+  FAILS=$((FAILS + 1))
+fi
+out="$(env -i PATH="$ROOT/server:/usr/bin:/bin" "$HERE/nika-pick-model.sh" || true)"
+check "picker prints a local route when a local server answers" "$out" "--model ollama/small-local:4b"
+if [ "$(grep -c '' "$ROOT/asked")" -eq 2 ] && [ "$(grep -c 'http://127.0.0.1:11434/api/tags$' "$ROOT/asked")" -eq 2 ]; then
+  echo "ok   the probe asks the local address only"
+else
+  echo "FAIL the probe asked: $(cat "$ROOT/asked")"
   FAILS=$((FAILS + 1))
 fi
 

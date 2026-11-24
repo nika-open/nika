@@ -22,6 +22,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/session-context.sh"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
+export HOME="$ROOT/home"
+mkdir -p "$HOME"
 FAILS=0
 say() { printf '%s\n' "$*"; }
 fail() {

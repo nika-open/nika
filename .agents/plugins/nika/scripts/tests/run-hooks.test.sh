@@ -21,6 +21,11 @@ command -v python3 >/dev/null 2>&1 || {
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
+export HOME="$ROOT/home"
+mkdir -p "$HOME"
+# The stub binary below is chosen through the PATH: a pin or a session
+# build folder inherited from the caller would be chosen before it.
+unset NIKA_BIN CARGO_TARGET_DIR
 FAILS=0
 check() { # check <label> <haystack> <needle>
   if printf '%s' "$2" | grep -qF -- "$3"; then echo "ok   $1"; else

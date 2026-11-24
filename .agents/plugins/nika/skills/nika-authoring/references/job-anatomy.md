@@ -12,7 +12,7 @@ person accepts them ([capabilities](capabilities.md)).
 
 | Phase | What it does | Typical builtins |
 |---|---|---|
-| Gather | read every source, in parallel when they are independent; a dead source yields a recover sample, not a dead run | `nika:fetch` modes, `nika:read`, `nika:glob`, `nika:grep`, `exec:`, `mcp:` |
+| Gather | read every source, in parallel when they are independent; a dead source fails the run when it is the only one, and degrades it, marked, when it is one of several | `nika:fetch` modes, `nika:read`, `nika:glob`, `nika:grep`, `exec:`, `mcp:` |
 | Normalize | turn text into typed data and refuse what does not fit | `nika:convert`, `nika:jq`, `extract:`, `nika:validate`, `nika:assert`, `nika:hash`, `nika:date` |
 | Judge | decide what matters: compare with last run, apply laws, let a model judge only what needs language | `nika:json_diff`, `when:`, `nika:decide`, `infer:` with `schema:` and `max_tokens:`, a bounded `agent:` |
 | Act | write, edit, draw, send, each effect gated on the data that justifies it | `nika:write`, `nika:edit`, `nika:chart`, `nika:image_generate`, `nika:notify` |
@@ -28,14 +28,18 @@ Before handing a job over, it clears this bar or the hand-over says why not:
   a failure route: an `on_error:` with `on_codes`, or an `after: { <task>: failure }`.
 - **A join.** At least one task binds two or more upstream outputs, or folds a
   `group:`.
-- **Breadth of tools.** At least eight distinct builtins when the job touches
-  data. Fewer means a phase is missing; name which one and why.
+- **Every phase present.** A job that validates what it reads, keeps state
+  and reports its run ends up calling many builtins; one that calls three is
+  usually missing a phase. Name the missing phase and add it, or say why it
+  does not apply. The count is a symptom to read, never a number to reach: a
+  task added to raise it is padding.
 - **State** when the job repeats: it reports what is new since the last run
-  (offered, not added, when the job fetches: see the first pattern).
+  (offered, not added, where it would bring a gate: « When an addition
+  brings a gate »).
 - **A run report**: what was read, what was decided, what was written, what it
-  cost.
-- **At most one human gate**, and none at all where nothing leaves the
-  machine or cannot be undone (« Approve once, then let it run »).
+  cost, and whether a source was missing.
+- **At most one human gate**, on a ground « Approve once, then let it run »
+  names, and none otherwise.
 
 Calibrate on the deep examples: `release-radar` (state and a root gate),
 `config-drift-sentinel` (fingerprint, merge patch, diff, triage),
@@ -83,13 +87,33 @@ From `release-radar`. One path on both sides: the same literal is in
 ```
 
 Keep the state file in the folder the person named for output; when they
-named none, propose its path in one line. A state file plus a fetch completes
-the lethal trifecta (the state read is a private read, the fetch is untrusted
-ingress, `net.http` is egress): check refuses `NIKA-SEC-009` until one
-confirm gate sits at the root (the shape is below, in « A fetching job that
-keeps state »), and that gate asks at every run. So for a fetching job, offer
-state in one line instead of adding it by default. A job whose sources are
-all local files keeps state with no gate.
+named none, propose its path in one line. In a job that fetches, the state
+read brings a gate with it: offer state there instead of adding it (next
+section).
+
+### When an addition brings a gate
+
+Check judges the lethal trifecta from the grants, not from intent. Three legs:
+a private read (`permits.fs.read` is not empty), outside content (a
+`nika:fetch` or an `mcp:` tool that a task calls) and a way out
+(`permits.net.http` is not empty, a write outside the project, or
+`permits.exec`). When all three hold, every task the outside content reaches
+needs a gate above it, and check refuses the file `NIKA-SEC-009` until one
+stands at the root. Measured on 0.125.0:
+
+| The job already | The addition | Check |
+|---|---|---|
+| fetches and writes in the project | a state file, a read-back of its own output, a config file: any new `fs.read` entry, even one no fetched value touches | refused `NIKA-SEC-009` |
+| fetches and writes in the project | a program (`permits.exec`), no read | clean: the fetch's host already was the way out |
+| calls an `mcp:` tool, reads a local file, writes in the project | a program (`permits.exec`), even one that touches none of the tool's data | refused `NIKA-SEC-009` |
+| reads and writes local files only | state, a read-back, validation | clean |
+
+So in a job that fetches or calls an MCP tool, an addition that needs a new
+`fs.read` entry or a new program is an offer, not a free craft addition: say
+in one line what it adds and that it brings one question at every run. And
+when an addition you made turns a clean check into `NIKA-SEC-009`, take the
+addition back out and offer it. Repairing that finding with a gate nobody
+asked for makes every scheduled fire wait for a person.
 
 ### Idempotency and dedupe
 
@@ -233,6 +257,8 @@ writer `after: { <last task>: terminal }` so the report survives a failed run
 
 From `competitor-radar`: a bounded pool where one dead item yields `null`,
 then a join that zips the inputs with the results and drops the failures.
+Put the number dropped in the run report (the inputs' `length` minus the
+join's), so a run where every page died does not read as a quiet week.
 
 ```yaml
   pages:
@@ -268,26 +294,61 @@ then a join that zips the inputs with the results and drops the failures.
           | map({ url: .[0], text: .[1] })
 ```
 
-### Recover samples
+### A dead source
 
-From `release-radar`: with no network, the recovery stands in for the RAW
-response, in the shape the mode returns, so the `extract:` binding runs
-unchanged. Recovering the binding's shape instead fails `NIKA-VAR-004`.
+A source that failed must not look like a source that answered. Measured on
+0.125.0:
+
+- **Retry first.** `retry:` re-attempts a transient failure and gives up at
+  once on the rest. A refused connection is transient (measured); the
+  stdlib's fetch contract adds a timeout, a 5xx, a 408 and a 429, and leaves
+  a 404 out.
+- **The only source: let the run fail.** With no `on_error:`, the run exits 1
+  and the always-run report (below) names the source that died. For a watcher
+  with one feed that is the honest result.
+- **One source among several: degrade, and mark it.** Recover to an empty
+  sentinel in the RAW shape of the response, so the `extract:` binding runs
+  unchanged (recovering the binding's shape instead fails `NIKA-VAR-004`).
+  Carry a `degraded` flag out through `extract:`, put it in the run report,
+  and close every state write on it.
 
 ```yaml
   feed:
+    retry: { max_attempts: 2, backoff_strategy: exponential, jitter: true }
     invoke:
       tool: "nika:fetch"
-      args:
-        url: "${{ const.releases_feed }}"
-        mode: feed
+      args: { url: "${{ const.feed_url }}", mode: feed }
     extract:
       entries: "[.items[] | {title, link}]"
+      degraded: ".degraded // false"
     on_error:
-      recover:
-        items:
-          - { title: "tokio 1.48.0", link: "https://github.com/tokio-rs/tokio/releases/tag/tokio-1.48.0" }
+      on_codes: [NIKA-BUILTIN-FETCH-001]
+      recover: { items: [], degraded: true }
+  save_state:
+    with: { entries: "${{ tasks.feed.entries }}", degraded: "${{ tasks.feed.degraded }}" }
+    when: ${{ with.degraded == false }}
+    invoke:
+      tool: "nika:write"
+      args: { path: "./out/state.json", content: "${{ with.entries }}", create_dirs: true, overwrite: true }
 ```
+
+Against a closed port: the fetch is retried, fails `NIKA-BUILTIN-FETCH-001`
+and is recovered; `save_state` is skipped, the state file is not written, the
+report carries `degraded: true` and the run exits 0. Three limits:
+
+- `NIKA-BUILTIN-FETCH-001` is the one code of every `nika:fetch` failure: a
+  refused connection, a 404 and a body that is not text all carry it.
+  `on_codes` keeps a refused permit loud; it cannot tell a dead network from
+  a missing page.
+- `nika:inspect` `view: records` reports a recovered task as `success`, so a
+  run report built from the records alone hides the recovery: the `degraded`
+  flag is what tells it. After the run, `nika trace outputs <trace> --json`
+  does say `recovered`, with the code.
+- Never recover to invented data in a job that compares, keeps state or
+  sends: a hard-coded sample is diffed, summarized and saved as if it were
+  today's answer. `release-radar` recovers its feed to a sample so that the
+  example runs with no network. Read it for the state pattern, not for its
+  recovery.
 
 ### The always-run report
 
@@ -352,21 +413,43 @@ quarantine.
 
 ### Approve once, then let it run
 
-The person approved the job when they asked for it, and again when they
-chose to schedule it. A question at every step trains them to click through
-without reading, so a gate is the exception:
+This is the kit's one statement of the gate rule; every other page links
+here. The person approved the job when they asked for it, and again when
+they chose to schedule it. A question at every step trains them to click
+through without reading, so a human gate is the exception. It has three
+grounds, and any one is enough:
 
-- A human gate exists only where something leaves the machine to a person or
-  a third party (a message, a post, an upload, a ticket), or cannot be undone
-  (a deletion, a payment, a deploy).
-- A flow that `nika check` does not refuse with `NIKA-SEC-009` needs no gate.
-  When one is needed, prefer `mode: confirm`: one question that names
-  everything the run will do.
+- **`nika check` requires it** (`NIKA-SEC-009`). Never design around that
+  one with a `default:`; either the gate stays or the addition that brought
+  it goes (« When an addition brings a gate »).
+- **A send.** The run delivers something to a person or to a destination
+  outside the machine: a message, a post, an upload, a ticket, a push. The
+  model the person chose is not a send: text going to their own model route
+  is the job they asked for, and a gate there would ask on every run of
+  every job that uses a hosted model. A fetch that only reads is not a send
+  either.
+- **An effect that cannot be undone.** A deletion, a deploy, a payment.
+  Check does not judge this:
+  `NIKA-SEC-009` reads the trifecta only, and a workflow that deletes every
+  file a glob returns checks clean with no hint (measured on 0.125.0). A
+  clean check is never the proof that no gate is needed.
+
+On a send or an irreversible effect the gate is there by default, and only
+the person takes it out. When they say that this job sends or deletes
+unattended (a scheduled post is the usual case), remove the gate, bound the
+effect with a law instead (the exact recipient in `const:`, a `nika:assert`
+on the number of files a deletion may touch) and say in the hand-over that
+it now runs without asking. Around the rule:
+
+- When a gate is needed, prefer `mode: confirm`: one question that names
+  everything the run will do. At most one gate per job.
 - Cost is never a gate. Bound it with a `nika:assert` on a computed budget
   (« Budget assertion » above) plus the run ceiling (`--max-cost-usd`, or the
   project's `ceiling:`).
+- Reading, validating, and writing a new file in the folder the person named
+  are never gated.
 - A scheduled workflow (an `arm:` beat) that keeps a gate pauses at every
-  fire on this release (exit 4) until a person answers. Say so before it is
+  fire on 0.125.0 (exit 4) until a person answers. Say so before it is
   armed, and design the gate out where the risk allows: keep state on local
   sources, drop a send the job does not need, or write a draft for the
   person instead of sending it.
@@ -374,7 +457,7 @@ without reading, so a gate is the exception:
   initiative. A paused run is shown to the person with its question, and
   resumed only with their answer: `--resume <trace> --answer <task>=<answer>`.
 
-How check counts a gate, measured on this release:
+How check counts a gate, measured on 0.125.0:
 
 - A `mode: confirm` gate counts by its position: it must stand on every path
   to the effect, data edges included, which in practice makes it the root.
@@ -556,7 +639,7 @@ shows text a feed chose; it is displayed to the person, never executed.
 
 Secret taint, the expression subset, field and tool limits, binary
 downloads, the stale file a skipped write leaves, what mock answers, resume
-and two hints that cannot both clear: each was measured on this release and
+and two hints that cannot both clear: each was measured on 0.125.0 and
 lives in [engine behaviors](engine-behaviors.md). Read it before you design
 around a refusal; none of them is a defect of your file.
 
@@ -577,7 +660,9 @@ apply:
       job offers it, since it brings the gate).
 - [ ] Every fan-out has `max_parallel`; a batch that must survive one bad item
       has `fail_fast: false` and a `recover:`.
-- [ ] Every source that can fail has a recover sample in the raw shape.
+- [ ] Every source that can fail either fails the run or recovers to an
+      empty sentinel whose `degraded` flag reaches the report and closes the
+      state write. None recovers to invented data.
 - [ ] Every retried mutating call carries an `idempotency-key`.
 - [ ] A run report exists as a value, written and returned, by a writer with
       `after: { <last task>: terminal }` so a failed run keeps it.
@@ -585,9 +670,16 @@ apply:
 - [ ] A write behind `when:` either always writes, or removes its stale file
       on the quiet branch.
 - [ ] No send's reply feeds a write: the record is gated by `when:` alone.
-- [ ] At most one gate, only where something leaves the machine or cannot be
-      undone and check or the person requires it; none on cost. A scheduled
-      job that keeps its gate is said to pause at every fire.
-- [ ] No effect the person did not ask for: a new send, host, paid model, seat
-      route or write outside their folder is proposed in one line instead.
-- [ ] `nika check <file> --json --native-strict` is clean on the final file.
+- [ ] At most one gate, on a ground « Approve once, then let it run » names:
+      check requires it, a send, or an effect that cannot be undone. None on
+      cost. A scheduled job that keeps its gate is said to pause at every
+      fire.
+- [ ] No effect the person did not ask for: a new send, host, paid model,
+      seat route, program (`exec:`), MCP server or write outside their
+      folder is proposed in one line instead. So is a craft addition that
+      would bring a gate. A program that stays has its row in the exec
+      ledger ([native and artifacts](native-and-artifacts.md)).
+- [ ] `nika check <file> --json --native-strict` is clean on the final file,
+      or the one finding left is named in the hand-over with the reason it
+      cannot clear (a binary download's `native-first/001` is the known
+      case, [engine behaviors](engine-behaviors.md)).

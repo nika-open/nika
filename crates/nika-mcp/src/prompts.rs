@@ -23,8 +23,13 @@
 //! Served: the five audit commands, plus `ideas` (propose workflows from the
 //! project) and `capture` (turn the conversation's recent work into a checked
 //! workflow). A command whose body calls a plugin helper script (`make`,
-//! `run`, `pending`, `doctor`) stays a plugin feature: an MCP client has no
-//! plugin root to run it from.
+//! `run`, `pending`) stays a plugin feature: an MCP client has no plugin root
+//! to run it from. `doctor` calls no helper and is simply not served: it
+//! diagnoses the client's own wiring, which the client's plugin surface owns.
+//!
+//! `ideas` and `capture` point at two authoring guides. An MCP-only client
+//! has neither the plugin nor a project `nika init` wrote, so both bodies
+//! say where the guides live and how to work from the oracle without them.
 
 use serde_json::{Value, json};
 
@@ -228,6 +233,25 @@ mod tests {
             .expect("a text block");
         assert!(text.contains("never run"), "{text}");
         assert!(text.contains("do not pass `--answer`"), "{text}");
+    }
+
+    #[test]
+    fn ideas_and_capture_stand_without_the_plugin_files() {
+        // An MCP-only client has no skill folder: a prompt that only says
+        // "read the guide" sends it to a file it does not have.
+        for name in ["ideas", "capture"] {
+            let got = render(name, None).expect("the prompt renders bare");
+            let text = got["messages"][0]["content"]["text"]
+                .as_str()
+                .expect("a text block");
+            for needed in [
+                ".agents/skills/nika-authoring/references/",
+                "nika_examples",
+                "Offer `nika init`",
+            ] {
+                assert!(text.contains(needed), "`{name}` lacks `{needed}`");
+            }
+        }
     }
 
     #[test]

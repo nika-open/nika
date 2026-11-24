@@ -179,6 +179,8 @@ for prompt in \
   'Generate 12 images for the campaign' \
   'Propose 6 variantes du logo' \
   'Compare the models on this prompt' \
+  'Compare les modèles sur ce prompt' \
+  'Comparer plusieurs mod\u00e8les sur ce texte' \
   'Watch the pricing page and alert me when it changes' \
   'Surveille le flux et previens-moi quand une version sort' \
   'Reconcile the bank export with our invoices' \
@@ -190,7 +192,10 @@ done
 for prompt in \
   'Explain how React reconciliation works' \
   'Translate this sentence into French' \
-  'Compare these two functions for me'; do
+  'Compare these two functions for me' \
+  'Compare modules in these two packages' \
+  'Let me know if this approach makes sense' \
+  'Fix the bug and let me know when you are done'; do
   n=$((n + 1))
   out="$(hint "{\"session_id\":\"w$n\",\"prompt\":\"$prompt\"}")"
   refuse "hint stays silent on a one-off: $prompt" "$out" "additionalContext"

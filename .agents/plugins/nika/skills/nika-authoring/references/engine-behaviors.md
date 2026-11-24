@@ -2,7 +2,7 @@
 
 Read this reference for the matching task; return to [the skill](../SKILL.md) for scope and completion.
 
-Each was measured on this release with `nika check`, and with runs where a
+Each was measured on 0.125.0 with `nika check`, and with runs where a
 run is named. Design around them; none is a defect of your file.
 
 ## A secret's taint reaches every value of the call
@@ -96,7 +96,7 @@ UTF-8 »), measured. Binary is file-mediated: an `exec:` of `curl --fail
 in `net.http` and the path in `fs.write`, then the path feeds `nika:image_fx`,
 `nika:image_compose` or `infer.vision`. Plain check admits it;
 `--native-strict` flags it `native-first/001`, pointing at `nika:fetch`,
-which cannot do it. That flag cannot clear on this release: say so in the
+which cannot do it. That flag cannot clear on 0.125.0: say so in the
 hand-over instead of looping. An MCP tool that returns image content also
 works: its bytes flow into `nika:write` `content:`.
 
@@ -185,7 +185,7 @@ When a model answer feeds a `nika:jq` or `nika:decide` law and the job
 writes, check raises `unproven-law` until the law is proved on a hand-known
 fixture with a `nika:assert` (`13-extract-then-law`). That assert then raises
 `assert-quarantine`, which fires for any `nika:assert` in a workflow that
-writes, wherever it sits. On this release the two cannot both clear. It is a
+writes, wherever it sits. On 0.125.0 the two cannot both clear. It is a
 known engine limit, not a defect in the file: clear `unproven-law`, which
 blocks `paid_ready`, and read `assert-quarantine` as advice, since it blocks
 neither `clean` nor `paid_ready` (a red assert moves the run's writes to

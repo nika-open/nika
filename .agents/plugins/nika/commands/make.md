@@ -47,25 +47,25 @@ authoring skill's `references/capabilities.md` and
 `references/job-anatomy.md`, then deepen the file with every craft
 addition the job can use that does not widen what it touches: validation
 of what it reads, state between runs and only-new reporting when it
-repeats, dedupe, a bounded fan-out, recover samples and retry, typed
-schemas with `max_tokens`, a `nika:assert` budget, a `nika:chart` when
-there are numbers, a run report built as a value with its `nika:inspect`
-cost. Each stays inside the hosts, files, folders and models the user
-already named; a report or a state file goes in the folder they named, or
-is only returned in `outputs:`. Run `nika check` again until it is clean.
-Then name, one line each, the upgrades that would widen effects (a new
-send, a new host, new paid inference, a seat route, a write outside their
-folder, a gate the check would then require): offers only, none is added
-without the user's yes. The promise of step 2 holds: no effect was added
-without the user.
+repeats, dedupe, a bounded fan-out, retry and a marked degraded result for
+a dead source, typed schemas with `max_tokens`, a `nika:assert` budget, a
+`nika:chart` when there are numbers, a run report built as a value with
+its `nika:inspect` cost. Each stays inside the hosts, files, folders and
+models the user already named; a report or a state file goes in the folder
+they named, or is only returned in `outputs:`. Run `nika check` again until
+it is clean. If an addition turns a clean check into `NIKA-SEC-009` (a new
+read grant or a new program in a job that fetches or calls an MCP tool does
+that), take it back out and offer it: do not repair it with a gate. Then
+name, one line each, the upgrades that would widen effects (a new send, a
+new host, new paid inference, a seat route, a new program or MCP server, a
+write outside their folder, an addition that would bring a gate): offers
+only, none is added without the user's yes. The promise of step 2 holds:
+no effect was added without the user.
 
-**Approve once, then let it run.** Asking for the job was the user's
-approval of it. Keep a human gate only where something leaves the machine
-to a person or a third party, or cannot be undone, and only where
-`nika check` requires it (`NIKA-SEC-009`) or the user asked for one; prefer
-`mode: confirm`. A flow the check does not refuse needs no gate. Bound cost
-with a `nika:assert` on a computed budget plus the run ceiling, never with a
-gate.
+**The gate rule** is stated once, in the authoring skill's
+`references/job-anatomy.md` under « Approve once, then let it run »: follow
+it. In short: at most one gate, where `nika check` requires one, before a
+send or before an effect that cannot be undone, and never for cost.
 
 **7 · Two files, not thirty.** A new project needs the workflow and
 `nika.yaml` (one cost ceiling, in the exact shape the authoring skill's
@@ -77,7 +77,7 @@ another tool, and say how many files it adds.
 **8 · A schedule is read, not switched on.** "Every Monday at 9" becomes a
 cron line in the reading, but arming is a separate step (a beat in
 `nika.yaml`). Say so, and arm only if the user asks. A scheduled
-workflow that keeps a gate pauses at every fire on this version (exit 4)
+workflow that keeps a gate pauses at every fire on 0.125.0 (exit 4)
 until someone answers: say so before arming, and design the gate out where
 the risk allows.
 

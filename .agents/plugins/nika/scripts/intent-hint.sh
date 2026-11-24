@@ -22,9 +22,12 @@ case "$lower" in *'"prompt":"/'* | *nika*) exit 0 ;; esac
 pattern='every (day|week|month|morning|evening|hour|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|each (day|week|month|morning)|daily|weekly|monthly|on a schedule|cron|for each (file|page|row|url|item|document|image|ticket|customer)|for every (file|page|row|url|item|document|image)|in bulk|batch of|do the same (again|as|for)|same thing (again|every)|run (it|this) again|tous les (jours|matins|soirs|mois|lundis|mardis|mercredis|jeudis|vendredis|samedis|dimanches)|toutes les (semaines|heures|nuits)|chaque (jour|semaine|mois|matin|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)|pour chaque (fichier|page|ligne|url|document|image|ticket|client)|par lot|en lot|refais (pareil|la meme|la même)|comme la derni(e|è)re fois|a chaque fois|à chaque fois'
 # Jobs where a workflow is the right tool even when nothing repeats yet: a
 # fan-out over many items, a media batch, a model comparison, a watcher, an
-# exact reconciliation. English and French; an accent may arrive raw or as a
-# JSON escape, hence the short wildcards.
-wide='(in|into) ([0-9]+|two|three|four|five|six|ten|several|multiple) languages|en ([0-9]+|deux|trois|quatre|cinq|six|dix|plusieurs) langues|(every|each) (locale|language)|all (the )?(locales|languages)|chaque (langue|locale)|toutes les (langues|locales)|(all|every one of) (the )?pages (of|on|in)|toutes les pages|(generate|create|make|draw) [0-9]+ (images|pictures|visuals|variants|variations)|[0-9]+ (variantes|variations)|compar(e|ing) (the |several |different )?(models|llms)|compar(er|e) (les |plusieurs )?mod.{1,6}les|alert me (when|if)|notify me (when|if)|let me know (when|if)|keep an eye on|surveille|pr.{1,6}viens[- ]moi|reconcile (the|our|my|these|two|both|bank|invoices|accounts|payments|transactions)|rapproch(er|ement) (les|des|bancaire)'
+# exact reconciliation. English and French; an accent may arrive raw, as a
+# JSON escape or not at all, so each accented letter spells its three forms
+# (a wildcard there matched « compare modules »). A false match costs the
+# session its only hint, so a phrase people also say in passing (« let me
+# know if ») is left out.
+wide='(in|into) ([0-9]+|two|three|four|five|six|ten|several|multiple) languages|en ([0-9]+|deux|trois|quatre|cinq|six|dix|plusieurs) langues|(every|each) (locale|language)|all (the )?(locales|languages)|chaque (langue|locale)|toutes les (langues|locales)|(all|every one of) (the )?pages (of|on|in)|toutes les pages|(generate|create|make|draw) [0-9]+ (images|pictures|visuals|variants|variations)|[0-9]+ (variantes|variations)|compar(e|ing) (the |several |different )?(models|llms)|compar(er|e) (les |plusieurs )?mod(e|è|\\u00e8)les|alert me (when|if)|notify me (when|if)|keep an eye on|surveille|pr(e|é|\\u00e9)viens[- ]moi|reconcile (the|our|my|these|two|both|bank|invoices|accounts|payments|transactions)|rapproch(er|ement) (les|des|bancaire)'
 printf '%s' "$lower" | grep -Eq "$pattern|$wide" || exit 0
 
 session="$(printf '%s' "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' | tr -cd 'A-Za-z0-9_-')"

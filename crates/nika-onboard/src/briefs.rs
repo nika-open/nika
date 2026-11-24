@@ -1158,8 +1158,26 @@ mod tests {
     #[test]
     fn targets_names_every_brief_family() {
         let t = targets();
-        assert_eq!(t.len(), 34);
         let paths: Vec<&str> = t.iter().map(|(p, _)| *p).collect();
+        // The count is the return type's; asserting it again proves nothing.
+        // What can drift is the kit gaining a guide that init forgets, so
+        // the guides are read from the kit's own folder.
+        let guides = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.agents/plugins/nika/skills/nika-authoring/references");
+        let mut shipped = 0;
+        for entry in std::fs::read_dir(&guides).expect("the kit's references folder") {
+            let name = entry.expect("a directory entry").file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".md") {
+                shipped += 1;
+                let target = format!(".agents/skills/nika-authoring/references/{name}");
+                assert!(
+                    paths.contains(&target.as_str()),
+                    "the kit ships `{name}` and init does not write it"
+                );
+            }
+        }
+        assert!(shipped > 0, "no guide found under {guides:?}");
         for expected in [
             ".vscode/settings.json",
             "AGENTS.md",

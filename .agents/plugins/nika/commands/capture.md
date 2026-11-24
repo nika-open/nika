@@ -26,7 +26,8 @@ ask one question first.
 `nika:grep`; a file listing `nika:glob`; JSON shaping `nika:jq`; a CSV or
 YAML conversion `nika:convert`; a file written `nika:write` at the same
 path; an edit `nika:edit`. A program with no builtin twin (a test runner,
-git) stays an `exec:` with `permits.exec` naming that one program. Your own
+git) stays an `exec:` with `permits.exec` naming that one program and its
+row in the file's exec ledger. Your own
 judgement becomes an `infer:` with `schema:` when its output is data and
 `max_tokens:` always, on the model the user chooses: ask which, and never
 pick a paid model or a seat for them. A value you typed becomes an
@@ -34,26 +35,38 @@ pick a paid model or a seat for them. A value you typed becomes an
 not. A key or token seen in the conversation never enters the file: it is
 a `secrets:` entry naming its store, and you say which variable to set.
 
-**3 · Make it the richest honest version.** Read the `nika-authoring`
-skill's `references/capabilities.md` and `references/job-anatomy.md`. Add
-by default what does not widen the effects the conversation had:
-validation of what it reads, state between runs when it will repeat,
-dedupe, a bounded fan-out where you did items one by one, recover samples
-and retry, typed schemas, a `nika:assert` budget, a run report. The
-effects stay exactly the conversation's: the same hosts, paths, programs
-and kind of model. Name in one line each the upgrades that would widen
-them (a new send, a new host, paid inference, a seat route, a write
-outside those paths); none is added without the user's yes.
+**3 · Make it the richest honest version.** The kit ships two guides for this, `capabilities.md` and
+`job-anatomy.md`: in the `nika-authoring` skill's `references/` folder where
+the plugin is installed, or under `.agents/skills/nika-authoring/references/`
+in a project where `nika init` ran. With neither (a client that only has the
+MCP server), say the guides are missing and work from the oracle instead:
+`nika catalog --tools` or `nika_tools` for the builtins, and `nika_examples`
+for the deep examples (`release-radar`, `config-drift-sentinel`,
+`competitor-radar`, `ceo-monday-brief`). Offer `nika init` as the way to get
+the guides; do not run it unasked, since it writes files in the project.
 
-**Approve once, then let it run.** Asking for this work was the user's
-approval of it. Add a gate only where something leaves the machine to a
-person or a third party, or cannot be undone, and only when `nika check`
-requires it (`NIKA-SEC-009`) or the user asks; prefer `mode: confirm`. A
-flow the check does not refuse needs no gate, and cost is bounded by a
-`nika:assert` plus the run ceiling, never by a gate. A scheduled workflow
-that keeps a gate pauses at every fire (exit 4) on this version: say so.
-A step that sent something (a message, a post, a push) is kept only if
-the user confirms it belongs in every run.
+Add by default what does not widen the effects the conversation had:
+validation of what it reads, state between runs when it will repeat,
+dedupe, a bounded fan-out where you did items one by one, retry and a
+marked degraded result for a dead source, typed schemas, a `nika:assert`
+budget, a run report. The effects stay exactly the conversation's: the
+same hosts, paths, programs and kind of model. Name in one line each the
+upgrades that would widen them (a new send, a new host, paid inference, a
+seat route, a new program or MCP server, a write outside those paths);
+none is added without the user's yes. Where the work fetched or called an
+MCP tool, an addition that needs a new read grant or a new program is an
+offer too: it can make `nika check` demand a gate. If check answers
+`NIKA-SEC-009` after an addition, take the addition back out and offer it.
+
+**The gate rule** is stated once, in `job-anatomy.md` under « Approve
+once, then let it run »: at most one gate, where `nika check` requires
+one, before a send (a delivery to a person or an outside destination; the
+model the user chose is not one) or before an effect that cannot be undone
+(a deletion, a deploy, a payment), and never for cost. So a step of the
+conversation that sent something or undid something is kept only if the
+user confirms it belongs in every run, and it keeps its gate unless they
+say it runs unattended. A scheduled workflow that keeps a gate pauses at
+every fire (exit 4) on 0.125.0: say so.
 
 **4 · Write and check, never run.** Write `workflows/<kebab-name>.nika`, or
 the path the user names, then run

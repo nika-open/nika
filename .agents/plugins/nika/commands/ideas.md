@@ -27,8 +27,17 @@ Read names and headers first; open a file only when it decides an idea.
 Never open `.env` or credential files, never quote a secret, and never run
 the project's scripts.
 
-**2 · Scan what Nika can do.** Read the `nika-authoring` skill's
-`references/capabilities.md` and `references/job-anatomy.md`. Prefer the
+**2 · Scan what Nika can do.** The kit ships two guides for this, `capabilities.md` and
+`job-anatomy.md`: in the `nika-authoring` skill's `references/` folder where
+the plugin is installed, or under `.agents/skills/nika-authoring/references/`
+in a project where `nika init` ran. With neither (a client that only has the
+MCP server), say the guides are missing and work from the oracle instead:
+`nika catalog --tools` or `nika_tools` for the builtins, and `nika_examples`
+for the deep examples (`release-radar`, `config-drift-sentinel`,
+`competitor-radar`, `ceo-monday-brief`). Offer `nika init` as the way to get
+the guides; do not run it unasked, since it writes files in the project.
+
+Prefer the
 jobs where a workflow is the right tool: a fan-out over many items (pages,
 locales, files, images, tickets), a media pipeline, the same input
 compared across several models, parallel agent seats over many items,
@@ -56,14 +65,13 @@ with no model at all; at least one reaches past the obvious (media, a
 crawl, seats in parallel, a model comparison) when the project gives it
 something to work on. Rank them by usefulness.
 
-**Approve once, then let it run.** A gate stands only where something
-leaves the machine to a person or a third party, or cannot be undone, and
-only when `nika check` requires it (`NIKA-SEC-009`) or the user asks for
-one; prefer `mode: confirm` then. A flow the check does not refuse needs
-no gate. Cost is bounded by a `nika:assert` on a computed budget plus the
-run ceiling, never by a gate. A scheduled workflow that keeps a gate
-pauses at every fire (exit 4) on this version: say so, and design the gate
-out where the risk allows.
+**The gate rule** is stated once, in `job-anatomy.md` under « Approve
+once, then let it run »: at most one gate, where `nika check` requires
+one, before a send (a delivery to a person or an outside destination; the
+model the user chose is not one) or before an effect that cannot be undone
+(a deletion, a deploy, a payment), and never for cost. Say for each idea
+whether it would keep a gate: a scheduled workflow that does pauses at
+every fire (exit 4) on 0.125.0.
 
 **4 · Write nothing until they pick.** End with one question: which one to
 build, if any. On a pick, pass the idea's one-sentence description to

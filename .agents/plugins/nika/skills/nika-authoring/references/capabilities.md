@@ -15,19 +15,24 @@ before you design a job, then build the richest honest version of it
   not widen what the workflow touches: validation of external and model
   values, state between runs (`nika:hash`, `nika:json_diff`,
   `nika:json_merge_patch`), idempotency keys and dedupe, parallel fan-out with
-  `max_parallel`, recover and retry, typed schemas with `max_tokens`,
-  `nika:assert` budgets, a `nika:chart`, a run report built as a value with
-  the `nika:inspect` cost.
+  `max_parallel`, retry and a marked degraded result for a dead source, typed
+  schemas with `max_tokens`, `nika:assert` budgets, a `nika:chart`, a run
+  report built as a value with the `nika:inspect` cost.
 - **Propose in one line, never add in silence**, every addition that widens
   effects: a new send, a new host, new paid inference, a seat route, a new
-  write outside the folder the person named.
-- **Interrupt the person as little as possible**: at most one human gate,
-  placed where `nika check` requires it or where something leaves the
-  machine, and a cost assertion instead of a gate when the risk is cost.
+  program (`exec:`), a new MCP server, a new write outside the folder the
+  person named.
+- **Interrupt the person as little as possible**: at most one human gate, on
+  the grounds the gate rule gives ([job anatomy](job-anatomy.md), « Approve
+  once, then let it run »), and a cost assertion instead of a gate when the
+  risk is cost.
 
-One craft addition can bring a gate with it: state between runs in a job that
-fetches completes the lethal trifecta, and check then requires a root gate
-([job anatomy](job-anatomy.md)). Offer state in that case instead of adding it.
+A craft addition can bring a gate with it. In a job that fetches or calls an
+MCP tool, an addition that needs a new `fs.read` entry (state, a read-back, a
+config file) or a new program completes the lethal trifecta, and check then
+requires a root gate that asks at every run ([job anatomy](job-anatomy.md),
+« When an addition brings a gate »). Offer that addition instead of adding it,
+and if one you added makes check demand a gate, take it back out.
 
 ## How to read the map
 
@@ -126,7 +131,7 @@ in the published specification. Names come from `nika catalog --tools`,
 | `outputs:` with `value`, `type`, `description` | the run hands back typed results | `09-returns-typed-door` |
 | `.nika/traces/` and `nika trace outputs`, `nika trace peek` | read what a past run produced | [validation](validation-and-execution.md) |
 
-There is no memory builtin in this release: memory is a file the workflow
+There is no memory builtin in 0.125.0: memory is a file the workflow
 reads and writes, inside its declared `fs` boundary.
 
 ## Composition
@@ -153,11 +158,11 @@ reaches what they do not: a database, a mailbox, a ticket tracker, a
 service's own API.
 
 - **The shelf.** The binary carries a shelf of the MCP servers it knows, each
-  with its package, the key variable it needs and its pricing class. This
-  release prints no list of it: the server's own documentation gives its
+  with its package, the key variable it needs and its pricing class. 0.125.0
+  prints no list of it: the server's own documentation gives its
   launch command.
 - **Hubs.** One kind of server is a hub: one server and one key, behind which
-  sit many providers. `firecrawl` is on this release's shelf (package
+  sit many providers. `firecrawl` is on the 0.125.0 shelf (package
   `firecrawl-mcp`, key `FIRECRAWL_API_KEY`, freemium): web search, scrape,
   crawl and its data-provider discovery. No builtin runs a web search, and
   `traverse` crawls 25 pages at most; a hub reaches further, on its own

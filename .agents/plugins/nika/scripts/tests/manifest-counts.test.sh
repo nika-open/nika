@@ -22,8 +22,10 @@ set -uo pipefail
 
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 command -v python3 >/dev/null 2>&1 || {
-  echo "SKIP manifest-counts.test: python3 is absent; nothing was asserted"
-  exit 0
+  # Red, not a quiet pass: the runner prints only "ok" for an exit 0, so a
+  # skip here would read as counts that were compared.
+  echo "FAIL manifest-counts.test: python3 is absent, so no count was compared" >&2
+  exit 1
 }
 
 python3 -I - "$KIT" <<'PY'

@@ -12,16 +12,19 @@ capability map (sources, data, decisions, models and seats, media, state,
 composition, time, MCP servers and hubs, serving), a job anatomy (the five
 phases, a depth bar, measured patterns for state between runs,
 idempotency keys, validation, budget assertions, a report that survives a
-failed run, fan-out, recover samples, and the engine behaviors to design
-around: secret taint, expression limits, field limits, binary downloads,
-stale files, mock answers, resume, two hints that cannot both clear) and
-a seats-and-images guide (`run.access`, `agent.images`, what mock can
-rehearse). Every workflow these references print was checked on 0.125.0.
+failed run, fan-out, a dead source that fails or degrades the run instead
+of feeding it invented data), an engine-behaviors guide (secret taint,
+expression limits, field limits, binary downloads, stale files, mock
+answers, resume, two hints that cannot both clear) and a seats-and-images
+guide (`run.access`, `agent.images`, what mock can rehearse). Every workflow these references print was checked on 0.125.0.
 `/nika:make` adds an ambition pass and the subagent a design pass and a
-self-audit. The kit teaches « approve once, then let it run »: a gate only
-where something leaves the machine or cannot be undone, cost bounded by an
-assertion and the ceiling, and a scheduled workflow that keeps a gate is
-said to pause at every fire. `/nika:ideas` reads the project and proposes
+self-audit. The kit teaches « approve once, then let it run », stated once
+in the job anatomy and linked from every other page: a gate only where
+`nika check` requires one, before a send or before an effect that cannot
+be undone, cost bounded by an assertion and the ceiling, and a scheduled
+workflow that keeps a gate is said to pause at every fire. A craft addition
+that would bring a gate (a new read grant or a new program in a job that
+fetches or calls an MCP tool) is offered, not added. `/nika:ideas` reads the project and proposes
 five workflows; `/nika:capture` turns the conversation's recent work into
 a checked workflow; both are served as MCP prompts. The delegation rule
 and the intent hint reach for a workflow on wide jobs too (fan-outs,
@@ -29,7 +32,7 @@ media, model comparisons, agent seats, crawls, watchers, exact
 reconciliations), in English and French. The edit hook judges with
 NIKA_BIN, else, inside the engine tree, the session's CARGO_TARGET_DIR
 build, then the tree's own build, else the PATH. A seventh evaluation
-measures that a new job is designed deep by default.
+case, written and not yet run, covers a new job designed deep by default.
 
 The run guard no longer bricks the editor when the `nika` binary is
 missing from its PATH. Inside a Nika project (a `nika.yaml` or a `.nika/`

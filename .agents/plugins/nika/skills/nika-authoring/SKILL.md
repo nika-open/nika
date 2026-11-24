@@ -49,15 +49,17 @@ job, or one the person wants to grow, design before the first line:
    ([job anatomy](references/job-anatomy.md)). **Ambition in craft, fidelity
    in effects**: additions that do not widen what the workflow touches
    (validation of external and model values, state between runs, dedupe and
-   idempotency keys, bounded fan-out, recover and retry, typed schemas with
-   `max_tokens`, `nika:assert` budgets, a chart, a run report with its
-   `nika:inspect` cost) go in by default and are named in the hand-over.
-   Additions that widen effects (a new send, a new host, new paid inference, a
-   seat route, a write outside the person's folder) are proposed in one line
-   and added only on a yes.
-4. Interrupt the person as little as possible: at most one human gate, where
-   the check requires it or something leaves the machine, and a cost
-   assertion instead of a gate when the risk is cost.
+   idempotency keys, bounded fan-out, retry and a marked degraded result for
+   a dead source, typed schemas with `max_tokens`, `nika:assert` budgets, a
+   chart, a run report with its `nika:inspect` cost) go in by default and are
+   named in the hand-over. Additions that widen effects (a new send, a new
+   host, new paid inference, a seat route, a new program or MCP server, a
+   write outside the person's folder) are proposed in one line and added only
+   on a yes. So is a craft addition that would make check demand a gate.
+4. Interrupt the person as little as possible: at most one human gate, on the
+   grounds the gate rule gives
+   ([job anatomy](references/job-anatomy.md), « Approve once, then let it
+   run »), and a cost assertion instead of a gate when the risk is cost.
 5. Before handing over, run the thin-workflow checklist and report the counts.
 
 A small edit to an existing workflow keeps its scope and skips the design.

@@ -21,6 +21,24 @@
 //! - **blocking human gate** = an `invoke:` of `nika:prompt` with NO
 //!   `default:` arg (the NEP's escape is the HUMAN decision). Gated on a
 //!   valid DAG + a DECLARED `permits:` block (skipped, never wrong).
+//! - **only a confirm gate counts by its position alone.** A gate in
+//!   `mode: choice` or `mode: input` answers with text, not a yes, so it is
+//!   credited only before an egress task whose own `when:` tests that
+//!   answer ([`crate::analyzer::gates::answer_tested_by`]: an exact `with:`
+//!   binding of its output that some listed choice makes false, or a
+//!   binding of a `nika:jq` stage that reads it). A task that only
+//!   waits on it (`after: { ask: success }`) runs whatever the answer, and
+//!   is refused as for no gate. An input gate also counts before a builtin
+//!   `nika:` tool call that sends nothing but the typed answer
+//!   ([`crate::analyzer::gates::answer_sent_by`]): what it sends is what the
+//!   person typed. A gate of any mode with an `on_error:` or a `for_each:`
+//!   counts before no effect
+//!   ([`crate::analyzer::gates::answer_stands_alone`]): something other than
+//!   a person can supply its answer. A confirm keeps the dominance credit: the consent lane
+//!   (`NIKA-SEC-014`) judges its « no ». A test made by any other upstream
+//!   stage (a model, a subprocess, another tool) is not read (an
+//!   over-approximation: the repair is the answer tested where the effect
+//!   is).
 //! - **the advisory side** (`trifecta/steering.rs`) = legs armed, a `when:`
 //!   that reads untrusted content decides whether an egress task runs
 //!   without entering an argument. A hint, never this lane's refusal.
@@ -35,6 +53,8 @@ use nika_schema::raw::{RawAction, RawInvokeTarget, RawWorkflow};
 use nika_schema::source::Spanned;
 
 pub(crate) mod steering;
+#[cfg(test)]
+mod text_gate_tests;
 
 /// The advisory channel once the lane has ruled, in one call: a gate it
 /// credited keeps no `headless-prompt` hint
@@ -113,10 +133,11 @@ pub fn scan_trifecta_declared(
             let task = &t.value;
             let call = listed_call(calls, &task.id.value, &task.action);
             let declared = declared_roles(&task.action, call, roles);
-            TrifectaSubject::new(
+            let gate = human_gate(&task.action);
+            let subject = TrifectaSubject::new(
                 task.id.value.clone(),
                 egress_capable(&task.action) || call.is_some_and(call_egress_capable),
-                human_gate(&task.action),
+                gate,
             )
             .with_defaulted_gate(defaulted_gate(&task.action))
             .with_ingress_source(
@@ -124,6 +145,11 @@ pub fn scan_trifecta_declared(
                     || call.is_some_and(|c| c.ingress.is_some()),
             )
             .with_declared_roles(declared.private_read, declared.egress)
+            .with_answer_stood_in(gate && !crate::analyzer::gates::answer_stands_alone(task));
+            match text_gate(&task.action).filter(|_| gate) {
+                Some(text) => subject.with_answer_tested_by(answered_by(wf, &task.id.value, &text)),
+                None => subject,
+            }
         })
         .collect();
     for e in edges {
@@ -344,6 +370,63 @@ fn defaulted_gate(action: &RawAction) -> bool {
         .is_some_and(|o| o.contains_key("default"))
 }
 
+/// A `nika:prompt` whose answer is text rather than a typed yes.
+struct TextGate {
+    /// Its `choices:`, when it is a choice whose list is literal strings.
+    choices: Option<Vec<String>>,
+    /// A literal `mode: input`: the person types the answer.
+    input: bool,
+}
+
+/// The tasks a text gate is credited before, as subject indices: those whose
+/// own `when:` tests its answer and, for an input gate, those that send
+/// nothing but the typed answer (`crate::analyzer::gates::answer_sent_by`).
+fn answered_by(wf: &RawWorkflow, gate: &str, text: &TextGate) -> Vec<usize> {
+    let mut credited = crate::analyzer::gates::answer_tested_by(wf, gate, text.choices.as_deref());
+    if text.input {
+        credited.extend(crate::analyzer::gates::answer_sent_by(wf, gate));
+        credited.sort_unstable();
+        credited.dedup();
+    }
+    credited
+}
+
+/// The text gate `action` is: any `mode:` but a confirm (`mode:` absent or
+/// `confirm`), so `choice`, `input`, or a value that names no literal mode
+/// (a template may resolve to either, so it is read as one).
+fn text_gate(action: &RawAction) -> Option<TextGate> {
+    let RawAction::Invoke(inv) = action else {
+        return None;
+    };
+    if inv.tool()?.value != nika_cap::HUMAN_GATE_TOOL {
+        return None;
+    }
+    let args = inv.args.as_ref().and_then(|a| a.value.as_object());
+    let mode = args.and_then(|o| o.get("mode"))?;
+    match mode.as_str() {
+        Some("confirm") => return None,
+        Some("input") => {
+            return Some(TextGate {
+                choices: None,
+                input: true,
+            });
+        }
+        _ => {}
+    }
+    let choices = args
+        .and_then(|o| o.get("choices"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|list| {
+            list.iter()
+                .map(|c| c.as_str().filter(|s| !s.contains("${{")).map(str::to_owned))
+                .collect::<Option<Vec<String>>>()
+        });
+    Some(TextGate {
+        choices,
+        input: false,
+    })
+}
+
 /// A BLOCKING `invoke: nika:prompt` (no `default:` arg) is the NEP's gate.
 fn human_gate(action: &RawAction) -> bool {
     let RawAction::Invoke(inv) = action else {
@@ -427,7 +510,8 @@ mod tests {
         );
     }
 
-    /// A blocking `nika:prompt` dominating every egress path → clean.
+    /// A blocking `nika:prompt` dominating every egress path → clean. A
+    /// choice gate counts once the tainted sink tests its answer.
     #[test]
     fn trifecta_gated_pass() {
         let gated = TRIFECTA.replacen(
@@ -435,7 +519,13 @@ mod tests {
             "tasks:\n  ask:\n    invoke:\n      tool: \"nika:prompt\"\n      args: { mode: \"choice\", message: \"exfiltrate?\", choices: [\"no\", \"yes\"] }\n  fetch_page:\n    after: { ask: success }",
             1,
         );
+        let gated = gated.replacen(
+            "    with: { body: \"${{ tasks.fetch_page.output }}\" }\n",
+            "    with: { body: \"${{ tasks.fetch_page.output }}\", pick: \"${{ tasks.ask.output }}\" }\n    when: \"${{ with.pick == 'yes' }}\"\n",
+            1,
+        );
         let r = report(&gated);
+        assert!(r.conformance.is_empty(), "{:?}", r.conformance);
         assert!(
             r.trifecta_findings.is_empty(),
             "the gate dominates fetch_page AND leak: {:?}",

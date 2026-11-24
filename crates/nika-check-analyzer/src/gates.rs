@@ -10,6 +10,9 @@
 //! prod-LOC wall — pure AST reads, moved as they stood: the dead-gate lane
 //! and the consent lane both judge `when:` gates, and the judgment ladder
 //! keeps the VERDICTS (which task is a sink · what refuses · what advises).
+//! The same substitution, with one listed choice in the answer's place, is
+//! how the trifecta lane reads a `mode: choice` or `mode: input` gate
+//! ([`answer_tested_by`]).
 //!
 //! Two readings of one gate, and they are NOT interchangeable ·
 //!
@@ -110,7 +113,7 @@ pub enum Gate {
 /// what runs — that is [`gate_certain`].
 #[must_use]
 pub fn gate_verdict(task: &RawTask, prompt: &str) -> Gate {
-    gate_under(task, prompt, false, Some(false))
+    gate_under(task, prompt, false, Some(Literal::Bool(false)))
 }
 
 /// The same gate read for a WITNESS: `Closed` = once admitted the task
@@ -135,7 +138,7 @@ pub fn gate_certain(task: &RawTask, prompt: &str) -> Gate {
     if !task.with.iter().all(|(_, v)| total_binding(&v.value)) {
         return Gate::Unclear;
     }
-    match gate_under(task, prompt, true, Some(false)) {
+    match gate_under(task, prompt, true, Some(Literal::Bool(false))) {
         Gate::Closed => Gate::Closed,
         _ if task.for_each.is_some() => Gate::Unclear,
         verdict => verdict,
@@ -182,13 +185,22 @@ pub fn affirmed_by(task: &RawTask, prompt: &str) -> bool {
     let Some(expr) = parse_gate(src) else {
         return false;
     };
-    let carriers = RefusalEnv::of(task, Some(false)).outputs;
-    expr_refs(&expr).iter().any(|r| {
+    reads_answer(task, &expr, prompt)
+        && [Some(Literal::Bool(false)), None]
+            .into_iter()
+            .all(|answer| gate_under(task, prompt, false, answer) == Gate::Closed)
+        && gate_under(task, prompt, false, Some(Literal::Bool(true))) != Gate::Closed
+}
+
+mod answer;
+pub use answer::{answer_derivations, answer_sent_by, answer_stands_alone, answer_tested_by};
+
+/// The gate expression reads an exact `with:` carrier of `tasks.<prompt>.output`.
+fn reads_answer(task: &RawTask, expr: &Expr, prompt: &str) -> bool {
+    let carriers = RefusalEnv::of(task, None).outputs;
+    expr_refs(expr).iter().any(|r| {
         matches!(r, NamespaceRef::With(key) if carriers.get(key).is_some_and(|id| id == prompt))
-    }) && [Some(false), None]
-        .into_iter()
-        .all(|answer| gate_under(task, prompt, false, answer) == Gate::Closed)
-        && gate_under(task, prompt, false, Some(true)) != Gate::Closed
+    })
 }
 
 /// Whether a task's `when:` reads nothing but caller inputs (E39 N4): every root it reads is
@@ -304,8 +316,9 @@ fn named_step(e: &Expr) -> Option<&Expr> {
 /// The ONE gate evaluation both readings share — `total` selects the
 /// reading (see [`gate_certain`]), `answer` the substituted answer:
 /// `Some(false)` is the refusal substitution, `None` a skipped gate (its
-/// output reads null) and `Some(true)` the approval ([`affirmed_by`]).
-fn gate_under(task: &RawTask, prompt: &str, total: bool, answer: Option<bool>) -> Gate {
+/// output reads null), `Some(true)` the approval ([`affirmed_by`]) and a
+/// string one listed choice ([`answer_tested_by`]).
+fn gate_under(task: &RawTask, prompt: &str, total: bool, answer: Option<Literal>) -> Gate {
     let Some(when) = task.when.as_ref() else {
         return Gate::Open;
     };
@@ -336,17 +349,18 @@ fn gate_under(task: &RawTask, prompt: &str, total: bool, answer: Option<bool>) -
 /// `.output` carrier is `false`, the `.status` carrier is `"success"`
 /// (a refusal settles success — a status read is decidable, and it is
 /// NOT consent). The other substitutions [`affirmed_by`] reads put `true`
-/// (an approval) or null (a skipped gate) in the output's place.
+/// (an approval) or null (a skipped gate) in the output's place, and
+/// [`answer_tested_by`] one listed choice.
 struct RefusalEnv {
     outputs: BTreeMap<String, String>,
     statuses: BTreeMap<String, String>,
-    answer: Option<bool>,
+    answer: Option<Literal>,
 }
 
 impl RefusalEnv {
     /// Collect the task's exact carriers — only THIS prompt's are facts;
     /// the reads (`is_output_ref` / `is_status_ref`) match on the id.
-    fn of(task: &RawTask, answer: Option<bool>) -> Self {
+    fn of(task: &RawTask, answer: Option<Literal>) -> Self {
         let mut outputs = BTreeMap::new();
         let mut statuses = BTreeMap::new();
         for (key, value) in &task.with {
@@ -506,8 +520,9 @@ fn eval_consent(e: &Expr, prompt: &str, env: &RefusalEnv, total: bool) -> K3 {
             K3::Unknown => K3::Unknown,
         },
         Expr::Relation { op, lhs, rhs } => eval_relation(*op, lhs, rhs, prompt, env, total),
-        // A null answer where a boolean is due errors: never `success`.
-        _ if is_output_ref(e, prompt, env) => k3(env.answer == Some(true)),
+        // A null or string answer where a boolean is due errors: never
+        // `success`.
+        _ if is_output_ref(e, prompt, env) => k3(env.answer == Some(Literal::Bool(true))),
         _ => K3::Unknown,
     }
 }
@@ -560,7 +575,7 @@ fn eval_relation(
 fn resolve_lit(e: &Expr, prompt: &str, env: &RefusalEnv) -> Option<Literal> {
     match e {
         Expr::Lit(l) => Some(l.clone()),
-        _ if is_output_ref(e, prompt, env) => Some(env.answer.map_or(Literal::Null, Literal::Bool)),
+        _ if is_output_ref(e, prompt, env) => Some(env.answer.clone().unwrap_or(Literal::Null)),
         _ if is_status_ref(e, prompt, env) => Some(Literal::Str("success".to_owned())),
         _ => None,
     }

@@ -529,11 +529,11 @@ fn push_headless_prompt_hint(
     // Keep fresh approval in the workflow and a one-off refusal in the
     // invocation, so advice does not silently remove the human pause.
     let close = if gates_an_effect {
+        let once = prompt_answer::settle_once(id, a.args.as_ref().map(|args| &args.value));
         format!(
-            "or refuse this invocation with `--answer {id}=false`. Keep this \
-             gate without `default:` when fresh human approval is required; \
-             a workflow default answers itself unattended and does not pause \
-             for a human"
+            "{once} Keep this gate without `default:` when fresh human approval \
+             is required; a workflow default answers itself unattended and does \
+             not pause for a human"
         )
     } else {
         "or declare the `default:` the unattended path should take".into()
@@ -1487,6 +1487,7 @@ pub(crate) fn legal_zero_hint(
 
 mod catalog;
 mod jq_as_map;
+mod prompt_answer;
 #[cfg(test)]
 mod reasoning_cap;
 pub use catalog::hint_help;

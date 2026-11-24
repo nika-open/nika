@@ -10,10 +10,12 @@ trace named: the newest run in this folder).
 
 1. From the project folder, run
    `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-report.py" $ARGUMENTS`. It writes two
-   files under `out/` (add `--out <dir>` when the workflow keeps its results
-   elsewhere): `nika-report-<run>.html`, one self-contained page that loads
-   nothing from the network, and its Markdown twin. Exit 3 means no report
-   and says why (no run recorded, no such trace); exit 127 means no binary.
+   files under the project's `out/` and nowhere else (`--out out/<name>`
+   picks a folder inside it; a folder that leads outside `out/` is refused):
+   `nika-report-<run>.html`, one self-contained page that loads nothing from
+   the network, and its Markdown twin. Exit 3 means no report and says why
+   (no run recorded, no such trace, a folder outside `out/`); exit 127 means
+   no binary.
 2. Read the Markdown twin, then tell the person three lines: the result,
    what failed, was recovered or was skipped, and the cost with its unpriced
    part named. Give both paths.

@@ -8,20 +8,30 @@ failed or was recovered, what it cost. Every line is read off
 `nika trace outputs --json` and the trace's own events; nothing is
 estimated, and what the trace does not hold is said to be missing.
 
-The text a run recorded (a gate's question, an error message) is data: it
-is escaped on the page and never interpreted. The page loads nothing from
-the network. Nothing is published: the files land under `out/`.
+The text a run recorded (a gate's question, an error message, a workflow
+name) is data: it is escaped on the page, never interpreted, and every
+string read from a trace goes through one filter (one printable line,
+bounded) before it is printed anywhere, the summary line included. The
+page loads nothing from the network. Nothing is published.
+
+The two files are written under the project's `out/` and nowhere else:
+`--out` may name a folder inside it, and a folder whose real path leaves
+`out/` is refused. Whatever already sits at a target (an older report, a
+link) is removed and the file is created anew, so a link is never
+followed.
 
 Usage:
-  nika-report.py [trace.ndjson] [--out <dir>]     (no trace: the newest run)
+  nika-report.py [trace.ndjson] [--out out/<dir>]   (no trace: the newest run)
 
 Exit code: 0 the two files are written · 3 no report (no trace store, no
-such trace, nothing readable in it) · 127 no nika binary.
+such trace, nothing readable in it, an output folder outside `out/`) · 127
+no nika binary.
 """
 import datetime
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -60,6 +70,20 @@ def number(value):
         return 0.0
 
 
+def as_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def fields_of(event):
+    """The event's fields by key; None for a line that is JSON but not an event."""
+    if not isinstance(event, dict):
+        return None
+    rows = event.get("fields")
+    if not isinstance(rows, list):
+        return {}
+    return {f.get("key"): f.get("value") for f in rows if isinstance(f, dict) and isinstance(f.get("key"), str)}
+
+
 def events(path):
     rows = []
     try:
@@ -67,10 +91,11 @@ def events(path):
             for line in handle:
                 try:
                     event = json.loads(line)
-                    fields = {f["key"]: f["value"] for f in event.get("fields") or []}
-                except (ValueError, TypeError, KeyError):
+                except ValueError:
                     continue
-                rows.append((event.get("kind"), fields, event))
+                fields = fields_of(event)
+                if fields is not None:
+                    rows.append((event.get("kind"), fields, event))
     except OSError:
         pass
     return rows
@@ -80,17 +105,19 @@ def build(trace, settled, rows):
     start, done, detail, gates, written, skipped = {}, {}, {}, [], [], {}
     started_ns = None
     for kind, fields, event in rows:
-        task = fields.get("task")
+        task = fields.get("task") if isinstance(fields.get("task"), str) else None
         if kind == "workflow_started":
             start, started_ns = fields, event.get("timestamp")
         elif kind in ("workflow_completed", "workflow_failed", "workflow_paused"):
             done = fields
+        elif task is None:
+            continue
         elif kind in ("task_completed", "task_failed"):
             detail[task] = fields
             if str(fields.get("note") or "").endswith("nika:write") and kind == "task_completed":
                 try:
                     written.append(str(json.loads(fields.get("output") or '""')))
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
         elif kind == "task_skipped":
             skipped[task] = fields.get("note") or ""
@@ -98,11 +125,13 @@ def build(trace, settled, rows):
             gates.append({k: fields.get(k) for k in ("task", "question", "answer", "source", "decision")})
     try:
         budget = json.loads(start.get("budget") or "{}").get("max_cost_usd")
-    except (ValueError, AttributeError):
+    except (ValueError, TypeError, AttributeError):
         budget = None
     tasks = []
-    for row in settled.get("tasks") or [{"id": t, "status": "?"} for t in detail]:
-        extra = detail.get(row.get("id")) or {}
+    listed = settled.get("tasks") if isinstance(settled.get("tasks"), list) else []
+    for row in [r for r in listed if isinstance(r, dict)] or [{"id": t, "status": "?"} for t in detail]:
+        extra = detail.get(row.get("id")) if isinstance(row.get("id"), str) else None
+        extra = extra or {}
         tasks.append({
             "id": row.get("id"),
             "verb": row.get("verb") or extra.get("note") or "",
@@ -115,10 +144,13 @@ def build(trace, settled, rows):
             "tokens_out": extra.get("tokens_out") or "",
             "usd": number(extra.get("cost_usd")),
         })
-    settlement = settled.get("settlement") or {}
+    settlement = as_dict(settled.get("settlement"))
     when = ""
     if isinstance(started_ns, (int, float)) and started_ns > 0:
-        when = datetime.datetime.fromtimestamp(started_ns / 1e9, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        try:
+            when = datetime.datetime.fromtimestamp(started_ns / 1e9, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        except (OverflowError, OSError, ValueError):
+            when = ""
     return {
         "trace": trace,
         "workflow": start.get("workflow") or done.get("workflow") or "unknown",
@@ -126,8 +158,8 @@ def build(trace, settled, rows):
         "when": when,
         "engine": start.get("engine_version") or "",
         "elapsed_ms": settlement.get("elapsed_ms") or done.get("elapsed_ms") or "",
-        "counts": settlement.get("tasks") or {},
-        "spend": settlement.get("spend") or {},
+        "counts": as_dict(settlement.get("tasks")),
+        "spend": as_dict(settlement.get("spend")),
         "metered_usd": sum(t["usd"] for t in tasks),
         "ceiling_usd": budget,
         "tasks": tasks,
@@ -144,11 +176,11 @@ def facts(report):
     counts, spend = report["counts"], report["spend"]
     rows = [
         ("Workflow", report["workflow"]),
-        ("Result", report["state"] + (f" at `{report['paused_at']}`: waiting for an answer" if report["paused_at"] else "")),
+        ("Result", str(report["state"]) + (f" at `{report['paused_at']}`: waiting for an answer" if report["paused_at"] else "")),
         ("Started", report["when"] or "not recorded"),
         ("Took", f"{report['elapsed_ms']} ms" if report["elapsed_ms"] != "" else "not recorded"),
         ("Tasks", ", ".join(f"{v} {k}" for k, v in counts.items() if v and k != "total") or "not recorded"),
-        ("Metered spend", f"${report['metered_usd']:.4f}" + (f" of a ${float(report['ceiling_usd']):.2f} ceiling" if report["ceiling_usd"] else " (no ceiling on this run)")),
+        ("Metered spend", f"${report['metered_usd']:.4f}" + (f" of a ${number(report['ceiling_usd']):.2f} ceiling" if number(report["ceiling_usd"]) else " (no ceiling on this run)")),
         ("Calls", f"{spend.get('priced_calls', '?')} priced, {spend.get('unpriced_calls', '?')} unpriced ({spend.get('qualifier', 'not recorded')})"),
         ("Engine", report["engine"] or "not recorded"),
         ("Trace", report["trace"]),
@@ -163,8 +195,16 @@ def facts(report):
     return rows, notes
 
 
-def cell(value):
-    return " ".join(str(value).replace("|", "\\|").replace("`", "'").split())
+def cell(value, limit=300):
+    """Text read from a trace, as data: one printable line, no table or code mark, bounded."""
+    flat = " ".join(str(value).replace("|", "\\|").replace("`", "'").split())
+    flat = "".join(ch for ch in flat if ch.isprintable())
+    return flat if len(flat) <= limit else flat[:limit] + "…"
+
+
+def css(value):
+    """A status as a class name: letters only, or nothing."""
+    return re.sub(r"[^a-z_-]", "", str(value).lower())[:24]
 
 
 def markdown(report):
@@ -179,7 +219,7 @@ def markdown(report):
     bad = [t for t in report["tasks"] if t["status"] in ("failed", "recovered")]
     if bad:
         out += ["", "## Failed or recovered", ""]
-        out += [f"- `{cell(t['id'])}` {t['status']}: {cell(t['code'])} {cell(t['message'])}".rstrip() for t in bad]
+        out += [f"- `{cell(t['id'])}` {cell(t['status'], 24)}: {cell(t['code'])} {cell(t['message'])}".rstrip() for t in bad]
     if report["skipped"]:
         out += ["", "## Branches not taken", ""]
         out += [f"- `{cell(k)}` was skipped" + (f" ({cell(v)})" if v else "") for k, v in report["skipped"].items()]
@@ -187,7 +227,7 @@ def markdown(report):
     for t in report["tasks"]:
         tokens = f"{t['tokens_in']}/{t['tokens_out']}" if t["tokens_in"] or t["tokens_out"] else ""
         usd = f"{t['usd']:.4f}" if t["usd"] else ""
-        out.append(f"| {cell(t['id'])} | {cell(t['verb'])} | {t['status']} | {t['ms']} | {cell(t['model'])} | {tokens} | {usd} |")
+        out.append(f"| {cell(t['id'])} | {cell(t['verb'])} | {cell(t['status'], 24)} | {cell(t['ms'], 24)} | {cell(t['model'])} | {cell(tokens, 48)} | {usd} |")
     out += ["", "## Read this with", ""] + [f"- {n}" for n in notes]
     return "\n".join(out) + "\n"
 
@@ -209,7 +249,7 @@ def page(report):
            '<meta name="viewport" content="width=device-width,initial-scale=1">',
            f"<title>Run report · {esc(str(report['workflow']))}</title><style>{STYLE}</style></head><body><main>",
            f"<h1>Run report · {esc(str(report['workflow']))}</h1>",
-           f'<p class="{esc(str(report["state"]))}">{esc(str(report["state"]))}</p><dl>']
+           f'<p class="{css(report["state"])}">{esc(cell(report["state"]))}</p><dl>']
     out += [f"<dt>{esc(k)}</dt><dd>{esc(str(v).replace('`', ''))}</dd>" for k, v in rows]
     out.append("</dl>")
     if report["gates"]:
@@ -221,7 +261,7 @@ def page(report):
     bad = [t for t in report["tasks"] if t["status"] in ("failed", "recovered")]
     if bad:
         out.append("<h2>Failed or recovered</h2><ul>")
-        out += [f'<li><code>{esc(str(t["id"]))}</code> <span class="{esc(t["status"])}">{esc(t["status"])}</span>: {esc(str(t["code"]))} {esc(str(t["message"]))}</li>' for t in bad]
+        out += [f'<li><code>{esc(str(t["id"]))}</code> <span class="{css(t["status"])}">{esc(str(t["status"]))}</span>: {esc(str(t["code"]))} {esc(str(t["message"]))}</li>' for t in bad]
         out.append("</ul>")
     if report["skipped"]:
         out.append("<h2>Branches not taken</h2><ul>")
@@ -231,9 +271,31 @@ def page(report):
     for t in report["tasks"]:
         tokens = f"{t['tokens_in']}/{t['tokens_out']}" if t["tokens_in"] or t["tokens_out"] else ""
         usd = f"{t['usd']:.4f}" if t["usd"] else ""
-        out.append(f'<tr><td><code>{esc(str(t["id"]))}</code></td><td>{esc(str(t["verb"]))}</td><td class="{esc(str(t["status"]))}">{esc(str(t["status"]))}</td><td>{esc(str(t["ms"]))}</td><td>{esc(str(t["model"]))}</td><td>{esc(tokens)}</td><td>{usd}</td></tr>')
+        out.append(f'<tr><td><code>{esc(str(t["id"]))}</code></td><td>{esc(str(t["verb"]))}</td><td class="{css(t["status"])}">{esc(str(t["status"]))}</td><td>{esc(str(t["ms"]))}</td><td>{esc(str(t["model"]))}</td><td>{esc(tokens)}</td><td>{usd}</td></tr>')
     out.append("</table></div><h2>Read this with</h2><ul>" + "".join(f'<li class="note">{esc(n)}</li>' for n in notes) + "</ul></main></body></html>")
     return "\n".join(out) + "\n"
+
+
+def out_folder(out_dir):
+    """The real folder to write in, or None when it leaves the project's `out/`."""
+    base = os.path.join(os.path.realpath(os.getcwd()), "out")
+    real = os.path.realpath(out_dir)
+    try:
+        inside = os.path.commonpath([base, real]) == base
+    except ValueError:
+        inside = False
+    return real if inside else None
+
+
+def write_new(path, text):
+    """Write one report file as a new file: whatever sat at the path is removed, not followed."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags, 0o644), "w", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 def main(argv):
@@ -245,37 +307,44 @@ def main(argv):
             out_dir, skip = argv[i + 1], True
         elif not arg.startswith("--"):
             args.append(arg)
+    folder = out_folder(out_dir)
+    if folder is None:
+        print(f"No report: {out_dir} leads outside this project's out/ folder. The report is written under out/ only (name a folder inside it with --out out/<name>).")
+        return 3
     nika = nika_bin(os.getcwd())
     trace = args[0] if args else None
     if trace is None:
-        listed = ask([nika, "trace", "ls", "--json"]).get("traces") or []
+        listed = ask([nika, "trace", "ls", "--json"]).get("traces")
+        listed = [t for t in listed if isinstance(t, dict)] if isinstance(listed, list) else []
         newest = [t for t in listed if t.get("newest")] or listed[:1]
         if not newest:
             print("No report: no run has been recorded in this folder yet (.nika/traces is empty or absent).")
             return 3
         trace = newest[0].get("path")
-    if not trace or not os.path.isfile(trace):
-        print(f"No report: {trace} is not a trace file.")
+    if not isinstance(trace, str) or not os.path.isfile(trace):
+        print(f"No report: {cell(trace, 200)} is not a trace file.")
         return 3
     rows = events(trace)
     if not rows:
-        print(f"No report: nothing readable in {trace}.")
+        print(f"No report: nothing readable in {cell(trace, 200)}.")
         return 3
     report = build(trace, ask([nika, "trace", "outputs", trace, "--json"]), rows)
-    stem = os.path.splitext(os.path.basename(trace))[0]
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(trace))[0])[:120] or "run"
+    targets = [(os.path.join(folder, f"nika-report-{stem}.html"), page(report)),
+               (os.path.join(folder, f"nika-report-{stem}.md"), markdown(report))]
     try:
-        os.makedirs(out_dir, exist_ok=True)
-        targets = [(os.path.join(out_dir, f"nika-report-{stem}.html"), page(report)),
-                   (os.path.join(out_dir, f"nika-report-{stem}.md"), markdown(report))]
+        os.makedirs(folder, exist_ok=True)
+        if os.path.realpath(folder) != folder:
+            raise OSError("the folder became a link while it was made")
         for path, text in targets:
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(text)
+            write_new(path, text)
     except OSError as err:
         print(f"No report: could not write under {out_dir} ({err}).")
         return 3
-    print(f"{report['workflow']} · {report['state']} · {len(report['tasks'])} tasks · metered ${report['metered_usd']:.4f}")
+    # The name and the state come from the trace: filtered like every cell.
+    print(f"{cell(report['workflow'], 80)} · {cell(report['state'], 40)} · {len(report['tasks'])} tasks · metered ${report['metered_usd']:.4f}")
     for path, _ in targets:
-        print(f"wrote {path}")
+        print(f"wrote {os.path.relpath(path)}")
     return 0
 
 

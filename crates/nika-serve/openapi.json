@@ -1149,7 +1149,7 @@
                 "type": "integer"
               },
               "max_cost_usd": {
-                "description": "A ceiling for the re-attempts alone (USD). Stating it accepts that an attempt whose spend could not be read is followed by another; without it such a job stays `interrupted` (`unknown_spend`) under a resident that bounds cost. It never raises the ceiling that covers every attempt of the job.",
+                "description": "A ceiling for the re-attempts alone (USD). Stating it accepts that an attempt whose spend could not be read is followed by another; without it such a job stays `interrupted` (`unknown_spend`), whether or not a ceiling bounds the job. It never raises the ceiling that covers every attempt of the job.",
                 "minimum": 0,
                 "type": "number"
               },
@@ -2369,7 +2369,7 @@
   "info": {
     "description": "Authenticated loopback remote execution, declarative schedules, verified downloads of the artifacts a settled job's sealed journal records, and stateless source-only authoring (POST /v1/compile never runs, admits or writes). Schedule backfill, /v1/arm, and POST /v1/run are absent.",
     "title": "nika serve",
-    "version": "0.124.5"
+    "version": "0.125.0"
   },
   "openapi": "3.1.0",
   "paths": {

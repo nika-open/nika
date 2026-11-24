@@ -7,7 +7,7 @@
     "diagnostics": [],
     "provenance": {
       "cognition": "deterministicOnly",
-      "compiler_version": "0.124.5",
+      "compiler_version": "0.125.0",
       "decision": {
         "intent_sha256": "8f8b0ce37431782869a37c9c3580b3519ddbdc7610466b074f90d913cf149798",
         "ledger": [
@@ -183,7 +183,7 @@
         "unknowns": []
       },
       "skeleton": null,
-      "spec_pin": "25078e7cbab3fd3388ba60708b52dbb9244138b9",
+      "spec_pin": "2edc285a3f376c24990898baf5b37b161e5e638a",
       "strategy": "hot",
       "suggested_file": null
     },

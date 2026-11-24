@@ -129,11 +129,11 @@ From main CLAUDE.md + deletion-first.md + honest-assessment.md :
 
 And 17+ more from rust-analyzer adapted invariants in RUST_ENFORCEMENT.md §6.
 
-## Timeline (the 0.124 line · no hard per-phase deadlines)
+## Timeline (the 0.125 line · no hard per-phase deadlines)
 
-0.124 is the current release line: work stays focused on maintenance, security
+0.125 is the current release line: work stays focused on maintenance, security
 and the media capabilities workflows need, and native video is planned for
-0.125. `main` is the only maintenance branch and ships the next release. The
+a later release. `main` is the only maintenance branch and ships the next release. The
 engine's current release is whatever the CHANGELOG top names (never quote a
 number here · it rots). Until 0.123 the plan was real semver toward a **1.0**
 public launch (amended D-2026-06-20-N1 · was "forever-v0.x — no v1.0 target"),

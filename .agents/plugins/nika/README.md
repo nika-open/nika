@@ -57,7 +57,7 @@ oracle wiring.
 | stop gate (Claude Code) | a `*.nika` changed during the session that fails `nika check` sends the agent back once, with the reason in plain words; it also catches files written through the shell, which the edit hook and the language server never see |
 | waiting-runs monitor (Claude Code) | prints one line when a run starts waiting for an answer, while the `nika-running` skill is in use; interactive sessions only |
 | `port-to-nika` workflow (Claude Code) | ports many files at once (n8n exports, scripts), one agent per file, each result checked, with a report of what could not be ported. Written and syntax-checked, not yet run in a session |
-| `evals/` | four cases for `claude plugin eval`: offered on intent · plain verdict · never answers a question for the user · stays quiet when it has nothing to add. Written, not yet run |
+| `evals/` | six cases for `claude plugin eval` (see `evals/README.md`): offered on intent · the engine reads the sentence first · a missing address is asked, never guessed · plain verdict · never answers a question for the user · stays quiet when it has nothing to add |
 | `max_cost_usd` setting (Claude Code) | the spending cap `/nika:run` puts on every run unless the user names another one; asked once when the plugin is enabled |
 
 <p align="center">

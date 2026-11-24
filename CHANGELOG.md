@@ -16,6 +16,384 @@ section below at tag time (`bash scripts/release/changelog-assemble.sh --fold
 pull requests collided on 2026-08-24 with no source overlap between them, and
 `--check` refuses a hand-written bullet in this section.
 
+## [0.125.0](https://github.com/nika-open/nika/compare/v0.124.5..v0.125.0) - 2026-11-24
+
+Nika 0.125.0 puts `nika serve` behind an application. A job carries the owner and labels its
+caller states, `GET /v1/jobs` finds it again, waiting jobs are shared fairly between owners, and
+`--provider-concurrency` caps the model calls in flight on one provider across every job.
+`--job-retention` forgets settled jobs, schedules can be listed, removed and run by hand over
+HTTP, and a job that a restart interrupted can be started again as a new attempt, only when
+asked: `--retry-interrupted` is off by default and `POST /v1/jobs/{id}/retry` starts one by
+request. A caller that states no owner sees what it saw in 0.124.5. The kit gains a Claude Code
+harness that makes, runs and follows a workflow from the editor, `nika check` names a guard that
+untrusted content steers towards an egress, and an approved MCP tool can declare what it reads
+and sends.
+
+Some files and stores that 0.124.5 accepted are now refused or rewritten.
+
+- The first 0.125 resident rewrites its job store to format 4 when it opens it, and a 0.124.x
+  resident then refuses that store (`state version is unsupported`). Copy the state root before
+  upgrading to keep a way back.
+- `NIKA-SEC-009` credits a `mode: confirm` gate by its position alone. A `choice` or `input`
+  gate now counts in front of an egress task only when that task tests the answer in its
+  `when:`, or, for an input gate, when a `nika:` tool call sends only the typed answer. A gate
+  of any mode with `on_error:` or `for_each:` counts in front of no effect. Every workflow the
+  engine ships keeps its verdict.
+- A paused answer, and a decision a trace already journaled, now bind the content they approved:
+  the question, the gate and every task behind it up to the next gate. A run paused by 0.124.5,
+  or a resume over a decision an earlier engine journaled, asks the gate again; `--from <gate>`
+  asks it on a resume.
+- On a host with no OS sandbox (no Seatbelt, no bubblewrap), an MCP server is refused with
+  `NIKA-1710` under `NIKA_SANDBOX=auto` (the default) and `require`, as an `exec:` child already
+  was. `NIKA_SANDBOX=off` starts it unconfined and the run journal records the waiver.
+- Without the `nika` binary on its PATH, the kit's shell hook refuses commands only inside a Nika
+  project, and lets them through with one warning elsewhere.
+
+The file format and its nine top-level keys are unchanged, and so is the SDK machine protocol.
+Known limits, each with a way around it, are at
+[Known limits](https://docs.nika.sh/changelog/known-limits). In short: 0.125.0 makes no video;
+the TypeScript SDK does not expose the new `nika serve` routes (the published 0.124 SDK keeps
+working); the job store is one file rewritten on every operation, so a high job rate holds only
+with a short `--job-retention`; the resident starts again on its own only a job whose resident
+died, when the policy allows it and, for a workflow with external effects, when the job
+consented, and never a cancelled job, a scheduled one or one admitted by a cost review; the
+provider cap counts the model calls of `infer:` and `agent:` tasks, not those an agent
+application makes with its own client, image and voice tools or the workflow-authoring door;
+and `owner` attributes a job, it does not control access to it.
+
+### Added
+
+- **`nika check` names a guard that untrusted content steers.** With
+  private read, untrusted ingress and external egress all permitted, a task
+  whose `when:` reads the output of a fetch, an exec, an MCP result or a
+  model answer that saw one, and that is an egress task or has one
+  downstream, now carries the advisory hint `branch-steering` (`nika explain
+  branch-steering`). `NIKA-SEC-009` judges content that reaches a task's
+  arguments, and a guard is not an argument: the content can pick whether
+  the branch runs without ever entering a payload. The hint names the task,
+  the task whose output the guard reads and the ingress the content came
+  from, and prints the repair: bind a confirm gate's answer and test it
+  first, so the content can only cancel what a person approved. Nothing is
+  refused and `is_clean` is unchanged. Not judged in this version: a guard
+  that reads only `inputs.*`, a guard inside a child workflow, a `for_each:`
+  collection, a status read. `nika_cap::TrifectaVerdict` gains `armed`,
+  whether the three legs held.
+- **The Claude Code plugin makes, runs and follows a workflow without leaving the conversation** — `/nika:make` turns a sentence into a checked file, `/nika:run` starts it under a spending cap asked once at install, `/nika:pending` lists the runs waiting for a person, and the plugin plugs in the language server, session hooks, a monitor for paused runs and six evaluations (`.agents/plugins/nika/evals/`). A paused run is never answered for the person. Codex and Cursor keep the surfaces they had.
+- **`nika serve` shares its workers between owners and takes its limits
+  as flags.** Waiting jobs are served fairly: a free worker goes to the
+  owner with the fewest jobs running, in turn among equals, so one
+  owner's burst no longer delays the others. `--max-queued-per-owner`
+  refuses an owner's next job with `429 owner_queue_full` and
+  `Retry-After`; `--max-concurrent-per-owner` makes its other jobs wait.
+  `--max-concurrent-jobs` (at most 256), `--queue-capacity`,
+  `--max-jobs` and `--shutdown-grace` replace the compiled-in four
+  workers, queue of 64, 10,000 jobs and 30-second drain.
+  `GET /v1/occupancy` reads what the resident holds against these
+  limits, and a queued job that is cancelled frees its place at once.
+  `/health` advertises the capability `occupancy`. Without a flag
+  nothing changes for a caller that states no owner.
+- **`GET /v1/jobs/{id}/attempts` lists every attempt of a job.** It
+  answers the policy in force for the job, where it stands about being
+  started again (`retry_state`: `none`, `queued`, `exhausted` or
+  `refused`, with `retry_reason`), and each attempt oldest first: its
+  identity, how it was started again (`mode`, `resumed_from`), its
+  receipt, what the decision that closed it counted, and when it
+  started and ended. Each summary of `GET /v1/jobs` gains `attempts`
+  and `retry_state`. `GET /v1/jobs/{id}/trace/verify?attempt=N`
+  verifies one attempt's own journal (`400 invalid_trace_query`,
+  `404 attempt_not_found`); without the query it verifies the latest,
+  as before.
+- **A job can carry the owner and labels its caller states.** The by-name
+  form of `POST /v1/jobs` accepts an optional `owner` (1 to 128 bytes of
+  `[A-Za-z0-9._:@-]`) and optional `labels` (at most 16 pairs: a key of 1
+  to 64 bytes of `[A-Za-z0-9._/-]`, a value of at most 256 bytes), so an
+  application can find a user's jobs again. They are attribution inside
+  one authority domain, never an authorization boundary: whoever holds the
+  token reads every job. Outside their bounds they are refused with
+  `422 invalid_job_owner` or `422 invalid_job_labels` before a job exists.
+  They bind the request identity, so the same `Idempotency-Key` under
+  another owner is `409 idempotency_conflict`. A snapshot body carries
+  none, and a cost review binds none. `/health` advertises the capability
+  `jobAttribution`: require it before sending either member.
+- **`GET /v1/jobs` lists jobs, newest first.** An application finds its
+  jobs again by `owner`, `status` (several at once), `workflow`, `origin`,
+  `label=key:value` (repeatable, all must match), `created_after` and
+  `created_before`, with `limit` (1 to 200, default 50) and an opaque
+  `cursor`. A page is a list of light summaries: no inputs, no outputs, no
+  receipt, and the same redacted error as the job itself. Pages are
+  stable: a job admitted while a caller pages never repeats or hides
+  another. An unknown query member or a value outside its bounds is
+  refused with `400 invalid_job_query`, never ignored. Filtering by
+  `owner` is not an authorization boundary: whoever holds the token lists
+  every job. `/health` advertises the capability `jobList`.
+- **`nika serve` can forget the jobs it settled long ago.** Out of the box
+  the job store keeps everything and refuses every admission once it holds
+  10,000 jobs. `--job-retention <DURATION>` (`36h`, `7d`) forgets a
+  succeeded job once it has been settled that long, and
+  `--job-retention-unsuccessful <DURATION>` sets the window of failed,
+  cancelled and interrupted jobs, which otherwise follow the first. Jobs
+  leave when the next one is admitted and at startup; a queued, running or
+  paused job never leaves. A forgotten job's `Idempotency-Key` is
+  forgotten with it, so keep the window longer than your callers retry.
+  Trace journals are not removed. The minimum is one minute, and both
+  flags work without `--bind`.
+- **`nika serve` can start a job again when its run loses its owner.**
+  A job that was running when the resident stopped or was killed used
+  to stay `interrupted`. With `--retry-interrupted restart` the next
+  resident runs it again as a new attempt of the same job: same id,
+  same `Idempotency-Key`, a new execution and trace identity, and the
+  interrupted attempt kept as evidence with its receipt. The default
+  is `off`: no job is started again, and each new job keeps its
+  effects class on its record. `--retry-max-attempts` (default 3,
+  at most 16) bounds the attempts, the first included, and one cost
+  ceiling covers them all: an attempt whose spend cannot be read is
+  never counted as zero, and its job is not started again unless a
+  budget is stated. With `--retry-interrupted resume` the new
+  attempt serves the tasks the lost one completed from its journal and
+  runs the rest; the journal is judged as `nika run --resume` judges
+  one, its chain required, and a journal that does not pass leaves the
+  job `interrupted` with `resume_refused` rather than run it from the
+  first task. A workflow with effects outside the engine
+  is started again only when its job stated `retry`, the new optional
+  member of the by-name form of `POST /v1/jobs` (`on_interrupted`,
+  `max_attempts`, `max_cost_usd`; `422 invalid_job_retry`). A job
+  that is not started again says why on its `interrupted` event:
+  `retry_exhausted`, `effects_need_consent`, `unknown_spend`,
+  `budget_exhausted` or `resume_refused`. A cancelled job and a job a
+  schedule fired on its beat are never started again. `/health`
+  advertises the capability `jobRetry`.
+- **`POST /v1/jobs/{id}/retry` starts a settled job again by request.**
+  The latest attempt of a job that ended `interrupted` or `failed`
+  becomes evidence, and a new attempt of the same job is queued with
+  its own execution and trace identity. The body names the attempt
+  (`attempt`, the first being 1), the `mode` (`restart` or `resume`)
+  and, optionally, `max_cost_usd` for the re-attempts alone; anything
+  else is `422 invalid_job_retry`. The request is the caller's consent
+  to run the workflow's effects again. The bound of attempts, the
+  resume judgment and the job's one cost ceiling hold as for a run
+  that lost its resident, and the place in the owner's lane is taken
+  before anything is written. The same request sent again answers
+  `200` with the job as it stands and starts nothing; a job still
+  waiting is put back in its owner's lane, once. A job a schedule
+  fired keeps its origin when it is restarted. Refusals:
+  `409 job_not_retryable`, `retry_exhausted`, `resume_refused`,
+  `unknown_spend` and `budget_exhausted`, and the queue refusals of an
+  admission.
+- **`nika serve --provider-concurrency PROVIDER=N` bounds the model
+  calls in flight on one provider, across every job.** Repeat it per
+  provider (`openai=16`, `anthropic=8`). A call past the cap waits its
+  turn, so a `for_each` runs as wide as its `max_parallel` and the free
+  slots allow. Retries stay where they were: the cap re-sends nothing,
+  and a backoff holds no slot. Child workflows count against the same
+  cap. A job cancelled while its calls wait leaves the line at once.
+  `GET /v1/occupancy` gains `providers`: the cap, the calls in flight
+  and the calls waiting, for each capped provider. Without the flag a
+  call never waits.
+- **Schedules can be listed, removed and run by hand over HTTP.**
+  `GET /v1/schedules` shows the schedules the door created and the
+  project's beats, each with its next slot. `DELETE /v1/schedules/{id}`
+  removes one under `If-Match` (the exact `ETag`, or `*`).
+  `POST /v1/schedules/{id}/trigger` admits one job now under what the
+  schedule declares, with an `Idempotency-Key`; the cadence does not move
+  and the next slot still fires. A schedule may also state `owner` and
+  `labels`, under the same law as `POST /v1/jobs`: every job it fires or
+  a trigger admits carries them, so `GET /v1/jobs?owner=...` finds
+  scheduled work too. A schedule that states none keeps its revision.
+  Project beats stay declared in `nika.yaml`: removing or triggering one
+  over HTTP answers `409 schedule_declared_by_project`. `/health`
+  advertises the capability `scheduleManage`.
+
+### Changed
+
+- **The run guard blocks only inside a Nika project when `nika` is
+  missing.** Without the binary on its PATH, the kit's shell hook used to
+  refuse every command in every folder. It now refuses them only inside a
+  Nika project (a `nika.yaml` or `.nika/` store in the host's project
+  directory, the hook's working directory or above). Elsewhere commands
+  pass with one `guard_off` warning until the binary is found again, and
+  no run is judged there meanwhile. Each refusal now names its own cause:
+  a command the judge could not see no longer says to restore the binary.
+- **One resume judgment for every door.** `nika run --resume` now judges
+  a journal through `nika_dap::continuation`, the module a resident's
+  resume of an interrupted job will call: the chain, then the project,
+  workflow, engine, model seat and access the journal recorded, then the
+  facts and the plan it folds to. What `nika run --resume` prints, in
+  which order, and its exit codes are unchanged.
+- **The resident's job store moves to format 4.** Every job now records
+  when it was admitted and its rank in the store, and can carry the owner
+  and labels its requester states. A format-3 store is rewritten as
+  format 4 by the resident that takes the state root, once it holds the
+  server lease, with every event hash, receipt and identity digest
+  unchanged; a start that loses the lease to a live resident writes
+  nothing. A migrated job gains no invented admission date. An engine
+  older than this one refuses a store this one has written, so keep a copy
+  of the state root while a downgrade must stay possible. `/health`
+  reports `storeFormatVersion.jobs: 4`.
+
+### Fixed
+
+- **The agent kit teaches the cost wording `nika check` prints.** The kit's
+  `check` command, its authoring references, its operating skill and the
+  brief `nika init` writes told an agent to look for a `≥ $X FLOOR` marker
+  that the COST line, the verdict line and `nika explain <file>` no longer
+  print. They now name what a bounded workflow prints
+  (`$X – $Y worst-case output ceiling`, `est out ≤$Y`) and what an uncapped
+  or unpriced one prints (`bounded portion $X no total ceiling` with its
+  `uncapped` or `unpriced` tasks, `est unbounded`). The short model id
+  example is measured again on 0.124.5.
+- **A paused run shows the question it waits on, and names the answers that gate takes** — the paused card now prints the gate's question on one quoted line, so a person or an agent reading the frame knows what is asked without opening the trace. The question can carry fetched content, so whitespace folds to one space, a control or invisible format character (an escape sequence, a bidirectional override, a zero-width or tag character) prints as a visible `\u{…}` escape, a quote is escaped, and a long question is clipped. The confirm hint said `not yes` while the resume binds `yes` and `no` to a `nika:prompt` confirm gate; it now reads `(true or yes · false or no)`. An `agent` task paused by its harness keeps `(true or false)`, since its answer stays the text typed.
+- **`nika explain NIKA-SEC-009` prints a fix, and it starts with the legs.** The
+  page described the trifecta but printed no fix, and the finding's own fix
+  names only the human gate. It now teaches dropping a leg the workflow does
+  not need first, with the grant that arms each leg (`exec` arms both
+  untrusted ingress and external egress), since a boundary missing a leg is
+  safe by construction. When all three legs are needed, it gives both gate
+  placements the check accepts: after the reads, where the question can show
+  the content that would leave, or upstream of every entry task, where the
+  person consents to the run before the untrusted content exists. Either way
+  each effect after the gate tests its answer, since NIKA-SEC-014 refuses an
+  effect it can prove runs on a « no » to a confirm gate. The MCP `nika_explain` tool prints
+  the same fix.
+- **A full queue no longer spends an approved cost review on
+  `nika serve`.** A job that carried an approved review and met
+  `503 queue_full` lost the review: the retry the refusal asks for was
+  answered as already consumed, and a person had to approve again. The
+  queue place is now taken before the review, so the refusal leaves the
+  review approved and the same request is admitted once there is a
+  place. The new `429 owner_queue_full` follows the same rule.
+- **A scheduled slot whose workflow changed after it fired no longer
+  stops `nika serve`.** When a slot that already had its job was offered
+  again under an edited workflow (a deploy between a crash and its
+  restart, or a schedule removed and declared again while the slot was
+  still on time), the resident ended on an idempotency conflict, and
+  ended again at every restart inside the slot's window. The slot now
+  stays consumed against the job it fired: nothing runs twice and the
+  resident keeps serving.
+- **The TRIFECTA line of `nika check` names the gate that clears it.** A
+  workflow whose three legs are declared, and whose reached egress waits
+  on a blocking `nika:prompt`, printed the same passing line as a workflow
+  missing a leg: `no lethal trifecta over the declared permits: without a
+  human gate`. The line now says that a blocking human gate sits on every
+  path to each egress the untrusted content reaches, and names them (for
+  example `` `ask` before `leak` ``), so a boundary that is safe by
+  construction reads differently from one that is safe while its gate is
+  real. It says where the gate sits, not what a « no » does: the CONSENT
+  line judges that for a confirm gate.
+
+### Security
+
+- **A paused approval answer no longer carries over to a task edited after
+  the question.** The ticket of a `nika:prompt` gate bound the question
+  and, for each effectful task behind the gate, its name and effect
+  classes only. A gated `nika:write` rewritten while the run waited, a
+  downstream `infer` whose prompt changed or a child workflow swapped on
+  disk therefore still ran on `nika run --resume <trace> --answer
+  <gate>=<answer>`. The ticket now binds the gate as written and the
+  definition of every task downstream of it, with or without an effect
+  class, up to and including the next gate. A definition is named by the
+  hash the trace already journals for the task (`def_hash`), so it covers
+  an inference's effective model and access, an agent's skill texts and a
+  child workflow's source closure, and a comment or a layout edit leaves it
+  as it was. An answer that meets another definition is refused with
+  `approval.content_mismatch` (`NIKA-SEC-010`): the gate fails and no task
+  that waits on its answer starts. An answer behind which the engine holds
+  no identity for a task is refused with `approval.content_unhashable`. A
+  run paused by an earlier engine holds a ticket without definitions: its
+  answer is refused with `approval.content_mismatch` too, and resuming
+  that run without `--answer` asks again. Still not bound: a value a gated
+  task reads from elsewhere (a constant, an input, the output of a task
+  outside the gate's closure) unless the question shows it.
+- **`NIKA-SEC-009` credits only a confirm gate by its position alone.** The
+  lethal-trifecta check counted any blocking `nika:prompt` as a human gate,
+  and the consent check (`NIKA-SEC-014`) reads only confirm gates. A `mode:
+  choice` or `mode: input` question followed by an egress task that waits on
+  it with `after:` alone therefore passed `nika check`, although that task
+  runs whatever the answer, the one that declines included. Such a gate now
+  counts before an egress task only when that task's own `when:` tests the
+  answer: it reads an exact `with:` binding of the gate's output and some
+  listed choice makes the guard false (for an input or a templated
+  `choices:` list, the read counts unless the guard holds whatever is bound
+  or only compares the binding to `null`), or it reads the output of a
+  `nika:jq` stage whose `args.input` carries the answer and whose program
+  reads it, directly or through further such stages, under the same two
+  exclusions. An input gate also counts before a `nika:` tool call that
+  sends only the typed answer. A choice or an input gate with an `on_error:`
+  or a `for_each:` counts before no effect: a recovered value or a list of
+  answers is not a person's answer. Otherwise the trifecta is refused as for
+  no gate, and the finding names the gate and the task and gives both
+  repairs: test the answer in `when:`, or use `mode: confirm`, whose « no »
+  `NIKA-SEC-014` judges. A confirm gate is credited as before unless it has
+  `on_error:` or `for_each:`, which now refuses it the same way. Not judged:
+  what a jq program computes from the answer it reads, which the check reads
+  as text and never runs. An answer tested through any other stage (a model,
+  a subprocess, another tool) is refused. The `headless-prompt` hint on a
+  choice or an input gate now suggests one of its choices or `--answer
+  <id>=<text>` instead of `--answer <id>=false`, and `nika explain
+  NIKA-SEC-009` states the rule.
+- **A decision journaled for a gate no longer carries over to a task
+  edited after it.** A resume served a decided `nika:prompt` gate from its
+  trace without looking at the tasks behind it, so on `nika run --resume
+  <trace> --answer <gate>=<answer>` a task behind an earlier, already
+  decided gate ran in its edited form under that earlier decision. The
+  record of a decided gate now carries the hash of the content its
+  decision bound (`approval_shown_hash`, beside `def_hash`): the question,
+  the gate as written and the definition of every task downstream of it
+  up to and including the next gate, the content a paused answer binds.
+  Before serving that decision a resume recomputes the content from the
+  files it runs. A decision over other content is refused with
+  `approval.content_mismatch` (`NIKA-SEC-010`): the gate fails and no
+  task that waits on it starts. A decision behind which the engine holds
+  no identity for a task is refused with `approval.content_unhashable`.
+  The refusal names the gate, and adding `--from <gate>` to the resume
+  asks it again. A trace written by an earlier engine journals no such
+  hash, so its decisions are refused with `approval.content_mismatch`
+  too. A decision over unchanged content is served as before.
+- **An MCP server no longer starts unconfined on a host with no OS
+  sandbox.** Where neither Seatbelt nor bubblewrap is present, a server
+  declared in `.nika/mcp_servers.json` used to start unconfined behind an
+  `UNSANDBOXED` note, while an `exec:` child on the same host was refused
+  with `NIKA-1710`. The spawn now rides the same `NIKA_SANDBOX` switch:
+  under `auto` (the default) and `require` it is refused with `NIKA-1710`
+  and no process starts, in `nika mcp approve` (an environment exit) and in
+  `nika run`, where the call fails with it and is not retried (an `invoke:`
+  task fails, an agent reads it as that tool's error). A server always runs
+  inside a boundary (the project tree and its `network` arm), so `auto`
+  requires confinement for it as it does for an `exec:` child under
+  `permits:`. `NIKA_SANDBOX=off` is the explicit waiver: the server starts
+  unconfined, its note names the waiver, and every `nika run` attests it on
+  the journal's opening frame (`sandbox_policy: off`, `sandbox_waived:
+  true`), whatever its workflow names. A mistyped `NIKA_SANDBOX` now refuses
+  every spawn with `NIKA-1711`, on a host with a backend too. A sandbox that
+  is present but refuses the profile stays `NIKA-MCP-005`.
+- **An MCP tool can now arm the private-read and egress legs of the lethal
+  trifecta.** A tool reads and sends on its server, outside `permits.fs`
+  and `permits.net`, so a workflow that read a private inbox through one
+  MCP tool and sent mail through another armed the ingress leg only and
+  passed `nika check`. `nika mcp approve <server>` now takes
+  `--reads-private <tool>`, `--sends-out <tool>` and `--no-role <tool>`:
+  the role is recorded beside the pin in `.nika/mcp_pins.json`, and the
+  check counts a call to a declared tool as that leg of `NIKA-SEC-009`
+  (an `invoke:`, an `agent:` whitelist, or the tool grants of a child
+  workflow). A tool with no declared role keeps today's verdict and is
+  named by a new `[mcp-roles]` hint, so the check says what it did not
+  judge. A role is kept across a re-approval only while the tool's
+  definition is unchanged. A role is the operator's declaration, not a
+  proof of what the server does.
+- **`url` is past a stack-overflow advisory.** In `url` 2.5.8, reading
+  the origin of a `blob:` URL descended into the URL it wraps without a
+  bound, and a URL nested deeply enough overflowed the stack
+  (RUSTSEC-2026-0592). The engine reads the origin of `http` and `https`
+  URLs only: the crawl of `nika:fetch` compares links its extractor has
+  already narrowed to those two schemes, and the other readers take a
+  vetted or operator-set endpoint. No path was found by which a fetched
+  page or a workflow reaches the overflow; the audit reads every
+  lockfile, though, and the advisory refused each push. The three
+  lockfiles (the root, `fuzz/` and `crates/nika-acp/`) move to `url`
+  2.5.9 with the `form_urlencoded` 1.2.3 it requires, and nothing else
+  in them changes. 2.5.9 also brings the parser closer to the URL
+  Standard: a `^` in a path is percent-encoded, so a fetched URL that
+  carries one now sends `%5E`; a `file:` URL keeps its host before a
+  drive letter; a `\` after the port of a non-special scheme is refused.
 ## [0.124.5](https://github.com/nika-open/nika/compare/v0.124.4..v0.124.5) - 2026-11-20
 
 Nika 0.124.5 is the first release from the `nika-open` organization. The engine and its sibling

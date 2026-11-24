@@ -13,7 +13,7 @@
     ],
     "provenance": {
       "cognition": "deterministicOnly",
-      "compiler_version": "0.124.5",
+      "compiler_version": "0.125.0",
       "decision": {
         "intent_sha256": "c8f1bbc600bbd244126670cb5da5c5a06aee52208fcc1f8ee79a432d8675ed1c",
         "ledger": [
@@ -131,7 +131,7 @@
         "unknowns": []
       },
       "skeleton": null,
-      "spec_pin": "25078e7cbab3fd3388ba60708b52dbb9244138b9",
+      "spec_pin": "2edc285a3f376c24990898baf5b37b161e5e638a",
       "suggested_file": null
     },
     "questions": [

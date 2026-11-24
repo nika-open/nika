@@ -15,8 +15,8 @@ project already declare a server that covers the need
 (`.nika/mcp_servers.json`)? The cheapest tool is the one already granted.
 
 **2 · Find the server.** Ask the binary whether it lists servers:
-`"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit" --has mcp-shelf` (without the plugin:
-look for `--mcp` in `nika catalog --help`).
+`"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit" --has mcp-shelf` (without the kit's
+scripts: look for `--mcp` in `nika catalog --help`).
 
 - Exit 0: `nika catalog --mcp` prints the shelf. Pick the entry that fits
   the need and take its launch command, its key and its tools from there.

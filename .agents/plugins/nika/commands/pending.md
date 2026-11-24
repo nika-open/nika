@@ -9,7 +9,7 @@ left during lunch. Find them and let the user answer in one step.
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py" $ARGUMENTS`
    (add `--json` to read it as data). Exit 0 means nothing waits: say so
-   in one line and stop. If the script is unavailable, use
+   in one line and stop. Without the kit's scripts, use
    `nika trace ls --json` and read the `workflow_paused` frame of each
    paused trace; a paused trace whose run id appears as another trace's
    `resumed_from` was already answered.

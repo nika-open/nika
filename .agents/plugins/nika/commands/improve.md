@@ -19,6 +19,13 @@ spend. Exit 3 means there is no recorded run of this workflow yet: say so
 and stop, since there is nothing to prove. Mock rehearsals are left out of
 the cost lines.
 
+Without the kit's scripts, read the runs yourself (`nika trace ls`, then
+`nika trace outputs <trace> --json` for each run of this workflow) and keep
+to the same rule: an observation needs a line of evidence from a record or
+from the file. The card of step 3 is then `nika check <file> --json` read
+beside `nika inspect <file> --format json`, compared before and after the
+edit.
+
 **2 · Show the observations as they are.** Each with its evidence, in the
 person's language. Add none the script did not print; « I think this
 prompt is long » is an opinion, and this command deals in evidence. If the

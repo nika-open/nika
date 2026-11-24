@@ -80,7 +80,13 @@ settled. Do this whether or not the host reminded you to.
 **9 · An approval the person gives every time.** After they answered the
 same gate of the same workflow more than once, look whether this binary
 can remember an approval: `"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit" --has consent`
-(without the plugin: `nika consent --help` answers, or it does not). When
+(without the kit's scripts: `nika consent --help` answers, or it does not). When
 it can (exit 0), say so once, in one line, and show them the command its
 help prints: they run the grant, you never do. When it cannot, say nothing
 and keep asking at each gate.
+
+**Without the kit's scripts** the steps are the same with the binary alone:
+the verdict is `nika check <file> --json` retold in plain words, the model
+route is a provider that `nika catalog` shows as resolving, and a waiting
+run is listed by `nika trace ls`, its question read from the paused frame of
+its trace.

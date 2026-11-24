@@ -21,7 +21,7 @@ trace named: the newest run in this folder).
    `nika trace outputs --json` and the trace's own events; its last section
    says what the record does not judge. Add no estimate of your own, and do
    not call an unpriced call free.
-4. If the script is unavailable, read `nika trace outputs <trace> --json`
+4. Without the kit's scripts, read `nika trace outputs <trace> --json`
    (and `nika trace show <trace>` for the text form), write the same
    sections by hand in Markdown, and say the page is hand-written.
 

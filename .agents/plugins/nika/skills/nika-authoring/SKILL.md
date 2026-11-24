@@ -153,7 +153,9 @@ state, report, gates), the craft additions you made and the effect upgrades
 you only proposed. A thin job says why it is thin. Done means three things:
 the check is clean, the job was rehearsed (on the mock model when nothing
 leaves the machine, with `--dry-run` otherwise), and every file the rehearsal
-wrote was opened and parsed. A review's verdict is passed on in the
+wrote was opened and parsed. When the person said not to run it, do not rehearse on the mock model
+either: read the plan with `nika run <file> --dry-run`, which executes
+nothing, and say in the hand-over that the job was not rehearsed. A review's verdict is passed on in the
 reviewer's own words, gaps included. The last lines of every hand-over are
 the verdict of `nika check <file> --json --native-strict` on the file as it
 now stands, quoted: the path, `clean`, each finding left with its code. Say

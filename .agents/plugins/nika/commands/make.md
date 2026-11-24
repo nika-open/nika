@@ -19,6 +19,15 @@ card shows nothing leaving the machine, and a `--dry-run` of any job (it
 shows the plan and executes no effect). Do the second list without asking;
 never do the first without a yes.
 
+**Without the kit's scripts** (a host that does not resolve
+`${CLAUDE_PLUGIN_ROOT}`), every step below still holds with the binary
+alone: `nika compile --json -- "<the sentence>"` is the engine's reading,
+`nika catalog` lists the model routes, and the card is
+`nika check <file> --json --native-strict` read beside
+`nika inspect <file> --format json`. Write down what the job reads, writes,
+sends, spends and runs from those two, keep that list as the approved plan,
+and compare it again before the hand-over.
+
 **1 · Let the engine read it.** Run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-intent.py" "<the sentence>"`.
 No model is called and no workflow is written. It prints the pieces of the
@@ -96,7 +105,9 @@ nothing leaving the machine is rehearsed with
 `nika run <file> --model mock/echo --max-cost-usd 0.10`. The mock replaces
 the model and nothing else, so a job that sends or reaches a host gets
 `nika run <file> --dry-run` instead, and the hand-over says its effects were
-not exercised. Then run
+not exercised. When the person said not to run it, do not rehearse on the mock model
+either: read the plan with `nika run <file> --dry-run`, which executes
+nothing, and say in the hand-over that the job was not rehearsed. Then run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py" <file> --since-plan`: an
 effect the approved card did not show (exit 4) comes back out, or is asked.
 

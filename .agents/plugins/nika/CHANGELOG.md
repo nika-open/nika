@@ -5,6 +5,35 @@ Versions move together across all manifests (the mirror gate pins it).
 
 ## Unreleased
 
+The plugin carries one loop around a job. A new job goes from a plan the
+person approves once (phases, an effect card read off `nika check` and
+`nika inspect`, the cost per run) to a file built phase by phase, reviewed
+cold above eight tasks or when an effect leaves the machine, repaired at
+most twice and handed over with the check's verdict, quoted. Five roles do
+the work: `nika-author`, `nika-debugger` and `nika-migrator` gain a model
+they inherit from the session, an effort level, a turn cap and, for the
+first two, a small project memory; `nika-reviewer` judges a finished file
+from the person's sentence and the path alone; `nika-scout` gathers facts
+on a small model. Every page that can stop for the person names what needs
+their yes and what never waits for them. `scripts/nika-card.py` remembers
+the card the person approved and names every effect added after it.
+`bin/nika-kit` decides once which binary the helpers use and detects a
+feature by asking the binary; `nika-authoring` and `nika-running` print the
+binary's own builtins and routes when they load. `/nika:run` starts a long
+run in the background, shows a gate's question word for word and reads a
+stopped run before any second run; `/nika:report` builds one
+self-contained page from a run's record; `/nika:improve` proposes only
+what the recorded runs prove and never changes an effect; `/nika:connect`
+offers an MCP server before writing its declaration. A routing guide gives
+a method for choosing which model does which step, with no model name in
+it. `nika-operating` lays out four ways to run without the person. Two
+workflow scripts, `nika-forge` and `nika-audit`, are written and not yet
+run in a session, as are six new evaluation cases. In Claude Code three
+hooks and a second monitor repeat the loop's rules (the author's hand-over
+is checked, a run that ended red brings back a reminder, runs that wait
+survive a compaction, a run reports its failures and its spend); each rule
+is also the stated step of a skill, so it holds on hosts without them.
+
 The plugin is ambitious about what one workflow can do, and careful
 about what it touches: ambition in craft, fidelity in effects. The
 authoring skill opens with a design step and three new references: a

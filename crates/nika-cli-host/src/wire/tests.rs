@@ -737,6 +737,1237 @@ fn detected_targets_cover_only_present_clients() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A home holding the configs of five hosts: Codex (TOML, another
+/// server, no `nika`), Gemini CLI (already wired), Copilot CLI, Amp and
+/// Kimi Code (another server).
+fn five_host_home(name: &str) -> PathBuf {
+    let home = temp_dir(name);
+    let seed = |parts: &[&str], body: &str| {
+        let path = parts.iter().fold(home.clone(), |p, part| p.join(part));
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, body).expect("seed");
+    };
+    seed(
+        &[".codex", "config.toml"],
+        "# my codex setup\n[mcp_servers.other]\ncommand = \"other\"\n",
+    );
+    seed(
+        &[".gemini", "settings.json"],
+        r#"{"mcpServers":{"nika":{"command":"nika","args":["mcp"]}}}"#,
+    );
+    seed(&[".copilot", "mcp-config.json"], r#"{"mcpServers":{}}"#);
+    seed(&[".config", "amp", "settings.json"], "{}");
+    seed(
+        &[".kimi-code", "mcp.json"],
+        r#"{"mcpServers":{"other":{"command":"x"}}}"#,
+    );
+    home
+}
+
+const FIVE_HOSTS: [WireTarget; 5] = [
+    WireTarget::Codex,
+    WireTarget::Gemini,
+    WireTarget::Kimi,
+    WireTarget::Copilot,
+    WireTarget::Amp,
+];
+
+/// `detected` sees every host `nika wire` can write, not a list of its
+/// own: a home holding five hosts lists exactly those, in row order, and
+/// an empty home lists none. (Those five once answered « no MCP client
+/// detected ».)
+#[test]
+fn detected_lists_exactly_the_hosts_this_home_holds() {
+    let dir = temp_dir("five-hosts-dir");
+    let bare = temp_dir("five-hosts-bare");
+    assert_eq!(
+        detected_targets_in(&bare, &dir),
+        Vec::<WireTarget>::new(),
+        "an empty home lists none"
+    );
+
+    let home = five_host_home("five-hosts-home");
+    assert_eq!(detected_targets_in(&home, &dir), FIVE_HOSTS);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(bare);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The preview of `detected` on that home: one line per host, each in
+/// its own writer's words, and not a byte written.
+#[test]
+fn detected_dry_run_plans_each_host_it_sees_and_writes_nothing() {
+    let home = five_host_home("five-hosts-plan-home");
+    let dir = temp_dir("five-hosts-plan-dir");
+    let at = |target| {
+        config_path(target, Some(&home), &dir)
+            .expect("a home-anchored path")
+            .display()
+            .to_string()
+    };
+    let bytes = || FIVE_HOSTS.map(|target| std::fs::read_to_string(at(target)).expect("read"));
+    let before = bytes();
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions {
+            dry_run: true,
+            ..WireOptions::default()
+        },
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             + would update codex: {}\n\
+             · current gemini: {}\n\
+             + would update kimi: {}\n\
+             + would update copilot: {}\n\
+             + would update amp: {}\n\
+             → re-run without --dry-run to apply",
+            at(WireTarget::Codex),
+            at(WireTarget::Gemini),
+            at(WireTarget::Kimi),
+            at(WireTarget::Copilot),
+            at(WireTarget::Amp),
+        )
+    );
+    assert_eq!(bytes(), before, "a preview never writes");
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A Codex config is TOML: with the `nika` server it reads current,
+/// without it reads to-update, and reading it changes nothing.
+#[test]
+fn a_codex_toml_reads_current_with_the_nika_server_and_to_update_without() {
+    let home = temp_dir("codex-detected-home");
+    let dir = temp_dir("codex-detected-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = home.join(".codex").join("config.toml");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("codex: {}", path.display());
+
+    let unwired = "# my codex setup\n[mcp_servers.github]\ncommand = \"gh\"\n";
+    std::fs::write(&path, unwired).expect("seed");
+    let targets = detected_targets_in(&home, &dir);
+    assert_eq!(targets, [WireTarget::Codex]);
+    assert_eq!(
+        collect_plan(&targets, Some(&home), dir_str),
+        [WireAction::Updated(label.clone())]
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        unwired,
+        "a plan writes nothing"
+    );
+
+    let wired = format!("{unwired}\n[mcp_servers.nika]\ncommand = \"nika\"\nargs = [\"mcp\"]\n");
+    std::fs::write(&path, &wired).expect("seed");
+    assert_eq!(detected_targets_in(&home, &dir), [WireTarget::Codex]);
+    assert_eq!(
+        collect_plan(&targets, Some(&home), dir_str),
+        [WireAction::Current(label)]
+    );
+    assert_eq!(std::fs::read_to_string(&path).expect("read"), wired);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The real run on that home wires the five hosts it sees, keeps every
+/// other server they hold, and creates no config for a host that is not
+/// there.
+#[test]
+fn detected_wires_the_hosts_it_sees_and_creates_nothing_for_the_others() {
+    let home = five_host_home("five-hosts-run-home");
+    let dir = temp_dir("five-hosts-run-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let at = |target| config_path(target, Some(&home), &dir).expect("a path");
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "✔ updated codex: {}\n\
+             · current gemini: {}\n\
+             ✔ updated kimi: {}\n\
+             ✔ updated copilot: {}\n\
+             ✔ updated amp: {}",
+            at(WireTarget::Codex).display(),
+            at(WireTarget::Gemini).display(),
+            at(WireTarget::Kimi).display(),
+            at(WireTarget::Copilot).display(),
+            at(WireTarget::Amp).display(),
+        )
+    );
+
+    let codex: toml_edit::DocumentMut = std::fs::read_to_string(at(WireTarget::Codex))
+        .expect("read")
+        .parse()
+        .expect("toml");
+    assert_eq!(
+        codex["mcp_servers"]["nika"]["command"].as_str(),
+        Some("nika")
+    );
+    assert_eq!(
+        codex["mcp_servers"]["other"]["command"].as_str(),
+        Some("other"),
+        "the other Codex server is kept"
+    );
+    let kimi = read_json(&at(WireTarget::Kimi)).expect("json");
+    assert_eq!(kimi["mcpServers"]["nika"]["args"], json!(["mcp"]));
+    assert_eq!(
+        kimi["mcpServers"]["other"]["command"], "x",
+        "the other Kimi server is kept"
+    );
+    let copilot = read_json(&at(WireTarget::Copilot)).expect("json");
+    assert_eq!(copilot["mcpServers"]["nika"]["type"], "local");
+    let amp = read_json(&at(WireTarget::Amp)).expect("json");
+    assert_eq!(amp["amp.mcpServers"]["nika"]["command"], "nika");
+
+    for target in expand_target(WireTarget::All) {
+        if !FIVE_HOSTS.contains(&target) {
+            assert!(
+                !at(target).exists(),
+                "{} is not on this machine and got a config",
+                target.id()
+            );
+        }
+    }
+    assert_eq!(
+        collect_plan(&FIVE_HOSTS, Some(&home), dir_str),
+        FIVE_HOSTS.map(|target| WireAction::Current(format!(
+            "{}: {}",
+            target.id(),
+            at(target).display()
+        ))),
+        "a second run has nothing to do"
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A client cannot be wired without being seen: every client `nika
+/// wire` writes into a bare home is detected there afterwards, at the
+/// file it was written to. A wire target added without a detection row
+/// fails here.
+#[test]
+fn every_client_wired_into_a_bare_home_is_then_detected() {
+    let home = temp_dir("round-trip-home");
+    let dir = temp_dir("round-trip-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let all = expand_target(WireTarget::All);
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+
+    for target in &all {
+        let action = wire_one(*target, Some(&home), dir_str, false).expect("wire");
+        assert!(
+            matches!(action, WireAction::Created(_)),
+            "{}: {action:?}",
+            target.id()
+        );
+    }
+    let seen = detected_targets_in(&home, &dir);
+    for target in &all {
+        assert_eq!(
+            seen.iter().filter(|one| *one == target).count(),
+            1,
+            "{} was wired and is not detected",
+            target.id()
+        );
+    }
+    assert_eq!(seen.len(), all.len(), "nothing else is detected: {seen:?}");
+    for action in collect_plan(&seen, Some(&home), dir_str) {
+        assert!(matches!(action, WireAction::Current(_)), "{action:?}");
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `detected` means the file the writer would patch is there. Cursor
+/// also reads a project `.cursor/mcp.json` (`doctor` reports that
+/// sighting), but a repository that ships one does not put Cursor on
+/// this machine: nothing is planned for it and no home config is created.
+#[test]
+fn detected_plans_nothing_for_cursor_from_a_project_file_alone() {
+    let home = temp_dir("project-cursor-home");
+    let dir = temp_dir("project-cursor-dir");
+    let project = dir.join(".cursor").join("mcp.json");
+    std::fs::create_dir_all(project.parent().expect("parent")).expect("dir");
+    let shipped = r#"{"mcpServers":{"other":{"command":"x"}}}"#;
+    std::fs::write(&project, shipped).expect("seed");
+
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+    assert!(
+        !home.join(".cursor").exists(),
+        "no home config is created for a host that is not there"
+    );
+    assert_eq!(std::fs::read_to_string(&project).expect("read"), shipped);
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+const GEMINI_UNWIRED: &str = "{\"theme\":\"dark\"}\n";
+const CODEX_REFUSED: &str = "mcp_servers = \"mine\"\n";
+
+/// A home with two hosts: Gemini CLI, whose settings are healthy and not
+/// wired yet, and Codex, whose config its writer refuses (`mcp_servers`
+/// is not a table). Returns the home, then the Gemini and Codex files.
+fn refused_codex_home(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let home = temp_dir(name);
+    let gemini = home.join(".gemini").join("settings.json");
+    let codex = home.join(".codex").join("config.toml");
+    for (path, body) in [(&gemini, GEMINI_UNWIRED), (&codex, CODEX_REFUSED)] {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, body).expect("seed");
+    }
+    (home, gemini, codex)
+}
+
+/// Nobody named the hosts `detected` wires, the machine did: one config
+/// its writer refuses is reported on its own line with the reason and
+/// left byte-identical, the other hosts are wired, and the exit is ENV
+/// so a script sees that one was skipped. The preview says the same.
+#[test]
+fn detected_wires_the_other_hosts_when_one_config_is_refused() {
+    let (home, gemini, codex) = refused_codex_home("partial-home");
+    let dir = temp_dir("partial-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let read = |path: &Path| std::fs::read_to_string(path).expect("read");
+    let refusal = format!(
+        "codex: `mcp_servers` in {} is not a TOML table; nika wire leaves it as it is",
+        codex.display()
+    );
+
+    let plan = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions {
+            dry_run: true,
+            ..WireOptions::default()
+        },
+    );
+    assert_eq!(plan.code, crate::output::exit::ENV, "{plan:?}");
+    assert_eq!(
+        plan.text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             ✖ skipped {refusal}\n\
+             + would update gemini: {}\n\
+             → re-run without --dry-run to apply",
+            gemini.display()
+        )
+    );
+    assert_eq!(read(&gemini), GEMINI_UNWIRED, "a preview never writes");
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "✖ skipped {refusal}\n✔ updated gemini: {}",
+            gemini.display()
+        )
+    );
+    assert_eq!(
+        read(&codex),
+        CODEX_REFUSED,
+        "the refused config is untouched"
+    );
+    let wired = read_json(&gemini).expect("json");
+    assert_eq!(wired["mcpServers"]["nika"], nika_server(false));
+    assert_eq!(wired["theme"], "dark", "the rest of the file is kept");
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The same two hosts NAMED keep the all-or-nothing preflight: the
+/// person chose those targets, so one refused config writes nothing.
+#[test]
+fn a_named_list_still_writes_nothing_when_one_config_is_refused() {
+    let (home, gemini, codex) = refused_codex_home("named-home");
+    let dir = temp_dir("named-dir");
+    let out = wire_targets(
+        &[WireTarget::Gemini, WireTarget::Codex],
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        false,
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    assert!(out.text.starts_with("nothing written"), "{out:?}");
+    assert_eq!(
+        std::fs::read_to_string(&gemini).expect("read"),
+        GEMINI_UNWIRED
+    );
+    assert_eq!(
+        std::fs::read_to_string(&codex).expect("read"),
+        CODEX_REFUSED
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A `nika` entry that pins an absolute command and carries a key of its
+/// own is wired: a desktop application does not inherit the shell's
+/// PATH, and the bare name would break what works. `detected` plans no
+/// change and leaves the file byte-identical; the same entry with other
+/// args is to update. A client wired BY NAME keeps the strict writer.
+#[test]
+fn detected_leaves_a_pinned_entry_alone_and_updates_other_args() {
+    let home = temp_dir("pinned-home");
+    let dir = temp_dir("pinned-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = config_path(WireTarget::ClaudeDesktop, Some(&home), &dir).expect("path");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("claude-desktop: {}", path.display());
+    let entry = |args: &str| {
+        format!(
+            r#"{{"mcpServers":{{"nika":{{"command":"/opt/nika/bin/nika","args":{args},"env":{{"NIKA_HOME":"/data"}}}}}}}}"#
+        )
+    };
+    let detected = |dry_run| {
+        run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir_str,
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+
+    let pinned = entry(r#"["mcp"]"#);
+    std::fs::write(&path, &pinned).expect("seed");
+    assert_eq!(
+        detected(true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             · current {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let out = detected(false);
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(out.text, format!("· current {label}"));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        pinned,
+        "a wired entry is left byte-identical"
+    );
+    assert_eq!(
+        wire_one(WireTarget::ClaudeDesktop, Some(&home), dir_str, true),
+        Ok(WireAction::Updated(label.clone())),
+        "wired by name, the writer stays strict"
+    );
+
+    std::fs::write(&path, entry(r#"["mcp","--verbose"]"#)).expect("seed");
+    assert_eq!(
+        detected(true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             + would update {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// One rule for every host, the six standing rows included: `doctor`
+/// has always called a pinned Cursor entry wired, and `detected` no
+/// longer rewrites what `doctor` calls wired. The plan is no change and
+/// the file stays byte-identical. Cursor NAMED by hand keeps the strict
+/// writer: the entry is rewritten into nika's own spelling.
+#[test]
+fn detected_leaves_a_pinned_cursor_entry_alone_and_a_named_wire_rewrites_it() {
+    let home = temp_dir("pinned-cursor-home");
+    let dir = temp_dir("pinned-cursor-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = home.join(".cursor").join("mcp.json");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("cursor: {}", path.display());
+    let pinned = r#"{"mcpServers":{"nika":{"command":"/opt/nika/bin/nika","args":["mcp"],"env":{"NIKA_HOME":"/data"}}}}"#;
+    std::fs::write(&path, pinned).expect("seed");
+    let wire = |target, dry_run| {
+        run_in(
+            target,
+            Some(&home),
+            dir_str,
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+
+    assert_eq!(
+        wire(WireTarget::Detected, true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             · current {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let out = wire(WireTarget::Detected, false);
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(out.text, format!("· current {label}"));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        pinned,
+        "a wired entry is left byte-identical"
+    );
+
+    let named = wire(WireTarget::Cursor, false);
+    assert_eq!(named.code, crate::output::exit::OK, "{named:?}");
+    assert_eq!(named.text, format!("✔ updated {label}"));
+    assert_eq!(
+        read_json(&path).expect("json")["mcpServers"]["nika"],
+        nika_server(false),
+        "named by hand, the entry is rewritten as the writer spells it"
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The reader cannot drift from the writers: on every host whose config
+/// is JSON or TOML (all but Hermes, whose YAML is never rewritten), what
+/// the writer wrote still reads wired once its command is pinned to an
+/// absolute path, in that host's own table and shape. And the real
+/// `detected` door, run over that whole home, leaves every one of those
+/// files byte-identical: one row of this table per host `wire` rewrites.
+#[test]
+fn detected_leaves_a_pinned_entry_byte_identical_on_every_rewritten_host() {
+    let home = temp_dir("pinned-all-home");
+    let dir = temp_dir("pinned-all-dir");
+    let mut table = Vec::new();
+    let hosts: Vec<WireTarget> = crate::detect::sights(Some(&home), &dir)
+        .iter()
+        .map(|sight| sight.target)
+        .filter(|target| *target != WireTarget::Hermes)
+        .collect();
+    assert_eq!(hosts.len(), 20, "every wire target but Hermes");
+
+    for target in hosts {
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        wire_at(target, &path, false).expect("wire");
+        let written = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(reads(target, &path), (true, false), "{}", target.id());
+        let pinned = written
+            .replace(
+                "\"command\": \"nika\"",
+                "\"command\": \"/opt/nika/bin/nika\"",
+            )
+            .replace("\"nika\",", "\"/opt/nika/bin/nika\",")
+            .replace("command = \"nika\"", "command = \"/opt/nika/bin/nika\"");
+        assert_ne!(pinned, written, "{}: no command was pinned", target.id());
+        std::fs::write(&path, &pinned).expect("pin");
+        assert_eq!(reads(target, &path), (true, false), "{}", target.id());
+        assert!(
+            matches!(wire_at(target, &path, true), Ok(WireAction::Updated(_))),
+            "{}: wired by name, the writer stays strict",
+            target.id()
+        );
+        table.push((target, path, pinned));
+    }
+
+    for dry_run in [true, false] {
+        let out = run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        );
+        assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+        let current: Vec<&str> = out
+            .text
+            .lines()
+            .filter(|line| line.starts_with("· current "))
+            .collect();
+        assert_eq!(
+            current.len(),
+            table.len(),
+            "every host, nothing else: {out:?}"
+        );
+        for (target, path, pinned) in &table {
+            let line = format!("· current {}: {}", target.id(), path.display());
+            assert!(current.contains(&line.as_str()), "{line}: {out:?}");
+            assert_eq!(
+                &std::fs::read_to_string(path).expect("read"),
+                pinned,
+                "{} (dry-run {dry_run}): byte-identical",
+                target.id()
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A settings path that is not a settings file (a directory, a FIFO, a
+/// link to `/dev/zero`, a file past the bound, one this account cannot
+/// read, an empty one) is refused with its reason, promptly, by the
+/// `detected` preview and by the run: its own skipped line that names
+/// the host and the file, exit ENV.
+fn detected_refuses(hazard: crate::detect::hazards::Hazard) {
+    let home = temp_dir(&format!("hazard-{hazard:?}-home"));
+    let dir = temp_dir(&format!("hazard-{hazard:?}-dir"));
+    let path = home.join(".gemini").join("settings.json");
+    let Some(reason) = hazard.plant(&path) else {
+        return; // root reads through a 000 mode: nothing to stage
+    };
+    // A link out of the home is refused before anything is read: `wire`
+    // never opens the device. (The reader's own refusal of it is held by
+    // its unit test and by the doctor probe, which follows such a link.)
+    let (joint, reason) = if hazard == crate::detect::hazards::Hazard::DevZeroLink {
+        (" ", "leads to /dev/zero, outside")
+    } else {
+        (": ", reason)
+    };
+    for dry_run in [true, false] {
+        let (home, dir) = (home.clone(), dir.clone());
+        let out = crate::detect::hazards::promptly(move || {
+            run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        });
+        assert_eq!(out.code, crate::output::exit::ENV, "{hazard:?}: {out:?}");
+        let line = out
+            .text
+            .lines()
+            .find(|line| line.starts_with("✖ skipped"))
+            .unwrap_or_default();
+        assert!(
+            line.starts_with(&format!("✖ skipped gemini: {}{joint}", path.display()))
+                && line.contains(reason),
+            "{hazard:?} (dry-run {dry_run}): {out:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detected_refuses_a_directory() {
+    detected_refuses(crate::detect::hazards::Hazard::Directory);
+}
+
+#[test]
+fn detected_refuses_an_empty_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Empty);
+}
+
+#[test]
+fn detected_refuses_an_unreadable_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Unreadable);
+}
+
+#[test]
+fn detected_refuses_a_file_that_is_not_text() {
+    detected_refuses(crate::detect::hazards::Hazard::NotText);
+}
+
+#[test]
+fn detected_refuses_a_link_to_dev_zero() {
+    detected_refuses(crate::detect::hazards::Hazard::DevZeroLink);
+}
+
+#[test]
+fn detected_refuses_a_fifo() {
+    detected_refuses(crate::detect::hazards::Hazard::Fifo);
+}
+
+#[test]
+fn detected_refuses_an_oversized_file() {
+    detected_refuses(crate::detect::hazards::Hazard::Oversized);
+}
+
+/// A settings file that is a link (into a dotfiles folder, say) stays a
+/// link: nika writes beside the real file, so the link survives and its
+/// target is the one updated, with the mode it had and no temporary file
+/// left in either folder. Under `detected` and by name, in a JSON config
+/// and in Codex's TOML, through an absolute link and a relative one — a
+/// home config linked into a folder under the home, and a project config
+/// linked into a folder of the project.
+#[test]
+fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let hosts = [
+        (
+            WireTarget::Gemini,
+            GEMINI_UNWIRED,
+            "\"theme\": \"dark\"",
+            None,
+        ),
+        (
+            WireTarget::Codex,
+            "model = \"x\"\n",
+            "model = \"x\"",
+            Some("../dotfiles/settings"),
+        ),
+        (
+            WireTarget::Opencode,
+            "{\"model\":\"x\"}\n",
+            "\"model\": \"x\"",
+            Some("dotfiles/settings"),
+        ),
+    ];
+    for by_name in [false, true] {
+        for (target, seed, kept, relative) in hosts {
+            let home = temp_dir("linked-home");
+            let dir = temp_dir("linked-dir");
+            let owner = if target == WireTarget::Opencode {
+                &dir
+            } else {
+                &home
+            };
+            let dotfiles = owner.join("dotfiles");
+            let real = dotfiles.join("settings");
+            std::fs::create_dir_all(&dotfiles).expect("dir");
+            std::fs::write(&real, seed).expect("seed");
+            std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+            let path = config_path(target, Some(&home), &dir).expect("path");
+            let folder = path.parent().expect("parent");
+            std::fs::create_dir_all(folder).expect("dir");
+            let points_to = relative.map_or_else(|| real.clone(), PathBuf::from);
+            std::os::unix::fs::symlink(&points_to, &path).expect("link");
+
+            let door = if by_name {
+                target
+            } else {
+                WireTarget::Detected
+            };
+            let out = run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions::default(),
+            );
+            let line = format!("{}: {}", target.id(), path.display());
+            assert_eq!(out.text, format!("✔ updated {line}"), "{door:?}");
+            assert_eq!(out.code, crate::output::exit::OK, "{door:?}");
+
+            let meta = std::fs::symlink_metadata(&path).expect("lstat");
+            assert!(meta.file_type().is_symlink(), "{door:?}: still a link");
+            assert_eq!(std::fs::read_link(&path).expect("readlink"), points_to);
+            let body = std::fs::read_to_string(&real).expect("read");
+            assert!(body.contains(kept), "{door:?}: {body}");
+            assert_eq!(
+                wire_at(target, &path, true),
+                Ok(WireAction::Current(line)),
+                "{door:?}: the target holds the entry: {body}"
+            );
+            let mode = std::fs::metadata(&real).expect("stat").permissions().mode();
+            assert_eq!(mode & 0o777, 0o640, "{door:?}: the target keeps its mode");
+            for place in [folder, dotfiles.as_path()] {
+                let litter = std::fs::read_dir(place)
+                    .expect("list")
+                    .map(|entry| entry.expect("entry").file_name())
+                    .filter(|name| name.to_string_lossy().starts_with(".nika-tmp-"))
+                    .count();
+                assert_eq!(litter, 0, "{door:?}: no temporary file left beside");
+            }
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A folder beside `owner` whose path, read as a string, starts with the
+/// owner's: inside by string prefix, outside by components.
+fn outside_of(owner: &Path) -> PathBuf {
+    let outside = PathBuf::from(format!("{}-outside", owner.display()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&outside).expect("outside");
+    outside
+}
+
+const OUTSIDE_FILE: &str = "{\"keep\":true}\n";
+
+/// A link is followed only inside the folder that owns the config: the
+/// project for a file the writer places in it, the home for the others.
+/// A repository can ship `opencode.json` as a link to any file of the
+/// account's, and following it would write there. Such a link is refused
+/// on its own line, naming the link, where it leads and the repair; the
+/// file outside is byte-identical and the link is still the link. Under
+/// `detected` the other host is wired; by name it is the strict refusal.
+/// Three ways out: a project file linked outside the project, a home
+/// file linked outside the home, and a home FOLDER linked outside.
+#[test]
+fn a_settings_link_that_leaves_its_folder_is_refused() {
+    #[derive(Debug, Clone, Copy)]
+    enum Way {
+        ProjectFile,
+        HomeFile,
+        HomeFolder,
+    }
+    for way in [Way::ProjectFile, Way::HomeFile, Way::HomeFolder] {
+        let home = temp_dir("leaves-home");
+        let dir = temp_dir("leaves-dir");
+        let (target, owner) = match way {
+            Way::ProjectFile => (WireTarget::Opencode, &dir),
+            Way::HomeFile | Way::HomeFolder => (WireTarget::Gemini, &home),
+        };
+        let outside = outside_of(owner);
+        let victim = outside.join("settings.json");
+        std::fs::write(&victim, OUTSIDE_FILE).expect("victim");
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        let folder = path.parent().expect("parent");
+        let (link, points_to) = match way {
+            Way::ProjectFile | Way::HomeFile => (path.clone(), victim.clone()),
+            Way::HomeFolder => (folder.to_path_buf(), outside.clone()),
+        };
+        std::fs::create_dir_all(link.parent().expect("parent")).expect("dir");
+        std::os::unix::fs::symlink(&points_to, &link).expect("link");
+        // A second host, healthy and not wired: `detected` still wires it.
+        let codex = home.join(".codex").join("config.toml");
+        std::fs::create_dir_all(codex.parent().expect("parent")).expect("dir");
+        std::fs::write(&codex, "model = \"x\"\n").expect("codex");
+
+        let refused = format!(
+            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
+            target.id(),
+            path.display(),
+            std::fs::canonicalize(&victim).expect("real").display(),
+            std::fs::canonicalize(owner).expect("real").display(),
+        );
+        for (door, dry_run) in [
+            (target, true),
+            (target, false),
+            (WireTarget::Detected, true),
+            (WireTarget::Detected, false),
+        ] {
+            let out = run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            );
+            assert_eq!(
+                out.code,
+                crate::output::exit::ENV,
+                "{way:?} {door:?}: {out:?}"
+            );
+            let skipped = out
+                .text
+                .lines()
+                .find(|row| row.starts_with(&refused))
+                .unwrap_or_default();
+            assert!(
+                skipped.ends_with("point the link inside that folder, or remove it"),
+                "{way:?} {door:?} (dry-run {dry_run}): {out:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&victim).expect("read"),
+                OUTSIDE_FILE,
+                "{way:?} {door:?}: the file outside is as it was"
+            );
+            assert_eq!(
+                std::fs::read_link(&link).expect("still the link"),
+                points_to
+            );
+        }
+        let other = format!("codex: {}", codex.display());
+        assert_eq!(
+            wire_at(WireTarget::Codex, &codex, true),
+            Ok(WireAction::Current(other)),
+            "{way:?}: `detected` wired the other host"
+        );
+        for place in [home, dir, outside] {
+            let _ = std::fs::remove_dir_all(place);
+        }
+    }
+}
+
+/// A linked FOLDER cannot redirect a creation either: with no config yet
+/// and `.gemini` (home) or `.junie` (project) linked outside, a wire by
+/// name is refused, by its preview too, and nothing appears outside.
+/// `detected` sees no host there: there is no file.
+#[test]
+fn a_linked_parent_folder_that_leaves_is_refused_on_creation() {
+    for (target, in_project) in [(WireTarget::Gemini, false), (WireTarget::Junie, true)] {
+        let home = temp_dir("redirect-home");
+        let dir = temp_dir("redirect-dir");
+        let owner = if in_project { &dir } else { &home };
+        let outside = outside_of(owner);
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        let link = owner.join(if in_project { ".junie" } else { ".gemini" });
+        std::os::unix::fs::symlink(&outside, &link).expect("link");
+        let run = |door, dry_run| {
+            run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        };
+
+        let refused = format!(
+            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
+            target.id(),
+            path.display(),
+            std::fs::canonicalize(&outside).expect("real").display(),
+            std::fs::canonicalize(owner).expect("real").display(),
+        );
+        for dry_run in [true, false] {
+            let out = run(target, dry_run);
+            assert_eq!(out.code, crate::output::exit::ENV, "{target:?}: {out:?}");
+            assert!(
+                out.text.lines().any(|line| line.starts_with(&refused)),
+                "{target:?} (dry-run {dry_run}): {out:?}"
+            );
+        }
+        let out = run(WireTarget::Detected, false);
+        assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+        assert_eq!(
+            std::fs::read_dir(&outside).expect("list").count(),
+            0,
+            "{target:?}: nothing was created outside"
+        );
+        assert_eq!(std::fs::read_link(&link).expect("still the link"), outside);
+        for place in [home, dir, outside] {
+            let _ = std::fs::remove_dir_all(place);
+        }
+    }
+}
+
+/// A FOLDER link whose target is gone is not followed into a new folder
+/// either: the creation fails where it stands, on a line that names the
+/// host and its settings file, and nothing appears outside.
+#[test]
+fn a_dangling_folder_link_takes_no_creation_outside() {
+    let home = temp_dir("dead-folder-home");
+    let dir = temp_dir("dead-folder-dir");
+    let outside = outside_of(&home);
+    let gone = outside.join("gemini");
+    let folder = home.join(".gemini");
+    std::os::unix::fs::symlink(&gone, &folder).expect("link");
+    let path = folder.join("settings.json");
+
+    let out = run_in(
+        WireTarget::Gemini,
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    let refused = format!("✖ skipped gemini: {}: cannot write: ", path.display());
+    assert!(out.text.starts_with(&refused), "{out:?}");
+    assert_eq!(std::fs::read_link(&folder).expect("still the link"), gone);
+    assert_eq!(
+        std::fs::read_dir(&outside).expect("list").count(),
+        0,
+        "nothing was created outside"
+    );
+    for place in [home, dir, outside] {
+        let _ = std::fs::remove_dir_all(place);
+    }
+}
+
+/// A link whose target is gone is no file. `detected` does not see the
+/// host and writes nothing; a wire by name creates the config in the
+/// link's place, and never a file where the dead link pointed.
+#[test]
+fn a_dangling_settings_link_is_no_file() {
+    let home = temp_dir("dangling-home");
+    let dir = temp_dir("dangling-dir");
+    let gone = home.join("dotfiles").join("gone.json");
+    std::fs::create_dir_all(gone.parent().expect("parent")).expect("dir");
+    let path = home.join(".gemini").join("settings.json");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    std::os::unix::fs::symlink(&gone, &path).expect("link");
+    let run = |door| {
+        run_in(
+            door,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions::default(),
+        )
+    };
+
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+    let out = run(WireTarget::Detected);
+    assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+    assert_eq!(std::fs::read_link(&path).expect("still the link"), gone);
+    assert!(!gone.exists(), "detected follows no dead link");
+
+    let out = run(WireTarget::Gemini);
+    let line = format!("gemini: {}", path.display());
+    assert_eq!(out.text, format!("✔ created {line}"));
+    assert_eq!(out.code, crate::output::exit::OK);
+    let meta = std::fs::symlink_metadata(&path).expect("lstat");
+    assert!(
+        meta.file_type().is_file(),
+        "the config stands in the link's place"
+    );
+    assert!(!gone.exists(), "never followed into a new file");
+    assert_eq!(
+        wire_at(WireTarget::Gemini, &path, true),
+        Ok(WireAction::Current(line))
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// "Current" under `detected` is an entry that can RUN: a `command`
+/// that is a non-empty string, and args that are exactly the ones `wire`
+/// writes. Our args with no command launch nothing, and an args value
+/// holding anything but strings is not ours: each is judged to update
+/// and repaired, in a JSON config, in the `opencode.json` argv and in
+/// Codex's TOML alike. The doctor read of the same file says not wired
+/// before, and wired after.
+#[test]
+fn detected_repairs_an_entry_that_only_looks_wired() {
+    let json = |entry: &str| format!("{{\"mcpServers\":{{\"nika\":{entry}}}}}\n");
+    let toml = |entry: &str| format!("[mcp_servers.nika]\n{entry}\n");
+    let cases = [
+        (WireTarget::Gemini, json(r#"{"args":["mcp"]}"#)),
+        (WireTarget::Gemini, json(r#"{"command":"","args":["mcp"]}"#)),
+        (WireTarget::Gemini, json(r#"{"command":7,"args":["mcp"]}"#)),
+        (
+            WireTarget::Gemini,
+            json(r#"{"command":"/opt/nika","args":["mcp",1]}"#),
+        ),
+        (
+            WireTarget::Gemini,
+            json(r#"{"command":"/opt/nika","args":"mcp"}"#),
+        ),
+        (
+            WireTarget::Opencode,
+            "{\"mcp\":{\"nika\":{\"type\":\"local\",\"command\":[\"\",\"mcp\"]}}}\n".to_owned(),
+        ),
+        (WireTarget::Codex, toml("args = [\"mcp\"]")),
+        (WireTarget::Codex, toml("command = \"\"\nargs = [\"mcp\"]")),
+        (WireTarget::Codex, toml("command = 7\nargs = [\"mcp\"]")),
+        (
+            WireTarget::Codex,
+            toml("command = \"/opt/nika\"\nargs = [\"mcp\", 1]"),
+        ),
+        (
+            WireTarget::Codex,
+            toml("command = \"nika\"\nargs = [\"mcp\", 1]"),
+        ),
+        (
+            WireTarget::Codex,
+            toml("command = \"/opt/nika\"\nargs = \"mcp\""),
+        ),
+    ];
+    for (target, body) in cases {
+        let home = temp_dir("looks-wired-home");
+        let dir = temp_dir("looks-wired-dir");
+        let path = config_path(target, Some(&home), &dir).expect("path");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(&path, &body).expect("seed");
+        let line = format!("{}: {}", target.id(), path.display());
+        let run = |dry_run| {
+            run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions {
+                    dry_run,
+                    ..WireOptions::default()
+                },
+            )
+        };
+
+        assert_eq!(reads(target, &path), (false, false), "{body}");
+        let preview = run(true);
+        assert_eq!(preview.code, crate::output::exit::OK, "{body}: {preview:?}");
+        assert!(
+            preview.text.contains(&format!("+ would update {line}")),
+            "{body}: {preview:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), body);
+
+        let out = run(false);
+        assert_eq!(out.text, format!("✔ updated {line}"), "{body}");
+        assert_eq!(out.code, crate::output::exit::OK, "{body}");
+        // Repaired: the strict writer, asked by name, finds nothing to change.
+        assert_eq!(
+            wire_at(target, &path, true),
+            Ok(WireAction::Current(line)),
+            "{body}"
+        );
+        assert_eq!(reads(target, &path), (true, false), "{body}");
+        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Zed and Amp keep settings that may be JSONC, and a file nika cannot
+/// round-trip is handed back as a snippet. A file that cannot be READ at
+/// all is not that case: it is a refusal with its real reason, under
+/// `detected` (its own line, exit ENV) and by name, never a manual line
+/// that calls it JSONC.
+#[test]
+fn zed_and_amp_refuse_a_settings_file_that_cannot_be_read() {
+    use crate::detect::hazards::Hazard;
+    for (target, folder) in [(WireTarget::Zed, "zed"), (WireTarget::Amp, "amp")] {
+        for hazard in [Hazard::Unreadable, Hazard::NotText, Hazard::Directory] {
+            let home = temp_dir(&format!("unread-{folder}-{hazard:?}-home"));
+            let dir = temp_dir(&format!("unread-{folder}-{hazard:?}-dir"));
+            let path = home.join(".config").join(folder).join("settings.json");
+            let Some(reason) = hazard.plant(&path) else {
+                continue; // root reads through a 000 mode: nothing to stage
+            };
+            let skipped = format!("✖ skipped {folder}: {}: ", path.display());
+            for (door, dry_run) in [
+                (WireTarget::Detected, true),
+                (WireTarget::Detected, false),
+                (target, true),
+                (target, false),
+            ] {
+                let out = run_in(
+                    door,
+                    Some(&home),
+                    dir.to_str().expect("utf8"),
+                    WireOptions {
+                        dry_run,
+                        ..WireOptions::default()
+                    },
+                );
+                assert_eq!(out.code, crate::output::exit::ENV, "{hazard:?}: {out:?}");
+                let line = out
+                    .text
+                    .lines()
+                    .find(|line| line.starts_with(&skipped))
+                    .unwrap_or_default();
+                assert!(line.contains(reason), "{door:?} {hazard:?}: {out:?}");
+                assert!(!out.text.contains("manual"), "{door:?} {hazard:?}: {out:?}");
+            }
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A Zed or Amp settings file that reads but is not plain JSON stays
+/// manual and byte-identical, exit OK — and the line does not assert
+/// comments as a fact: the text may hold comments, or be damaged.
+#[test]
+fn zed_and_amp_stay_manual_on_text_that_is_not_plain_json() {
+    for folder in ["zed", "amp"] {
+        for body in [
+            "{\n  // mine\n  \"theme\": \"dark\"\n}\n",
+            "{\"theme\":",
+            "",
+        ] {
+            let home = temp_dir(&format!("manual-{folder}-home"));
+            let dir = temp_dir(&format!("manual-{folder}-dir"));
+            let path = home.join(".config").join(folder).join("settings.json");
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+            std::fs::write(&path, body).expect("seed");
+            let out = run_in(
+                WireTarget::Detected,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions::default(),
+            );
+            assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+            let manual = format!(
+                "✋ manual {folder}: {} is not plain JSON (it may hold comments, or be damaged)",
+                path.display()
+            );
+            assert!(out.text.starts_with(&manual), "{body:?}: {out:?}");
+            assert!(out.text.contains("\"command\": \"nika\""), "{out:?}");
+            assert!(!out.text.contains("JSONC"), "{out:?}");
+            assert_eq!(std::fs::read_to_string(&path).expect("read"), body);
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A settings folder this account cannot write in. The run's line names
+/// the host and its settings file, never the temporary file nika writes
+/// beside it, and the file is as it was. The preview shows the plan: it
+/// does not test that the file can be written.
+#[test]
+fn a_write_failure_names_the_host_and_its_settings_file() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = temp_dir("write-refused-home");
+    let dir = temp_dir("write-refused-dir");
+    let folder = home.join(".gemini");
+    let path = folder.join("settings.json");
+    std::fs::create_dir_all(&folder).expect("dir");
+    std::fs::write(&path, GEMINI_UNWIRED).expect("seed");
+    let mode = |mode| {
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(mode)).expect("chmod");
+    };
+    mode(0o555);
+    // Root writes through a read-only mode: nothing to stage.
+    let staged = std::fs::File::create(folder.join("probe")).is_err();
+    let run = |dry_run| {
+        run_in(
+            WireTarget::Detected,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+    let (preview, out) = (run(true), run(false));
+    let after = std::fs::read_to_string(&path).expect("read");
+    mode(0o755); // before any assertion: a failure must not strand the folder
+    if staged {
+        assert_eq!(preview.code, crate::output::exit::OK, "{preview:?}");
+        let planned = format!("+ would update gemini: {}", path.display());
+        assert!(preview.text.contains(&planned), "{preview:?}");
+
+        assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+        let refused = format!(
+            "✖ skipped gemini: {}: cannot write: Permission denied",
+            path.display()
+        );
+        assert!(out.text.starts_with(&refused), "{out:?}");
+        assert!(!out.text.contains(".nika-tmp-"), "{out:?}");
+        assert_eq!(after, GEMINI_UNWIRED);
+    }
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.
@@ -752,7 +1983,8 @@ fn all_consent_truth_table() {
 /// the refusal names the right door (preview · detected · --yes).
 #[test]
 fn wire_all_without_consent_is_refused_naming_the_path() {
-    let out = run_with(WireTarget::All, ".", WireOptions::default());
+    // Refused at the door: no home is asked for, none is handed.
+    let out = run_in(WireTarget::All, None, ".", WireOptions::default());
     assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
     assert!(out.text.contains("--dry-run"), "{out:?}");
     assert!(out.text.contains("wire detected"), "{out:?}");
@@ -760,35 +1992,44 @@ fn wire_all_without_consent_is_refused_naming_the_path() {
 }
 
 /// H7 · `wire all --dry-run` is the preview — no consent needed,
-/// nothing written (the temp workspace stays empty). The exit code
-/// PREDICTS the run's: a client whose existing config is unreadable
-/// is a `✖ skipped` line and flips the code to ENV — on a machine
-/// with all-healthy configs the preview exits OK.
+/// nothing written. On a home of its own (never the account's), bare:
+/// every client is planned as a creation, the exit code is the run's
+/// (OK: nothing is refused), and neither the home nor the workspace
+/// holds a file afterwards.
 #[test]
 fn wire_all_dry_run_previews_without_consent() {
+    let home = temp_dir("all-dry-run-home");
     let dir = temp_dir("all-dry-run");
-    let out = run_with(
+    let out = run_in(
         WireTarget::All,
+        Some(&home),
         dir.to_str().expect("utf8"),
         WireOptions {
             dry_run: true,
             ..WireOptions::default()
         },
     );
-    assert!(
-        out.code == crate::output::exit::OK
-            || (out.code == crate::output::exit::ENV && out.text.contains("skipped")),
-        "the exit code predicts the run's (skips included): {out:?}"
-    );
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
     assert!(out.text.contains("dry-run"), "{out:?}");
-    assert!(
-        out.text.contains("opencode.json"),
-        "the workspace-scope client is planned: {out:?}"
+    let planned = out
+        .text
+        .lines()
+        .filter(|line| line.starts_with("+ would create "))
+        .count();
+    assert_eq!(planned, expand_target(WireTarget::All).len(), "{out:?}");
+    let workspace = format!(
+        "+ would create opencode: {}",
+        dir.join("opencode.json").display()
     );
-    assert!(
-        !dir.join("opencode.json").exists(),
-        "a preview never writes"
-    );
+    assert!(out.text.contains(&workspace), "{out:?}");
+    for place in [&home, &dir] {
+        assert_eq!(
+            std::fs::read_dir(place).expect("list").count(),
+            0,
+            "a preview never writes"
+        );
+    }
+    let _ = std::fs::remove_dir_all(home);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -953,18 +2194,21 @@ fn dry_run_of_a_non_object_table_says_skipped() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// `detected` and `all` preflight every client before the first
+/// A named client and `all` preflight every client before the first
 /// write: one malformed config leaves every config untouched, exit ENV,
 /// never the first client written before the second is found invalid.
-/// (Driven through the shared door with project-scope clients, so no test
-/// ever reads this machine's HOME.)
+/// (`detected` wires host by host instead, see
+/// `detected_wires_the_other_hosts_when_one_config_is_refused`. Driven
+/// through the list door with project-scope clients, so no test ever
+/// reads this machine's HOME.)
 #[test]
-fn detected_wire_writes_nothing_when_one_client_is_malformed() {
+fn a_named_list_writes_nothing_when_one_client_is_malformed() {
     let dir = temp_dir("detected-preflight");
     let opencode = r#"{"mcp":["keep"]}"#;
     std::fs::write(dir.join("opencode.json"), opencode).expect("seed");
     let out = wire_targets(
         &[WireTarget::Vscode, WireTarget::Opencode, WireTarget::Junie],
+        None,
         dir.to_str().expect("utf8"),
         false,
     );
@@ -983,6 +2227,7 @@ fn detected_wire_writes_nothing_when_one_client_is_malformed() {
     std::fs::write(dir.join("opencode.json"), "{}").expect("repair");
     let out = wire_targets(
         &[WireTarget::Vscode, WireTarget::Opencode, WireTarget::Junie],
+        None,
         dir.to_str().expect("utf8"),
         false,
     );

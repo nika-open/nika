@@ -57,6 +57,17 @@ pub enum WireTarget {
     All,
 }
 
+impl WireTarget {
+    /// The client's name as the verb spells it (`claude-desktop` ·
+    /// `lmstudio`): read off the clap surface, so a label, a registry id
+    /// and a detection row can never spell a client two ways.
+    pub(crate) fn id(self) -> String {
+        self.to_possible_value()
+            .map(|value| value.get_name().to_owned())
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WireAction {
     Created(String),
@@ -104,6 +115,12 @@ pub fn run(target: WireTarget, dir: &str) -> VerbOutput {
 /// `--yes`. A bare `all` in a pipe is refused, naming the right door.
 #[must_use]
 pub fn run_with(target: WireTarget, dir: &str, options: WireOptions) -> VerbOutput {
+    run_in(target, crate::probe::home_dir().as_deref(), dir, options)
+}
+
+/// [`run_with`] on a named home: the environment is read once, at the
+/// door, and every path below is resolved from what the door was handed.
+fn run_in(target: WireTarget, home: Option<&Path>, dir: &str, options: WireOptions) -> VerbOutput {
     if target == WireTarget::All {
         match all_consent(options.dry_run, options.yes, options.interactive) {
             AllConsent::Refuse => {
@@ -119,7 +136,7 @@ pub fn run_with(target: WireTarget, dir: &str, options: WireOptions) -> VerbOutp
                 use std::io::Write as _;
                 let targets = expand_target(target);
                 let mut out = std::io::stdout().lock();
-                let _ = writeln!(out, "{}", render_plan(&collect_plan(&targets, dir)));
+                let _ = writeln!(out, "{}", render_plan(&collect_plan(&targets, home, dir)));
                 if !ask_consent(&mut out, targets.len()) {
                     return VerbOutput::ok(
                         "aborted · nothing written — `nika wire detected` wires only \
@@ -132,7 +149,7 @@ pub fn run_with(target: WireTarget, dir: &str, options: WireOptions) -> VerbOutp
         }
     }
 
-    let targets = resolve_targets(target, dir);
+    let targets = resolve_targets(target, home, dir);
     if targets.is_empty() {
         return VerbOutput::ok(
             "no MCP client detected on this machine — `nika wire all --dry-run` \
@@ -141,15 +158,59 @@ pub fn run_with(target: WireTarget, dir: &str, options: WireOptions) -> VerbOutp
         );
     }
 
-    wire_targets(&targets, dir, options.dry_run)
+    if target == WireTarget::Detected {
+        return wire_detected(&targets, home, dir, options.dry_run);
+    }
+    wire_targets(&targets, home, dir, options.dry_run)
 }
 
-/// Wire `targets`, preflighted as one: every client is planned
-/// before the first write, and one the plan cannot wire as it is (a
-/// malformed config, a server table that is not an object) leaves every
-/// config untouched, exit ENV. A preview is that plan alone.
-fn wire_targets(targets: &[WireTarget], dir: &str, dry_run: bool) -> VerbOutput {
-    let plan = collect_plan(targets, dir);
+/// The `detected` door wires host by host. Nobody named these targets,
+/// the machine did: a config its writer refuses (malformed, a server
+/// table that is not one) is reported on its own line and left as it
+/// is, the other hosts are wired, and the exit is ENV so a script sees
+/// that one was skipped. A preview is that plan alone, on the same exit.
+fn wire_detected(
+    targets: &[WireTarget],
+    home: Option<&Path>,
+    dir: &str,
+    dry_run: bool,
+) -> VerbOutput {
+    let mut actions = plan_detected(targets, home, dir);
+    if !dry_run {
+        for (one, action) in targets.iter().zip(&mut actions) {
+            // Refused or already wired: left exactly as it is.
+            if !matches!(action, WireAction::Skipped(_) | WireAction::Current(_)) {
+                *action = wire_one(*one, home, dir, false).unwrap_or_else(WireAction::Skipped);
+            }
+        }
+    }
+    let skipped = actions
+        .iter()
+        .any(|action| matches!(action, WireAction::Skipped(_)));
+    let text = if dry_run {
+        render_plan(&actions)
+    } else {
+        render(&actions)
+    };
+    if skipped {
+        VerbOutput::env(text)
+    } else {
+        VerbOutput::ok(text)
+    }
+}
+
+/// Wire the `targets` a person named (a client, or `all`), preflighted
+/// as one: every client is planned before the first write, and one the
+/// plan cannot wire as it is (a malformed config, a server table that is
+/// not an object) leaves every config untouched, exit ENV. A preview is
+/// that plan alone.
+fn wire_targets(
+    targets: &[WireTarget],
+    home: Option<&Path>,
+    dir: &str,
+    dry_run: bool,
+) -> VerbOutput {
+    let plan = collect_plan(targets, home, dir);
     let refused = plan
         .iter()
         .any(|action| matches!(action, WireAction::Skipped(_)));
@@ -168,7 +229,7 @@ fn wire_targets(targets: &[WireTarget], dir: &str, dry_run: bool) -> VerbOutput 
     let mut actions = Vec::new();
     let mut failed = false;
     for one in targets {
-        match wire_one(*one, dir, false) {
+        match wire_one(*one, home, dir, false) {
             Ok(action) => actions.push(action),
             Err(message) => {
                 failed = true;
@@ -228,49 +289,61 @@ fn ask_consent(out: &mut impl std::io::Write, count: usize) -> bool {
     answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
-fn resolve_targets(target: WireTarget, dir: &str) -> Vec<WireTarget> {
+fn resolve_targets(target: WireTarget, home: Option<&Path>, dir: &str) -> Vec<WireTarget> {
     match target {
-        WireTarget::Detected => detected_targets(dir),
+        WireTarget::Detected => detected_targets(home, dir),
         other => expand_target(other),
     }
 }
 
-/// The clients this machine SHOWS — the same presence truth `doctor`
-/// reports. Both ride the shared [`crate::detect`] table: one per-client
-/// path list, one registry gate (a client dropped from the matrix leaves
-/// BOTH lists — never wire-visible but doctor-invisible), and one probe
-/// semantics through [`client_probe_any`](crate::probe::client_probe_any)
-/// (presence only, never a guess — a YAML config the JSON probe cannot
-/// parse still DETECTS on `present`, which is exactly that).
-fn detected_targets(dir: &str) -> Vec<WireTarget> {
-    match home_path(&[]) {
-        Ok(home) => detected_targets_in(&home, Path::new(dir)),
-        Err(_) => Vec::new(),
-    }
+/// The clients this machine SHOWS: those whose config — the one file
+/// [`config_path`] hands the writer — is already there, whatever it
+/// holds. They ride the shared [`crate::detect`] rows for the registry
+/// gate (a client dropped from the matrix leaves `doctor` and `wire`
+/// together), but not for every path a row knows: `doctor` also reports
+/// the project `.cursor/mcp.json` Cursor reads, and a repository that
+/// ships one does not put Cursor on this machine. Wiring on that
+/// sighting would create a home config for a host that is absent.
+fn detected_targets(home: Option<&Path>, dir: &str) -> Vec<WireTarget> {
+    home.map(|home| detected_targets_in(home, Path::new(dir)))
+        .unwrap_or_default()
 }
 
 fn detected_targets_in(home: &Path, dir: &Path) -> Vec<WireTarget> {
     crate::detect::sights(Some(home), dir)
         .iter()
-        .map(|sight| crate::probe::client_probe_any(sight.id, &sight.paths, &sight.server_path))
-        .filter(|probe| probe.present)
-        .filter_map(|probe| WireTarget::from_str(&probe.id, true).ok())
+        .map(|sight| sight.target)
+        .filter(|target| config_path(*target, Some(home), dir).is_ok_and(|path| path.exists()))
         .collect()
 }
 
-/// The plan half of a run: every outcome, zero writes (the interactive
-/// `all` preview reads it before asking).
-fn collect_plan(targets: &[WireTarget], dir: &str) -> Vec<WireAction> {
+/// What `detected` would do to each host it sees, nothing written: each
+/// host as [`judged`], so an entry that already works is current as it
+/// stands and the run leaves it alone.
+fn plan_detected(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<WireAction> {
     targets
         .iter()
-        .map(|one| match wire_one(*one, dir, true) {
+        .map(|one| {
+            settled_path(*one, home, Path::new(dir))
+                .and_then(|path| judged(*one, &path))
+                .unwrap_or_else(WireAction::Skipped)
+        })
+        .collect()
+}
+
+/// The plan half of a named run: every outcome, zero writes (the
+/// interactive `all` preview reads it before asking).
+fn collect_plan(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<WireAction> {
+    targets
+        .iter()
+        .map(|one| match wire_one(*one, home, dir, true) {
             Ok(action) => action,
             Err(message) => WireAction::Skipped(message),
         })
         .collect()
 }
 
-fn expand_target(target: WireTarget) -> Vec<WireTarget> {
+pub(crate) fn expand_target(target: WireTarget) -> Vec<WireTarget> {
     match target {
         // Every concrete client, in declaration order (the clap registry
         // is the one list — no hand-maintained twin to drift). `All` and
@@ -284,123 +357,305 @@ fn expand_target(target: WireTarget) -> Vec<WireTarget> {
     }
 }
 
-/// The user-home `mcpServers` family — one shape, per-client paths
-/// (gemini: shared settings.json, server names must not contain `_`
-/// — upstream policy parser splits on it, `nika` is safe · qwen: the
-/// gemini-cli fork, same key, its own dotdir · antigravity: standalone
-/// `mcp_config.json` under `~/.gemini/config/` · kimi: two-level
-/// `mcp.json`, machine wiring writes the user file · kiro: the Amazon Q
-/// rebrand, `.kiro` wins over the legacy `~/.aws/amazonq/`).
-fn wire_home_family(target: WireTarget, dry_run: bool) -> Option<Result<WireAction, String>> {
-    let (segs, label): (&[&str], &str) = match target {
-        WireTarget::Cursor => (&[".cursor", "mcp.json"], "cursor"),
-        WireTarget::Claude => (&[".claude.json"], "claude"),
-        WireTarget::Windsurf => (&[".codeium", "windsurf", "mcp_config.json"], "windsurf"),
-        WireTarget::Gemini => (&[".gemini", "settings.json"], "gemini"),
-        WireTarget::Qwen => (&[".qwen", "settings.json"], "qwen"),
-        WireTarget::Antigravity => (&[".gemini", "config", "mcp_config.json"], "antigravity"),
-        WireTarget::Kimi => (&[".kimi-code", "mcp.json"], "kimi"),
-        WireTarget::Kiro => (&[".kiro", "settings", "mcp.json"], "kiro"),
-        _ => return None,
-    };
-    Some(patch_home_mcp(segs, label, dry_run))
+/// Where each client keeps the config `nika wire` writes — THE one
+/// answer. The writers patch this path and [`crate::detect`] looks for
+/// this path, so a client cannot be wired without being seen, and a new
+/// [`WireTarget`] does not compile until it says where it lives. `home`
+/// is the user's home (without one, only the project-anchored clients
+/// resolve) and `dir` the project.
+pub(crate) fn config_path(
+    target: WireTarget,
+    home: Option<&Path>,
+    dir: &Path,
+) -> Result<PathBuf, String> {
+    config_place(target, home, dir).map(|(_, path)| path)
 }
 
-fn wire_one(target: WireTarget, dir: &str, dry_run: bool) -> Result<WireAction, String> {
-    if let Some(done) = wire_home_family(target, dry_run) {
-        return done;
-    }
-    match target {
-        WireTarget::Vscode => {
-            patch_vscode(&Path::new(dir).join(".vscode").join("mcp.json"), dry_run)
-        }
+/// [`config_path`] with the folder that OWNS the config: the project for
+/// a file the writer places in it, the home for every other. The same
+/// arm says both, so a target cannot name a path without naming the
+/// folder a link in that path must stay inside ([`settled_path`]).
+fn config_place<'a>(
+    target: WireTarget,
+    home: Option<&'a Path>,
+    dir: &'a Path,
+) -> Result<(&'a Path, PathBuf), String> {
+    let join = |base: &'a Path, parts: &[&str]| {
+        let path = parts.iter().fold(base.to_path_buf(), |p, s| p.join(s));
+        (base, path)
+    };
+    let user = || home.ok_or_else(no_home);
+    Ok(match target {
+        // The user-home `mcpServers` family — one shape, per-client paths
+        // (gemini: shared settings.json, server names must not contain `_`
+        // — upstream policy parser splits on it, `nika` is safe · qwen: the
+        // gemini-cli fork, same key, its own dotdir · antigravity: standalone
+        // `mcp_config.json` under `~/.gemini/config/` · kimi: two-level
+        // `mcp.json`, machine wiring writes the user file · kiro: the Amazon Q
+        // rebrand, `.kiro` wins over the legacy `~/.aws/amazonq/`).
+        WireTarget::Cursor => join(user()?, &[".cursor", "mcp.json"]),
+        WireTarget::Claude => join(user()?, &[".claude.json"]),
+        WireTarget::Windsurf => join(user()?, &[".codeium", "windsurf", "mcp_config.json"]),
+        WireTarget::Gemini => join(user()?, &[".gemini", "settings.json"]),
+        WireTarget::Qwen => join(user()?, &[".qwen", "settings.json"]),
+        WireTarget::Antigravity => join(user()?, &[".gemini", "config", "mcp_config.json"]),
+        WireTarget::Kimi => join(user()?, &[".kimi-code", "mcp.json"]),
+        WireTarget::Kiro => join(user()?, &[".kiro", "settings", "mcp.json"]),
+        WireTarget::Vscode => join(dir, &[".vscode", "mcp.json"]),
         // Claude DESKTOP is a different app with a different config file
         // than Claude Code's ~/.claude.json — the wave-3 double gap (#449).
-        WireTarget::ClaudeDesktop => patch_cursor_like(
-            &claude_desktop_config_path()?,
-            "mcpServers",
-            "claude-desktop",
-            false,
-            dry_run,
-        ),
-        // Cline hot-reloads its settings file (chokidar watcher), shape =
-        // Cursor-style `mcpServers` record — the resolver below picks the
-        // live globalStorage file when a host IDE has it, else the stable
-        // `~/.cline/data/settings/` home (#449 wave-3b).
-        WireTarget::Cline => patch_cursor_like(
-            &cline_settings_path()?,
-            "mcpServers",
-            "cline",
-            false,
-            dry_run,
-        ),
-        WireTarget::Codex => {
-            patch_toml_mcp(&home_path(&[".codex", "config.toml"])?, "codex", dry_run)
-        }
+        WireTarget::ClaudeDesktop => (user()?, claude_desktop_config_path(home)?),
+        // Cline: the resolver below picks the live globalStorage file when
+        // a host IDE has it, else the stable `~/.cline/data/settings/` home
+        // (#449 wave-3b).
+        WireTarget::Cline => (user()?, cline_settings_path(home)?),
+        // Codex CLI, and Grok Build on the same TOML shape.
+        WireTarget::Codex => join(user()?, &[".codex", "config.toml"]),
+        WireTarget::Grok => join(user()?, &[".grok", "config.toml"]),
         // Continue scans `~/.continue/mcpServers/*.json` (the Claude-Desktop
         // JSON shape, name-keyed) — an OWN-FILE write: the user's
         // comment-bearing config.yaml is never touched (the Zed lesson,
-        // applied preemptively). External writes are NOT hot-reloaded —
-        // the hint rides the verdict line (#449 wave-3b).
-        WireTarget::Continue => {
-            let path = home_path(&[".continue", "mcpServers", "nika.json"])?;
-            patch_cursor_like(&path, "mcpServers", "continue", false, dry_run)
-                .map(|a| with_hint(a, "reload Continue (or re-save config.yaml) to pick it up"))
-        }
+        // applied preemptively). So this file says Continue was WIRED, not
+        // that it is installed: detection sees Continue once wired, and
+        // `nika wire continue` is the door before that.
+        WireTarget::Continue => join(user()?, &[".continue", "mcpServers", "nika.json"]),
         // Zed keeps its settings under ~/.config on EVERY platform (macOS
         // included — deliberate upstream choice, zed.dev/docs).
-        WireTarget::Zed => patch_zed(&home_path(&[".config", "zed", "settings.json"])?, dry_run),
+        WireTarget::Zed => join(user()?, &[".config", "zed", "settings.json"]),
         // OpenCode merges the PROJECT-local opencode.json over the global
         // one (opencode.ai/docs/mcp-servers) — the project file is the
         // least-privilege home (the repo the oracle serves).
-        WireTarget::Opencode => patch_opencode(&Path::new(dir).join("opencode.json"), dry_run),
-        WireTarget::Hermes => patch_hermes(&home_path(&[".hermes", "config.yaml"])?, dry_run),
-        WireTarget::Lmstudio => patch_cursor_like(
-            &lmstudio_mcp_path()?,
-            "mcpServers",
-            "lmstudio",
-            false,
-            dry_run,
-        ),
+        WireTarget::Opencode => join(dir, &["opencode.json"]),
+        WireTarget::Hermes => join(user()?, &[".hermes", "config.yaml"]),
+        WireTarget::Lmstudio => (user()?, lmstudio_mcp_path(home)?),
         // Junie reads project-scope `.junie/mcp/mcp.json` (`mcpServers`
         // root · junie-cli-mcp-configuration.html); the global
         // `~/.junie/mcp/mcp.json` exists but the project file is the
         // least-privilege home, same reasoning as OpenCode above.
-        WireTarget::Junie => patch_cursor_like(
-            &Path::new(dir).join(".junie").join("mcp").join("mcp.json"),
-            "mcpServers",
-            "junie",
-            false,
-            dry_run,
-        ),
-        // Grok Build: the Codex TOML shape at `~/.grok/config.toml` — the
+        WireTarget::Junie => join(dir, &[".junie", "mcp", "mcp.json"]),
+        WireTarget::Copilot => join(user()?, &[".copilot", "mcp-config.json"]),
+        WireTarget::Amp => join(user()?, &[".config", "amp", "settings.json"]),
+        WireTarget::All | WireTarget::Detected => return Err(DOOR.to_owned()),
+    })
+}
+
+/// `all` and `detected` name no config of their own: they are expanded
+/// into clients before any path or writer is asked for.
+const DOOR: &str = "wire doors must be resolved before dispatch";
+
+fn no_home() -> String {
+    "cannot find HOME/USERPROFILE for editor wiring".to_owned()
+}
+
+/// `target`'s config path, once it is known to stay inside the folder
+/// that owns it. A settings path can be a link, or sit under a linked
+/// folder, and a link is followed only while what it leads to is still
+/// in the project (a project file) or in the home (every other). A
+/// repository can ship `opencode.json` as a link to any file of the
+/// account's: followed, `wire` would write there. Refused instead, by
+/// the plan and by the run, before the writer reads or writes anything.
+fn settled_path(target: WireTarget, home: Option<&Path>, dir: &Path) -> Result<PathBuf, String> {
+    let (owner, path) = config_place(target, home, dir)?;
+    stays_inside(owner, &path).map_err(|why| format!("{}: {why}", target.id()))?;
+    Ok(path)
+}
+
+/// Does a write to `path` land inside `owner`? The file's real location
+/// when it is there; when it is not (or is a link whose target is gone,
+/// which the write replaces), the real location of the folder a creation
+/// would land in, so a linked folder cannot redirect a creation either.
+/// Real paths are compared by components, never as strings.
+fn stays_inside(owner: &Path, path: &Path) -> Result<(), String> {
+    let unreadable = |e: std::io::Error| format!("{}: {e}", path.display());
+    let inside = nearest_real(owner).map_err(unreadable)?;
+    let lands = match std::fs::canonicalize(path) {
+        Ok(real) => real,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            nearest_real(path.parent().unwrap_or(path)).map_err(unreadable)?
+        }
+        Err(e) => return Err(unreadable(e)),
+    };
+    if lands.starts_with(&inside) {
+        return Ok(());
+    }
+    Err(format!(
+        "{} leads to {}, outside {}; nika wire leaves it as it is: \
+         point the link inside that folder, or remove it",
+        path.display(),
+        lands.display(),
+        inside.display()
+    ))
+}
+
+/// The real location of `path`, or of the nearest folder above it that
+/// exists: nothing below that one is there to be a link.
+fn nearest_real(path: &Path) -> std::io::Result<PathBuf> {
+    for above in path.ancestors() {
+        match std::fs::canonicalize(above) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            found => return found,
+        }
+    }
+    // A relative path with nothing of it on disk yet: it starts here.
+    std::fs::canonicalize(".")
+}
+
+fn wire_one(
+    target: WireTarget,
+    home: Option<&Path>,
+    dir: &str,
+    dry_run: bool,
+) -> Result<WireAction, String> {
+    wire_at(
+        target,
+        &settled_path(target, home, Path::new(dir))?,
+        dry_run,
+    )
+}
+
+/// The writer half of a wiring: patch the config at `path` the way
+/// `target`'s host reads it. The path is [`config_path`]'s, never decided
+/// here. A refusal names its host: a read or a write that fails knows
+/// only the file, and `detected` prints one line per host.
+fn wire_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction, String> {
+    let host = format!("{}: ", target.id());
+    patch_at(target, path, dry_run).map_err(|why| {
+        if why.starts_with(&host) {
+            why
+        } else {
+            format!("{host}{why}")
+        }
+    })
+}
+
+fn patch_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction, String> {
+    match target {
+        WireTarget::Vscode => patch_vscode(path, dry_run),
+        // The `[mcp_servers.nika]` table: Codex CLI, and Grok Build, whose
         // native table survives a `[compat.claude] mcps = false` toggle.
-        WireTarget::Grok => patch_toml_mcp(&home_path(&[".grok", "config.toml"])?, "grok", dry_run),
+        WireTarget::Codex | WireTarget::Grok => patch_toml_mcp(path, &target.id(), dry_run),
+        // External writes are NOT hot-reloaded — the hint rides the
+        // verdict line (#449 wave-3b).
+        WireTarget::Continue => patch_cursor_like(path, "mcpServers", "continue", false, dry_run)
+            .map(|a| with_hint(a, "reload Continue (or re-save config.yaml) to pick it up")),
+        WireTarget::Zed => patch_zed(path, dry_run),
+        WireTarget::Opencode => patch_opencode(path, dry_run),
+        WireTarget::Hermes => patch_hermes(path, dry_run),
         // Copilot CLI: the desired matches THEIR writer byte-shape (tools
         // + type local) so a copilot-added entry reads Current, no churn.
-        WireTarget::Copilot => {
-            patch_copilot(&home_path(&[".copilot", "mcp-config.json"])?, dry_run)
-        }
+        WireTarget::Copilot => patch_copilot(path, dry_run),
         // Amp: the LITERAL dotted "amp.mcpServers" key at the settings
         // root; a JSONC file gets the snippet (the Zed lossless contract).
-        WireTarget::Amp => patch_amp(&home_path(&[".config", "amp", "settings.json"])?, dry_run),
-        #[allow(
-            clippy::unreachable,
-            reason = "doors are expanded before dispatch · the home family early-returns"
-        )]
-        WireTarget::All
-        | WireTarget::Detected
-        | WireTarget::Cursor
+        WireTarget::Amp => patch_amp(path, dry_run),
+        // The Cursor-style `mcpServers` record, whichever file holds it
+        // (Cline hot-reloads its own through a chokidar watcher).
+        WireTarget::Cursor
         | WireTarget::Claude
         | WireTarget::Windsurf
         | WireTarget::Gemini
         | WireTarget::Qwen
         | WireTarget::Antigravity
         | WireTarget::Kimi
-        | WireTarget::Kiro => {
-            unreachable!("wire doors must be resolved before dispatch")
-        }
+        | WireTarget::Kiro
+        | WireTarget::ClaudeDesktop
+        | WireTarget::Cline
+        | WireTarget::Lmstudio
+        | WireTarget::Junie => patch_cursor_like(path, "mcpServers", &target.id(), false, dry_run),
+        WireTarget::All | WireTarget::Detected => Err(DOOR.to_owned()),
     }
+}
+
+/// `target`'s plan at `path` as the `detected` door judges it, on every
+/// host: the writer's own plan, nothing written, except that an entry
+/// the writer would only respell is current. A `nika` entry that RUNS
+/// ours — a `command` that is a non-empty string, and exactly the args
+/// `wire` writes ([`entry_argv`]) — is wired whatever that command's path
+/// and whatever keys of its own it holds: one voice with [`reads`] about
+/// one entry. A desktop application does not inherit the shell's PATH, so
+/// its entry pins an absolute binary on purpose: replacing it with the
+/// bare name can break a setup that works. An entry with our args and no
+/// command launches nothing, and is repaired like any other. (A client
+/// wired BY NAME keeps the strict writer: the person asked for nika's own
+/// spelling.)
+fn judged(target: WireTarget, path: &Path) -> Result<WireAction, String> {
+    match wire_at(target, path, true) {
+        Ok(WireAction::Updated(_))
+            if entry_argv(target, path)
+                .is_some_and(|(command, args)| !command.is_empty() && args == NIKA_MCP_ARGS) =>
+        {
+            let label = format!("{}: {}", target.id(), path.display());
+            Ok(WireAction::Current(label))
+        }
+        planned => planned,
+    }
+}
+
+/// How the config at `path` reads for `target`, as `(current, stale)`:
+/// [`judged`] current, or stale when the writer would migrate the old
+/// `mcp serve --stdio` argv. Nothing is written.
+pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
+    match judged(target, path) {
+        Ok(WireAction::Current(_)) => (true, false),
+        Ok(WireAction::Migrated(_)) => (false, true),
+        _ => (false, false),
+    }
+}
+
+/// The `nika` entry `target`'s host reads at `path`, as the command it
+/// launches and the args it passes: each writer's table and shape, read
+/// back (a test wires every such host and holds this reader to its
+/// writer). `None` when the file does not parse, holds no entry, or the
+/// entry is not a command line — no `command` string, args that are not
+/// an array, or an array holding anything but strings, in JSON and in
+/// TOML alike. And for Hermes, whose YAML its writer never rewrites and
+/// reads with a predicate of its own.
+fn entry_argv(target: WireTarget, path: &Path) -> Option<(String, Vec<String>)> {
+    let body = crate::detect::read_config(path).ok()?;
+    let table = match target {
+        WireTarget::Codex | WireTarget::Grok => {
+            let doc: toml_edit::DocumentMut = body.parse().ok()?;
+            let entry = doc.get("mcp_servers")?.get("nika")?;
+            let command = entry.get("command")?.as_str()?.to_owned();
+            return Some((command, toml_args(entry)?));
+        }
+        WireTarget::Opencode => "mcp",
+        WireTarget::Amp => "amp.mcpServers",
+        WireTarget::Vscode => "servers",
+        WireTarget::Zed => "context_servers",
+        WireTarget::Cursor
+        | WireTarget::Windsurf
+        | WireTarget::Claude
+        | WireTarget::ClaudeDesktop
+        | WireTarget::Cline
+        | WireTarget::Continue
+        | WireTarget::Gemini
+        | WireTarget::Qwen
+        | WireTarget::Lmstudio
+        | WireTarget::Junie
+        | WireTarget::Antigravity
+        | WireTarget::Kimi
+        | WireTarget::Kiro
+        | WireTarget::Copilot => "mcpServers",
+        WireTarget::Hermes | WireTarget::All | WireTarget::Detected => return None,
+    };
+    let root: Value = serde_json::from_str(&body).ok()?;
+    let entry = root.get(table)?.get("nika")?;
+    let strings = |value: &Value| -> Option<Vec<String>> {
+        value
+            .as_array()?
+            .iter()
+            .map(|arg| arg.as_str().map(str::to_owned))
+            .collect()
+    };
+    if target == WireTarget::Opencode {
+        // OpenCode keeps the whole argv in `command`: its head is the
+        // command, its tail the args.
+        let mut argv = strings(entry.get("command")?)?.into_iter();
+        let command = argv.next()?;
+        return Some((command, argv.collect()));
+    }
+    let command = entry.get("command")?.as_str()?.to_owned();
+    Some((command, strings(entry.get("args")?)?))
 }
 
 /// LM Studio documents `~/.lmstudio/mcp.json` (blog v0.3.17 · macOS+Linux ·
@@ -409,8 +664,8 @@ fn wire_one(target: WireTarget, dir: &str, dry_run: bool) -> Result<WireAction, 
 /// open) — writing the documented path there would wire nothing. Resolution:
 /// whichever app-created directory EXISTS wins, documented location first;
 /// neither existing falls back to the documented default (created on write).
-fn lmstudio_mcp_path() -> Result<PathBuf, String> {
-    Ok(lmstudio_mcp_path_from(&home_path(&[])?))
+fn lmstudio_mcp_path(home: Option<&Path>) -> Result<PathBuf, String> {
+    home.map(lmstudio_mcp_path_from).ok_or_else(no_home)
 }
 
 /// Claude Desktop keeps `claude_desktop_config.json` under the app-config
@@ -419,7 +674,7 @@ fn lmstudio_mcp_path() -> Result<PathBuf, String> {
 /// `~/Library/Application Support/Claude/` · Windows `%APPDATA%\Claude\` ·
 /// Linux `~/.config/Claude/` (community builds — same dir the app uses).
 #[allow(clippy::disallowed_methods)]
-fn claude_desktop_config_path() -> Result<PathBuf, String> {
+fn claude_desktop_config_path(home: Option<&Path>) -> Result<PathBuf, String> {
     if cfg!(target_os = "windows")
         && let Some(appdata) = std::env::var_os("APPDATA")
     {
@@ -427,7 +682,8 @@ fn claude_desktop_config_path() -> Result<PathBuf, String> {
             .join("Claude")
             .join("claude_desktop_config.json"));
     }
-    Ok(claude_desktop_config_path_from(&home_path(&[])?))
+    home.map(claude_desktop_config_path_from)
+        .ok_or_else(no_home)
 }
 
 fn claude_desktop_config_path_from(home: &Path) -> PathBuf {
@@ -450,8 +706,8 @@ fn claude_desktop_config_path_from(home: &Path) -> PathBuf {
 /// a host IDE's EXISTING extension dir wins (the live, hot-reloaded file);
 /// none existing falls back to the stable home (created on write — correct
 /// for the CLI today and the extension after its migration).
-fn cline_settings_path() -> Result<PathBuf, String> {
-    Ok(cline_settings_path_from(&home_path(&[])?))
+fn cline_settings_path(home: Option<&Path>) -> Result<PathBuf, String> {
+    home.map(cline_settings_path_from).ok_or_else(no_home)
 }
 
 fn cline_settings_path_from(home: &Path) -> PathBuf {
@@ -502,21 +758,20 @@ fn lmstudio_mcp_path_from(home: &Path) -> PathBuf {
 /// is: only rewrite a file we can round-trip losslessly (a plain-JSON parse
 /// succeeding ⇒ no comments existed); otherwise return
 /// [`WireAction::Manual`] with the exact snippet and leave the user's file
-/// byte-identical.
+/// byte-identical. A file that cannot be read at all is not that case: it
+/// is refused with its reason ([`read_plain_json`]).
 fn patch_zed(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let label_path = format!("zed: {}", path.display());
     let (mut root, original) = if existed {
-        match read_json_text(path) {
-            Ok((value, text)) => (value, Some(text)),
-            Err(_) => {
-                return Ok(WireAction::Manual(format!(
-                    "{label_path} is JSONC (comments) — add this to \
-                     \"context_servers\" yourself:\n  \"nika\": {{ \
-                     \"command\": \"nika\", \"args\": [\"mcp\"], \"env\": {{}} }}"
-                )));
-            }
-        }
+        let Some((value, text)) = read_plain_json(path)? else {
+            return Ok(WireAction::Manual(format!(
+                "{label_path} {NOT_PLAIN_JSON} — add this to \
+                 \"context_servers\" yourself:\n  \"nika\": {{ \
+                 \"command\": \"nika\", \"args\": [\"mcp\"], \"env\": {{}} }}"
+            )));
+        };
+        (value, Some(text))
     } else {
         (Value::Object(Map::new()), None)
     };
@@ -569,11 +824,6 @@ fn zed_server() -> Value {
 
 fn patch_vscode(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     patch_config(path, "servers", "vscode", true, dry_run)
-}
-
-/// The user-home `mcpServers` shape shared by the cursor-like family.
-fn patch_home_mcp(parts: &[&str], label: &str, dry_run: bool) -> Result<WireAction, String> {
-    patch_cursor_like(&home_path(parts)?, "mcpServers", label, false, dry_run)
 }
 
 fn patch_cursor_like(
@@ -633,7 +883,7 @@ fn patch_config(
 fn patch_toml_mcp(path: &Path, label: &str, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let body = if existed {
-        std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?
+        crate::detect::read_config(path)?
     } else {
         String::new()
     };
@@ -686,24 +936,24 @@ fn patch_toml_mcp(path: &Path, label: &str, dry_run: bool) -> Result<WireAction,
     }
 }
 
-fn toml_args(item: &toml_edit::Item) -> Vec<String> {
-    item.get("args")
-        .and_then(toml_edit::Item::as_array)
-        .map(|args| {
-            args.iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+/// The args of a `[mcp_servers.nika]` entry: `None` unless `args` is an
+/// array of strings and nothing else. An element that is not a string is
+/// never dropped to make the rest look like ours.
+fn toml_args(item: &toml_edit::Item) -> Option<Vec<String>> {
+    item.get("args")?
+        .as_array()?
+        .iter()
+        .map(|arg| arg.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn toml_entry_is_current(item: &toml_edit::Item) -> bool {
     item.get("command").and_then(toml_edit::Item::as_str) == Some("nika")
-        && toml_args(item) == NIKA_MCP_ARGS
+        && toml_args(item).is_some_and(|args| args == NIKA_MCP_ARGS)
 }
 
 fn toml_entry_is_stale(item: &toml_edit::Item) -> bool {
-    toml_args(item) == ["mcp", "serve", "--stdio"]
+    toml_args(item).is_some_and(|args| args == ["mcp", "serve", "--stdio"])
 }
 
 /// `OpenCode` wires MCP through `opencode.json` — its OWN shape (`mcp.nika`
@@ -757,7 +1007,7 @@ fn patch_hermes(path: &Path, dry_run: bool) -> Result<WireAction, String> {
         }
         return Ok(WireAction::Created(format!("hermes: {}", path.display())));
     }
-    let body = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let body = crate::detect::read_config(path)?;
     // CURRENT means the canonical block is present verbatim-modulo-indent
     // — the shared `detect::hermes_recognized` predicate (a `nika:` server
     // whose command line names the binary). Anything else is the
@@ -832,17 +1082,15 @@ fn patch_copilot(path: &Path, dry_run: bool) -> Result<WireAction, String> {
 fn patch_amp(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let (mut root, original) = if existed {
-        match read_json_text(path) {
-            Ok((value, text)) => (value, Some(text)),
-            Err(_) => {
-                return Ok(WireAction::Manual(format!(
-                    "amp: {} is JSONC (comments) — add this under \
-                     \"amp.mcpServers\" yourself:\n  \"nika\": {{ \
-                     \"command\": \"nika\", \"args\": [\"mcp\"] }}",
-                    path.display()
-                )));
-            }
-        }
+        let Some((value, text)) = read_plain_json(path)? else {
+            return Ok(WireAction::Manual(format!(
+                "amp: {} {NOT_PLAIN_JSON} — add this under \
+                 \"amp.mcpServers\" yourself:\n  \"nika\": {{ \
+                 \"command\": \"nika\", \"args\": [\"mcp\"] }}",
+                path.display()
+            )));
+        };
+        (value, Some(text))
     } else {
         (Value::Object(Map::new()), None)
     };
@@ -899,10 +1147,24 @@ fn read_json(path: &Path) -> Result<Value, String> {
 /// A JSON config and its exact text, kept to restore it when a write does
 /// not read back.
 fn read_json_text(path: &Path) -> Result<(Value, String), String> {
-    let body = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let body = crate::detect::read_config(path)?;
     let value = serde_json::from_str(&body)
         .map_err(|e| format!("{}: malformed JSON: {e}", path.display()))?;
     Ok((value, body))
+}
+
+/// What a manual line says of a settings file that reads but is not
+/// plain JSON. Its host allows comments, so that is the likely cause —
+/// and a damaged file reads the same, so neither is asserted.
+const NOT_PLAIN_JSON: &str = "is not plain JSON (it may hold comments, or be damaged)";
+
+/// A settings file whose host reads JSONC (Zed, Amp), with its exact
+/// text: `None` when it reads but is not plain JSON, which nika cannot
+/// rewrite without losing what it could not parse. A file that cannot be
+/// read at all is an error with its reason, never a `None`.
+fn read_plain_json(path: &Path) -> Result<Option<(Value, String)>, String> {
+    let text = crate::detect::read_config(path)?;
+    Ok(serde_json::from_str(&text).ok().map(|value| (value, text)))
 }
 
 /// The config as it is (with its text) when it exists, else an empty object.
@@ -942,38 +1204,60 @@ fn server_table<'a>(
 /// `~/.claude.json` in place. A NEW file gets 0600 (these configs grow
 /// API keys); an existing file's mode is carried onto the temp file
 /// BEFORE the rename so the swap preserves it.
+///
+/// A settings file that is a LINK (into a dotfiles folder under the
+/// home, say) stays one: the temp file and the rename go beside the file
+/// the link leads to ([`write_target`]), so the link survives and what it
+/// points at is what changes. Renaming over the link itself left a
+/// regular file in its place, and the dotfiles copy stale.
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent()
+    // The failure is the settings file's: the temporary file beside it is
+    // nika's own business, and a name the person has never seen.
+    let refuse = |e: std::io::Error| format!("{}: cannot write: {e}", path.display());
+    let target = write_target(path).map_err(refuse)?;
+    if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(refuse)?;
     }
-    let tmp = path.with_file_name(format!(".nika-tmp-{}", std::process::id()));
-    let result = write_atomic_via(&tmp, path, body);
+    let tmp = target.with_file_name(format!(".nika-tmp-{}", std::process::id()));
+    let result = write_atomic_via(&tmp, &target, body).map_err(refuse);
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp); // never litter the user's dir
     }
     result
 }
 
+/// Where a write to `path` lands: the file itself, or the one it links
+/// to, however many links away. A path that names nothing yet is its own
+/// target, and so is a link whose target is gone: that write replaces
+/// the dead link, and never creates a file where it pointed. Whether a
+/// link may be followed at all is settled before any writer runs
+/// ([`settled_path`]): only inside the folder that owns the config.
+fn write_target(path: &Path) -> std::io::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(real) => Ok(real),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(e) => Err(e),
+    }
+}
+
 /// The tmp-file half of [`write_atomic`], split so every error path
 /// funnels through the litter sweep (the 100-line fn ratchet).
-fn write_atomic_via(tmp: &Path, path: &Path, body: &str) -> Result<(), String> {
+fn write_atomic_via(tmp: &Path, path: &Path, body: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt as _;
-    let mut file = std::fs::File::create(tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    file.write_all(body.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let mut file = std::fs::File::create(tmp)?;
+    file.write_all(body.as_bytes())?;
+    file.sync_all()?;
     drop(file);
     // An existing file keeps its mode; a new one is owner-only (0600).
     let mode = match std::fs::metadata(path) {
         Ok(meta) => meta.permissions().mode() & 0o777,
         Err(_) => 0o600,
     };
-    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))
-        .map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))?;
+    std::fs::rename(tmp, path)
 }
 
 fn write_json(path: &Path, value: &Value, original: Option<&str>) -> Result<(), String> {
@@ -992,8 +1276,7 @@ fn write_read_back(
     write: fn(&Path, &str) -> Result<(), String>,
 ) -> Result<(), String> {
     write(path, body)?;
-    // seam-bypass-ok: the readback of the host config just written
-    if std::fs::read_to_string(path).is_ok_and(|read| read == body) {
+    if crate::detect::read_config(path).is_ok_and(|read| read == body) {
         return Ok(());
     }
     let restored = match original {
@@ -1011,15 +1294,6 @@ fn write_read_back(
             path.display()
         ),
     })
-}
-
-#[allow(clippy::disallowed_methods)]
-fn home_path(parts: &[&str]) -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "cannot find HOME/USERPROFILE for editor wiring".to_owned())?;
-    Ok(parts.iter().fold(home, |path, part| path.join(part)))
 }
 
 fn render(actions: &[WireAction]) -> String {

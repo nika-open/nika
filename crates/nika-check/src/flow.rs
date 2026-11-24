@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use nika_schema::expression::{NamespaceRef, expr_refs, scan_templates};
 use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
-use nika_schema::types::{EgressRule, OutputDecl, Permits};
+use nika_schema::types::{EgressRule, OnErrorAction, OutputDecl, Permits};
 
 use super::declass;
 
@@ -126,6 +126,9 @@ pub struct FlowFacts {
     effect_leaks: BTreeMap<usize, Taints>,
     /// Task index → the taint of its OUTPUT (`tasks.<id>.output`).
     output_taint: BTreeMap<usize, TaintTrace>,
+    /// Task index → every secret its `on_error.recover:` value reads. The recovered value
+    /// replaces the output (spec 05 §recovery), so the record carries each of them.
+    recover_taint: BTreeMap<usize, Taints>,
     /// Workflow `outputs:` entry name → the taint reaching it (egress).
     egress: BTreeMap<String, TaintTrace>,
 }
@@ -368,6 +371,19 @@ fn propagate_task(
             .insert(idx, trace.via(format!("tasks.{}.output", task.id.value)));
     }
 
+    // 4b. A recovered value replaces the output whatever the verb, so the record carries what
+    //     the value reads besides what the request did. Written to the record, not sent: no
+    //     sink here, each later reader is judged as usual.
+    let recovered = recover_taints(task, declared, &with_taints, &item_taints, names, facts);
+    if !facts.output_taint.contains_key(&idx)
+        && let Some(trace) = recovered.values().next()
+    {
+        facts.output_taint.insert(idx, trace.clone());
+    }
+    if !recovered.is_empty() {
+        facts.recover_taint.insert(idx, recovered);
+    }
+
     // 5. `on_finally` cleanup effects are sinks too (extracted for the
     //    100-LOC fn cap · same env / same declass filter as the main effect).
 }
@@ -414,6 +430,45 @@ fn task_local_taints<'a>(
         .map(|(secret, trace)| (secret, trace.via(format!("item @ {}", task.id.value))))
         .collect();
     (with_taints, item_taints)
+}
+
+/// Every secret `task`'s `on_error.recover:` value reads, each traced through the recovered
+/// record: a `secrets.*` read, and what a `tasks.*`, `group.*`, `with.*` or `item` read
+/// carries (the content walk reads the same value for the content law).
+fn recover_taints(
+    task: &RawTask,
+    declared: &BTreeSet<&str>,
+    with_taints: &WithTaints<'_>,
+    item_taints: &Taints,
+    names: &Names<'_>,
+    facts: &FlowFacts,
+) -> Taints {
+    let Some(OnErrorAction::Recover(value)) = task.on_error.as_ref().map(|e| &e.value.action)
+    else {
+        return Taints::new();
+    };
+    let refs = refs_in_json(&value.value);
+    all_taints_of_refs(refs, declared, with_taints, Some(item_taints), names, facts)
+        .into_iter()
+        .map(|(secret, trace)| {
+            let recovered = trace
+                .via(format!("on_error.recover @ {}", task.id.value))
+                .via(format!("tasks.{}.output", task.id.value));
+            (secret, recovered)
+        })
+        .collect()
+}
+
+/// Every trace `task`'s record carries: its output's propagation fact, then each secret its
+/// recover value reads.
+fn record_taints(facts: &FlowFacts, task: usize) -> impl Iterator<Item = &TaintTrace> {
+    facts.output_taint.get(&task).into_iter().chain(
+        facts
+            .recover_taint
+            .get(&task)
+            .into_iter()
+            .flat_map(BTreeMap::values),
+    )
 }
 
 fn record_effect_leaks(
@@ -619,11 +674,8 @@ fn all_taints_of_refs(
             }
             r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
                 for &upstream in names.producers(&r) {
-                    if seen_tasks.insert(upstream)
-                        && let Some(trace) = facts.output_taint.get(&upstream)
-                    {
-                        out.entry(trace.secret.clone())
-                            .or_insert_with(|| trace.clone());
+                    if seen_tasks.insert(upstream) {
+                        extend_first(&mut out, record_taints(facts, upstream).cloned());
                     }
                 }
             }

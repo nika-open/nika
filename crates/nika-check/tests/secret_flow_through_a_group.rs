@@ -6,6 +6,10 @@
 //! each member's record, so it carries whatever a member's output carries. The secret flow
 //! judges it as it judges the same record read one member at a time: a secret a member
 //! received and the fold sends where the secret's `egress:` does not allow is `NIKA-SEC-006`.
+//!
+//! A task's record is also what its `on_error.recover:` value makes it (spec 05 §recovery): the
+//! recovered value replaces the output, so a secret the value reads rides the record. The
+//! recover itself sends nothing and is no destination; each later reader is judged as usual.
 
 use nika_check::{CheckReport, check};
 use nika_schema::{FileId, ParseMode, parse};
@@ -288,4 +292,111 @@ fn the_journey_counts_the_host_a_fold_sends_the_secret_to() {
     assert_eq!(findings(&report), [sec_006("push")]);
     assert_eq!(flows_to(&report), ["other.example.com"]);
     assert!(!report.is_clean());
+}
+
+/// `call_a` sends the token to crm.example.com; `backup` fails over to `VALUE`; `relay` posts
+/// `backup`'s record to other.example.com.
+const RECOVER_RELAY: &str = r#"nika: recover-relay
+secrets:
+  token: { source: env, key: T, egress: [EGRESS] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  backup:
+    after: { call_a: success }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "VALUE" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+/// `backup` binds the fold of `calls`, of which only `call_a` received the token, and recovers
+/// to it.
+const RECOVER_A_FOLD: &str = r#"nika: recover-relay
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  call_b:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/c" } }
+  backup:
+    with: { legs: "${{ group.calls }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "${{ with.legs }}" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+fn recover_relay(value: &str, egress: &str) -> String {
+    RECOVER_RELAY
+        .replace("EGRESS", egress)
+        .replace("VALUE", value)
+}
+
+#[test]
+fn a_recover_value_that_reads_a_secret_carries_it_into_the_record() {
+    for (value, path) in [
+        (
+            "${{ tasks.call_a.output }}",
+            "secrets.token → tasks.call_a.output → on_error.recover @ backup → \
+             tasks.backup.output → with.legs @ relay",
+        ),
+        (
+            "${{ secrets.token }}",
+            "secrets.token → on_error.recover @ backup → tasks.backup.output → with.legs @ relay",
+        ),
+    ] {
+        let report = run(&recover_relay(value, CRM));
+        assert_eq!(leaks(&report), [leak("relay", path)], "{value}");
+        assert_eq!(findings(&report), [sec_006("relay")], "{value}");
+        assert_eq!(
+            flows_to(&report),
+            ["crm.example.com", "other.example.com"],
+            "{value}"
+        );
+    }
+}
+
+/// The recover is no destination of its own: with the relay's host allowed, a secret read
+/// directly in `recover:` gives no finding.
+#[test]
+fn the_recovered_record_sent_where_the_secret_may_go_is_clean() {
+    for value in ["${{ tasks.call_a.output }}", "${{ secrets.token }}"] {
+        let report = run(&recover_relay(value, &format!("{CRM}, {OTHER}")));
+        assert_eq!(leaks(&report), Vec::<Leak>::new(), "{value}");
+        assert_eq!(findings(&report), Vec::<Finding>::new(), "{value}");
+    }
+}
+
+#[test]
+fn a_recover_value_that_carries_no_secret_is_clean() {
+    let report = run(&recover_relay("offline", CRM));
+    assert_eq!(leaks(&report), Vec::<Leak>::new());
+    assert_eq!(findings(&report), Vec::<Finding>::new());
+    assert_eq!(flows_to(&report), ["crm.example.com"]);
+}
+
+#[test]
+fn a_recover_value_that_reads_a_fold_with_one_tainted_member_is_a_leak() {
+    let report = run(RECOVER_A_FOLD);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.legs @ backup → on_error.recover @ \
+             backup → tasks.backup.output → with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
 }

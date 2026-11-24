@@ -11,4 +11,10 @@
   allow is `NIKA-SEC-006` naming the secret, the task and the path, and the
   journey lists the destination. A group none of whose members received a
   secret stays clean, and a destination the secret's `egress:` allows stays
-  allowed.
+  allowed. A task's `on_error.recover:` value now rides its record the same
+  way: since 0.90.0, the first release with the secret flow check, a
+  recovered value that read a secret, or a record that carried one, left
+  the task's output clean, so a later task could send it anywhere. The run
+  resolves a secret in `recover:` in clear into the record. A secret sent
+  on from a recovered record is now `NIKA-SEC-006` with the path through
+  the recover; the recover itself is no destination and gets no finding.

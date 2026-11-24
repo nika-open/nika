@@ -564,6 +564,59 @@ fn the_run_help_and_the_explain_teach_the_exit_codes() {
     );
 }
 
+/// A seat that only records its argv and answers every call with
+/// success: `login status` reads as signed in, and the log counts every
+/// launch of the binary, whatever the arguments.
+fn recording_seat(log: &std::path::Path) -> String {
+    format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit 0\n",
+        log.display()
+    )
+}
+
+/// `nika explain` launches another program only for a code whose page
+/// prints the seat line. It used to ask every installed seat for its
+/// login (`codex login status`) before every answer and keep the reply
+/// for two codes only: a wait paid again for each finding a repair loop
+/// explains.
+#[test]
+fn explain_asks_a_seat_for_its_login_only_where_the_page_prints_it() {
+    let rig = Rig::new("explain-seat-line");
+    let log = rig.root.join("seat-launches");
+    for bin in ["codex", "codex-acp"] {
+        // Written over the rig's stub: the file keeps its executable mode.
+        std::fs::write(rig.root.join("bin").join(bin), recording_seat(&log))
+            .expect("recording seat");
+    }
+    let launches = || std::fs::read_to_string(&log).unwrap_or_default();
+    for code in ["NIKA-DAG-002", "NIKA-PARSE-005", "NIKA-440", "harness"] {
+        let explain = rig.nika(&["explain", code]);
+        assert_eq!(
+            explain.status.code(),
+            Some(0),
+            "{code}: {}",
+            text(&explain.stdout)
+        );
+        assert_eq!(launches(), "", "`explain {code}` launched a program");
+    }
+    let seat_line = "\n  or use a seat present on this machine: `--access codex` (its login is \
+                     judged at run)\n";
+    for (before, code) in ["NIKA-INFER-001", "NIKA-1800"].into_iter().enumerate() {
+        let explain = rig.nika(&["explain", code]);
+        let out = text(&explain.stdout);
+        assert_eq!(explain.status.code(), Some(0), "{out}");
+        assert!(
+            out.ends_with(seat_line),
+            "{code} ends on the seat line: {out}"
+        );
+        assert_eq!(
+            launches(),
+            "login status\n".repeat(before + 1),
+            "`explain {code}` asks the seat once, and launches nothing else"
+        );
+    }
+}
+
 /// W3-F10 · the exit-3 lane is ONE JSON object on stdout under `--json`
 /// on both verbs — a missing file never prints prose to a machine reader.
 #[test]

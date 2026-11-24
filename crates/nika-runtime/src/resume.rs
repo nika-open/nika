@@ -278,11 +278,14 @@ fn fold_numbers(value: &Value) -> Value {
     }
 }
 
-/// The two hex hashes a settled success stamps onto its trace record.
+/// The two hex hashes a settled success stamps onto its trace record, and
+/// for a decided gate the hash of the content its decision bound.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResumeStamp {
     pub def_hash: String,
     pub input_hash: String,
+    /// A gate's approval content hash (`approval_shown_hash` on the record).
+    pub approval: Option<String>,
 }
 
 /// One journaled success read back from a trace — the skip candidate
@@ -298,6 +301,10 @@ pub struct PriorSuccess {
     /// The journaled output (rehydrated on a hit — downstream observes
     /// `status: success` and this value exactly as if it ran live).
     pub output: Value,
+    /// For a `nika:prompt` gate: the hash of the content its journaled
+    /// decision bound (`approval_shown_hash`). `None` when the record
+    /// carries none (an earlier engine): the decision is then never served.
+    pub approval_shown_hash: Option<String>,
 }
 
 impl PriorSuccess {
@@ -308,7 +315,16 @@ impl PriorSuccess {
             def_hash,
             input_hash,
             output,
+            approval_shown_hash: None,
         }
+    }
+
+    /// The content hash a journaled gate decision bound (the fold reads it
+    /// from the record's `approval_shown_hash`).
+    #[must_use]
+    pub fn with_approval_shown_hash(mut self, hash: Option<String>) -> Self {
+        self.approval_shown_hash = hash;
+        self
     }
 }
 
@@ -532,6 +548,7 @@ pub(crate) fn stamp(
     Some(ResumeStamp {
         def_hash: key.definition_hash()?,
         input_hash: key.input_hash()?,
+        approval: None,
     })
 }
 

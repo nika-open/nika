@@ -119,7 +119,27 @@ under recipe 2 cannot be told from an answer over edited content: its answer
 halts with `approval.content_mismatch`. Resuming that run without an answer
 asks again under a recipe 3 ticket.
 
-What the ticket does not bind:
+A decision already journaled is bound to the same content. A decided gate's
+checkpoint record (`task_completed`, and `task_cache_hit` when a resume served
+it) carries `approval_shown_hash`, the `shown_hash` its decision signed; the
+field is additive beside `def_hash`, `input_hash` and `output`, so older
+readers and the hash chain are unchanged. Before a resume serves a gate from
+its journal, it recomputes this value from the files it executes and judges,
+in this order: a record without `approval_shown_hash` (an earlier engine
+journaled the decision) or with another hash is `approval.content_mismatch`;
+an equal hash over a closure with a `null` definition is
+`approval.content_unhashable`. Each refusal fails the gate under
+`NIKA-SEC-010` and journals one engine `approval_decided` deny without a
+`digest` (no ticket was held for the gate); no task that waits on the gate's
+success starts, the next gate included. The refusal names the gate and says
+how to proceed: `nika run --resume <trace> --from <gate>` drops the gate and
+every task after it from the plan, so the gate asks again over the workflow as
+it is now; a new run asks every gate. A gate that binds the same content is
+served as before and its cache hit carries the hash on, so the next resume
+judges it the same way. A resume that waives chain verification asks every
+journaled gate again instead.
+
+What neither a paused ticket nor a journaled decision binds:
 
 - A value a closure task reads from outside the closure's definitions, unless
   the question renders it: a constant, an input (supplied or defaulted), the
@@ -133,10 +153,6 @@ What the ticket does not bind:
   the text of the child workflows, not the skill texts their agents carry.
 - Whatever an effect reads when it runs (a file a command opens, a server's
   state).
-- A decision already journaled. A resume serves a decided gate from its
-  journal and consults no ticket for it (a resume that waives chain
-  verification asks again instead), so a task behind that gate that is edited
-  afterwards runs again under the journaled decision.
 - An answer given to a gate that holds no paused ticket (`--answer` on a fresh
   run, or for a gate the resumed trace never asked): it binds to the workflow
   it is supplied with.

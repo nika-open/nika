@@ -8,7 +8,8 @@
 //!
 //! The bound content is the question as shown, the gate as written, and the
 //! definition of every task the answer unleashes: a paused answer never
-//! carries over to one of those tasks edited after the question.
+//! carries over to one of those tasks edited after the question, and a
+//! decision the trace journaled never carries over to one edited after it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -326,6 +327,16 @@ pub(crate) struct Refusal {
     pub attestation: ApprovalAttestation,
 }
 
+/// What a resume may serve for a gate its trace already decided.
+pub(crate) enum Journaled {
+    /// Not a direct `invoke: nika:prompt`: the journal serves it unchanged.
+    NotPrompt,
+    /// The gate binds the content the decision bound: its hash, carried on.
+    Bound(String),
+    /// The decision does not bind the gate as this run defines it.
+    Refused(Box<Refusal>),
+}
+
 /// One task a prompt's answer unleashes.
 #[derive(Debug, Clone)]
 struct GatedAction {
@@ -485,6 +496,78 @@ impl ApprovalBook {
     /// One prompt's unleashed closure (empty, unnamed, for a step with none).
     fn closure_for(&self, step: &str) -> Closure {
         self.lock().gated.get(step).cloned().unwrap_or_default()
+    }
+
+    /// The refusal of a gate whose shown content does not canonicalize.
+    fn uncanonical(&self, step: &str, mode: &str) -> Refusal {
+        refusal(
+            &self.lock(),
+            step,
+            mode,
+            "",
+            None,
+            0,
+            "approval.content_unhashable",
+            format!(
+                "task '{step}' · approval.content_unhashable — the shown content cannot \
+                 canonicalize, so it cannot be signed ({APPROVAL_CODE})"
+            ),
+        )
+    }
+
+    /// Judge a decision the resumed trace journaled for `step`: it carries
+    /// over only when it bound `shown_hash`, the content the gate binds now,
+    /// over a closure the engine names whole. `None` = it binds.
+    fn journaled_refusal(
+        &self,
+        step: &str,
+        mode: &str,
+        shown_hash: &str,
+        journaled: Option<&str>,
+    ) -> Option<Refusal> {
+        let inner = self.lock();
+        let retry = format!(
+            "nothing that waits on the gate starts; resume with `--from {step}` to ask it \
+             again, or start a new run ({APPROVAL_CODE})"
+        );
+        let refused = |why: &'static str, detail: String| {
+            refusal(&inner, step, mode, shown_hash, None, 0, why, detail)
+        };
+        let Some(decided) = journaled else {
+            return Some(refused(
+                "approval.content_mismatch",
+                format!(
+                    "task '{step}' · approval.content_mismatch — the resumed trace journals no \
+                     content hash for the decision of this gate (an earlier engine recorded it), \
+                     so nothing ties that decision to the gate and the tasks behind it as they \
+                     are now: {retry}"
+                ),
+            ));
+        };
+        if decided != shown_hash {
+            return Some(refused(
+                "approval.content_mismatch",
+                format!(
+                    "task '{step}' · approval.content_mismatch — the decision the resumed trace \
+                     journaled for this gate bound content `{decided}`, not the content \
+                     `{shown_hash}` it binds now: the gate or a task behind it changed since \
+                     that decision, which does not carry over: {retry}"
+                ),
+            ));
+        }
+        let unnamed = match inner.gated.get(step) {
+            Some(closure) => closure.unbound(step)?,
+            None => step,
+        };
+        Some(refused(
+            "approval.content_unhashable",
+            format!(
+                "task '{step}' · approval.content_unhashable — the engine holds no definition \
+                 identity for task `{unnamed}`, which the decision the resumed trace journaled \
+                 for this gate would unleash: a journaled decision never carries over to a task \
+                 it cannot name: {retry}"
+            ),
+        ))
     }
 
     /// Admit or refuse this step under the ticket state machine.
@@ -1085,6 +1168,53 @@ where
             .unwrap_or(0)
     }
 
+    /// The gate's canonical bound content this run ([`canonical_content`]):
+    /// the question resolved over the secret-marker scope, the closure as
+    /// this run's files define it.
+    fn bound_content(
+        &self,
+        task: &RawTask,
+        records: &BTreeMap<String, TaskRecord>,
+        inputs: &BTreeMap<String, Value>,
+        consts: &BTreeMap<String, Value>,
+        resume_ctx: &crate::resume::ResumeContext,
+    ) -> (String, Value) {
+        // Hash the resolved question, but keep secrets as markers.
+        let base =
+            Scope::workflow_with_value_authorities(records, inputs, consts, resume_ctx.markers())
+                .with_run(resume_ctx.run_value());
+        let closure = self.approvals.closure_for(task.id.value.as_str());
+        canonical_content(task, &closure, &base)
+    }
+
+    /// Judge the decision a resumed trace journaled for a gate before the
+    /// journal serves it (NEP-0013 law 1): `journaled`, the content hash that
+    /// decision bound, must be the content the gate binds from this run's
+    /// files, the closure included. A resume never replays a decision over a
+    /// gate or a gated task edited since.
+    pub(crate) fn journaled_decision(
+        &self,
+        task: &RawTask,
+        journaled: Option<&str>,
+        records: &BTreeMap<String, TaskRecord>,
+        inputs: &BTreeMap<String, Value>,
+        consts: &BTreeMap<String, Value>,
+        resume_ctx: &crate::resume::ResumeContext,
+    ) -> Journaled {
+        if !is_prompt_task(task) {
+            return Journaled::NotPrompt;
+        }
+        let step = task.id.value.as_str();
+        let (mode, content) = self.bound_content(task, records, inputs, consts, resume_ctx);
+        let Some(shown_hash) = crate::resume::jcs_blake3_hex(&content) else {
+            return Journaled::Refused(Box::new(self.approvals.uncanonical(step, &mode)));
+        };
+        match (self.approvals).journaled_refusal(step, &mode, &shown_hash, journaled) {
+            Some(refused) => Journaled::Refused(Box::new(refused)),
+            None => Journaled::Bound(shown_hash),
+        }
+    }
+
     /// Apply the bounded approval gate before a prompt runs.
     pub(crate) fn approval_gate(
         &self,
@@ -1098,29 +1228,11 @@ where
             return Gate::NotPrompt;
         }
         let step = task.id.value.as_str();
-        // Hash the resolved question, but keep secrets as markers.
-        let base =
-            Scope::workflow_with_value_authorities(records, inputs, consts, resume_ctx.markers())
-                .with_run(resume_ctx.run_value());
-        let closure = self.approvals.closure_for(step);
-        let (mode, content) = canonical_content(task, &closure, &base);
+        let (mode, content) = self.bound_content(task, records, inputs, consts, resume_ctx);
         let question = content["approval"]["message"].as_str().map(str::to_owned);
         let Some(shown_hash) = crate::resume::jcs_blake3_hex(&content) else {
             // The content shape is canonicalizable; still fail closed.
-            let inner = self.approvals.lock();
-            return Gate::Refused(Box::new(refusal(
-                &inner,
-                step,
-                &mode,
-                "",
-                None,
-                0,
-                "approval.content_unhashable",
-                format!(
-                    "task '{step}' · approval.content_unhashable — the shown content cannot \
-                     canonicalize, so it cannot be signed ({APPROVAL_CODE})"
-                ),
-            )));
+            return Gate::Refused(Box::new(self.approvals.uncanonical(step, &mode)));
         };
         let answer = self.prompt_answers.get(step);
         let source = if answer.is_some() {

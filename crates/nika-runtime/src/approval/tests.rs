@@ -448,11 +448,15 @@ fn str_field<'a>(event: &'a nika_event::Event, key: &str) -> Option<&'a str> {
         })
 }
 
-/// Fold a sink's stream back into a resume plan (what the CLI does).
+/// Fold a sink's stream back into a resume plan (what the CLI does): both
+/// terminal kinds, a gate's record with the content hash its decision bound.
 fn plan_from(sink: &VecSink) -> ResumePlan {
     let mut plan = ResumePlan::new();
     for event in sink.events() {
-        if event.kind != EventKind::TaskCompleted {
+        if !matches!(
+            event.kind,
+            EventKind::TaskCompleted | EventKind::TaskCacheHit
+        ) {
             continue;
         }
         let (Some(task), Some(def), Some(input), Some(output)) = (
@@ -466,9 +470,11 @@ fn plan_from(sink: &VecSink) -> ResumePlan {
         let Ok(output) = serde_json::from_str(output) else {
             continue;
         };
+        let approval = str_field(event, fields::APPROVAL_SHOWN_HASH).map(str::to_owned);
         plan.insert(
             task.to_owned(),
-            PriorSuccess::new(def.to_owned(), input.to_owned(), output),
+            PriorSuccess::new(def.to_owned(), input.to_owned(), output)
+                .with_approval_shown_hash(approval),
         );
     }
     plan

@@ -850,6 +850,180 @@ fn an_answer_never_runs_a_child_workflow_swapped_after_the_question() {
     );
 }
 
+const BOUND_CHAIN: &str = r#"
+nika: resume-bound-chain
+permits:
+  fs: { write: ["./out/**"] }
+  tools: ["nika:prompt", "nika:write"]
+tasks:
+  approve:
+    invoke:
+      tool: "nika:prompt"
+      args: { mode: "confirm", message: "Write out/a.txt?" }
+  write_a:
+    with: { go: "${{ tasks.approve.output }}" }
+    when: "${{ with.go == true }}"
+    invoke:
+      tool: "nika:write"
+      args: { path: "./out/a.txt", content: "a" }
+  confirm_b:
+    after: { write_a: success }
+    invoke:
+      tool: "nika:prompt"
+      args: { mode: "confirm", message: "Write out/b.txt?" }
+  write_b:
+    with: { go: "${{ tasks.confirm_b.output }}" }
+    when: "${{ with.go == true }}"
+    invoke:
+      tool: "nika:write"
+      args: { path: "./out/b.txt", content: "b" }
+"#;
+
+/// The one `kind` frame of `stdout` whose `task` field is `task`.
+fn frame_of<'a>(stdout: &'a str, kind: &str, task: &str) -> &'a str {
+    let frames: Vec<&str> = events_for(stdout, kind, task)
+        .into_iter()
+        .filter(|line| field_str(line, "task") == task)
+        .collect();
+    assert_eq!(frames.len(), 1, "one {kind} for {task}:\n{stdout}");
+    frames[0]
+}
+
+/// `nika trace verify` walks the chain of a journal this engine wrote, and
+/// `nika trace show` renders it with the run's own status (`show` exits 1 on
+/// a run that did not complete, a paused one included).
+fn assert_journal_reads(dir: &std::path::Path, journal: &str, completed: bool) {
+    let trace = |verb: &str| {
+        bin()
+            .args(["trace", verb, journal, "--color", "never"])
+            .env("NIKA_KEYCHAIN", "off")
+            .current_dir(dir)
+            .output()
+            .expect("binary runs")
+    };
+    let verified = trace("verify");
+    assert_eq!(
+        verified.status.code(),
+        Some(0),
+        "the chain of {journal} verifies: {}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let shown = trace("show");
+    let story = String::from_utf8_lossy(&shown.stdout);
+    assert_eq!(
+        shown.status.code(),
+        Some(i32::from(!completed)),
+        "{journal} renders under its run status:\n{story}"
+    );
+    assert!(story.contains("approve"), "the gate is rendered:\n{story}");
+}
+
+/// The operator answers the first gate, the run writes `out/a.txt` and waits
+/// at its second gate; `write_a` is then rewritten. The decision journaled for
+/// the first gate does not carry over to the rewritten task: resuming with the
+/// second answer halts typed, naming the first gate and how to ask it again,
+/// and writes nothing. `--from approve` asks the first gate again; over the
+/// workflow as it was decided, the same resume serves the decision and the
+/// cache hit carries its content hash on.
+#[test]
+fn a_journaled_decision_never_runs_a_gated_task_edited_after_it() {
+    let dir = tempfile::tempdir().expect("owned fixture room");
+    let wf = dir.path().join("chain.nika");
+    std::fs::write(&wf, BOUND_CHAIN).expect("workflow written");
+    let (code, first) = bound_leg(dir.path(), "chain.nika", &[]);
+    assert_eq!(code, Some(4), "the first run pauses:\n{first}");
+    std::fs::write(dir.path().join("first.ndjson"), &first).expect("trace written");
+    let answered = ["--resume", "first.ndjson", "--answer", "approve=true"];
+    let (code, second) = bound_leg(dir.path(), "chain.nika", &answered);
+    assert_eq!(code, Some(4), "the run waits at its second gate:\n{second}");
+    assert_eq!(
+        field_str(frame_of(&second, "workflow_paused", "confirm_b"), "task"),
+        "confirm_b"
+    );
+    std::fs::write(dir.path().join("second.ndjson"), &second).expect("trace written");
+    assert_journal_reads(dir.path(), "second.ndjson", false);
+    let journaled = field_str(
+        frame_of(&second, "task_completed", "approve"),
+        "approval_shown_hash",
+    );
+    assert_eq!(
+        journaled,
+        field_str(
+            frame_of(&second, "approval_decided", "approve"),
+            "shown_hash"
+        ),
+        "the gate's record names the content its decision signed"
+    );
+    let resume = ["--resume", "second.ndjson", "--answer", "confirm_b=true"];
+
+    let edited = BOUND_CHAIN.replace(
+        "args: { path: \"./out/a.txt\", content: \"a\" }",
+        "args: { path: \"./out/elsewhere.txt\", content: \"elsewhere\" }",
+    );
+    assert_ne!(edited, BOUND_CHAIN, "the fixture edits `write_a`");
+    std::fs::write(&wf, &edited).expect("workflow edited");
+    let (code, refused) = bound_leg(dir.path(), "chain.nika", &resume);
+    assert_eq!(
+        code,
+        Some(1),
+        "the refused decision fails the run:\n{refused}"
+    );
+    assert!(
+        refused.contains("NIKA-SEC-010") && refused.contains("approval.content_mismatch"),
+        "the typed refusal names the law:\n{refused}"
+    );
+    assert!(
+        refused.contains("task 'approve'") && refused.contains("--from approve"),
+        "the refusal names the gate and how to ask it again:\n{refused}"
+    );
+    let deny = frame_of(&refused, "approval_decided", "approve");
+    assert_eq!(field_str(deny, "decision"), "deny");
+    assert_eq!(field_str(deny, "source"), "engine");
+    assert_eq!(field_str(deny, "why"), "approval.content_mismatch");
+    assert_ne!(field_str(deny, "shown_hash"), journaled);
+    for gated in ["write_a", "confirm_b", "write_b"] {
+        assert!(
+            events_for(&refused, "task_started", gated).is_empty(),
+            "`{gated}` never starts:\n{refused}"
+        );
+    }
+    assert!(!dir.path().join("out/elsewhere.txt").exists());
+    assert!(!dir.path().join("out/b.txt").exists());
+
+    let (code, reasked) = bound_leg(
+        dir.path(),
+        "chain.nika",
+        &["--resume", "second.ndjson", "--from", "approve"],
+    );
+    assert_eq!(code, Some(4), "the first gate asks again:\n{reasked}");
+    let pause = frame_of(&reasked, "workflow_paused", "approve");
+    assert_ne!(
+        field_str(pause, "approval_shown_hash"),
+        journaled,
+        "the new question binds the rewritten write"
+    );
+    assert!(!dir.path().join("out/elsewhere.txt").exists());
+
+    std::fs::write(&wf, BOUND_CHAIN).expect("workflow restored");
+    let (code, served) = bound_leg(dir.path(), "chain.nika", &resume);
+    assert_eq!(code, Some(0), "the decided workflow completes:\n{served}");
+    assert_eq!(
+        field_str(
+            frame_of(&served, "task_cache_hit", "approve"),
+            "approval_shown_hash"
+        ),
+        journaled,
+        "the served gate carries the content its decision bound"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("out/b.txt")).expect("the second write"),
+        "b"
+    );
+    assert!(!dir.path().join("out/elsewhere.txt").exists());
+    std::fs::write(dir.path().join("served.ndjson"), &served).expect("trace written");
+    assert_journal_reads(dir.path(), "served.ndjson", true);
+}
+
 // ─── (e) resume ACROSS a composition (spec 14 law 10 · condition 8) ─────
 //
 // The def_hash-tier demonstration: a parent's `invoke: workflow:` call

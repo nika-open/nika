@@ -14,4 +14,8 @@ pub mod fields {
     pub const INPUT_HASH: &str = "input_hash";
     /// The task's output as ONE compact JSON text (rehydration source).
     pub const OUTPUT: &str = "output";
+    /// On a `nika:prompt` gate's terminal record: the hash of the content
+    /// its decision bound (the approval content hash, blake3 hex). A resume
+    /// serves the journaled decision only while the gate binds that content.
+    pub const APPROVAL_SHOWN_HASH: &str = "approval_shown_hash";
 }

@@ -265,9 +265,9 @@ fn settle_cache_hit(
     let mut fields = vec![("task", s(id)), ("note", s("cache hit"))];
     let output_text = serde_json::to_string(&record.output).unwrap_or_else(|_| "null".to_owned());
     if let Some(stamp) = resume {
-        fields.push((resume::fields::DEF_HASH, s(&stamp.def_hash)));
-        fields.push((resume::fields::INPUT_HASH, s(&stamp.input_hash)));
-        fields.push((resume::fields::OUTPUT, s(&output_text)));
+        // A served gate carries the content its decision bound forward, so
+        // this trace stays resumable past it.
+        emit_task::push_resume_fields(&mut fields, stamp, &output_text);
     }
     fields.push(("outcome", s(&record::outcome_json(&record))));
     emit_task::push_integrity_fields(&mut fields, &record);

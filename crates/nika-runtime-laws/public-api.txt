@@ -260,6 +260,7 @@ pub use nika_runtime_laws::origins::InputOrigin
 pub fn nika_runtime_laws::origins::input_origins(wf: &nika_schema::raw::workflow::RawWorkflow, overrides: &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>, env_sourced: &alloc::collections::btree::set::BTreeSet<alloc::string::String>, ci: bool) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_types::origins::InputOrigin>
 pub mod nika_runtime_laws::resume_fields
 pub mod nika_runtime_laws::resume_fields::fields
+pub const nika_runtime_laws::resume_fields::fields::APPROVAL_SHOWN_HASH: &str
 pub const nika_runtime_laws::resume_fields::fields::DEF_HASH: &str
 pub const nika_runtime_laws::resume_fields::fields::INPUT_HASH: &str
 pub const nika_runtime_laws::resume_fields::fields::OUTPUT: &str

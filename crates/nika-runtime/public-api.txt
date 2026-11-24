@@ -751,11 +751,13 @@ impl<T> tracing::instrument::WithSubscriber for nika_runtime::resume::ResumeUnve
 impl<T> typenum::type_operators::Same for nika_runtime::resume::ResumeUnverified
 pub type nika_runtime::resume::ResumeUnverified::Output = T
 #[non_exhaustive] pub struct nika_runtime::resume::PriorSuccess
+pub nika_runtime::resume::PriorSuccess::approval_shown_hash: core::option::Option<alloc::string::String>
 pub nika_runtime::resume::PriorSuccess::def_hash: alloc::string::String
 pub nika_runtime::resume::PriorSuccess::input_hash: alloc::string::String
 pub nika_runtime::resume::PriorSuccess::output: serde_json::value::Value
 impl nika_runtime::resume::PriorSuccess
 pub fn nika_runtime::resume::PriorSuccess::new(def_hash: alloc::string::String, input_hash: alloc::string::String, output: serde_json::value::Value) -> Self
+pub fn nika_runtime::resume::PriorSuccess::with_approval_shown_hash(self, hash: core::option::Option<alloc::string::String>) -> Self
 impl core::clone::Clone for nika_runtime::resume::PriorSuccess
 pub fn nika_runtime::resume::PriorSuccess::clone(&self) -> nika_runtime::resume::PriorSuccess
 impl core::fmt::Debug for nika_runtime::resume::PriorSuccess

@@ -446,9 +446,15 @@ where
         } else {
             self.cache_hit_finish(task, id, resume.as_ref(), jq_clock)
         }
-        .map(|mut finish| {
-            finish.integrity = integrity.clone();
-            finish
+        .map(|mut hit| {
+            hit.integrity = integrity.clone();
+            // NEP-0013 law 1 · a gate's journaled decision is served only
+            // over the content it bound.
+            let journaled =
+                (self.resume_plan.get(id)).and_then(|prior| prior.approval_shown_hash.as_deref());
+            let verdict =
+                self.journaled_decision(task, journaled, records, inputs, consts, resume_ctx);
+            finish::served_decision(verdict, hit, task)
         });
         (resume, skip)
     }

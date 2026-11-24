@@ -18,5 +18,4 @@
   answer is refused with `approval.content_mismatch` too, and resuming
   that run without `--answer` asks again. Still not bound: a value a gated
   task reads from elsewhere (a constant, an input, the output of a task
-  outside the gate's closure) unless the question shows it, and a decision
-  already journaled, which a resume replays as before.
+  outside the gate's closure) unless the question shows it.

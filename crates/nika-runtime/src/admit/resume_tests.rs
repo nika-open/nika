@@ -172,9 +172,12 @@ fn plan_from(events: &[Event]) -> ResumePlan {
             continue;
         };
         let output = serde_json::from_str(output).expect("a journaled output parses");
+        // A gate's record names the content its decision bound.
+        let approval = text(event, fields::APPROVAL_SHOWN_HASH).map(str::to_owned);
         plan.insert(
             task.to_owned(),
-            PriorSuccess::new(def.to_owned(), input.to_owned(), output),
+            PriorSuccess::new(def.to_owned(), input.to_owned(), output)
+                .with_approval_shown_hash(approval),
         );
     }
     plan

@@ -80,6 +80,23 @@ pub(crate) fn emit_recovered(
     );
 }
 
+/// The ADR-099 checkpoint fields of a stamped success (`task_completed` and
+/// `task_cache_hit` alike): `def_hash` · `input_hash` · `output`, and on a
+/// decided gate the content hash its decision bound (`approval_shown_hash`),
+/// so a later resume can tell whether that decision still binds.
+pub(crate) fn push_resume_fields(
+    fields: &mut Vec<(&'static str, FieldValue)>,
+    stamp: &resume::ResumeStamp,
+    output: &str,
+) {
+    fields.push((resume::fields::DEF_HASH, s(&stamp.def_hash)));
+    fields.push((resume::fields::INPUT_HASH, s(&stamp.input_hash)));
+    fields.push((resume::fields::OUTPUT, s(output)));
+    if let Some(hash) = &stamp.approval {
+        fields.push((resume::fields::APPROVAL_SHOWN_HASH, s(hash)));
+    }
+}
+
 // The access stamps (lane facts · the authored requirement and the call's
 // selection receipt · a seat's typed refusal) are pure projections owned
 // beside the plan they read (`nika_providers::stamp`, moved verbatim).
@@ -152,9 +169,7 @@ pub(crate) fn emit_completed(
     let output_text =
         resume.map(|_| serde_json::to_string(&record.output).unwrap_or_else(|_| "null".to_owned()));
     if let (Some(stamp), Some(text)) = (resume, output_text.as_deref()) {
-        fields.push((resume::fields::DEF_HASH, s(&stamp.def_hash)));
-        fields.push((resume::fields::INPUT_HASH, s(&stamp.input_hash)));
-        fields.push((resume::fields::OUTPUT, s(text)));
+        push_resume_fields(&mut fields, stamp, text);
     }
     // F-P6 · the fired step's binding evidence (preview ≡ commit) — and
     // the finding when a RECOVERED divergence preceded (never a warn).

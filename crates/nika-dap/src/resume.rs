@@ -739,9 +739,13 @@ pub fn fold_plan(events: &[Event]) -> PlanFold {
             fold.unreadable += 1;
             continue;
         };
+        // A decided gate's record names the content its decision bound; the
+        // runtime serves that decision only while the gate binds it.
+        let approval = str_field(event, fields::APPROVAL_SHOWN_HASH).map(str::to_owned);
         fold.plan.insert(
             task.to_owned(),
-            PriorSuccess::new(def.to_owned(), input.to_owned(), output),
+            PriorSuccess::new(def.to_owned(), input.to_owned(), output)
+                .with_approval_shown_hash(approval),
         );
     }
     fold
@@ -908,6 +912,29 @@ mod tests {
         assert!(fold.plan.contains_key("a") && fold.plan.contains_key("b"));
         assert_eq!(fold.keyless, 1, "the old record is counted, not an error");
         assert_eq!(fold.unreadable, 0);
+    }
+
+    /// A decided gate's record names the content its decision bound, on its
+    /// completion and on the cache hit that served it alike; a record without
+    /// one (another task, an earlier engine) folds none.
+    #[test]
+    fn fold_reads_the_content_hash_a_journaled_decision_bound() {
+        let decided = |kind: EventKind, task: &str, hash: &str| {
+            event(kind, task, true).with_field(KeyValue::new(
+                fields::APPROVAL_SHOWN_HASH,
+                FieldValue::String(hash.to_owned()),
+            ))
+        };
+        let events = vec![
+            decided(EventKind::TaskCompleted, "ask", &"a".repeat(64)),
+            decided(EventKind::TaskCacheHit, "served", &"b".repeat(64)),
+            event(EventKind::TaskCompleted, "write", true),
+        ];
+        let plan = fold_plan(&events).plan;
+        let hash = |task: &str| plan[task].approval_shown_hash.clone();
+        assert_eq!(hash("ask"), Some("a".repeat(64)));
+        assert_eq!(hash("served"), Some("b".repeat(64)));
+        assert_eq!(hash("write"), None);
     }
 
     #[test]

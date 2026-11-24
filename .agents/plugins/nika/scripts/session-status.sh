@@ -10,8 +10,10 @@
 #   2. A run in THIS workspace is waiting for an answer (a scheduled run
 #      parked at night, a run left before a meeting).
 #
-# It also drops a per-session marker so stop-gate.sh knows which workflow
-# files changed during the session. Silence when there is nothing to say.
+# It also drops a per-session marker so stop-gate.sh and precompact-notes.py
+# know which workflow files changed during the session. Its first line says
+# when the session started and survives a later start of the same session
+# (a resume, a compaction). Silence when there is nothing to say.
 set -u
 input="$(cat 2>/dev/null || true)"
 
@@ -29,7 +31,8 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 session="$(printf '%s' "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' | tr -cd 'A-Za-z0-9_-')"
 dir="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}}"
 if [ -n "$session" ]; then
-  mkdir -p "$dir" 2>/dev/null && : >"$dir/nika-session-$session" 2>/dev/null
+  started="$(sed -n '1s/^started \([0-9][0-9]*\)$/\1/p' "$dir/nika-session-$session" 2>/dev/null)"
+  mkdir -p "$dir" 2>/dev/null && printf 'started %s\n' "${started:-$(date +%s)}" >"$dir/nika-session-$session" 2>/dev/null
 fi
 
 if ! command -v nika >/dev/null 2>&1; then

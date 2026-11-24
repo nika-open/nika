@@ -82,13 +82,48 @@ and showing a plan with `nika run <file> --dry-run` never wait for them.
    one sentence and one fix. Hints that repeat become one line ("same
    remark on 3 steps"). The detail is always one question away.
 
+## A run that takes a while
+
+Start a long run in the background when the host's shell tool can do that
+and tell you when it ends. Say the ceiling, say you will come back when the
+run ends or asks something, and carry on with what the person asked next.
+When it ends, the exit code comes first: 0 it settled, 4 it waits for an
+answer, anything else it stopped. Where the host cannot run in the
+background, run it in the foreground: nothing else changes.
+
+## A run that stopped
+
+Read it before any second run. The first run already had effects (files
+written, calls paid, maybe something sent) and a run from the start repeats
+them. `nika trace outputs <trace> --json` names the task that stopped and its
+code; `nika explain <code>` teaches the fix. After the repair, check the
+file, then prefer `nika run <file> --resume <trace>`, which skips what
+settled, and read its first line: a trace that « carries no resume keys »
+runs everything again. This is the last step of every run that ends red,
+whether or not the host reminded you of it.
+
 ## Runs that wait
 
 A run can be waiting without anyone knowing: a scheduled run parked at
-night, a run left before a meeting. When you start work in a Nika
-project, and after any scheduled run, run
-`"${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py"`. If something waits,
-say it first: which workflow, the question, how long ago. `/nika:pending` handles the answer.
+night, a run left before a meeting, a background run that paused while you
+were elsewhere. A waiting run is state on disk, not something to remember:
+`nika trace ls` lists it in any session, on any host. When you start work in
+a Nika project, after any scheduled run, and when a long conversation was
+summarized, list them again: run
+`"${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py"`, or read
+`nika trace ls --json` and the paused frame of each paused trace. If
+something waits, say it first: which workflow, the question, how long ago.
+`/nika:pending` handles the answer.
+
+## An approval the person gives every time
+
+After they answered the same gate of the same workflow more than once, look
+whether this binary can remember an approval:
+`"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit" --has consent`, or simply whether
+`nika consent --help` answers. When it does, say so once, in one line, and
+show them the command its help prints: they run the grant, you never do, and
+you never create one on their behalf. When it does not, say nothing about it
+and keep asking at each gate.
 
 ## What the plugin already does for you
 
@@ -96,7 +131,18 @@ say it first: which workflow, the question, how long ago. `/nika:pending` handle
   each edit of a `.nika` file the findings are already in your context, in
   a few milliseconds. Fix them before you say anything about the file.
 - **A waiting run is announced.** At session start, and while this skill is
-  in use, a run that pauses for an answer shows up as a short notice.
+  in use, a run that pauses for an answer shows up as a short notice. Before
+  a long conversation is summarized, the runs that wait and the workflows
+  changed in the session are written into the summary.
+- **A run is followed without watching it.** While this skill is in use, one
+  line arrives when a task fails, is recovered or pauses, and when metered
+  spend passes half and nine tenths of the ceiling. A task that succeeds
+  prints nothing.
+- **A run that stopped comes back with a reminder** to read its trace before
+  a second run.
+
+These three exist in interactive Claude Code sessions. Everything above
+holds without them: they repeat a rule, they do not replace it.
 - **A repeatable request is flagged once, already read.** When a prompt
   sounds like a schedule, a batch or "do it again", you get one hint per
   session. When the engine can read the sentence, the hint already holds

@@ -268,6 +268,27 @@ definition drops the role, so re-approving asks for it again.
   key lifecycle (mint · TOFU fingerprint · rotate — old public halves
   stay verifiable).
 
+## Running without the person
+
+When someone wants a workflow to keep running while they are away, lay out
+the choices in one table and let them pick. Set up the one they choose, and
+nothing more. A secret never moves to another host by your hand: say where
+it has to live, and they put it there.
+
+| Choice | What it needs | Where the secrets live | What it costs |
+|---|---|---|---|
+| A schedule on this machine: an `arm:` beat in `nika.yaml` | this machine awake at the hour; a beat with its cadence, zone and `plafond:`; a unit written by `nika arm --emit`, or a resident `nika serve` | where they are today, in this machine's store | the model calls, under the beat's `plafond:` |
+| The repository's CI | the workflow and `nika.yaml` committed; a job that installs the binary, runs `nika check`, then `nika run` with `--max-cost-usd` | in the CI's own secret store, put there by the person | the model calls, plus CI minutes |
+| A scheduled cloud task of the agent host | the workflow, `nika.yaml` and the project's agent files committed, since the task starts from a clone and not from this machine; the binary installed at the start of each run; an interval the host allows (an hour at the shortest on the hosts read when this was written) | in the host's own secret settings, put there by the person; a key or a local model on this machine is out of its reach | the model calls, plus the host's usage for the agent that starts the run |
+| Their own `nika serve` | a machine that stays up; `nika serve` resident, firing the beats, or taking jobs by name over HTTP with a token file (`--bind`, `--workflows`, `--token-file`). It listens on loopback unless told otherwise and does not terminate TLS, so a reverse proxy goes in front before another machine reaches it | on that machine | the model calls, plus the machine |
+
+Say three things whatever they pick. A human gate still pauses the run
+until someone answers: on 0.125.0 a scheduled workflow that keeps a gate
+pauses at every fire. The record of each run stays where the run happened,
+so say how they will read it (`nika trace ls` there, or an export). And a
+ceiling is part of every unattended run: the beat's `plafond:`, the project
+`ceiling:` or `--max-cost-usd` on the run line.
+
 ## Production checklist
 
 1. `nika check <file>` — clean, ceiling not floor.

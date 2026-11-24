@@ -1197,19 +1197,76 @@ fn detected_leaves_a_pinned_entry_alone_and_updates_other_args() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// The reader cannot drift from the writers: on every host its writer
-/// reads for `doctor`, what the writer wrote still reads wired once its
-/// command is pinned to an absolute path, in that host's own shape.
+/// One rule for every host, the six standing rows included: `doctor`
+/// has always called a pinned Cursor entry wired, and `detected` no
+/// longer rewrites what `doctor` calls wired. The plan is no change and
+/// the file stays byte-identical. Cursor NAMED by hand keeps the strict
+/// writer: the entry is rewritten into nika's own spelling.
 #[test]
-fn a_pinned_command_reads_wired_on_every_writer_read_host() {
+fn detected_leaves_a_pinned_cursor_entry_alone_and_a_named_wire_rewrites_it() {
+    let home = temp_dir("pinned-cursor-home");
+    let dir = temp_dir("pinned-cursor-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let path = home.join(".cursor").join("mcp.json");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    let label = format!("cursor: {}", path.display());
+    let pinned = r#"{"mcpServers":{"nika":{"command":"/opt/nika/bin/nika","args":["mcp"],"env":{"NIKA_HOME":"/data"}}}}"#;
+    std::fs::write(&path, pinned).expect("seed");
+    let wire = |target, dry_run| {
+        run_in(
+            target,
+            Some(&home),
+            dir_str,
+            WireOptions {
+                dry_run,
+                ..WireOptions::default()
+            },
+        )
+    };
+
+    assert_eq!(
+        wire(WireTarget::Detected, true).text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             · current {label}\n\
+             → re-run without --dry-run to apply"
+        )
+    );
+    let out = wire(WireTarget::Detected, false);
+    assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
+    assert_eq!(out.text, format!("· current {label}"));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read"),
+        pinned,
+        "a wired entry is left byte-identical"
+    );
+
+    let named = wire(WireTarget::Cursor, false);
+    assert_eq!(named.code, crate::output::exit::OK, "{named:?}");
+    assert_eq!(named.text, format!("✔ updated {label}"));
+    assert_eq!(
+        read_json(&path).expect("json")["mcpServers"]["nika"],
+        nika_server(false),
+        "named by hand, the entry is rewritten as the writer spells it"
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The reader cannot drift from the writers: on every host whose config
+/// is JSON or TOML (all but Hermes, whose YAML is never rewritten), what
+/// the writer wrote still reads wired once its command is pinned to an
+/// absolute path, in that host's own table and shape.
+#[test]
+fn a_pinned_command_reads_wired_on_every_json_and_toml_host() {
     let home = temp_dir("pinned-all-home");
     let dir = temp_dir("pinned-all-dir");
     let hosts: Vec<WireTarget> = crate::detect::sights(Some(&home), &dir)
         .iter()
-        .filter(|sight| !sight.standing)
         .map(|sight| sight.target)
+        .filter(|target| *target != WireTarget::Hermes)
         .collect();
-    assert_eq!(hosts.len(), 15, "every host beyond the six standing rows");
+    assert_eq!(hosts.len(), 20, "every wire target but Hermes");
 
     for target in hosts {
         let path = config_path(target, Some(&home), &dir).expect("path");

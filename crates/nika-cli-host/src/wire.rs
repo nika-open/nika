@@ -482,15 +482,17 @@ fn wire_at(target: WireTarget, path: &Path, dry_run: bool) -> Result<WireAction,
     }
 }
 
-/// `target`'s plan at `path` as `doctor` and the `detected` door judge
-/// it: the writer's own plan, nothing written, except that an entry the
-/// writer would only respell is current. A `nika` entry carrying the
+/// `target`'s plan at `path` as the `detected` door judges it, on every
+/// host: the writer's own plan, nothing written, except that an entry
+/// the writer would only respell is current. A `nika` entry carrying the
 /// args `wire` writes is wired whatever its `command` and whatever keys
-/// of its own it holds — the meaning the six standing rows have always
-/// had. A desktop application does not inherit the shell's PATH, so its
-/// entry pins an absolute binary on purpose: replacing it with the bare
-/// name can break a setup that works. (A client wired BY NAME keeps the
-/// strict writer: the person asked for nika's own spelling.)
+/// of its own it holds — what `doctor` has always said of the six
+/// standing rows, and says of the others through [`reads`]: one voice
+/// about one entry. A desktop application does not inherit the shell's
+/// PATH, so its entry pins an absolute binary on purpose: replacing it
+/// with the bare name can break a setup that works. (A client wired BY
+/// NAME keeps the strict writer: the person asked for nika's own
+/// spelling.)
 fn judged(target: WireTarget, path: &Path) -> Result<WireAction, String> {
     match wire_at(target, path, true) {
         Ok(WireAction::Updated(_))
@@ -517,9 +519,8 @@ pub(crate) fn reads(target: WireTarget, path: &Path) -> (bool, bool) {
 /// The args of the `nika` entry `target`'s host reads at `path`: each
 /// writer's table and shape, read back (a test wires every such host
 /// and holds this reader to its writer). `None` when the file does not
-/// parse or holds no entry — and for the six standing rows, which
-/// [`crate::detect`] reads its own way and whose plan under `detected`
-/// stays the writer's own, as it was.
+/// parse or holds no entry — and for Hermes, whose YAML its writer
+/// never rewrites and reads with a predicate of its own.
 fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
     let body = std::fs::read_to_string(path).ok()?;
     let table = match target {
@@ -529,7 +530,12 @@ fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
         }
         WireTarget::Opencode => "mcp",
         WireTarget::Amp => "amp.mcpServers",
-        WireTarget::ClaudeDesktop
+        WireTarget::Vscode => "servers",
+        WireTarget::Zed => "context_servers",
+        WireTarget::Cursor
+        | WireTarget::Windsurf
+        | WireTarget::Claude
+        | WireTarget::ClaudeDesktop
         | WireTarget::Cline
         | WireTarget::Continue
         | WireTarget::Gemini
@@ -540,14 +546,7 @@ fn entry_args(target: WireTarget, path: &Path) -> Option<Vec<String>> {
         | WireTarget::Kimi
         | WireTarget::Kiro
         | WireTarget::Copilot => "mcpServers",
-        WireTarget::Cursor
-        | WireTarget::Windsurf
-        | WireTarget::Claude
-        | WireTarget::Zed
-        | WireTarget::Hermes
-        | WireTarget::Vscode
-        | WireTarget::All
-        | WireTarget::Detected => return None,
+        WireTarget::Hermes | WireTarget::All | WireTarget::Detected => return None,
     };
     let root: Value = serde_json::from_str(&body).ok()?;
     let entry = root.get(table)?.get("nika")?;

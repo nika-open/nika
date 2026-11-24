@@ -12,12 +12,12 @@
   by host: a config its writer refuses is reported on its own line with the
   reason and left as it is, the other hosts are wired, and the exit code is
   3 so a script sees the skip. A client wired by name and `wire all` still
-  write nothing when one config is refused. On the fifteen hosts newly seen,
-  an entry that already carries the args `wire` writes reads as wired in
-  `nika doctor`, whatever its `command` path and extra keys, and `detected`
-  leaves it alone, so an absolute path pinned for a desktop application is
-  kept; `nika wire <client>` by name still rewrites it. `nika doctor` and
-  `nika welcome` report the new hosts once their config is on the machine:
-  the six they always listed keep their rows, an absent host gets no new
-  line and no config, and doctor's coverage line now reads 21 probed with
-  nothing declared-not-probed.
+  write nothing when one config is refused. Under `detected`, on every host,
+  an entry that already carries the args `wire` writes is left as it is,
+  whatever its `command` path and extra keys, so an absolute path pinned for
+  a desktop application is kept, and `nika doctor` reads it as wired on the
+  fifteen new hosts as it always did on the six; `nika wire <client>` by
+  name still rewrites it. `nika doctor` and `nika welcome` report the new
+  hosts once their config is on the machine: the six they always listed keep
+  their rows, an absent host gets no new line and no config, and doctor's
+  coverage line now reads 21 probed with nothing declared-not-probed.

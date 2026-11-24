@@ -51,28 +51,15 @@ def waiting_runs(cwd):
 def changed_workflows(cwd, session):
     store = os.environ.get("CLAUDE_PLUGIN_DATA") or os.environ.get("TMPDIR") or "/tmp"
     marker = os.path.join(store, f"nika-session-{session}")
+    # session-status.sh writes the marker once, at the first start of the
+    # session, and nothing rewrites it: its modification time is when the
+    # session started. The stop gate compares workflow files against the same
+    # time, so the two agree on what « changed in this session » means.
     try:
-        stat = os.stat(marker)
+        since = os.stat(marker).st_mtime
     except OSError:
         return []
-    # session-status.sh writes « started <epoch> » on the marker's first line.
-    # The stop gate appends the files it reported below it, which moves the
-    # marker's modification time: read the start from the line, and count the
-    # files the gate wrote down as work in progress too.
-    since = getattr(stat, "st_birthtime", stat.st_mtime)
     found = []
-    try:
-        with open(marker, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                head, _, tail = line.strip().rpartition(" ")
-                if head == "started" and tail.isdigit():
-                    since = float(tail)
-                    continue
-                path = os.path.normpath(head)
-                if path.endswith(".nika") and os.path.isfile(os.path.join(cwd, path)):
-                    found.append(path)
-    except OSError:
-        pass
     for folder, dirs, files in os.walk(cwd):
         dirs[:] = [d for d in dirs if d not in SKIP]
         if os.path.relpath(folder, cwd).count(os.sep) >= 3:

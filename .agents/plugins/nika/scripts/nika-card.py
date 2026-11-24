@@ -16,7 +16,12 @@ Usage:
                                           has now and the plan did not
 
 The remembered plan lives outside the project (the plugin's data folder,
-else the temporary folder), keyed by the file's path.
+else the temporary folder), keyed by the file's path. Recording a plan
+again replaces it, and the card then says so and lists the effects the
+earlier plan did not have. `--since-plan` catches an effect added by
+mistake between the plan and the hand-over. It cannot hold an agent that
+records a new plan: the approval itself is the person's, given in the
+conversation, and no file stands in for it.
 
 Exit code: 0 card printed and the check is clean · 2 card printed, the
 check refuses the file · 3 no card (no file, unreadable output) · 4 clean,
@@ -264,7 +269,11 @@ def main(argv):
     }
     card["review"] = review(card)
     added = None
+    replaced = None
     if "--plan" in argv:
+        replaced = added_since_plan(path, card["effects"])
+        if replaced is not None:
+            card["plan_replaced_added"] = replaced
         try:
             with open(plan_path(path), "w", encoding="utf-8") as handle:
                 json.dump(card["effects"], handle)
@@ -282,6 +291,12 @@ def main(argv):
             print("\n".join(f"  {item}" for item in added))
         else:
             print("Since the plan   no effect was added")
+    if replaced is not None and "--json" not in argv:
+        if replaced:
+            print("Plan             REPLACED the plan remembered for this file. Not in the earlier one, so the person approves them again:")
+            print("\n".join(f"  {item}" for item in replaced))
+        else:
+            print("Plan             replaced the plan remembered for this file; no effect was added")
     if not card["verdict"]["clean"]:
         return 2
     return 4 if added else 0

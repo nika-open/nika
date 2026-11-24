@@ -9,8 +9,11 @@ export const meta = {
   ],
 }
 
-// args: { dir?: string } — the folder to audit (default: the project).
+// args: { dir?: string, max?: number } — the folder to audit (default: the
+// project) and how many files at most in one go (default 60, never more
+// than 200): one reader runs per file.
 const dir = (args && args.dir) || '.'
+const MAX_FILES = Math.min(Math.max(Number(args && args.max) || 60, 1), 200)
 
 phase('Find')
 const found = await agent(
@@ -25,12 +28,17 @@ const found = await agent(
     },
   },
 )
-if (!found || !found.files.length) {
-  return { audited: 0, reason: found ? `No .nika file under ${dir}.` : 'The file listing gave no result.' }
+const listed = found && Array.isArray(found.files) ? found.files.filter(f => typeof f === 'string' && f) : null
+if (!listed || !listed.length) {
+  return { audited: 0, reason: listed ? `No .nika file under ${dir}.` : 'The file listing gave no result.' }
+}
+const batch = listed.slice(0, MAX_FILES)
+if (listed.length > batch.length) {
+  log(`${listed.length - batch.length} file(s) are past the cap of ${MAX_FILES}: they are listed as not audited, not as clean`)
 }
 
 phase('Audit')
-const audits = await pipeline(found.files, file =>
+const audits = await pipeline(batch, file =>
   agent(
     `Audit the Nika workflow ${file} without running it and without editing it. ` +
       'Run `nika check <file> --json --native-strict` and `nika inspect <file> --format json`, and report only what they print: ' +
@@ -95,13 +103,13 @@ const ranked = done
     }
   })
   .sort((x, y) => y.weight - x.weight || x.file.localeCompare(y.file))
-const lost = found.files.length - done.length
+const lost = batch.length - done.length
 if (lost) log(`${lost} file(s) gave no audit result: they are listed as not audited, not as clean`)
-log(`${ranked.filter(r => r.weight === 0).length} of ${found.files.length} files need nothing`)
+log(`${ranked.filter(r => r.weight === 0).length} of ${listed.length} files need nothing`)
 return {
   audited: done.length,
   needs_attention: ranked.filter(r => r.weight > 0),
   nothing_to_report: ranked.filter(r => r.weight === 0).map(r => r.file),
-  not_audited: found.files.filter(f => !done.some(a => a.file === f)),
+  not_audited: listed.filter(f => !done.some(a => a.file === f)),
   read_this_with: 'A clean check does not judge whether a job does what was asked, nor an effect that cannot be undone. Nothing was run.',
 }

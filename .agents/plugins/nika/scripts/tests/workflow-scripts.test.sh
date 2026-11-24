@@ -55,6 +55,21 @@ for script in "$KIT"/workflows/*.js; do
 done
 [ "$count" -ge 3 ] || bad "expected the three workflow scripts, found $count"
 
+# A script that starts one agent per file is capped, and a listing that gave
+# no result is a stated end, not a crash on a missing value.
+for name in port-to-nika nika-audit; do
+  script="$KIT/workflows/$name.js"
+  if grep -qF 'pipeline(batch,' "$script" && grep -qF '.slice(0, MAX_FILES)' "$script" && ! grep -qF 'pipeline(found.files' "$script"; then
+    echo "ok   $name runs its agents over a capped list"
+  else bad "$name starts one agent per file with no cap"; fi
+  if grep -qF "found && Array.isArray(found.files)" "$script" && grep -qF "The file listing gave no result." "$script"; then
+    echo "ok   $name ends plainly when the listing gave no result"
+  else bad "$name does not guard a missing file listing"; fi
+done
+if grep -qF 'runs nothing for real' "$KIT/workflows/nika-forge.js"; then
+  bad "nika-forge says it runs nothing for real while its reviewer rehearses"
+else echo "ok   nika-forge says what its one rehearsal does"; fi
+
 if [ "$FAILS" -eq 0 ]; then echo "all green"; else
   echo "$FAILS failure(s)"
   exit 1

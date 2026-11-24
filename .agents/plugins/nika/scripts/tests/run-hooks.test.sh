@@ -60,6 +60,15 @@ check "the newest trace is named" "$out" "$TRACE"
 check "the hint is context for the agent" "$out" '"hookEventName": "PostToolUseFailure"'
 out="$(failure '/opt/tools/nika run workflows/a.nika' 1 "$ROOT/empty" | hint)"
 check "a binary called by its path counts, and no trace store is said" "$out" "nika trace ls"
+ln -s "$ROOT/nowhere.ndjson" "$P/.nika/traces/9999-a-link-that-leads-nowhere.ndjson"
+out="$(failure 'nika run workflows/a.nika' 1 "$P" | hint)"
+rc=$?
+check "a trace link that leads nowhere does not stop the hint" "$out" "$TRACE"
+if [ "$rc" -eq 0 ]; then echo "ok   and the hook still exits 0"; else
+  echo "FAIL the hint exited $rc on a dangling link"
+  FAILS=$((FAILS + 1))
+fi
+rm -f "$P/.nika/traces/9999-a-link-that-leads-nowhere.ndjson"
 out="$(failure 'nika run workflows/a.nika' 4 "$P" | hint)"
 check "exit 4 is a pause, not a failure" "$out" "is a pause, not a failure"
 check "a pause is never answered by the agent" "$out" "Never answer it yourself"

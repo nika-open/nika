@@ -1,7 +1,7 @@
 export const meta = {
   name: 'nika-forge',
   description: 'Build one Nika workflow from a plan the person approved: gather the facts, write it phase by phase, review it cold, repair at most twice, report with the check verdict',
-  whenToUse: 'After the person approved the plan of a new workflow and the job is long enough to be worth several agents. It asks no question, answers no gate and runs nothing for real.',
+  whenToUse: 'After the person approved the plan of a new workflow and the job is long enough to be worth several agents. It asks no question and answers no gate. Its one run is the reviewer\'s rehearsal on the mock model, only when nothing leaves the machine: the tools and the writes of that rehearsal are real. Otherwise the plan is read with a dry run, which executes nothing.',
   phases: [
     { title: 'Design', detail: 'the engine reads the sentence, a scout gathers the facts the design depends on' },
     { title: 'Write', detail: 'the author role builds the file phase by phase, a check after each' },

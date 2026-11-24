@@ -23,10 +23,18 @@ TRACE = re.compile(r"^[A-Za-z0-9_./:-]+\.ndjson$")
 
 
 def newest_trace(cwd):
-    traces = glob.glob(os.path.join(cwd, ".nika", "traces", "*.ndjson"))
-    if not traces:
+    """The newest trace by modification time; a link that leads nowhere is not one."""
+    newest, when = None, -1.0
+    for path in glob.glob(os.path.join(cwd, ".nika", "traces", "*.ndjson")):
+        try:
+            stamp = os.path.getmtime(path)
+        except OSError:
+            continue
+        if stamp > when:
+            newest, when = path, stamp
+    if newest is None:
         return None
-    path = os.path.relpath(max(traces, key=os.path.getmtime), cwd)
+    path = os.path.relpath(newest, cwd)
     return path if TRACE.match(path) else None
 
 
@@ -68,4 +76,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:  # pylint: disable=broad-except
+        # The header's promise: this hook cannot block, whatever it met.
+        sys.exit(0)

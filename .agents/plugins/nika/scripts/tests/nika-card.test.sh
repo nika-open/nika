@@ -19,6 +19,8 @@ command -v python3 >/dev/null 2>&1 || {
 CARD="$(cd "$(dirname "$0")/.." && pwd)/nika-card.py"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
+export HOME="$ROOT/home"
+mkdir -p "$HOME"
 FAILS=0
 check() { # check <label> <haystack> <needle>
   if printf '%s' "$2" | grep -qF -- "$3"; then echo "ok   $1"; else
@@ -64,7 +66,7 @@ chmod +x "$ROOT/bin/nika"
 : >"$ROOT/small.nika"
 : >"$ROOT/wide.nika"
 : >"$ROOT/mute.nika"
-card() { NIKA_BIN="$ROOT/bin/nika" python3 "$CARD" "$@" 2>&1; }
+card() { env -u CARGO_TARGET_DIR NIKA_BIN="$ROOT/bin/nika" python3 "$CARD" "$@" 2>&1; }
 
 out="$(card "$ROOT/small.nika")"
 rc_is "a clean check is exit 0" 0 $?
@@ -114,6 +116,13 @@ sed -i.bak 's|"net":{"http":\[\]}|"net":{"http":["new.example.org"]}|' "$ROOT/bi
 out="$(card "$ROOT/small.nika" --since-plan)"
 rc_is "an effect added since the plan is exit 4" 4 $?
 check "and the added effect is named" "$out" "leaves the machine: host new.example.org"
+# Recording the plan again replaces it. That cannot be prevented from here,
+# so it is made visible: the card names what the earlier plan did not have.
+out="$(card "$ROOT/small.nika" --plan)"
+check "a plan recorded again says it replaced the earlier one" "$out" "REPLACED the plan remembered for this file"
+check "and names the effect the earlier plan did not have" "$out" "leaves the machine: host new.example.org"
+out="$(card "$ROOT/small.nika" --plan)"
+check "the same plan recorded twice adds nothing" "$out" "no effect was added"
 mv "$ROOT/bin/nika.bak" "$ROOT/bin/nika"
 
 out="$(card "$ROOT/mute.nika")"

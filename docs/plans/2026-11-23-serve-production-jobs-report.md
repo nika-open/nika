@@ -11,16 +11,23 @@
 >
 > Update, 24 November: workstream C is built on `feat/serve-job-attempts`,
 > stacked on this branch. Sections 1 to 7, 9 and 10 now cover it.
-> A and B are pull request #1896, C is #1898, stacked on it. Neither is
-> merged.
+> A and B are pull request #1896, C is #1898, stacked on it.
+>
+> Update, 24 November: both are merged on `main`, squashed. #1896 landed as
+> `e1da83653` and #1898 as `85887b847`, after main had merged the `url` fix
+> as #1895 and #1902. Before each merge the branch took `main` in, passed
+> the pre-push gate (14,636 then 14,730 tests) and the whole Diamond CI
+> against `main`, `rust (tests)` included. The tree of `85887b847` is the
+> tree those runs tested. The branch commits in section 10 are the history
+> behind the two squashes; what follows is in sections 6, 7 and 11.
 
 ## 1. Where the three workstreams stand
 
 | Workstream | State | Record |
 |---|---|---|
-| A · attribute, list and retain jobs; manage schedules | built, tested, reviewed | ADR-155 (accepted) |
-| B · share the workers fairly; cap the calls per provider | built, tested, reviewed | ADR-155 (accepted) |
-| C · re-attempt interrupted jobs | built and tested on the stacked branch `feat/serve-job-attempts`; review in section 5 | ADR-156 (accepted) |
+| A · attribute, list and retain jobs; manage schedules | built, tested, reviewed; merged as `e1da83653` (#1896) | ADR-155 (accepted) |
+| B · share the workers fairly; cap the calls per provider | built, tested, reviewed; merged with A | ADR-155 (accepted) |
+| C · re-attempt interrupted jobs | built, tested, reviewed; merged as `85887b847` (#1898) | ADR-156 (accepted) |
 
 Workstream C touches the run and proof vocabulary, retry ownership and a
 closed DTO. No line of it was written before ADR-156 was accepted. One item
@@ -139,8 +146,9 @@ second consumer. The kernel is not touched.
 4. **The roadmap line.** `ROADMAP.md` now names this work for 0.125 beside
    native video. The other public pages that repeat "native video is planned
    for 0.125" were left as they are.
-5. **The dependency fix** (section 8) rides this branch as one commit. It
-   touches nothing of the serve work and can go to `main` on its own.
+5. **The dependency fix** (section 8) rode this branch as one commit. It
+   went to `main` on its own as #1895, with the same files, before #1896
+   merged.
 6. **Two places where C reads ADR-156 more narrowly than its text.** Both
    are written in the ADR's notes, the spec and the operations guide:
    - section 3 says a job whose journal this engine cannot resume stays

@@ -397,6 +397,9 @@ mod tests {
         let anatomy = include_str!(
             "../../../.agents/plugins/nika/skills/nika-authoring/references/job-anatomy.md"
         );
+        let behaviors = include_str!(
+            "../../../.agents/plugins/nika/skills/nika-authoring/references/engine-behaviors.md"
+        );
         let slug_shaped = |token: &str| {
             token.contains('-')
                 && !token.starts_with('-')
@@ -426,7 +429,7 @@ mod tests {
             shown >= 40,
             "the « Shown in » column was read ({shown} slugs)"
         );
-        for line in map.lines().chain(anatomy.lines()) {
+        for line in map.lines().chain(anatomy.lines()).chain(behaviors.lines()) {
             for token in line.split('`').skip(1).step_by(2) {
                 if slug_shaped(token) && numbered(token) {
                     assert!(

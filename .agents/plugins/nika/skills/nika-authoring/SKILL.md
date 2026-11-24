@@ -67,7 +67,8 @@ A small edit to an existing workflow keeps its scope and skips the design.
 | Task | Reference |
 |---|---|
 | What Nika can do: every source, data step, decision, model route, medium and schedule, with the example that shows it | [Capabilities](references/capabilities.md) |
-| The phases of a real job, the depth bar, the patterns (state, idempotency, validation, budget, run report, fan-out, recover, the always-run report, approve once and the single gate), the engine behaviors to design around (secret taint, expression and field limits, binary downloads, stale files, mock answers, resume) and the thin-workflow checklist | [Job anatomy](references/job-anatomy.md) |
+| The phases of a real job, the depth bar, the patterns (state, idempotency, validation, budget, run report, fan-out, recover, the always-run report, approve once and the single gate) and the thin-workflow checklist | [Job anatomy](references/job-anatomy.md) |
+| A refusal or a surprise that is the engine's, not your file's: secret taint, expression and field limits, binary downloads, stale files, mock answers, resume, two hints that cannot both clear | [Engine behaviors](references/engine-behaviors.md) |
 | A seat route (`run.access`, ACP), images an agent application draws (`agent.images`), seat images versus `nika:image_generate`, what mock can rehearse | [Seats and images](references/seats-and-images.md) |
 | Find a local owner or example for a new graph | [Workspace and examples](references/workspace-and-examples.md) |
 | Envelope, values, modifiers, verbs, permits or CEL syntax | [Language](references/language.md) |

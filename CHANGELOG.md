@@ -16,6 +16,157 @@ section below at tag time (`bash scripts/release/changelog-assemble.sh --fold
 pull requests collided on 2026-08-24 with no source overlap between them, and
 `--check` refuses a hand-written bullet in this section.
 
+## [0.125.1](https://github.com/nika-open/nika/compare/v0.125.0..v0.125.1) - 2026-11-25
+
+Nika 0.125.1 is a corrective release. The `exec` floor now refuses a recursive delete that leaves
+the working directory, in a `command:` argv and on a `shell:` line alike, where 0.125.0 judged
+`rm` by its program name alone. The kit's helpers no longer run a `nika` binary a project
+supplies, and the kit builds, runs and improves a job as one loop. `nika wire detected` sees every
+host `nika wire` can connect, `nika explain` asks the installed agentic CLIs for their login only
+for the two codes that print it, and the engine's SDK guard reads what the published
+`@nika-open/nika` 0.125.0 closes.
+
+Some workflows that 0.125.0 ran are now refused.
+
+- A `command:` or `shell:` line that deletes recursively (`rm -r`, `rm -rf`, `find … -delete`)
+  an absolute path, or one that climbs above the working directory with `..`, meets
+  `NIKA-SEC-001` at `nika check`, and the run refuses the same command before spawn. A delete
+  inside the working directory stays admitted: name the path relative to it (`cwd:` sets it), or
+  use `nika:remove_file` under a `permits.fs.write` bound.
+
+The file format, the embedded spec (`2edc285`), the model catalog and the SDK machine protocol are
+unchanged. The known limits of 0.125.0 still hold, each with a way around it:
+[Known limits](https://docs.nika.sh/changelog/known-limits).
+
+### Added
+
+- **The plugin builds, runs and improves a job as one loop.** A new job goes
+  from a plan the person approves once (phases, an effect card read off
+  `nika check` and `nika inspect`, the cost per run) to a file built phase
+  by phase, reviewed cold by a new `nika-reviewer` role above eight tasks
+  or when an effect leaves the machine, repaired at most twice and handed
+  over with the check's verdict, quoted. Every page that can stop for the
+  person names what needs their yes and what never waits for them.
+  `/nika:run` starts a long run in the background, shows a gate's question
+  word for word and reads a stopped run before any second run;
+  `/nika:report` builds one self-contained page from a run's record,
+  `/nika:improve` proposes only what the recorded runs prove and
+  `/nika:connect` offers an MCP server before writing its declaration. One
+  resolver, `bin/nika-kit`, decides which binary every helper uses, the
+  skills print the binary's own builtins and routes when they load, and a
+  routing guide gives a method with no model name in it. In Claude Code,
+  hooks repeat the loop's rules; each rule is also the stated step of a
+  skill, so it holds on hosts without them.
+- **The plugin designs a real job, not a three-step chain** — the authoring skill gains a capability map (every source, data step, decision, model route, medium, MCP server and schedule, each with the example that shows it), a job anatomy (five phases, a depth bar, patterns for state, idempotency, validation, budgets, a dead source, the always-run report and the single gate), an engine-behaviors guide and a seats-and-images guide, all written into a project by `nika init`. A new job is designed first and deepened with every addition that widens no effect; additions that would (a new send, host, paid model, seat route, program or MCP server) are offered in one line. A gate stands only where `nika check` requires one, before a send or before an effect that cannot be undone; an addition that would bring a gate is offered, not added. `/nika:ideas` proposes five workflows from the project, `/nika:capture` turns the conversation's recent work into a checked workflow, both also served as MCP prompts. The intent hint fires on wide jobs (many pages, locales or images, a model comparison, a watcher, a reconciliation) in English and French, and the edit hook judges with the session's own engine build inside the engine tree.
+
+### Changed
+
+- **The SDK guard reads what the published `@nika-open/nika` 0.125.0 closes.**
+  `published_sdk.json` is re-read from that package's `dist`, which still enforces machine
+  protocol 2, and every closed set of `@supernovae-st/nika` 0.124.0 is unchanged. One parser is
+  new: the access offer of `GET /v1/access-offers/{name}`. It closes the keys of the offer, of
+  its declared route, of each route row with its adapter and model, and of each listing, and the
+  values of the offer's `schema` and `status`, of a row's `protocol`, `profile`, `status` and
+  model `status`, and of a listing's `status`. It reads the declared route's values as text, so
+  those stay open. The other runtime changes in that `dist` read a task's access rows on local
+  frames only and rename the native packages, so they close nothing. The guard also lists a
+  value it had missed: the snapshot acknowledgement's `status`, which the SDK already closed to
+  `accepted` in 0.124.0.
+
+### Fixed
+
+- **`nika explain` launches another program only for the two codes that
+  print the seat line.** Every explain, from the CLI and from the MCP
+  `nika_explain` tool, first asked each installed agentic CLI for its
+  login (`claude auth status`, `codex login status`) and read which
+  provider keys the environment holds, then kept the answer for
+  `NIKA-INFER-001` and `NIKA-1800` only. The question is now asked for
+  those two codes alone, and their text is unchanged; every other code
+  answers from the tables embedded in the binary and waits for no other
+  program.
+- **`nika wire detected` sees every host `nika wire` can connect.** Its
+  detection read a six-row list of its own beside twenty-one wire targets,
+  so a machine with Codex, Gemini CLI, Copilot CLI, Amp or Kimi Code
+  answered "no MCP client detected" and a Codex config was never brought up
+  to date. Each wire target now says where its config lives, the writer and
+  the detection read that one answer, and a client added to `wire` is
+  detected with no second list to remember. `detected` means the file the
+  writer would patch is already there: OpenCode and Junie are seen from the
+  project file `wire` writes, Continue once it has been wired, and a
+  repository that ships a `.cursor/mcp.json` no longer makes `detected`
+  create a Cursor config in a home that has none. `detected` now wires host
+  by host: a config its writer refuses is reported on its own line, which
+  names the host, the file and the reason, and is left as it is; the other
+  hosts are wired, and the exit code is 3 so a script sees the skip. A Zed
+  or Amp settings file that cannot be read is such a refusal: it used to
+  print "manual" and call the file JSONC, exit 0. One that reads but is not
+  plain JSON stays manual, and the line now says it may hold comments or be
+  damaged. A client wired by name and `wire all` still write nothing when
+  one config is refused. `--dry-run` shows the plan and does not test that a
+  file can be written: a settings folder that is read-only is reported by
+  the run, on a line that names the host and its settings file. Under
+  `detected`, on every host whose file `wire` rewrites, an entry that runs a
+  command with exactly the args `wire` writes is left as it is, whatever
+  that command's path and the entry's other keys, so an absolute path pinned
+  for a desktop application is kept; `nika wire <client>` by name still
+  rewrites it. An entry with those args and no command, or with anything but
+  strings among its args, is repaired. `nika doctor` reads the fifteen new
+  hosts by the same rule; its five JSON rows keep the reading they always
+  had. Hermes, the one YAML host, is never rewritten: once its `config.yaml`
+  is there, `wire` prints the block to add by hand unless the file already
+  holds it. Every settings file is read through one guarded reader: a link
+  is followed, what it leads to must be a regular file of at most 4 MiB, and
+  anything else in its place (a FIFO, a device, a directory) is refused by
+  `wire` with its reason and read as not wired by `nika doctor`. A FIFO used
+  to block both, and a link to an endless device to read until memory ran
+  out. A settings file that is a link is kept as a link when what it leads
+  to stays in the same project (a project config) or under the home folder
+  (every other): `wire` writes beside the real file, so a config kept in a
+  dotfiles folder is updated in place. A link that leads anywhere else, or a
+  linked folder that would take a new config elsewhere, is refused on its
+  own line and left as it is, and a link whose target is gone counts as no
+  file. `nika doctor` and `nika welcome` report the new hosts once their
+  config is on the machine: the six they always listed keep their rows, an
+  absent host gets no new line and no config, and doctor's coverage line now
+  reads 21 probed with nothing declared-not-probed.
+
+### Security
+
+- **The exec floor refuses a recursive delete that leaves the working
+  directory, in argv form and on a `shell:` line alike.** The argv floor
+  judged a `command:` only by its program identity and an interpreter's
+  inline-eval form, so `rm` was an ordinary program whatever its
+  arguments. It now refuses `rm` with a recursive flag (`-r`, `-R`,
+  `--recursive` or a prefix of it, wherever it sits before `--`) and
+  `find` with `-delete`, when a target is absolute or climbs above the
+  working directory with `..`, read lexically; a Windows drive prefix
+  (`C:\x`) counts as absolute on every host. `nika check` reports a
+  literal argv as `NIKA-SEC-001`, and the run refuses the same argv,
+  resolved, before spawn. Every simple command of a `shell:` line is
+  judged by the same rule, whether it follows `;`, `&`, `|`, a newline or
+  a line continuation, or sits behind an assignment, `exec`, `time` or a
+  reserved word, with redirection targets set aside. So `rm -fr /x`,
+  `rm -r -f /x`, `rm -R ../x` and `true & rm -fr /x` meet the refusal the
+  literal `rm -rf /` pattern gave. A delete inside the
+  working directory (`["rm", "-rf", "build"]`, `find . -delete`) and a
+  non-recursive `rm` stay admitted. The finding's repair names a path
+  relative to the working directory (`cwd:` sets it) or `nika:remove_file`
+  under a `permits.fs.write` bound. Not judged: symbolic links, and a
+  `cwd:` that points outside the project; the OS sandbox built from
+  `permits:` still bounds what the child can write.
+- **The plugin's helpers never run a binary a project supplies.** The edit
+  hook used to judge with a build found inside the repository it was
+  working in. The binary now comes from the session only: `NIKA_BIN` when
+  set, else inside the engine tree the session's own build folder
+  (`CARGO_TARGET_DIR`, absolute and outside the tree), else the first
+  `nika` on the PATH; `bin/nika-kit` prints which one and why. Text the
+  helpers read from a project or from a run's record (names, paths, a
+  gate's question) reaches the agent filtered, bounded and marked as data,
+  and a path printed inside a suggested command is shell-quoted.
+  `/nika:report` writes under the project's `out/` only and follows no
+  link there. The stop gate keeps what it has checked across a second
+  start of the same session, and the plain verdict, the list of waiting
+  runs and the facts read at skill load give the binary a time limit.
 ## [0.125.0](https://github.com/nika-open/nika/compare/v0.124.5..v0.125.0) - 2026-11-24
 
 Nika 0.125.0 puts `nika serve` behind an application. A job carries the owner and labels its

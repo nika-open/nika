@@ -3,15 +3,23 @@
 
 //! The one-off answer a `headless-prompt` hint over an effect teaches: a
 //! confirm gate is refused once with `--answer <id>=false`; a choice gate
-//! takes one of its `choices:`, since `false` is no answer it accepts.
+//! takes one of its `choices:` and an input gate the text it asks for,
+//! since `false` is no answer either of them means.
 
 /// The clause that settles this invocation of the gate `id`, given its
-/// `args`: the confirm refusal, or a valid choice (the last literal one as
-/// the example, the list named; `<choice>` when the list is templated).
+/// `args`: the confirm refusal, the typed text of an input, or a valid
+/// choice (the last literal one as the example, the list named; `<choice>`
+/// when the list is templated).
 pub(super) fn settle_once(id: &str, args: Option<&serde_json::Value>) -> String {
     let arg = |name: &str| args.and_then(|a| a.get(name));
-    if arg("mode").and_then(serde_json::Value::as_str) != Some("choice") {
-        return format!("or refuse this invocation with `--answer {id}=false`.");
+    match arg("mode").and_then(serde_json::Value::as_str) {
+        Some("choice") => {}
+        Some("input") => {
+            return format!(
+                "or answer this invocation with the text it asks for (`--answer {id}=<text>`)."
+            );
+        }
+        _ => return format!("or refuse this invocation with `--answer {id}=false`."),
     }
     let literal: Option<Vec<&str>> = arg("choices")
         .and_then(serde_json::Value::as_array)
@@ -62,7 +70,8 @@ mod tests {
     }
 
     /// A choice gate is answered with one of its choices, never `false`; a
-    /// templated list gets a placeholder; a confirm keeps its refusal.
+    /// templated list gets a placeholder; an input gate gets its text; a
+    /// confirm keeps its refusal.
     #[test]
     fn the_one_off_answer_is_one_the_gate_accepts() {
         let listed = advice("{ mode: choice, message: \"send?\", choices: [\"send\", \"no\"] }");
@@ -81,12 +90,19 @@ mod tests {
             templated.contains("(`--answer ask=<choice>`)") && !templated.contains("ask=false"),
             "{templated}"
         );
+        let input = advice("{ mode: input, message: \"text to send?\" }");
+        assert!(
+            input.contains(
+                "or answer this invocation with the text it asks for (`--answer ask=<text>`)."
+            ) && !input.contains("ask=false"),
+            "{input}"
+        );
         let confirm = advice("{ mode: confirm, message: \"send?\" }");
         assert!(
             confirm.contains("or refuse this invocation with `--answer ask=false`."),
             "{confirm}"
         );
-        for kept in [&listed, &templated, &confirm] {
+        for kept in [&listed, &templated, &input, &confirm] {
             assert!(
                 kept.contains("--answer ask=<value>")
                     && kept.contains("Keep this gate without `default:`"),

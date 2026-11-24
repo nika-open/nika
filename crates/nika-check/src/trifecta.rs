@@ -26,13 +26,16 @@
 //!   credited only before an egress task whose own `when:` tests that
 //!   answer ([`crate::analyzer::gates::answer_tested_by`]: an exact `with:`
 //!   binding of its output that some listed choice makes false, or a
-//!   binding of a `nika:jq` stage that transforms it). A task that only
+//!   binding of a `nika:jq` stage that reads it). A task that only
 //!   waits on it (`after: { ask: success }`) runs whatever the answer, and
-//!   is refused as for no gate. A confirm keeps the dominance credit: the
-//!   consent lane (`NIKA-SEC-014`) judges its « no ». A test made by any
-//!   other upstream stage (a model, a subprocess, another tool) is not read
-//!   (an over-approximation: the repair is the answer tested where the
-//!   effect is).
+//!   is refused as for no gate. An input gate also counts before an egress
+//!   task that sends nothing but the typed answer
+//!   ([`crate::analyzer::gates::answer_sent_by`]): what it sends is what the
+//!   person typed. A confirm keeps the dominance credit: the consent lane
+//!   (`NIKA-SEC-014`) judges its « no ». A test made by any other upstream
+//!   stage (a model, a subprocess, another tool) is not read (an
+//!   over-approximation: the repair is the answer tested where the effect
+//!   is).
 //! - **the advisory side** (`trifecta/steering.rs`) = legs armed, a `when:`
 //!   that reads untrusted content decides whether an egress task runs
 //!   without entering an argument. A hint, never this lane's refusal.
@@ -140,13 +143,7 @@ pub fn scan_trifecta_declared(
             )
             .with_declared_roles(declared.private_read, declared.egress);
             match text_gate(&task.action).filter(|_| gate) {
-                Some(text) => {
-                    subject.with_answer_tested_by(crate::analyzer::gates::answer_tested_by(
-                        wf,
-                        &task.id.value,
-                        text.choices.as_deref(),
-                    ))
-                }
+                Some(text) => subject.with_answer_tested_by(answered_by(wf, &task.id.value, &text)),
                 None => subject,
             }
         })
@@ -373,6 +370,21 @@ fn defaulted_gate(action: &RawAction) -> bool {
 struct TextGate {
     /// Its `choices:`, when it is a choice whose list is literal strings.
     choices: Option<Vec<String>>,
+    /// A literal `mode: input`: the person types the answer.
+    input: bool,
+}
+
+/// The tasks a text gate is credited before, as subject indices: those whose
+/// own `when:` tests its answer and, for an input gate, those that send
+/// nothing but the typed answer (`crate::analyzer::gates::answer_sent_by`).
+fn answered_by(wf: &RawWorkflow, gate: &str, text: &TextGate) -> Vec<usize> {
+    let mut credited = crate::analyzer::gates::answer_tested_by(wf, gate, text.choices.as_deref());
+    if text.input {
+        credited.extend(crate::analyzer::gates::answer_sent_by(wf, gate));
+        credited.sort_unstable();
+        credited.dedup();
+    }
+    credited
 }
 
 /// The text gate `action` is: any `mode:` but a confirm (`mode:` absent or
@@ -389,7 +401,12 @@ fn text_gate(action: &RawAction) -> Option<TextGate> {
     let mode = args.and_then(|o| o.get("mode"))?;
     match mode.as_str() {
         Some("confirm") => return None,
-        Some("input") => return Some(TextGate { choices: None }),
+        Some("input") => {
+            return Some(TextGate {
+                choices: None,
+                input: true,
+            });
+        }
         _ => {}
     }
     let choices = args
@@ -400,7 +417,10 @@ fn text_gate(action: &RawAction) -> Option<TextGate> {
                 .map(|c| c.as_str().filter(|s| !s.contains("${{")).map(str::to_owned))
                 .collect::<Option<Vec<String>>>()
         });
-    Some(TextGate { choices })
+    Some(TextGate {
+        choices,
+        input: false,
+    })
 }
 
 /// A BLOCKING `invoke: nika:prompt` (no `default:` arg) is the NEP's gate.

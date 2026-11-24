@@ -34,9 +34,10 @@
 //! answers with text, not a yes, so it counts only before an egress task
 //! whose own `when:` tests that answer
 //! ([`TrifectaSubject::answer_tested_by`]), since a task that merely waits
-//! on it runs whatever the answer. One violation per ungated tainted egress
-//! task, message opening with the NEP's verbatim « lethal trifecta complete
-//! · human gate required ».
+//! on it runs whatever the answer; an input gate also counts before an
+//! egress task that sends only the typed answer. One violation per ungated
+//! tainted egress task, message opening with the NEP's verbatim « lethal
+//! trifecta complete · human gate required ».
 //!
 //! The judge is pure L0 (the same shape the dead `policy_violations`
 //! set): it
@@ -99,7 +100,8 @@ pub struct TrifectaSubject {
     pub declared_egress: bool,
     /// For a gate whose answer is text rather than a typed yes (a `mode:
     /// choice` or `mode: input` prompt): the subjects whose own `when:` tests
-    /// that answer (indices into the same slice). The judge credits such a
+    /// that answer, and for an input gate those that send nothing but the
+    /// typed answer (indices into the same slice). The judge credits such a
     /// gate only before an egress task listed here: one that merely waits on
     /// the gate runs whatever the answer. `None`: a gate credited wherever it
     /// dominates (a confirm, whose « no » the consent lane judges).
@@ -128,9 +130,10 @@ impl TrifectaSubject {
     }
 
     /// Mark the subject a gate whose answer is text (a `mode: choice` or
-    /// `mode: input` prompt) and list the subjects whose `when:` tests that
-    /// answer (the projection reads the guards; the judge credits the gate
-    /// only before those).
+    /// `mode: input` prompt) and list the subjects it is credited before:
+    /// those whose `when:` tests that answer, and for an input gate those
+    /// that send only the typed answer (the projection reads the tasks; the
+    /// judge credits the gate only before those).
     #[must_use]
     pub fn with_answer_tested_by(mut self, tested_by: Vec<usize>) -> Self {
         self.answer_tested_by = Some(tested_by);
@@ -139,7 +142,7 @@ impl TrifectaSubject {
 
     /// Whether this subject, a blocking gate, is credited before `sink`:
     /// a confirm wherever it dominates, a gate whose answer is text only
-    /// where `sink` tests that answer.
+    /// where the projection listed `sink`.
     fn credits(&self, sink: usize) -> bool {
         self.human_gate
             && self
@@ -572,8 +575,9 @@ fn untested_answer_note(gate: &str, sink: &str) -> String {
         "the gate `{gate}` dominates `{sink}`, but `{sink}` does not test its answer: only a \
          `mode: confirm` gate counts by its position alone, a choice or an input answers with \
          text, and unless the `when:` of `{sink}` tests `tasks.{gate}.output`, bound through \
-         `with:` directly or through a `nika:jq` stage, `{sink}` runs whatever the answer, the \
-         one that declines included"
+         `with:` directly or through a `nika:jq` stage that reads it, `{sink}` runs whatever the \
+         answer, the one that declines included (an input gate also counts before an effect that \
+         sends only the typed answer)"
     )
 }
 

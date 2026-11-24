@@ -237,8 +237,9 @@ fn a_guard_true_on_every_choice_tests_nothing() {
 
 /// A `mode:` the check cannot read as a literal may resolve to `choice`:
 /// it is read as one (fail-closed), so the untested POST is refused and
-/// the tested one is credited. Templated `choices:` cannot be listed, so
-/// the read of the answer alone is the test.
+/// the tested one is credited. Templated `choices:` cannot be listed, so a
+/// read of the answer is the test, unless it is only a `null` test of the
+/// binding, which every answer passes.
 #[test]
 fn a_templated_mode_is_read_as_a_choice() {
     let templated = |yaml: &str| {
@@ -257,10 +258,15 @@ fn a_templated_mode_is_read_as_a_choice() {
     assert!(r.conformance.is_empty(), "{:?}", r.conformance);
     assert_eq!(sinks(&r), [("send", Some("page"))]);
     let r = report(&templated(&choice_with_guard(
-        "\"${{ with.pick != null }}\"",
+        "\"${{ with.pick == inputs.yes }}\"",
     )));
     assert!(r.conformance.is_empty(), "{:?}", r.conformance);
     assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    let r = report(&templated(&choice_with_guard(
+        "\"${{ with.pick != null }}\"",
+    )));
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert_eq!(sinks(&r), [("send", Some("page"))]);
 }
 
 /// The shipped Foundry block, read from the bundled release: its `review`
@@ -328,19 +334,43 @@ fn a_jq_stage_that_does_not_bind_the_answer_tests_nothing() {
     }
 }
 
+/// [`CHOICE`] asked as an input: the person types the answer.
+fn input(yaml: &str) -> String {
+    swap(
+        yaml,
+        "args: { mode: \"choice\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"send\", \"no\"] }",
+        "args: { mode: \"input\", message: \"Type send to post this: ${{ with.brief }} / ${{ with.page }}\" }",
+    )
+}
+
+/// `send` also posts a caller input beside the answer, so it sends more
+/// than what the person typed.
+fn with_caller_field(yaml: &str) -> String {
+    let y = swap(
+        yaml,
+        "nika: choice-gate\n",
+        "nika: choice-gate\ninputs:\n  to: { type: string, default: ops }\n",
+    );
+    let y = swap(
+        &y,
+        "with: { pick: \"${{ tasks.human.output }}\" }",
+        "with: { pick: \"${{ tasks.human.output }}\", to: \"${{ inputs.to }}\" }",
+    );
+    swap(
+        &y,
+        "body: { pick: \"${{ with.pick }}\" }",
+        "body: { pick: \"${{ with.pick }}\", to: \"${{ with.to }}\" }",
+    )
+}
+
 /// An input gate follows the choice rule: only a confirm counts by position
-/// alone. With no list to enumerate, a guard that reads the answer is the
-/// test.
+/// alone, so an effect that posts more than the typed answer counts only
+/// where its `when:` tests that answer. With no list to enumerate, a guard
+/// that reads the answer is the test. An effect that posts nothing but the
+/// typed answer counts too: what it sends is what the person typed.
 #[test]
-fn an_input_gate_counts_only_where_the_effect_tests_its_answer() {
-    let input = |yaml: &str| {
-        swap(
-            yaml,
-            "args: { mode: \"choice\", message: \"Send this? ${{ with.brief }} / ${{ with.page }}\", choices: [\"send\", \"no\"] }",
-            "args: { mode: \"input\", message: \"Type send to post this: ${{ with.brief }} / ${{ with.page }}\" }",
-        )
-    };
-    let r = report(&input(CHOICE));
+fn an_input_gate_counts_where_the_effect_tests_or_only_sends_its_answer() {
+    let r = report(&input(&with_caller_field(CHOICE)));
     assert!(r.conformance.is_empty(), "{:?}", r.conformance);
     assert_eq!(sinks(&r), [("send", Some("page"))]);
     assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
@@ -348,11 +378,169 @@ fn an_input_gate_counts_only_where_the_effect_tests_its_answer() {
     for part in [
         "the gate `human` dominates `send`, but `send` does not test its answer",
         "only a `mode: confirm` gate counts by its position alone",
+        "an input gate also counts before an effect that sends only the typed answer",
     ] {
         assert!(d.contains(part), "missing `{part}`: {d}");
     }
-    let r = report(&input(&choice_with_guard("\"${{ with.pick == 'send' }}\"")));
+    let r = report(&input(&with_caller_field(&choice_with_guard(
+        "\"${{ with.pick == 'send' }}\"",
+    ))));
     assert!(r.conformance.is_empty(), "{:?}", r.conformance);
     assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
     assert_eq!(credited(&r), [("send", "human")]);
+    let r = report(&input(CHOICE));
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert_eq!(credited(&r), [("send", "human")]);
+}
+
+/// The shipped teaching block, read from the bundled release: the person
+/// edits the draft in an input gate, and `write_dossier` writes exactly the
+/// text typed there.
+const BLOCKING_GATE_BLOCK: &str = include_str!(
+    "../../../nika-onboard-knowledge/assets/knowledge-release-0.123.0-r3.5-foundry-20261016/blocks/trifecta-blocking-gate.nika"
+);
+
+/// The `write_dossier` task of [`BLOCKING_GATE_BLOCK`].
+const WRITE_DOSSIER: &str = "  write_dossier:\n    with: { text: \"${{ tasks.review.output }}\" }\n    invoke: { tool: \"nika:write\", args: { path: \"./out/dossier.md\", content: \"${{ with.text }}\" } }\n";
+
+#[test]
+fn the_shipped_blocking_gate_block_writes_only_the_typed_answer() {
+    let r = report(BLOCKING_GATE_BLOCK);
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert_eq!(credited(&r), [("write_dossier", "review")]);
+    assert!(r.is_clean(), "{r:?}");
+}
+
+/// The twins: a write that also carries the draft, or carries only the
+/// draft after the review, takes untrusted content around the person, and
+/// a write that carries the output of a task ordered after the review sends
+/// more than the typed answer while the gate still dominates it. Each one
+/// is refused.
+#[test]
+fn a_write_that_carries_more_than_the_typed_answer_is_refused() {
+    for (why, task) in [
+        (
+            "the draft beside the answer",
+            WRITE_DOSSIER
+                .replacen(
+                    "with: { text: \"${{ tasks.review.output }}\" }",
+                    "with: { text: \"${{ tasks.review.output }}\", draft: \"${{ tasks.draft.output }}\" }",
+                    1,
+                )
+                .replacen("${{ with.text }}", "${{ with.text }} ${{ with.draft }}", 1),
+        ),
+        (
+            "the draft alone, after the review",
+            WRITE_DOSSIER.replacen(
+                "with: { text: \"${{ tasks.review.output }}\" }",
+                "after: { review: success }\n    with: { text: \"${{ tasks.draft.output }}\" }",
+                1,
+            ),
+        ),
+    ] {
+        let r = report(&swap(BLOCKING_GATE_BLOCK, WRITE_DOSSIER, &task));
+        assert!(r.conformance.is_empty(), "{why}: {:?}", r.conformance);
+        assert_eq!(sinks(&r), [("write_dossier", Some("lookup"))], "{why}");
+        assert!(credited(&r).is_empty(), "{why}: {:?}", r.trifecta_mitigations);
+    }
+    let stamped = swap(
+        BLOCKING_GATE_BLOCK,
+        "tools: [\"nika:read\", \"nika:fetch\", \"nika:prompt\", \"nika:write\"]",
+        "tools: [\"nika:read\", \"nika:fetch\", \"nika:prompt\", \"nika:write\", \"nika:jq\"]",
+    );
+    let stamped = swap(
+        &stamped,
+        WRITE_DOSSIER,
+        &format!(
+            "  stamp:\n    after: {{ review: success }}\n    invoke: {{ tool: \"nika:jq\", args: {{ input: \"x\", expression: \"now\" }} }}\n{}",
+            WRITE_DOSSIER
+                .replacen(
+                    "with: { text: \"${{ tasks.review.output }}\" }",
+                    "with: { text: \"${{ tasks.review.output }}\", at: \"${{ tasks.stamp.output }}\" }",
+                    1,
+                )
+                .replacen("${{ with.text }}", "${{ with.text }} ${{ with.at }}", 1)
+        ),
+    );
+    let r = report(&stamped);
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert_eq!(sinks(&r), [("write_dossier", Some("lookup"))]);
+    let d = &r.trifecta_findings[0].detail;
+    assert!(
+        d.contains("the gate `review` dominates `write_dossier`, but `write_dossier` does not test its answer"),
+        "{d}"
+    );
+}
+
+/// The jq stage of [`WATCH_BLOCK`] earns the credit only while the answer
+/// reaches its program, the program reads it, and the effect's guard can
+/// close: a constant program, a guard true whatever `plan` holds, or an
+/// answer bound in `with:` but left out of `args.input` (which reads the
+/// answer inside a string instead) tests nothing. Dropping the answer from
+/// `args.input` altogether leaves no untrusted content in the effects, so
+/// that twin is clean with no credit claimed.
+#[test]
+fn the_watch_block_credit_needs_the_answer_read_and_a_guard_that_can_close() {
+    let plan = WATCH_BLOCK.find("\n  plan:\n").expect("the jq stage");
+    let at = plan
+        + WATCH_BLOCK
+            .get(plan..)
+            .and_then(|rest| rest.find("        expression: >-\n"))
+            .expect("its program");
+    let end = WATCH_BLOCK.find("\n  notify:\n").expect("the first effect");
+    let constant = format!(
+        "{}        expression: '{{accepted: true, changed: true, payload: {{}}, journal: \"\", state: \"\"}}'{}",
+        WATCH_BLOCK.get(..at).expect("prefix"),
+        WATCH_BLOCK.get(end..).expect("suffix"),
+    );
+    let unbound = swap(
+        &swap(
+            WATCH_BLOCK,
+            "with: { answer: \"${{ tasks.review.output }}\",",
+            "with: { answer: \"${{ tasks.review.output }}\", raw: \"answer=${{ tasks.review.output }}\",",
+        ),
+        "input: { answer: \"${{ with.answer }}\",",
+        "input: { answer: \"${{ with.raw }}\",",
+    );
+    let all = [
+        ("notify", Some("current")),
+        ("append_journal", Some("current")),
+        ("save_state", Some("current")),
+    ];
+    for (why, twin) in [
+        ("a constant program", constant),
+        ("an answer left out of the input", unbound),
+    ] {
+        let r = report(&twin);
+        assert!(r.conformance.is_empty(), "{why}: {:?}", r.conformance);
+        assert_eq!(sinks(&r), all, "{why}: {:?}", r.trifecta_findings);
+        assert!(
+            credited(&r).is_empty(),
+            "{why}: {:?}",
+            r.trifecta_mitigations
+        );
+    }
+    let dropped = swap(
+        WATCH_BLOCK,
+        "input: { answer: \"${{ with.answer }}\",",
+        "input: { answer: \"none\",",
+    );
+    let r = report(&dropped);
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert!(r.trifecta_findings.is_empty(), "{:?}", r.trifecta_findings);
+    assert!(credited(&r).is_empty(), "{:?}", r.trifecta_mitigations);
+    let tautology = swap(
+        WATCH_BLOCK,
+        "when: \"${{ with.plan.changed == true }}\"",
+        "when: \"${{ with.plan.changed == true || true }}\"",
+    );
+    let r = report(&tautology);
+    assert!(r.conformance.is_empty(), "{:?}", r.conformance);
+    assert_eq!(sinks(&r), [("notify", Some("current"))]);
+    assert_eq!(
+        credited(&r),
+        [("append_journal", "review"), ("save_state", "review")]
+    );
 }

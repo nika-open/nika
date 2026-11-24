@@ -114,16 +114,25 @@ depend on without pulling the CLI:
   `analyzer::gates::answer_tested_by`): the guard reads an exact `with:`
   binding of `tasks.<gate>.output`, and some listed choice, substituted as
   the answer, does not prove it true (for an input or a templated list, the
-  read alone); or it reads a binding of the output (or a field of it) of a
-  `nika:jq` stage whose `with:` binds the answer, directly or through
-  further such stages (`analyzer::gates::answer_derivations`: no
-  `on_error:`, no `for_each:`). An egress task that only waits on the gate
-  is refused as for no gate, and the refusal names the gate, the task and
-  the two repairs (test the answer, or `mode: confirm`). A confirm keeps
-  the dominance credit: `NIKA-SEC-014` judges its « no ». It does NOT judge
-  what the jq program computes from the answer it binds (the read of the
-  derived binding is the test), nor a test made through any other stage
-  (`infer:`, `agent:`, `exec:`, another tool): over-approximated, refused.
+  read counts unless the guard is proven true with nothing substituted or
+  only compares the binding itself to `null`); or it reads a binding of the
+  output (or a field of it) of a `nika:jq` stage, under the same two
+  exclusions (`analyzer::gates::answer_derivations`: no `on_error:`, no
+  `for_each:`, `args.input` reads a `with:` key bound to the answer or to
+  such a stage, and the literal `expression` starts a `.` path, the field
+  that carries it when the input is an object, read as text). A literal
+  input gate is also credited before an egress task that sends only the
+  typed answer (`analyzer::gates::answer_sent_by`: every `with:` value is
+  the answer, a field of it, or `const.*`/`secrets.*` only, and the verb and
+  the `when:` read nothing else; never an `infer:`, an `agent:` or a
+  `for_each:`). An egress task that only waits on the gate is refused as for
+  no gate, and the refusal names the gate, the task and the two repairs
+  (test the answer, or `mode: confirm`). A confirm keeps the dominance
+  credit: `NIKA-SEC-014` judges its « no ». It does NOT judge what the jq
+  program computes from the answer it reads (a read of the derived binding
+  is the test), nor a path read after the program rebinds `.`, nor a test
+  made through any other stage (`infer:`, `agent:`, `exec:`, another tool):
+  over-approximated, refused.
 - **branch steering** (`trifecta/steering.rs`, the advisory side of the
   trifecta lane) — the hint `branch-steering`, never a finding. With the
   three legs armed (`nika_cap::TrifectaVerdict::armed`, read off the verdict

@@ -531,8 +531,10 @@ fn security_fix_hint(code: &str) -> Option<&'static str> {
              with text, not a yes: it counts only before an effect whose own \
              `when:` tests that answer (`when: ${{ with.pick == 'send' }}` on \
              a `with:` binding of its output, or on the output of a `nika:jq` \
-             stage that binds it), and an effect that only waits on it runs \
-             whatever the answer, so it is refused as if no gate stood there",
+             stage whose program reads it), and an effect that only waits on \
+             it runs whatever the answer, so it is refused as if no gate stood \
+             there. An input gate also counts before an effect that sends only \
+             the typed answer: what it sends is what the person typed",
         ),
         _ => None,
     }
@@ -834,8 +836,9 @@ mod tests {
             "Only a `mode: confirm` gate counts by its position alone",
             "A `mode: choice` or `mode: input` gate answers with text, not a yes",
             "it counts only before an effect whose own `when:` tests that answer",
-            "or on the output of a `nika:jq` stage that binds it",
+            "or on the output of a `nika:jq` stage whose program reads it",
             "an effect that only waits on it runs whatever the answer",
+            "An input gate also counts before an effect that sends only the typed answer",
         ] {
             assert!(cli.text.contains(fact), "`{fact}` missing:\n{}", cli.text);
         }

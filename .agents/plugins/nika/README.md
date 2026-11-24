@@ -26,8 +26,8 @@ codex plugin add nika@nika
 Cursor, Grok Build and other clients: see
 [Install in your client](https://github.com/nika-open/nika-plugins#install-in-your-client).
 Without a plugin, `nika init` writes part of this kit into a repository: the
-authoring skill, the three hooks, the Cursor rules and subagents, and the
-oracle wiring.
+authoring skill, the three hooks, the Cursor rules, three of the five
+subagents (author, debugger, migrator) and the oracle wiring.
 
 ## What one install gives your agent
 
@@ -37,9 +37,12 @@ oracle wiring.
 | `nika-debugging` skill | run forensics: trace ls → show → outputs → verify · resume lines · surgical reruns |
 | `nika-operating` skill | day-2 hardening: spend caps · permits · secrets · model swaps · CI goldens · OTLP export |
 | `nika-migration` skill | convert scripts, CI jobs and prompt chains to workflows — mapping table + parity protocol |
-| `nika-author` subagent | writes or repairs the requested artifact, checks it and reports blockers; launching belongs to the conversation |
+| `nika-author` subagent | designs, writes phase by phase and repairs the requested artifact, and ends its hand-over with the check's verdict on the file, quoted; launching belongs to the conversation |
+| `nika-reviewer` subagent | judges a finished workflow cold: it receives the person's sentence and the file path, nothing of the author's reasons, and returns asked versus delivered, the depth card, effects versus permits, the cost line `nika check` prints and what it could not verify. It edits nothing |
+| `nika-scout` subagent | gathers the facts a design needs (files and their shape, existing workflows, catalog lookups, what a past run did) on a small fast model; read-only |
 | `nika-debugger` subagent | root-causes a failed or paused run from its hash-chained trace, hands back the exact resume line |
 | `nika-migrator` subagent | ports existing automation: inventory → native-first mapping → check loop → golden pin |
+| role settings (Claude Code) | every role inherits the session's model, so the choice and the bill stay with the person; only the scout names a cheaper one. Each has an effort level and a turn cap. The author and the debugger keep a small project memory of repairs that worked, project conventions and hosts that flake, never a secret, a data value or a personal detail. Other hosts read the same bodies and ignore the settings they do not know |
 | language rule | the 4-verb surface (`infer` · `exec` · `invoke` · `agent`), auto-loaded on `*.nika` |
 | delegation rule | teaches the agent WHEN to propose a workflow (repeatable · multi-step · spend-bound AI work) and which bundled surface to reach for |
 | `/nika:check` · `/nika:explain` · `/nika:compile` | audit a file · explain a finding code · compile an exact skeleton or conservative edit |

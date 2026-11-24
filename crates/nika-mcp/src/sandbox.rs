@@ -18,7 +18,7 @@
 //!   [`NoopSandbox`](nika_kernel::command_sandbox::NoopSandbox)
 //!   elsewhere (named by the note on every connect — never silent).
 //! - **Policy** — the ONE knob the exec composition reads (`NIKA_SANDBOX`
-//!   · #889), judged before any process starts ([`admit_spawn`]). A server
+//!   · #889), judged before any process starts (`admit_spawn`). A server
 //!   always runs inside a boundary, so it is judged as an `exec:` child
 //!   under `permits:`: with no backend, `auto` (the default) and `require`
 //!   refuse it (NIKA-1710) and only the explicit `off` waiver starts it

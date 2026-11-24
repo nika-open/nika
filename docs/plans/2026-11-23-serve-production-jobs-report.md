@@ -251,6 +251,16 @@ Gates on `439145eac`, the commit that closes the reviews:
 | Target | Result |
 |---|---|
 | `nika-serve` and `nika-dap`, every test under nextest | 1,044 passed, 5 skipped (577 of `nika-serve`, 467 of `nika-dap`) |
+| `nika-cli`, every test with its integration files, `NIKA_KEYCHAIN=off`, on `b29bb554c` | 1,156 of 1,164 passed; the 8 others are conformance tests that read `nika-spec` and stop when it is absent. With `NIKA_SPEC_DIR` set to `nika-spec` at `SPEC_PIN`, their four binaries passed, 26 of 26 |
+
+Diamond CI, which runs every test of the workspace with its integration
+files, runs on pull requests to `main` only. #1898 targets the branch of
+#1896 and gets that run once it is retargeted to `main`. The pre-push gate
+runs the library tests. Of the crates C changes, the integration files of
+`nika-serve` and `nika-dap` ran under nextest above and those of `nika-cli`
+in the row above; `nika-cli-host` and `nika-service-execution` have none.
+The integration files of the crates C does not change did not run on this
+branch.
 
 The CI of #1898 caught one defect the local gates had not run: the
 `public-api.txt` of `nika-cli-host` lacked the two retry flags. It is fixed
@@ -259,10 +269,11 @@ in `572368d19`. The review fixes change no public item.
 `verbs::run::tests::answer_without_resume_preseeds_the_gate`, a test of
 `nika-cli`, failed once in four runs of `cargo test -p nika-cli --lib`, with
 exit 3, and passes alone and under nextest, which runs each test in its own
-process. It runs without the lease on the current directory that other tests
-of that module take, and reads the current directory as the base does: the
-same reads stand on `a9db05bb2`. It was not run on the base, so whether it
-fails there too is not known.
+process; it passed again in the `nika-cli` run above. It runs without the
+lease on the current directory that other tests of that module take, and
+reads the current directory as the base does: the same reads stand on
+`a9db05bb2`. It was not run on the base, so whether it fails there too is
+not known.
 
 Each fix of the reviews was removed in turn, its test seen to fail, and the
 file restored byte for byte:
@@ -440,8 +451,9 @@ were measured before the review fixes, which add 416 lines net under
 them; it was at 1,555 before this work, above the 1,500 warning and under
 the 2,500 wall. The plan estimated `nika-serve` at 19,470 after B and C at
 1,400 more; before the review fixes `nika-serve` stood 2,345 lines above its
-size after B, most of it the retry route, the attempts read and the judgment of a lost run. The
-other crates' figures before the branch were not measured.
+size after B, most of it the retry route, the attempts read and the judgment
+of a lost run. The other crates' figures before the branch were not
+measured.
 
 ## 10. Commits
 

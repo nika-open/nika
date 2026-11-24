@@ -50,6 +50,20 @@ limit. The script tests run under a temporary home
 folder, and the one that needs the real binary says SKIP when the `nika` it
 finds does not answer there.
 
+What the pages state was played on the 0.125.0 release, claim by claim. A
+rehearsal on the mock model is offered only for a job that sends nothing,
+reaches no host and pins no model on a task: a model pinned on a task is
+called for real under `--model mock/echo`, and the plan card names such
+models in a row of its own. A run refused before it started (exit 2 or 3)
+is told apart from a run that stopped (exit 1 or 130): nothing ran, no
+trace was written, and the latest trace is never read for it. A resume
+repeats the first run's model flag, and the list of waiting runs prints it.
+`/nika:connect` states the sandbox a declared server starts in and the two
+routes a key has today, with what each exposes. The evaluation graders read
+the shell command itself, know the bare `nika <file>.nika` form and both
+spellings of `--answer`, and every pattern is played on samples by the
+script tests.
+
 The plugin is ambitious about what one workflow can do, and careful
 about what it touches: ambition in craft, fidelity in effects. The
 authoring skill opens with a design step and three new references: a

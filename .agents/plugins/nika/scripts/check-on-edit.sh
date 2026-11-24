@@ -73,7 +73,14 @@ esac
 # project's build. A project outside the engine names its judge with
 # NIKA_BIN in the environment the client gives its hooks.
 NIKA="${NIKA_BIN:-}"
-if [ -z "$NIKA" ]; then
+kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../bin/nika-kit"
+if [ -x "$kit" ]; then
+  # Inside the plugin, every helper asks the one resolver, which applies the
+  # order written above. A copy of this hook that `nika init` wrote into a
+  # project has no resolver beside it and applies the same order itself.
+  NIKA="$("$kit" --path "$(dirname "$file")" 2>/dev/null || true)"
+  [ -n "$NIKA" ] || NIKA="${NIKA_BIN:-nika}"
+elif [ -z "$NIKA" ]; then
   root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
   if [ -n "$root" ] && [ -f "$root/crates/nika-cli/Cargo.toml" ] \
     && [ -n "${CARGO_TARGET_DIR:-}" ] && [ -x "$CARGO_TARGET_DIR/debug/nika" ]; then

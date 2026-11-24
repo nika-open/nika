@@ -1,7 +1,7 @@
 ---
 name: nika-running
 description: "Run, approve, resume and schedule Nika workflows for someone who should not have to read engine output. Use when the user wants a task done again or on a schedule ('every Monday', 'for each file', 'do the same as last time', a batch of items), asks what a workflow will do or cost, wants to run one, or when a run is waiting for an answer. The word Nika does not need to appear."
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-intent.py *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-verdict.py *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-pick-model.sh *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py *)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-facts.sh *), Bash(${CLAUDE_PLUGIN_ROOT}/bin/nika-kit *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-intent.py *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-verdict.py *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-pick-model.sh *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-pending.py *)
 ---
 
 # Running Nika for a person, not for a terminal
@@ -9,6 +9,15 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-intent.py *), Bash(${CLAU
 The engine is exact and wordy. The person wants three things: to know
 what will happen, to say yes once, and to get the result. Everything
 here serves that.
+
+## What this machine has, right now
+
+In the plugin, the line below runs when this skill loads and prints the
+binary in use, its model routes and how many runs wait for an answer. If
+nothing follows it (the host does not run it, or a policy disabled it), ask
+the binary yourself: `nika --version`, `nika catalog`, `nika trace ls`.
+
+!`"${CLAUDE_PLUGIN_ROOT}/scripts/nika-facts.sh" || true`
 
 ## Where the helpers are
 

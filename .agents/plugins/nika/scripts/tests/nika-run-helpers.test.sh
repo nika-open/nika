@@ -142,6 +142,18 @@ rm -rf "$EVIL" "$SHIM"
 out="$(env -i PATH="/usr/bin:/bin" OPENAI_API_KEY=sk-test-value "$HERE/nika-pick-model.sh" || true)"
 check "picker prints a route for a present key" "$out" "--model openai/"
 refuse "picker never prints the key value" "$out" "sk-test-value"
+PICK="$(mktemp -d)"
+cat >"$PICK/nika" <<'EOF_PICK'
+#!/usr/bin/env bash
+[ "$1 $2" = "catalog --json" ] && echo '{"providers":[{"id":"openai","cheap_model":"from-the-catalog"}]}'
+exit 0
+EOF_PICK
+chmod +x "$PICK/nika"
+out="$(env -i PATH="/usr/bin:/bin" NIKA_BIN="$PICK/nika" OPENAI_API_KEY=sk-test-value "$HERE/nika-pick-model.sh" || true)"
+check "picker reads the model name from the binary's catalog" "$out" "--model openai/from-the-catalog"
+out="$(env -i PATH="/usr/bin:/bin" NIKA_BIN="$PICK/nika" MISTRAL_API_KEY=sk-test-value "$HERE/nika-pick-model.sh" || true)"
+check "picker keeps a known name when the catalog has no row" "$out" "--model mistral/mistral-small-latest"
+rm -rf "$PICK"
 set +e
 out="$(env -i PATH="/usr/bin:/bin" "$HERE/nika-pick-model.sh")"
 code=$?

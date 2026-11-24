@@ -17,7 +17,12 @@
 set -u
 input="$(cat 2>/dev/null || true)"
 case "$input" in *'"stop_hook_active":true'* | *'"stop_hook_active": true'*) exit 0 ;; esac
-command -v nika >/dev/null 2>&1 || exit 0
+kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../bin/nika-kit"
+if [ -x "$kit" ]; then
+  "$kit" --path "$PWD" >/dev/null 2>&1 || exit 0
+else
+  command -v nika >/dev/null 2>&1 || exit 0
+fi
 
 session="$(printf '%s' "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' | tr -cd 'A-Za-z0-9_-')"
 [ -n "$session" ] || exit 0

@@ -15,6 +15,7 @@ Exit code: the one `nika check` returned (0 ready · 2 findings · other =
 the check itself could not run).
 """
 import json
+import os
 import subprocess
 import sys
 
@@ -26,8 +27,21 @@ KNOWN_KINDS = {
 }
 
 
+def nika_bin(location):
+    """The binary the kit resolved (bin/nika-kit), else NIKA_BIN, else PATH."""
+    kit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "nika-kit")
+    if os.access(kit, os.X_OK):
+        try:
+            out = subprocess.run([kit, "--path", location], capture_output=True, text=True, check=False, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return os.environ.get("NIKA_BIN") or "nika"
+
+
 def run_check(path, model):
-    cmd = ["nika", "check", path, "--json"]
+    cmd = [nika_bin(os.path.dirname(os.path.abspath(path))), "check", path, "--json"]
     if model:
         cmd += ["--model", model]
     try:

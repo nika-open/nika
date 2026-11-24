@@ -10,8 +10,11 @@ set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 seen="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/nika-watch-$$")"
 trap 'rm -f "$seen"' EXIT
+have_nika() {
+  if [ -x "$here/../bin/nika-kit" ]; then "$here/../bin/nika-kit" --path "$PWD" >/dev/null 2>&1; else command -v nika >/dev/null 2>&1; fi
+}
 while :; do
-  if [ -d .nika/traces ] && command -v nika >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  if [ -d .nika/traces ] && have_nika && command -v python3 >/dev/null 2>&1; then
     "$here/nika-pending.py" --json 2>/dev/null | python3 -c 'import json,sys
 seen_path = sys.argv[1]
 try:

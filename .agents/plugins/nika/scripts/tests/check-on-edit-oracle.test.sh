@@ -15,7 +15,6 @@ set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="$HERE/../check-on-edit.sh"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 fails=0
@@ -67,17 +66,29 @@ judge() {
   fi
 }
 
-judge "NIKA_BIN wins everywhere" "$ENGINE/flows/flow.nika" explicit \
-  NIKA_BIN="$ROOT/explicit/nika" CARGO_TARGET_DIR="$ROOT/session-target"
-judge "inside the engine, the session target folder judges" "$ENGINE/flows/flow.nika" session-target \
-  CARGO_TARGET_DIR="$ROOT/session-target"
-judge "inside the engine, no session folder: the tree build judges" "$ENGINE/flows/flow.nika" tree-build
-judge "a session folder with no build falls back to the tree build" "$ENGINE/flows/flow.nika" tree-build \
-  CARGO_TARGET_DIR="$ROOT/empty-target"
-judge "outside the engine, the session folder never judges" "$PROJECT/flow.nika" path-bin \
-  CARGO_TARGET_DIR="$ROOT/session-target"
-judge "outside the engine, NIKA_BIN names the judge" "$PROJECT/flow.nika" explicit \
-  NIKA_BIN="$ROOT/explicit/nika"
+# The same order must hold through the plugin's resolver (bin/nika-kit sits
+# beside the hook) and in the lone copy `nika init` writes into a project,
+# which has no resolver and applies the order itself.
+mkdir -p "$ROOT/lone"
+cp "$HERE/../check-on-edit.sh" "$ROOT/lone/check-on-edit.sh"
+for HOOK in "$HERE/../check-on-edit.sh" "$ROOT/lone/check-on-edit.sh"; do
+  case "$HOOK" in "$ROOT"/*) where="lone copy" ;; *) where="in the plugin" ;; esac
+  judge "$where · NIKA_BIN wins everywhere" "$ENGINE/flows/flow.nika" explicit \
+    NIKA_BIN="$ROOT/explicit/nika" CARGO_TARGET_DIR="$ROOT/session-target"
+  judge "$where · inside the engine, the session target folder judges" "$ENGINE/flows/flow.nika" session-target \
+    CARGO_TARGET_DIR="$ROOT/session-target"
+  judge "$where · inside the engine, no session folder: the tree build judges" "$ENGINE/flows/flow.nika" tree-build
+  judge "$where · a session folder with no build falls back to the tree build" "$ENGINE/flows/flow.nika" tree-build \
+    CARGO_TARGET_DIR="$ROOT/empty-target"
+  judge "$where · outside the engine, the session folder never judges" "$PROJECT/flow.nika" path-bin \
+    CARGO_TARGET_DIR="$ROOT/session-target"
+  judge "$where · outside the engine, NIKA_BIN names the judge" "$PROJECT/flow.nika" explicit \
+    NIKA_BIN="$ROOT/explicit/nika"
+done
+if [ -x "$HERE/../../bin/nika-kit" ]; then echo "ok   the plugin pass went through bin/nika-kit"; else
+  echo "FAIL bin/nika-kit is missing: the plugin pass tested the fallback twice"
+  fails=$((fails + 1))
+fi
 
 if [ "$fails" -eq 0 ]; then
   echo "all green"

@@ -1,6 +1,7 @@
 ---
 name: nika-authoring
 description: Author, check and repair Nika projects (.nika workflows, the nika.yaml project file and its beats, supporting files, child workflows) and static NIKA findings. Use migration for existing automation ports and debugging for run failures.
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-facts.sh *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/nika-card.py *), Bash(${CLAUDE_PLUGIN_ROOT}/bin/nika-kit *)
 ---
 
 # Authoring Nika workflows
@@ -11,6 +12,18 @@ repair within the user's scope; include execution and artifact inspection when
 requested and authorized. If blocked, return the artifact and concrete finding,
 not a claim of readiness. These instructions apply across models and clients;
 installed engine capabilities and host tools determine what is available.
+
+## Names come from the binary
+
+Builtins, model routes and fields change between releases, and a name from
+memory is how a file ends up refused. In the plugin, the line below runs when
+this skill loads and prints what this binary serves. If no list of names
+follows it (the host does not run it, a policy disabled it, or this copy
+lives outside the plugin), read the same names yourself before writing one:
+`nika catalog --tools`, `nika catalog`, `nika spec --canon`, or the oracle's
+`nika_tools`, `nika_catalog` and `nika_canon`.
+
+!`"${CLAUDE_PLUGIN_ROOT}/scripts/nika-facts.sh" || true`
 
 ## Start from the task
 

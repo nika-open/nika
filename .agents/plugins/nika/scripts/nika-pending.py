@@ -52,10 +52,23 @@ def as_data(text):
     return "".join(ch for ch in flat if ch.isprintable())
 
 
+def nika_bin(location):
+    """The binary the kit resolved (bin/nika-kit), else NIKA_BIN, else PATH."""
+    kit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "nika-kit")
+    if os.access(kit, os.X_OK):
+        try:
+            out = subprocess.run([kit, "--path", location], capture_output=True, text=True, check=False, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return os.environ.get("NIKA_BIN") or "nika"
+
+
 def trace_store(project):
     try:
         proc = subprocess.run(
-            ["nika", "trace", "ls", "--json"],
+            [nika_bin(project), "trace", "ls", "--json"],
             capture_output=True, text=True, check=False, cwd=project,
         )
     except FileNotFoundError:

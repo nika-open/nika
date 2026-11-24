@@ -1,6 +1,6 @@
 ---
 description: Diagnose Nika installation, provider access and client wiring.
-allowed-tools: Bash(nika doctor:*), Bash(nika explain:*)
+allowed-tools: Bash(nika doctor:*), Bash(nika explain:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/nika-kit *)
 ---
 
 Run `nika doctor --json`. Read `summary` and `findings[]`; distinguish tool
@@ -8,6 +8,13 @@ failure from advisory findings. Prioritize failures affecting the requested
 work, then relevant kit drift or missing provider access. Relay the actual
 per-client fix command: marketplace refresh, plugin refresh and host restart
 can be distinct operations.
+
+When a check and a run seem to disagree, look at which binary answers each.
+Where the kit's scripts are installed, `"${CLAUDE_PLUGIN_ROOT}/bin/nika-kit"`
+prints the binary the kit's helpers resolved, why (a `NIKA_BIN` pin, an
+engine build, the PATH), its version, and a note when the run guard, which
+always judges with the PATH's `nika`, uses another one. Without the script,
+compare `command -v nika` and `nika --version` with what `NIKA_BIN` names.
 
 This command is diagnostic: its allowed tools do not install or mutate config.
 Return fixes to the coordinating conversation, which may carry out setup

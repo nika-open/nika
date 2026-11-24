@@ -52,6 +52,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub use nika_check::mcp_roles::McpToolRoles;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -391,7 +392,16 @@ struct ToolPin {
     description: String,
     #[serde(rename = "inputSchema")]
     input_schema: Value,
+    /// What the operator declared the tool does when approving it (a
+    /// private read · an external egress · an empty list for neither).
+    /// Absent = never declared. Outside the pin: the pin vets what the
+    /// SERVER says, the role is what the OPERATOR says about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    roles: Option<McpToolRoles>,
 }
+
+/// The roles an operator declares at approval, by tool name.
+pub type RoleDeclarations = BTreeMap<String, McpToolRoles>;
 
 /// One server's lockfile entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -627,14 +637,37 @@ impl PinStore {
         tools: &[McpToolDef],
         now_epoch: u64,
     ) -> Result<String, PinError> {
+        self.enroll_declared(server, identity, tools, &RoleDeclarations::new(), now_epoch)
+    }
+
+    /// [`Self::enroll`] with the roles the operator declares now. A tool
+    /// `declared` names takes that role. A tool it does not name KEEPS the
+    /// role it was approved with only while its pin is unchanged on the same
+    /// server identity: a tool whose definition changed is a different
+    /// tool, and its role is declared again or left unknown.
+    pub(crate) fn enroll_declared(
+        &mut self,
+        server: &str,
+        identity: ServerIdentity,
+        tools: &[McpToolDef],
+        declared: &RoleDeclarations,
+        now_epoch: u64,
+    ) -> Result<String, PinError> {
         let pinned_at = rfc3339_utc(now_epoch);
+        let previous = (self.file.servers.get(server)).filter(|entry| entry.identity == identity);
         let tools: BTreeMap<String, ToolPin> = tools
             .iter()
             .map(|d| {
+                let pin = d.pin_hash();
+                let kept = previous
+                    .and_then(|entry| entry.tools.get(&d.name))
+                    .filter(|old| old.pin == pin)
+                    .and_then(|old| old.roles);
                 (
                     d.name.clone(),
                     ToolPin {
-                        pin: d.pin_hash(),
+                        roles: declared.get(&d.name).copied().or(kept),
+                        pin,
                         description: d.description.clone(),
                         input_schema: d.input_schema.clone(),
                     },
@@ -670,6 +703,20 @@ impl PinStore {
                 })
                 .collect()
         })
+    }
+
+    /// The role recorded for each tool of `server`, by tool name: `None`
+    /// for a tool nobody declared (for the approve receipt).
+    pub(crate) fn roles_of(&self, server: &str) -> BTreeMap<String, Option<McpToolRoles>> {
+        self.file
+            .servers
+            .get(server)
+            .map(|entry| {
+                (entry.tools.iter())
+                    .map(|(name, tool)| (name.clone(), tool.roles))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// The pins currently recorded for `server` (for the approve receipt).
@@ -1073,6 +1120,126 @@ mod tests {
         let err = PinStore::load(&dir).expect_err("hand-edit refused");
         assert!(matches!(err, PinError::Corrupt { .. }), "{err}");
         assert!(format!("{err}").contains("does not match"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn srv() -> ServerIdentity {
+        ServerIdentity {
+            command: Some("srv".to_owned()),
+            args: Vec::new(),
+            url: None,
+        }
+    }
+
+    /// The declared role is stored beside the pin, survives a reload (it is
+    /// outside the pin hash, so it never reads as tampering), and a tool
+    /// nobody declared stores no `roles` key at all.
+    #[test]
+    fn a_declared_role_is_stored_beside_the_pin_and_survives_a_reload() {
+        let dir = tmp("roles");
+        let mut store = store_in(&dir);
+        let tools = [query_def(), def("ping", "Liveness", json!({}))];
+        let declared =
+            RoleDeclarations::from([("query".to_owned(), McpToolRoles::new(true, false))]);
+        store
+            .enroll_declared("postgres", srv(), &tools, &declared, 1)
+            .expect("enroll");
+        let text = std::fs::read_to_string(dir.join(PINS_PATH)).expect("lockfile");
+        let file: Value = serde_json::from_str(&text).expect("lockfile is JSON");
+        let pinned = &file["servers"]["postgres"]["tools"];
+        assert_eq!(pinned["query"]["roles"], json!(["private-read"]));
+        assert!(pinned["ping"].get("roles").is_none(), "{text}");
+        let reloaded = PinStore::load(&dir).expect("a lockfile with roles loads");
+        assert_eq!(
+            reloaded.roles_of("postgres"),
+            BTreeMap::from([
+                ("ping".to_owned(), None),
+                ("query".to_owned(), Some(McpToolRoles::new(true, false))),
+            ])
+        );
+        assert!(matches!(
+            reloaded.verify("postgres", &srv(), &tools),
+            Verify::Clean
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A re-pin with no new declaration keeps a role only for the SAME
+    /// definition on the SAME server identity. A changed definition, or a
+    /// re-pointed server, is a different tool: its role is not inherited.
+    #[test]
+    fn a_role_is_kept_only_for_the_same_definition_on_the_same_server() {
+        let dir = tmp("roles-carry");
+        let mut store = store_in(&dir);
+        let none = RoleDeclarations::new();
+        let declared =
+            RoleDeclarations::from([("query".to_owned(), McpToolRoles::new(false, true))]);
+        store
+            .enroll_declared("postgres", srv(), &[query_def()], &declared, 1)
+            .expect("enroll");
+        store
+            .enroll_declared("postgres", srv(), &[query_def()], &none, 2)
+            .expect("re-pin, same definition");
+        assert_eq!(
+            store.roles_of("postgres")["query"],
+            Some(McpToolRoles::new(false, true)),
+            "the same definition keeps its role"
+        );
+        let changed = def(
+            "query",
+            "Run a SQL query, anywhere",
+            query_def().input_schema,
+        );
+        store
+            .enroll_declared("postgres", srv(), &[changed], &none, 3)
+            .expect("re-pin, changed definition");
+        assert_eq!(
+            store.roles_of("postgres")["query"],
+            None,
+            "a changed definition does not inherit the role"
+        );
+        store
+            .enroll_declared("postgres", srv(), &[query_def()], &declared, 4)
+            .expect("declare again");
+        let repointed = ServerIdentity {
+            command: Some("other-srv".to_owned()),
+            args: Vec::new(),
+            url: None,
+        };
+        store
+            .enroll_declared("postgres", repointed, &[query_def()], &none, 5)
+            .expect("re-pin, re-pointed server");
+        assert_eq!(
+            store.roles_of("postgres")["query"],
+            None,
+            "a re-pointed server does not inherit the role"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A role this engine does not know is refused at load (NIKA-MCP-004),
+    /// never read as "no role": a lockfile written by a newer engine must
+    /// not silently lose a declaration.
+    #[test]
+    fn an_unknown_role_in_the_lockfile_is_refused_at_load() {
+        let dir = tmp("roles-unknown");
+        let mut store = store_in(&dir);
+        let declared =
+            RoleDeclarations::from([("query".to_owned(), McpToolRoles::new(true, false))]);
+        store
+            .enroll_declared("postgres", srv(), &[query_def()], &declared, 1)
+            .expect("enroll");
+        let path = dir.join(PINS_PATH);
+        let text = std::fs::read_to_string(&path).expect("lockfile");
+        let edited = text.replace("private-read", "from-the-future");
+        assert_ne!(text, edited);
+        std::fs::write(&path, edited).expect("write");
+        let err = PinStore::load(&dir).expect_err("an unknown role is refused");
+        assert_eq!(err.code(), Some("NIKA-MCP-004"), "{err}");
+        assert!(
+            format!("{err}").contains("unknown MCP tool role `from-the-future`"),
+            "{err}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

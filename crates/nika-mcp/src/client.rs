@@ -42,6 +42,7 @@
 //! ignore unknown entry fields (serde's posture), so no envelope bump is
 //! honest.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,7 +51,9 @@ use nika_kernel::command_sandbox::CommandSandbox;
 use nika_kernel::process::{EgressAllowlist, NetPolicy};
 use serde::Deserialize;
 
-use crate::pin::{McpToolDef, PinError, PinStore, ServerIdentity, Verify};
+use crate::pin::{
+    McpToolDef, McpToolRoles, PinError, PinStore, RoleDeclarations, ServerIdentity, Verify,
+};
 use crate::session::{McpConnectDyn, StdioConnector};
 
 /// The server-registry location, relative to the project root.
@@ -362,6 +365,68 @@ pub struct ApproveReport {
     /// The confinement the server ran under while it was read
     /// ([`ToolsListDyn::confinement`]) — the receipt's first line.
     pub confinement: Option<String>,
+    /// The role now recorded for each pinned tool, by name: `None` for a
+    /// tool nobody declared (the check then does not judge what it reads
+    /// or sends).
+    pub roles: BTreeMap<String, Option<McpToolRoles>>,
+    /// The tools whose earlier role was NOT carried over because their
+    /// definition (or the server identity) changed since it was declared.
+    pub dropped_roles: Vec<String>,
+}
+
+/// Why [`approve_server_declaring`] wrote nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ApproveError {
+    /// The pinning layer refused (transport · sandbox · lockfile).
+    Pin(PinError),
+    /// A role was declared for a tool the server does not serve: a typo
+    /// must not leave the intended tool undeclared, so nothing is pinned.
+    UnknownTool {
+        /// The configured server name.
+        server: String,
+        /// The declared names the server does not serve, sorted.
+        unknown: Vec<String>,
+        /// The tool names the server serves now, sorted.
+        served: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for ApproveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pin(err) => write!(f, "{err}"),
+            Self::UnknownTool {
+                server,
+                unknown,
+                served,
+            } => write!(
+                f,
+                "MCP server `{server}` serves no tool named {} — nothing was pinned \
+                 (it serves: {})",
+                backticked(unknown),
+                if served.is_empty() {
+                    "no tool".to_owned()
+                } else {
+                    backticked(served)
+                }
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApproveError {}
+
+impl From<PinError> for ApproveError {
+    fn from(err: PinError) -> Self {
+        Self::Pin(err)
+    }
+}
+
+/// `` `a`, `b` `` for a receipt line.
+fn backticked(names: &[String]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+    quoted.join(", ")
 }
 
 /// The enrollment-capable connect (TOFU semantics, for embedders that
@@ -429,16 +494,74 @@ pub fn approve_server<C: ToolsListDyn + ?Sized>(
     project_dir: &Path,
     now_epoch: u64,
 ) -> Result<ApproveReport, PinError> {
+    let declared = RoleDeclarations::new();
+    match approve_server_declaring(config, client, project_dir, &declared, now_epoch) {
+        Ok(report) => Ok(report),
+        Err(ApproveError::Pin(err)) => Err(err),
+        // No role is declared here, so no declared name can be unknown.
+        Err(ApproveError::UnknownTool { server, .. }) => Err(PinError::Malformed {
+            server,
+            why: "a role was declared for a tool the server does not serve".to_owned(),
+        }),
+    }
+}
+
+/// [`approve_server`] with the roles the operator declares for the tools
+/// they just reviewed (`nika mcp approve <server> --reads-private <tool>
+/// --sends-out <tool> --no-role <tool>`). The check's lethal-trifecta lane
+/// reads them: an MCP tool's effects are server-side, where `permits:`
+/// cannot see a private read or an egress.
+///
+/// A tool `declared` does not name keeps its earlier role only while its
+/// definition is unchanged; [`ApproveReport::dropped_roles`] lists the
+/// tools whose role was not carried over.
+///
+/// # Errors
+///
+/// [`ApproveError::UnknownTool`] when `declared` names a tool the server
+/// does not serve (nothing is written) · [`ApproveError::Pin`] for every
+/// refusal [`approve_server`] documents.
+pub fn approve_server_declaring<C: ToolsListDyn + ?Sized>(
+    config: &McpServerConfig,
+    client: &C,
+    project_dir: &Path,
+    declared: &RoleDeclarations,
+    now_epoch: u64,
+) -> Result<ApproveReport, ApproveError> {
     refuse_remote(config)?;
     let tools = client.tools_list()?;
+    let unknown: Vec<String> = declared
+        .keys()
+        .filter(|name| !tools.iter().any(|d| &d.name == *name))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        let mut served: Vec<String> = tools.iter().map(|d| d.name.clone()).collect();
+        served.sort();
+        return Err(ApproveError::UnknownTool {
+            server: config.name.clone(),
+            unknown,
+            served,
+        });
+    }
     let mut store = PinStore::load(project_dir)?;
-    let pinned_at = store.enroll(&config.name, config.identity(), &tools, now_epoch)?;
+    let before = store.roles_of(&config.name);
+    let pinned_at =
+        store.enroll_declared(&config.name, config.identity(), &tools, declared, now_epoch)?;
     let pins = store.pins_of(&config.name).unwrap_or_default();
+    let roles = store.roles_of(&config.name);
+    let dropped_roles = before
+        .iter()
+        .filter(|(name, was)| was.is_some() && roles.get(*name).is_some_and(Option::is_none))
+        .map(|(name, _)| name.clone())
+        .collect();
     Ok(ApproveReport {
         server: config.name.clone(),
         pinned_at,
         pins,
         confinement: client.confinement(),
+        roles,
+        dropped_roles,
     })
 }
 

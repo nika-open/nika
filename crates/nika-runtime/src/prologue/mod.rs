@@ -22,7 +22,7 @@ use nika_types::resource::{KeyValue, Value as FieldValue};
 use crate::Runtime;
 use crate::origins::InputOrigin;
 use crate::stamp::{EventSink, Stamper};
-use crate::{approval, emit, i, s};
+use crate::{emit, i, s};
 
 #[cfg(test)]
 mod tests;
@@ -242,10 +242,6 @@ pub(crate) fn boot_attestation_fields(wf: &RawWorkflow) -> Vec<(&'static str, Fi
     fields
 }
 
-/// Emit the run's opening frames · `WorkflowStarted` + one
-/// `TaskScheduled` per task (the storyboard's fixed prologue) — then
-/// open the F-P4 approval book on the opening frame's id (the run
-/// nonce every ticket this run mints is scoped to · NEP-0013 law 2).
 /// The run's identity on the opening frame: the semantic hash of the
 /// workflow and the project that wrote the trace (#1367 · resume judges it).
 fn push_identity(
@@ -261,6 +257,10 @@ fn push_identity(
     }
 }
 
+/// Emit the run's opening frames · `WorkflowStarted` + one
+/// `TaskScheduled` per task (the storyboard's fixed prologue). The opening
+/// frame's id is the run nonce: the caller opens the F-P4 approval book on
+/// it (every ticket this run mints is scoped to it · NEP-0013 law 2).
 #[allow(clippy::too_many_arguments)] // the prologue parts + the pens
 pub(crate) fn emit_prologue(
     wf: &RawWorkflow,
@@ -279,7 +279,6 @@ pub(crate) fn emit_prologue(
     model_override: Option<&str>,
     access: Vec<(&'static str, FieldValue)>,
     harness_seat: Option<&str>,
-    approvals: &approval::ApprovalBook,
     opening_stamp: (nika_types::id::EventId, nika_types::timestamp::Timestamp),
     run_facts: Option<&crate::run_facts::ResolvedRunFacts>,
     stamper: &mut dyn Stamper,
@@ -343,11 +342,6 @@ pub(crate) fn emit_prologue(
     }
     sink.emit(event);
     emit_task_declarations(wf, stamper, sink);
-    // F-P4 · the approval book opens with the run: the nonce is the
-    // opening frame's id, and every prompt's unleashed closure is
-    // precomputed over THESE bytes (the resumed run recomputes the same
-    // closure — the shown hash stays comparable).
-    approvals.begin_run(wf, nonce.uuid.to_string());
 }
 
 /// The opening frame's header attestation (split out of `emit_prologue` at the 100-line ratchet),
@@ -405,7 +399,13 @@ where
         let jq_clock = nika_cap::JqClock::at(opening_stamp.1);
         let run_start = ToolRunStart::new(opening_stamp.1.unix_ns);
         let run_facts = resume_ctx.run_facts();
+        // F-P4 · the approval book opens with the run: its nonce is the opening
+        // frame's id, and every prompt's closure is bound over the definitions
+        // THIS run executes — a resumed run recomputes it from its own files,
+        // so an answer meets the tasks as they are now (NEP-0013 law 1).
+        let nonce = opening_stamp.0.uuid.to_string();
         self.emit_run_prologue(wf, workflow_name, opening_stamp, run_facts, stamper, sink);
+        self.approvals.begin_run(wf, nonce, &resume_ctx);
         self.seed_inspect(wf, report);
         (resume_ctx, jq_clock, run_start)
     }

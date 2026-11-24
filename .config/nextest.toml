@@ -10,3 +10,17 @@
 # gate for 23 minutes until a human sent SIGTERM (2026-09-21).
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 5, grace-period = "10s" }
+
+# A test that judges wall-clock time against a budget runs alone: it takes
+# every test slot, so nextest starts it only when no other test runs and starts
+# nothing beside it. Both tests below refused pushes while passing alone:
+# - the composer's keystroke budget (25 ms in the quickest of three rounds),
+#   on 2026-10-28 and again on 2026-11-23 with the machine at a load of 46;
+#   alone it passed in 2.75 s;
+# - the serve restart drain (nine recovered jobs under 2 s server limits),
+#   8 of 9 jobs on 2026-10-28; alone it passed 3 times out of 3.
+# A build running elsewhere on the machine can still slow them; the suite
+# beside them no longer does.
+[[profile.default.overrides]]
+filter = '(package(nika-tui) and test(/^composer::answer::cost_tests::/)) or (package(nika-serve) and test(=server::coordinator_tests::restart_drains_more_queued_jobs_than_live_channel_capacity))'
+threads-required = "num-test-threads"

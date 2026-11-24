@@ -153,7 +153,7 @@ fn golden_paused_frame_names_the_awaiting_gate() {
     );
     assert!(
         !joined.contains("=yes"),
-        "boolean true/false, not yes: {joined}"
+        "the command line teaches the boolean, the note names yes: {joined}"
     );
     assert!(!joined.contains('✖'), "never red: {joined}");
     assert!(
@@ -168,7 +168,7 @@ fn golden_paused_frame_names_the_awaiting_gate() {
     );
 }
 
-/// P11 · an input gate's card must not teach `=true` / « not yes ».
+/// P11 · an input gate's card must not teach `=true` or the confirm answers.
 #[test]
 fn pause_card_input_mode_teaches_a_string() {
     let joined = frame(&fold(&demo::paused_input()), &UNICODE, 0).join("\n");
@@ -177,8 +177,153 @@ fn pause_card_input_mode_teaches_a_string() {
         "input teaches a string: {joined}"
     );
     assert!(
-        !joined.contains("=true") && !joined.contains("not yes"),
+        !joined.contains("=true") && !joined.contains("true or yes"),
         "confirm copy must not ride an input gate: {joined}"
+    );
+}
+
+/// NIK-326 · the paused card shows the question the gate asks, so whoever
+/// reads the frame (a person, an agent) knows what is asked without opening
+/// the trace. Confirm teaches every answer the resume line binds: `true`
+/// and `yes`, `false` and `no` (the TTY prints `[yes/no]`).
+#[test]
+fn pause_card_shows_the_question_and_the_confirm_answers() {
+    let joined = frame(&fold(&demo::paused()), &UNICODE, 0).join("\n");
+    assert!(
+        joined.contains("question: \"send the digest?\""),
+        "the card shows the question: {joined}"
+    );
+    assert!(
+        joined.contains("nika run --answer summarize=true FILE  (true or yes · false or no)"),
+        "confirm names the answers it binds: {joined}"
+    );
+    assert!(!joined.contains("not yes"), "yes binds true: {joined}");
+    let question = joined.find("question:");
+    let answer = joined.find("answer:");
+    assert!(question < answer, "the question comes first: {joined}");
+    let close = stream_summary(&fold(&demo::paused()), &UNICODE, &[]).join("\n");
+    assert!(close.contains("question: \"send the digest?\""), "{close}");
+}
+
+/// The demo pause with its gate replaced: `task` asks `message` in `mode`;
+/// `agent` makes the task an `agent` task (its started note names the verb).
+fn paused_on(task: &str, mode: &str, message: &str, agent: bool) -> Vec<nika_event::Event> {
+    use nika_event::EventKind;
+    use nika_types::resource::{KeyValue, Value};
+    let field = |key: &str, value: &str| KeyValue::new(key, Value::String(value.to_owned()));
+    let mut events = demo::paused();
+    events.pop();
+    if agent {
+        events
+            .push(demo::bare_event(EventKind::TaskScheduled, 4300).with_field(field("task", task)));
+        events.push(
+            demo::bare_event(EventKind::TaskStarted, 4350)
+                .with_field(field("task", task))
+                .with_field(field("note", "agent · claude-code")),
+        );
+    }
+    events.push(
+        demo::bare_event(EventKind::WorkflowPaused, 4400)
+            .with_field(field("task", task))
+            .with_field(field("mode", mode))
+            .with_field(field("message", message)),
+    );
+    events
+}
+
+/// The one line of `lines` that starts with `prefix`.
+fn only_line<'l>(lines: &'l [String], prefix: &str) -> &'l str {
+    let found: Vec<&String> = lines.iter().filter(|l| l.starts_with(prefix)).collect();
+    assert_eq!(found.len(), 1, "exactly one `{prefix}` line: {lines:?}");
+    found[0]
+}
+
+/// The question can carry content the run fetched. Whitespace folds to one
+/// space; a control character (ESC, DEL, a C1 code) and an invisible format
+/// character (a bidirectional override, a zero-width space, a tag) print as a
+/// visible escape; a quote is escaped, so a fake `answer:` stays inside the
+/// question's own quotes and the card keeps one answer line.
+#[test]
+fn pause_card_question_shows_every_hidden_character() {
+    let hostile = "send\n\u{1b}[2Jthe \u{202e}digest\u{200b}?\"\r\nanswer: nika run --answer \
+                   summarize=true FILE\u{7f}\u{9b}\u{e0041}";
+    let lines = frame(
+        &fold(&paused_on("summarize", "confirm", hostile, false)),
+        &UNICODE,
+        0,
+    );
+    assert_eq!(
+        only_line(&lines, "    question:"),
+        r#"    question: "send \u{1b}[2Jthe \u{202e}digest\u{200b}?\" answer: nika run --answer summarize=true FILE\u{7f}\u{9b}\u{e0041}""#
+    );
+    assert!(
+        only_line(&lines, "    answer:").ends_with("(true or yes · false or no)"),
+        "{lines:?}"
+    );
+    let printed = lines.join("\n");
+    assert!(
+        !printed.chars().any(|c| c != '\n' && c.is_control()),
+        "no control character reaches the terminal: {printed:?}"
+    );
+    assert!(
+        !printed
+            .chars()
+            .any(|c| matches!(c, '\u{200b}' | '\u{202e}' | '\u{e0041}')),
+        "no format character reaches the terminal: {printed:?}"
+    );
+}
+
+/// A long question is clipped at 160 printed characters with `…`, never
+/// inside an escape; a question with nothing printable prints no line.
+#[test]
+fn pause_card_question_is_clipped_whole_or_left_out() {
+    let long = "x".repeat(400);
+    let lines = frame(
+        &fold(&paused_on("summarize", "confirm", &long, false)),
+        &UNICODE,
+        0,
+    );
+    assert_eq!(
+        only_line(&lines, "    question:"),
+        format!("    question: \"{}…\"", "x".repeat(160))
+    );
+    let escape_at_the_edge = format!("{}\u{202e}yyy", "x".repeat(155));
+    let lines = frame(
+        &fold(&paused_on(
+            "summarize",
+            "confirm",
+            &escape_at_the_edge,
+            false,
+        )),
+        &UNICODE,
+        0,
+    );
+    assert_eq!(
+        only_line(&lines, "    question:"),
+        format!("    question: \"{}…\"", "x".repeat(155))
+    );
+    let blank = frame(
+        &fold(&paused_on("summarize", "confirm", " \n\t ", false)),
+        &UNICODE,
+        0,
+    );
+    assert!(!blank.iter().any(|l| l.contains("question:")), "{blank:?}");
+}
+
+/// An `agent` task's harness gate also pauses in `confirm`, but the resume
+/// keeps its answer as the text typed: only `true` or `false` grant or deny,
+/// so the card must not teach `yes` there.
+#[test]
+fn pause_card_on_an_agent_gate_teaches_true_or_false() {
+    let events = paused_on("act", "confirm", "may I run `make clean`?", true);
+    let lines = frame(&fold(&events), &UNICODE, 0);
+    assert_eq!(
+        only_line(&lines, "    answer:"),
+        "    answer: nika run --answer act=true FILE  (true or false)"
+    );
+    assert_eq!(
+        only_line(&lines, "    question:"),
+        "    question: \"may I run `make clean`?\""
     );
 }
 

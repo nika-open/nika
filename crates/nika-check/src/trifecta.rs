@@ -26,6 +26,7 @@ use nika_cap::TrifectaSubject;
 
 use crate::ComposedCall;
 use crate::analyzer::Edge;
+use crate::mcp_roles::{self, McpRoleMap, McpToolRoles};
 use nika_schema::raw::{RawAction, RawInvokeTarget, RawWorkflow};
 use nika_schema::source::Spanned;
 
@@ -59,6 +60,24 @@ pub fn scan_trifecta_composed(
     topo_waves: &[Vec<usize>],
     calls: &[ComposedCall],
 ) -> nika_cap::TrifectaVerdict {
+    scan_trifecta_declared(wf, edges, topo_waves, calls, &McpRoleMap::new())
+}
+
+/// [`scan_trifecta_composed`] over the roles the operator declared for the
+/// approved MCP tools ([`crate::CheckReport::mcp_tool_roles`]): a task that
+/// calls a tool declared `private-read` arms leg ①, one declared `egress`
+/// arms leg ③, where `permits.fs` and `permits.net` cannot see a server-side
+/// effect. A tool `roles` does not list arms nothing more than before (the
+/// `mcp-roles` hint names it). A child call carries the roles of the tool
+/// grants its closure holds.
+#[must_use]
+pub fn scan_trifecta_declared(
+    wf: &RawWorkflow,
+    edges: &[Edge],
+    topo_waves: &[Vec<usize>],
+    calls: &[ComposedCall],
+    roles: &McpRoleMap,
+) -> nika_cap::TrifectaVerdict {
     let Some(permits) = wf.permits.as_ref() else {
         return nika_cap::TrifectaVerdict::default();
     };
@@ -78,6 +97,7 @@ pub fn scan_trifecta_composed(
         .map(|t| {
             let task = &t.value;
             let call = listed_call(calls, &task.id.value, &task.action);
+            let declared = declared_roles(&task.action, call, roles);
             TrifectaSubject::new(
                 task.id.value.clone(),
                 egress_capable(&task.action) || call.is_some_and(call_egress_capable),
@@ -88,6 +108,7 @@ pub fn scan_trifecta_composed(
                 super::content_flow::classify(&task.action, &mcp_trusted).0
                     || call.is_some_and(|c| c.ingress.is_some()),
             )
+            .with_declared_roles(declared.private_read, declared.egress)
         })
         .collect();
     for e in edges {
@@ -100,6 +121,37 @@ pub fn scan_trifecta_composed(
         nika_cap::trifecta_verdict(&permits.value, &subjects, &flow.witnesses, &topo_flat);
     name_composed_sources(&mut verdict, wf, calls);
     verdict
+}
+
+/// What the MCP tools one task can call were declared to do: its own
+/// `invoke:` target, its `agent:` whitelist, or, for a workflow call, the
+/// tool grants its child closure holds.
+fn declared_roles(
+    action: &RawAction,
+    call: Option<&ComposedCall>,
+    roles: &McpRoleMap,
+) -> McpToolRoles {
+    if roles.is_empty() {
+        return McpToolRoles::default();
+    }
+    if let Some(call) = call {
+        let held = call.grants.tools.as_deref().unwrap_or_default();
+        return mcp_roles::of_grants(roles, held.iter().map(String::as_str));
+    }
+    match action {
+        RawAction::Invoke(inv) => {
+            mcp_roles::of_grants(roles, inv.tool().iter().map(|t| t.value.as_str()))
+        }
+        RawAction::Agent(agent) => mcp_roles::of_grants(
+            roles,
+            agent
+                .tools
+                .iter()
+                .map(|t| t.value.as_str())
+                .filter(|g| !g.starts_with('!')),
+        ),
+        _ => McpToolRoles::default(),
+    }
 }
 
 /// The listed call a task stands for (a workflow call `calls` names).

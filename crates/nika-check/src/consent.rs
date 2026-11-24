@@ -149,7 +149,7 @@ pub(crate) enum Sink {
 
 impl Sink {
     /// A task of `wf`, a listed call standing for its closure.
-    fn of_task(task: &RawTask, calls: &[ComposedCall]) -> Self {
+    pub(crate) fn of_task(task: &RawTask, calls: &[ComposedCall]) -> Self {
         if let Some(call) = crate::trifecta::listed_call(calls, &task.id.value, &task.action) {
             return Self::of_call(call);
         }

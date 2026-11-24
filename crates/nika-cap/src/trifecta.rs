@@ -223,6 +223,13 @@ pub struct TrifectaVerdict {
     pub violations: Vec<TrifectaViolation>,
     /// The sinks a blocking gate cleared, each naming its gate.
     pub mitigations: Vec<TrifectaMitigation>,
+    /// Whether the three legs all hold (①∧②∧③ over the declared boundary
+    /// and the realized ingress). `false` is the missing-leg clearance;
+    /// `true` with both lists empty means the legs hold and no untrusted
+    /// content reaches an egress task's effect. A lane that judges another
+    /// consequence of the same three legs reads this, never a second copy
+    /// of the leg rules.
+    pub armed: bool,
 }
 
 /// A declared `fs.write` glob escapes the workspace (leg ③'s write variant):
@@ -488,6 +495,7 @@ pub fn trifecta_verdict(
     TrifectaVerdict {
         violations: out,
         mitigations,
+        armed: true,
     }
 }
 
@@ -960,6 +968,40 @@ mod tests {
                 .is_empty(),
             "no realized flow → no finding"
         );
+    }
+
+    /// Two empty verdicts, two facts: the legs hold and nothing reaches an
+    /// egress effect, or a leg is missing. `armed` tells them apart, and a
+    /// refusal is always armed.
+    #[test]
+    fn the_verdict_says_whether_the_legs_were_armed() {
+        let (subjects, tainted) = realized_pair();
+        let clean = vec![TaintWitness::clean(), TaintWitness::clean()];
+        let order = topo(&subjects);
+        let no_flow = trifecta_verdict(&full_boundary(), &subjects, &clean, &order);
+        assert!(no_flow.violations.is_empty() && no_flow.mitigations.is_empty());
+        assert!(no_flow.armed, "the three legs hold without a realized flow");
+
+        let refused = trifecta_verdict(&full_boundary(), &subjects, &tainted, &order);
+        assert_eq!(refused.violations.len(), 1);
+        assert!(refused.armed);
+
+        // Each leg dropped in turn: ① no private read · ② no ingress grant ·
+        // ② no realized source · ③ no external egress.
+        let no_read = boundary(&[], &["./out/**"], &["api.example.com"], &["nika:fetch"]);
+        let no_grant = boundary(&["./private/**"], &["./out/**"], &["api.example.com"], &[]);
+        let no_egress = boundary(&["./private/**"], &["./out/**"], &[], &["nika:fetch"]);
+        for permits in [no_read, no_grant, no_egress] {
+            let v = trifecta_verdict(&permits, &subjects, &tainted, &order);
+            assert!(!v.armed, "a missing leg is not armed: {permits:?}");
+        }
+        let unrealized = vec![
+            TrifectaSubject::new("fetch_page".to_owned(), true, false),
+            TrifectaSubject::new("leak".to_owned(), true, false),
+        ];
+        let v = trifecta_verdict(&full_boundary(), &unrealized, &clean, &[0, 1]);
+        assert!(!v.armed, "a granted ingress nothing realizes arms nothing");
+        assert!(!TrifectaVerdict::default().armed);
     }
 
     #[test]

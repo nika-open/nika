@@ -21,14 +21,38 @@
 //! - **blocking human gate** = an `invoke:` of `nika:prompt` with NO
 //!   `default:` arg (the NEP's escape is the HUMAN decision). Gated on a
 //!   valid DAG + a DECLARED `permits:` block (skipped, never wrong).
+//! - **the advisory side** (`trifecta/steering.rs`) = legs armed, a `when:`
+//!   that reads untrusted content decides whether an egress task runs
+//!   without entering an argument. A hint, never this lane's refusal.
 
 use nika_cap::TrifectaSubject;
 
 use crate::ComposedCall;
 use crate::analyzer::Edge;
+use crate::hints::Hint;
 use crate::mcp_roles::{self, McpRoleMap, McpToolRoles};
 use nika_schema::raw::{RawAction, RawInvokeTarget, RawWorkflow};
 use nika_schema::source::Spanned;
+
+pub(crate) mod steering;
+
+/// The advisory channel once the lane has ruled, in one call: a gate it
+/// credited keeps no `headless-prompt` hint
+/// ([`crate::hints::credit_gates`]), and armed legs name every guard that
+/// untrusted content steers ([`steering`]).
+#[must_use]
+pub(crate) fn advise(
+    mut hints: Vec<Hint>,
+    wf: &RawWorkflow,
+    edges: &[Edge],
+    topo_waves: &[Vec<usize>],
+    calls: &[ComposedCall],
+    verdict: &nika_cap::TrifectaVerdict,
+) -> Vec<Hint> {
+    crate::hints::credit_gates(&mut hints, &verdict.mitigations);
+    hints.extend(steering::hints(wf, edges, topo_waves, calls, verdict));
+    hints
+}
 
 /// Judge the trifecta over the derived graph. Empty unless the workflow
 /// declares `permits:` AND the trifecta legs all hold AND an egress-capable
@@ -81,16 +105,7 @@ pub fn scan_trifecta_declared(
     let Some(permits) = wf.permits.as_ref() else {
         return nika_cap::TrifectaVerdict::default();
     };
-    // The realized-flow facts (v2.0). The MCP trust closure is the
-    // catalog mark's seam — until it lands, every server is untrusted.
-    let mcp_trusted = |_: &str| false;
-    let sources = super::content_flow::Sources {
-        mcp_trusted: &mcp_trusted,
-        calls,
-        entry: super::content_flow::Entry::Born,
-        exec_reads_files: None,
-    };
-    let flow = super::content_flow::analyze_content_flow(wf, topo_waves, &sources);
+    let flow = born_flow(wf, topo_waves, calls);
     let mut subjects: Vec<TrifectaSubject> = wf
         .tasks
         .iter()
@@ -152,6 +167,30 @@ fn declared_roles(
         ),
         _ => McpToolRoles::default(),
     }
+}
+
+/// The MCP trust seam: the catalog's `content_trust` mark. Until it lands,
+/// every server is untrusted.
+fn mcp_trusted(_server: &str) -> bool {
+    false
+}
+
+/// The realized-flow facts (v2.0): the content-taint pass over the
+/// workflow's own born sources and the calls a composed check resolved.
+/// ONE reading, so the refusal and the [`steering`] advisory judge the same
+/// taint.
+fn born_flow(
+    wf: &RawWorkflow,
+    topo_waves: &[Vec<usize>],
+    calls: &[ComposedCall],
+) -> super::content_flow::ContentFlow {
+    let sources = super::content_flow::Sources {
+        mcp_trusted: &mcp_trusted,
+        calls,
+        entry: super::content_flow::Entry::Born,
+        exec_reads_files: None,
+    };
+    super::content_flow::analyze_content_flow(wf, topo_waves, &sources)
 }
 
 /// The listed call a task stands for (a workflow call `calls` names).

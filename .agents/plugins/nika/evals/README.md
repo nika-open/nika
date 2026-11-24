@@ -68,9 +68,25 @@ How to read the scores:
   difference with the baseline is by construction there, so read those two
   as "the plugin did its part", not as a gain.
 - **A dry run is not a run.** The graders named `did-not-run` and
-  `no-real-run` let `nika run <file> --dry-run` through: it prints the plan
-  and executes no effect. A rehearsal on the mock model is a run, since the
-  mock replaces the model and nothing else.
+  `no-real-run` read the shell command itself, not its description:
+  `nika run <file>` and the bare `nika <file>.nika` both count, and
+  `--dry-run` or `--help` on the same command is let through, since neither
+  executes an effect. A rehearsal on the mock model is a run: the mock
+  replaces the workflow's own model only, so tools, writes and sends stay
+  real and a model pinned on a task is still called.
+- **A file can change by three routes.** A case that forbids a change has
+  one grader per route (the edit tool, the write tool, the shell) and, where
+  the content tells, one that reads the file after the run: a `mcp:` tool in
+  the workflow, a `default` on the gate (measured on 0.125.0: with one, a
+  run that has no terminal settles without asking). The shell graders know
+  the usual forms (a redirect, `tee`, `sed -i`, `cp` or `mv` onto the file):
+  they are a net, not a proof.
+- **`--answer` in either spelling.** `--answer task=value` and
+  `--answer=task=value` both resume a paused run, and both count.
+- **Every pattern is played on samples.** `scripts/tests/evals.test.sh` holds,
+  for each grader with a pattern, one input it must match and one it must
+  not, encoded the way the runner encodes a tool's input. A new grader
+  without samples fails that test.
 - **`in-the-background`** in `surfaces-gate-from-background-run` reads the
   shell tool's own input for its background flag. A host whose shell tool has
   no such flag fails that grader and should pass the others.

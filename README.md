@@ -68,6 +68,7 @@ local-first and fully open source (AGPL-3.0).
   <a href="#what-you-can-hand-to-nika"><b>Examples</b></a> ·
   <a href="#why-a-file-and-not-a-chat"><b>Why a file</b></a> ·
   <a href="#works-where-you-already-work"><b>Where it works</b></a> ·
+  <a href="#behind-your-application-nika-serve"><b>Serve</b></a> ·
   <a href="#know-the-limits"><b>Limits</b></a> ·
   <a href="https://docs.nika.sh"><b>Docs</b></a>
 </p>
@@ -503,6 +504,51 @@ whole API.
   </a>
 </p>
 <p align="center"><sub>Your app asks, the engine decides, the receipt proves it. The code is the quick start above, which the capture ran, with lines 3 and 6 also shown as its server driver ran them against <code>nika serve</code>. Every event, verdict, hash and version on screen was captured from <code>@supernovae-st/nika</code> 0.124.0, the engine it bundles and <code>nika serve</code> in a <code>mock/echo</code> rehearsal; the cards, lanes, packets and pacing are illustration.</sub></p>
+
+### Behind your application: `nika serve`
+
+`nika serve --bind` runs the same engine as an HTTP server beside your
+backend. It admits a job by workflow name, queues and runs it, and keeps its
+record. Since 0.125 one server holds the jobs of the many users of an
+application:
+
+- A job carries the `owner` and `labels` your backend states, and
+  `GET /v1/jobs` finds jobs again by owner, label, status and date.
+- Waiting jobs are shared fairly between owners: a user who submits fifty
+  jobs does not delay the user who submits one. `--provider-concurrency`
+  caps the model calls in flight on one provider across every job.
+- `--job-retention` forgets settled jobs after a window.
+- A job a restart interrupted runs again as a new attempt of the same job
+  only when asked: `--retry-interrupted` is off by default, and
+  `POST /v1/jobs/{id}/retry` starts one on request.
+
+In a Nika project (a directory with a `nika.yaml`), with your workflows under
+`./workflows`:
+
+```sh
+umask 077 && mkdir -p .nika && openssl rand -hex 24 > .nika/serve.token
+nika serve --bind 127.0.0.1:8787 --workflows ./workflows \
+  --token-file .nika/serve.token --job-retention 7d --max-concurrent-per-owner 2
+```
+
+Then, from your backend or another terminal:
+
+```sh
+AUTH="Authorization: Bearer $(cat .nika/serve.token)"
+curl -s -X POST http://127.0.0.1:8787/v1/jobs -H "$AUTH" \
+  -H 'Idempotency-Key: report-user_123-1' -H 'Content-Type: application/json' \
+  -d '{"workflow": "workflows/report.nika", "owner": "user_123"}'
+curl -s -H "$AUTH" 'http://127.0.0.1:8787/v1/jobs?owner=user_123&status=failed,interrupted'
+```
+
+`owner` attributes a job; it does not control access. Whoever holds the token
+reads, lists, cancels and retries every job, so keep the token in your
+backend and apply your own authorization there. The TypeScript SDK does not
+call these routes yet: call them over HTTP. The
+[resident server guide](https://docs.nika.sh/sdk/operations/resident-server)
+covers the routes, and the
+[server runbook](https://docs.nika.sh/sdk/operations/server-runbook) covers
+sizing, an upgrade that keeps a way back and a support retry.
 
 ## Know the limits
 

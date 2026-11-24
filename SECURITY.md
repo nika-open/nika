@@ -2,18 +2,18 @@
 
 ## Supported Versions
 
-0.124 is the current release line. Work stays focused on maintenance,
+0.125 is the current release line. Work stays focused on maintenance,
 security and the media capabilities workflows need; native video is planned
-for 0.125. Security fixes land on `main`, the only maintenance branch, and
-ship in the next release. The 0.123.x line is the previous one and receives
-no further patches. Report against the latest release or `main`.
+for a later release. Security fixes land on `main`, the only maintenance
+branch, and ship in the next release. The 0.124.x line is the previous one
+and receives no further patches. Report against the latest release or `main`.
 
 | Version or branch        | Status                            | Security fixes |
 |--------------------------|-----------------------------------|----------------|
-| 0.124.x (latest release) | maintained                        | ✅ yes         |
+| 0.125.x (latest release) | maintained                        | ✅ yes         |
 | `main`                   | maintenance branch                | ✅ yes         |
-| 0.123.x                  | previous line: upgrade to 0.124.x | ❌ no          |
-| older than 0.123         | unsupported: upgrade              | ❌ no          |
+| 0.124.x                  | previous line: upgrade to 0.125.x | ❌ no          |
+| older than 0.124         | unsupported: upgrade              | ❌ no          |
 | `brouillon`              | read-only legacy (v0.79.3)        | ❌ frozen      |
 
 ## Reporting a Vulnerability
@@ -44,10 +44,10 @@ substantive response (initial triage + ETA) within **7 days**.
 We aim for **≤90 days** between report and public disclosure for
 non-trivial vulnerabilities, shorter for actively-exploited issues.
 
-## Defense Layers in 0.124
+## Defense Layers in 0.125
 
 What the released engine enforces. Every code below resolves with
-`nika explain <code>` on 0.124.5; most are refused by `nika check` before a
+`nika explain <code>` on 0.125.0; most are refused by `nika check` before a
 run starts, and the runtime enforces the same boundary again.
 
 | Code | Layer | Defense |
@@ -127,4 +127,4 @@ here once fixes ship. Anonymity respected on request.
 - [ADR-002 — release model](docs/adr/adr-002-forever-v0x.md)
 - [ADR-014 — Sealed kernel traits](docs/adr/adr-014-sealed-kernel-traits.md)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — what contributions are in scope, and the 12-gate process
-- [Known limits in 0.124](https://docs.nika.sh/changelog/known-limits) — what the release does not do, each with a way around it
+- [Known limits in 0.125](https://docs.nika.sh/changelog/known-limits) — what the release does not do, each with a way around it

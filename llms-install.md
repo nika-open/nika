@@ -6,9 +6,9 @@ is non-interactive and idempotent. Prefer the package-manager paths —
 they verify checksums for you; the shell install script is the human
 lane (guided page: <https://nika.sh/install>), not the agent lane.
 
-0.124 is the current release line. Work stays focused on maintenance,
+0.125 is the current release line. Work stays focused on maintenance,
 security and the media capabilities workflows need; native video is planned
-for 0.125. The current release is 0.124.5. Its known limits are at
+for a later release. The current release is 0.125.0. Its known limits are at
 <https://docs.nika.sh/changelog/known-limits>.
 
 ## 1 · Install
@@ -29,7 +29,7 @@ cargo binstall --git https://github.com/nika-open/nika nika-cli
 `nika-cli`; the installed binary is `nika`.)
 
 **Nix (builds the default branch via the flake; append `/<tag>` to the
-flake reference, e.g. `github:nika-open/nika/v0.124.5`, to build a release):**
+flake reference, e.g. `github:nika-open/nika/v0.125.0`, to build a release):**
 
 ```sh
 nix profile install github:nika-open/nika
@@ -46,8 +46,8 @@ gh nika --version   # pass-through to a PATH nika, else a one-time checksum-veri
 **A container (Linux, amd64 · arm64), built from the same release binaries:**
 
 ```sh
-docker run --rm ghcr.io/nika-open/nika:0.124.5 --version
-docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika:0.124.5 check flow.nika
+docker run --rm ghcr.io/nika-open/nika:0.125.0 --version
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/nika-open/nika:0.125.0 check flow.nika
 ```
 
 Images up to 0.124.4 stay at `ghcr.io/supernovae-st/nika`.
@@ -82,7 +82,7 @@ path above; say so plainly — do not improvise a build.
 ## 2 · Verify (always, before reporting success)
 
 ```sh
-nika --version   # prints the installed release and its commit: nika 0.124.5 (<commit>)
+nika --version   # prints the installed release and its commit: nika 0.125.0 (<commit>)
 nika doctor      # providers · PATH · what this machine can run
 ```
 

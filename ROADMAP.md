@@ -1,25 +1,27 @@
 # Nika Roadmap
 
-> **Status at 0.124.** 0.124 is the current release line of Nika: the Rust engine, the CLI and
-> TUI, and a minimal TypeScript SDK that runs `.nika` workflows. Work stays focused on
-> maintenance, security and the media capabilities workflows need; native video is planned for
-> 0.125. The 0.123.x line is the previous one, and there is no hosted service or SaaS. The plan
+> **Status at 0.125.** 0.125 is the current release line of Nika: the Rust engine, the CLI and
+> TUI, `nika serve` for applications, and a minimal TypeScript SDK that runs `.nika` workflows.
+> Work stays focused on maintenance, security and the media capabilities workflows need; native
+> video is planned for a later release. The 0.124.x line is the previous one, and there is no
+> hosted service or SaaS. The plan
 > below is the earlier long-range roadmap, kept as the record of how the engine was built; its
 > forward items are not commitments.
 
-## The 0.124 line
+## The 0.125 line
 
 - **Maintained and focused.** Fixes land on `main`, the only maintenance
   branch, and ship in the next release: security fixes, bug fixes,
   compatibility and the media capabilities workflows need
   ([SECURITY.md](SECURITY.md) lists the supported versions).
-- **Planned next:** native video, in 0.125.
-- **Also planned for 0.125:** `nika serve` behind an application. Jobs carry
-  the owner and labels their caller states and can be listed, the queue is
-  shared fairly between owners, and the model calls in flight are capped per
+- **Shipped in 0.125:** `nika serve` behind an application. Jobs carry the
+  owner and labels their caller states and can be listed, the queue is shared
+  fairly between owners, and the model calls in flight are capped per
   provider ([ADR-155](docs/adr/adr-155-serve-job-attribution-listing-and-fair-admission.md)).
-  Re-attempting a job a restart interrupted is decided and not built yet
+  A job a restart interrupted can run again as a new attempt of the same
+  job, when the operator's policy or a request asks for it
   ([ADR-156](docs/adr/adr-156-serve-attempts-for-interrupted-jobs.md)).
+- **Planned next:** native video, in a later release. No version is set.
 - **Not planned:** a hosted service or SaaS, a 1.0 launch, and new features
   outside that focus. The forward items in the historical plan below are
   not commitments.

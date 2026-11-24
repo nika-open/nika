@@ -929,8 +929,9 @@ pub const NIKA_1709: NikaCode = NikaCode {
 /// a server always runs inside a boundary, so on such a host `auto` and
 /// `require` refuse to start it, with no process started. That refusal
 /// is the spawn's own, not the run's: `nika mcp approve` exits
-/// environment-class, and under `nika run` the task naming the server
-/// fails with this code, never transient.
+/// environment-class, and under `nika run` the call to the server fails
+/// with this code, never transient (an `invoke:` task fails; an agent
+/// reads it as that tool's error result).
 pub const NIKA_1710: NikaCode = NikaCode {
     num: 1710,
     category: Category::Runtime,

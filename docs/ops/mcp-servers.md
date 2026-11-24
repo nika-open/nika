@@ -143,9 +143,12 @@ Every spawned server rides the same OS sandbox as the `exec` verb:
   started.
 - **The waiver**: `NIKA_SANDBOX=off` starts the server **unconfined and
   says so** on the connect line (`UNSANDBOXED … under the NIKA_SANDBOX=off
-  waiver …`), and a run that names an `mcp:` tool attests it on the
+  waiver …`), and every `nika run` under it attests the waiver on the
   journal's opening frame (`sandbox_policy: off` · `sandbox_waived:
-  true`), as it attests an unconfined `exec:` child.
+  true`), as it attests an unconfined `exec:` child. The run lane can
+  start any configured server, whatever its workflow names (an agent `**`
+  grant or a templated tool reaches one), so the record is not narrowed
+  to the `mcp:` tools a workflow spells out.
 - **Filesystem**: read + write confined to the project tree (the directory
   holding `.nika/`). System binaries and their loader paths stay readable —
   a `node` or `python3` installed anywhere runs; what it *reads and writes*

@@ -209,41 +209,26 @@ fn the_waiver_is_attested_on_the_opening_frame() {
     );
 }
 
-/// The MCP half of the witnessed waiver: a workflow that names an `mcp:`
-/// tool (an `invoke` target or a granted agent `tools:` entry) under a
-/// recorded `off` posture on a host with no backend can start a server
-/// unconfined, so the waiver is attested; every other cell claims nothing.
+/// The MCP half of the witnessed waiver is the recorded posture alone: a
+/// host with no backend under `off` starts a server unconfined, so the
+/// waiver holds; every other cell, an unrecorded or a mistyped posture
+/// included, claims nothing. What the workflow names plays no part (the
+/// installed plane is the runtime's half, `tests/mcp_sandbox_waiver.rs`).
 #[test]
-fn an_mcp_server_the_run_can_start_unconfined_is_a_waiver() {
-    let parse = |yaml: &str| {
-        nika_schema::parse(
-            yaml,
-            nika_schema::FileId::new(0),
-            nika_schema::ParseMode::Strict,
-        )
-        .expect("fixture parses")
-    };
-    let invoke = parse("nika: w\ntasks:\n  a:\n    invoke: { tool: \"mcp:s/ping\" }\n");
-    let agent = parse(
-        "nika: w\nmodel: mock/echo\ntasks:\n  a:\n    agent: { prompt: \"go\", tools: [\"mcp:s/*\"] }\n",
-    );
-    let denied = parse(
-        "nika: w\nmodel: mock/echo\ntasks:\n  a:\n    agent: { prompt: \"go\", tools: [\"!mcp:s/*\"] }\n",
-    );
-    let none = parse("nika: w\ntasks:\n  a:\n    exec: { command: [\"echo\", \"x\"] }\n");
-    for wf in [&invoke, &agent] {
-        assert!(super::mcp_server_waived(wf, Some("noop"), Some("off")));
-        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("auto")));
-        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("require")));
-        assert!(!super::mcp_server_waived(wf, Some("seatbelt"), Some("off")));
-        assert!(!super::mcp_server_waived(wf, None, Some("off")));
-        assert!(!super::mcp_server_waived(wf, Some("noop"), None));
-        assert!(!super::mcp_server_waived(wf, Some("noop"), Some("requrie")));
-    }
-    for wf in [&denied, &none] {
+fn an_mcp_server_the_posture_starts_unconfined_is_a_waiver() {
+    assert!(super::mcp_server_waived(Some("noop"), Some("off")));
+    for (backend, policy) in [
+        (Some("noop"), Some("auto")),
+        (Some("noop"), Some("require")),
+        (Some("seatbelt"), Some("off")),
+        (Some("landlock"), Some("off")),
+        (None, Some("off")),
+        (Some("noop"), None),
+        (Some("noop"), Some("requrie")),
+    ] {
         assert!(
-            !super::mcp_server_waived(wf, Some("noop"), Some("off")),
-            "a run that names no MCP tool starts no server"
+            !super::mcp_server_waived(backend, policy),
+            "{backend:?} · {policy:?} starts no server unconfined"
         );
     }
 }

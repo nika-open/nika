@@ -4,9 +4,11 @@
 //! The MCP half of the witnessed waiver (#889): an MCP server always runs
 //! inside a boundary, so on a host with no OS sandbox backend it starts
 //! only under `NIKA_SANDBOX=off` (the spawn site refuses `auto` and
-//! `require` with NIKA-1710). A run that can start one — an installed MCP
-//! plane and a workflow naming an `mcp:` tool — attests that waiver on its
-//! opening frame, where an `exec:` child under `permits:` attests its own.
+//! `require` with NIKA-1710). A run with an installed MCP plane holds that
+//! waiver for its whole life, whatever its workflow names (an agent `**`
+//! grant or a templated target reaches a server no static read can see),
+//! so it attests it on its opening frame, where an `exec:` child under
+//! `permits:` attests its own.
 
 use std::sync::Arc;
 
@@ -23,6 +25,13 @@ use nika_verb_invoke::{InvokeVerb, McpPlane};
 
 /// One `mcp:` task, granted.
 const MCP_TASK: &str = "nika: w\npermits:\n  tools: [\"mcp:s/ping\"]\ntasks:\n  a:\n    invoke: { tool: \"mcp:s/ping\" }\n";
+
+/// A workflow that names no `mcp:` tool at all.
+const EXEC_ONLY: &str =
+    "nika: w\npermits:\n  exec: true\ntasks:\n  a:\n    exec: { command: [\"echo\", \"x\"] }\n";
+
+/// An agent whose `**` grant can reach any MCP tool while it runs.
+const AGENT_GLOB: &str = "nika: w\nmodel: mock/echo\npermits:\n  tools: [\"*\"]\ntasks:\n  a:\n    agent: { prompt: \"go\", tools: [\"**\"] }\n";
 
 /// A plane whose server answers every call.
 fn answering_plane() -> McpPlane {
@@ -92,29 +101,37 @@ async fn opening_frame(
 }
 
 #[tokio::test]
-async fn an_mcp_server_started_under_the_waiver_is_attested_on_the_opening_frame() {
-    let (sandbox, policy, waived) = opening_frame(MCP_TASK, "noop", "off", true).await;
-    assert_eq!(sandbox.as_deref(), Some("noop"));
-    assert_eq!(policy.as_deref(), Some("off"));
-    assert_eq!(
-        waived.as_deref(),
-        Some("true"),
-        "the run can start its MCP server unconfined: the waiver is witnessed"
-    );
+async fn a_run_with_an_mcp_plane_under_the_waiver_attests_it_whatever_it_names() {
+    for yaml in [MCP_TASK, EXEC_ONLY, AGENT_GLOB] {
+        let (sandbox, policy, waived) = opening_frame(yaml, "noop", "off", true).await;
+        assert_eq!(sandbox.as_deref(), Some("noop"), "{yaml}");
+        assert_eq!(policy.as_deref(), Some("off"), "{yaml}");
+        assert_eq!(
+            waived.as_deref(),
+            Some("true"),
+            "an installed plane can start a server unconfined: the waiver is witnessed\n{yaml}"
+        );
+    }
 }
 
 #[tokio::test]
 async fn nothing_is_waived_where_no_mcp_server_starts_unconfined() {
-    // No plane: no `mcp:` call can reach a server.
-    let (_, _, waived) = opening_frame(MCP_TASK, "noop", "off", false).await;
-    assert_eq!(waived, None, "no plane, no server");
-    // `auto` and `require`: the spawn site refuses (NIKA-1710).
-    for refused in ["auto", "require"] {
-        let (_, policy, waived) = opening_frame(MCP_TASK, "noop", refused, true).await;
-        assert_eq!(policy.as_deref(), Some(refused));
-        assert_eq!(waived, None, "{refused} refuses the spawn: nothing waived");
+    for yaml in [MCP_TASK, EXEC_ONLY, AGENT_GLOB] {
+        // No plane: no call can reach a server.
+        let (_, policy, waived) = opening_frame(yaml, "noop", "off", false).await;
+        assert_eq!(policy.as_deref(), Some("off"), "{yaml}");
+        assert_eq!(waived, None, "no plane, no server\n{yaml}");
+        // `auto` and `require`: the spawn site refuses (NIKA-1710).
+        for refused in ["auto", "require"] {
+            let (_, policy, waived) = opening_frame(yaml, "noop", refused, true).await;
+            assert_eq!(policy.as_deref(), Some(refused), "{yaml}");
+            assert_eq!(
+                waived, None,
+                "{refused} refuses the spawn: nothing waived\n{yaml}"
+            );
+        }
+        // A backend confines the server whatever the policy.
+        let (_, _, waived) = opening_frame(yaml, "seatbelt", "off", true).await;
+        assert_eq!(waived, None, "a confined server waives nothing\n{yaml}");
     }
-    // A backend confines the server whatever the policy.
-    let (_, _, waived) = opening_frame(MCP_TASK, "seatbelt", "off", true).await;
-    assert_eq!(waived, None, "a confined server waives nothing");
 }

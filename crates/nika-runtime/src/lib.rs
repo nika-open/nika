@@ -324,7 +324,7 @@ pub struct Runtime<S, T, H, P, D, C> {
     access_plan: Option<nika_providers::ExecutionAccessPlan>,
     /// Live `nika:inspect` cell (ADR-088). Shared with the dispatcher.
     inspect: Option<Arc<nika_builtin::LiveInspect>>,
-    /// An MCP plane is installed: the run can start MCP servers (the waiver reads it).
+    /// An MCP plane is installed: the run can start MCP servers (the waiver attests it).
     mcp_plane: bool,
     /// The run's SOURCE identity — sha256 hex over the exact bytes the
     /// operator ran (computed by the composer that read the file; the
@@ -984,7 +984,7 @@ where
             self.source_sha256_lf.as_deref(),
             self.config.sandbox_backend.as_deref(),
             self.config.sandbox_policy.as_deref(),
-            prologue::witnessed_waiver(&self.config, self.mcp_plane, wf),
+            prologue::witnessed_waiver(&self.config, self.mcp_plane),
             self.config.project_root_fingerprint.as_deref(),
             &self.input_origins,
             self.resume_compat.as_deref(),

@@ -43,7 +43,8 @@ Then the next observation. A change that did not help comes back out.
 reads, writes, reaches or sends, never removes a gate and never raises a
 ceiling on its own. A cheaper model route stays a proposal until a run on
 real data passes the same validation as before: a paid route, and a run on
-real data, are the person's yes.
+real data, are the person's yes (the authoring skill's
+`references/routing.md` gives the method for choosing one).
 
 **5 · Hand over.** One line per change kept, with the evidence that
 prompted it; one line per change put back; what is still only a proposal.

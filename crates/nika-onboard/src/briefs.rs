@@ -365,6 +365,11 @@ const AGENT_ENGINE_BEHAVIORS: &str = include_str!(concat!(
     "/../../.agents/plugins/nika/skills/nika-authoring/references/engine-behaviors.md"
 ));
 
+const AGENT_ROUTING: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.agents/plugins/nika/skills/nika-authoring/references/routing.md"
+));
+
 /// `.cursor/agents/nika-*.md` — the three kit subagents, project-side.
 /// Cursor's LOCAL plugin loader consumes MCP + skills ONLY (agents in a
 /// local plugin manifest are ignored; the marketplace path processes the
@@ -506,7 +511,7 @@ pub fn agents_md() -> &'static str {
 
 /// The scaffold set · (relative path, body). The ONE source of what `init`
 /// writes — `plan` and the docs both read it.
-pub(super) fn targets() -> [(&'static str, &'static str); 34] {
+pub(super) fn targets() -> [(&'static str, &'static str); 35] {
     [
         (".vscode/settings.json", VSCODE_SETTINGS),
         ("AGENTS.md", AGENTS_MD),
@@ -581,6 +586,10 @@ pub(super) fn targets() -> [(&'static str, &'static str); 34] {
         (
             ".agents/skills/nika-authoring/references/engine-behaviors.md",
             AGENT_ENGINE_BEHAVIORS,
+        ),
+        (
+            ".agents/skills/nika-authoring/references/routing.md",
+            AGENT_ROUTING,
         ),
         (".github/copilot-instructions.md", COPILOT_INSTRUCTIONS),
         ("CLAUDE.md", CLAUDE_MD),
@@ -1198,6 +1207,7 @@ mod tests {
             ".agents/skills/nika-authoring/references/job-anatomy.md",
             ".agents/skills/nika-authoring/references/seats-and-images.md",
             ".agents/skills/nika-authoring/references/engine-behaviors.md",
+            ".agents/skills/nika-authoring/references/routing.md",
             ".github/copilot-instructions.md",
             "CLAUDE.md",
         ] {

@@ -115,6 +115,7 @@ A small edit to an existing workflow keeps its scope and skips the design.
 | Check findings, execution, rehearsal, traces or cost reporting | [Validation and execution](references/validation-and-execution.md) |
 | Choose native tools, retain an exec, build JSON or prove deterministic rules | [Native tools and artifacts](references/native-and-artifacts.md) |
 | Paid inference, extraction schemas or paid-readiness blockers | [Paid inference](references/paid-inference.md) |
+| Which model does which step: the six roles, reading the catalog, the price `nika check` computes, where the data goes, proving a cheaper route | [Routing](references/routing.md) |
 | Parent/child calls, containment, child outputs or budgets | [Composition](references/composition.md) |
 | A project: `nika.yaml`, beats and their zone, supporting files, children, path bases | [Project](references/project.md) |
 | An open value, a human gate, exact identifiers, readback, a refused write, a model step a hint questions | [Decisions and effects](references/decisions-and-effects.md) |

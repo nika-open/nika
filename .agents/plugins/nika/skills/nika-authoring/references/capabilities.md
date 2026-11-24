@@ -187,6 +187,15 @@ service's own API.
   `--sends-out <tool>`, `--no-role <tool>`. The lethal-trifecta row of check
   counts those roles; a tool with no role is unknown, not safe, and check
   says so with an `[mcp-roles]` hint.
+- **The key.** On 0.125.0 a declared server starts with a cleaned
+  environment and the declaration has no field that points at a secret
+  store: a value reaches the server only through its launch arguments. The
+  person chooses how their key gets there. Never write its value into the
+  declaration or a workflow.
+- **Cost.** The engine does not price a call to an MCP tool, so
+  `--max-cost-usd` does not bound what the service bills. Bound a fan-out
+  over a billed tool yourself (`for_each.max_items`, a small `max_parallel`)
+  and say so once before the first run.
 - **An upgrade that widens effects.** Adding a server or a hub to a workflow
   starts a new process, reaches new hosts and can spend on a paid account.
   Offer it in one line, with what it reaches and what it may cost, and add it

@@ -12,27 +12,14 @@
 //!
 //! Two more Messages API refusals are recorded per model, from Anthropic's tool-use and
 //! thinking pages (read 2026-11-24): a forced tool choice, and a `thinking` type that turns the
-//! model's reasoning down.
+//! model's reasoning down. Each rides its capability rule (`reasoning_facts.refuses`), so a model
+//! added to a rule takes the rule's refusals in plain sight and a model no rule lists is never
+//! refused: the provider answers.
 
 use crate::data::generated::find_provider;
 use crate::data::models::model_capabilities;
 use crate::types::ParamFlag;
-use crate::types::model::{ReasoningFacts, ThinkingOff};
-
-/// The Claude models whose Messages API answers a forced tool choice (`tool_choice` of type
-/// `any` or `tool`) with HTTP 400 on every request, as Anthropic's « Define tools » and thinking
-/// pages list them (2026-11-24); `auto` and `none` stay accepted. Wire ids only.
-const FORCED_TOOL_CHOICE_REFUSED: [&str; 4] = [
-    "claude-fable-5-2",
-    "claude-fable-5-1",
-    "claude-opus-5-5",
-    "claude-sonnet-5-5",
-];
-
-/// The one Claude model whose documented way to turn its reasoning down is not
-/// `thinking: { type: "disabled" }`: Claude Sonnet 5.5 refuses `disabled` and takes
-/// `between_tools` (Anthropic's per-model thinking table, 2026-11-24).
-const BETWEEN_TOOLS_OFF: &str = "claude-sonnet-5-5";
+use crate::types::model::{ReasoningFacts, RefusedControl};
 
 /// The wire model a catalog nickname names (`anthropic`/`sonnet` names `claude-sonnet-5-5`);
 /// `None` for any other name, which is its own wire id.
@@ -87,56 +74,56 @@ pub fn refuses_thinking_budget(provider: &str, name: &str) -> bool {
 }
 
 /// Whether the provider's API refuses a forced tool choice (`tool_choice` `any` or `tool`) on
-/// `provider`/`name` with an error on every request: an Anthropic route to a model of
-/// [`FORCED_TOOL_CHOICE_REFUSED`]. Such a request must let the model choose (`auto`), with
-/// structured output where it needs a fixed shape. `false` wherever no refusal is recorded.
+/// `provider`/`name` with an error on every request: an Anthropic route whose model's rule lists
+/// `forced-tool-choice` in `reasoning_facts.refuses`. Such a request must let the model choose
+/// (`auto`), with structured output where it needs a fixed shape. `false` wherever no refusal is
+/// recorded.
 #[must_use]
 pub fn refuses_forced_tool_choice(provider: &str, name: &str) -> bool {
-    anthropic_route(provider) && FORCED_TOOL_CHOICE_REFUSED.contains(&wire_model(provider, name))
+    refuses(provider, name, RefusedControl::ForcedToolChoice)
 }
 
 /// Whether the provider's API refuses `thinking: { type: <kind> }` on `provider`/`name` with an
-/// error on every request, for the two types that turn a model's reasoning down (`disabled`,
-/// `between_tools`): both on an Anthropic route whose model's reasoning cannot be turned off
-/// (`off = never`), and, on one that documents a lower setting, the type it does not take
-/// (`between_tools` everywhere but Claude Sonnet 5.5, `disabled` there). `false` for any other
-/// type and wherever the catalog records no such refusal. A type the model takes may still be
-/// refused at some effort levels; that is not claimed here.
+/// error on every request, for the two types that turn a model's reasoning down: `disabled` and
+/// `between_tools`, each where the model's rule lists it in `reasoning_facts.refuses`. `false`
+/// for any other type and wherever the catalog records no such refusal, a model no rule lists
+/// included. A type the model takes may still be refused at some effort levels (Sonnet 5.5's
+/// `between_tools` above `high`, Haiku 5.5's and Opus 5's `disabled` at `xhigh` or `max`); that
+/// is not claimed here.
 #[must_use]
 pub fn refuses_thinking_type(provider: &str, name: &str, kind: &str) -> bool {
-    if !anthropic_route(provider) || !matches!(kind, "disabled" | "between_tools") {
-        return false;
-    }
-    let wire = wire_model(provider, name);
-    match model_capabilities(provider, wire)
-        .reasoning_facts
-        .thinking_off
-    {
-        Some(ThinkingOff::Never) => true,
-        Some(ThinkingOff::NotReached) => {
-            let off = if wire == BETWEEN_TOOLS_OFF {
-                "between_tools"
-            } else {
-                "disabled"
-            };
-            kind != off
-        }
-        _ => false,
-    }
+    let control = match kind {
+        "disabled" => RefusedControl::ThinkingDisabled,
+        "between_tools" => RefusedControl::ThinkingBetweenTools,
+        _ => return false,
+    };
+    refuses(provider, name, control)
+}
+
+/// Whether an Anthropic route's model rule lists `control` among the controls it refuses.
+fn refuses(provider: &str, name: &str, control: RefusedControl) -> bool {
+    anthropic_route(provider)
+        && model_capabilities(provider, wire_model(provider, name))
+            .reasoning_facts
+            .refuses(control)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::model::ThinkingOff;
 
-    /// Anthropic's tool-use page (2026-11-24): Fable 5.2, Fable 5.1, Opus 5.5 and Sonnet 5.5
-    /// refuse a forced tool choice on every request; Haiku 5.5, Opus 5 and the earlier models
-    /// accept it, and no other route claims the refusal.
+    /// Anthropic's thinking-tool-workflows page (2026-11-24): Opus 5.5, Sonnet 5.5, Fable 5.2,
+    /// Mythos 5.2, Fable 5.1 and Mythos 5.1 refuse a forced tool choice on every request; « Other
+    /// models: Forced tool use is accepted », so Haiku 5.5, Opus 5, Fable 5, the earlier models
+    /// and an id the data does not know accept it, and no other route claims the refusal.
     #[test]
     fn the_current_claude_models_refuse_a_forced_tool_choice() {
         for (provider, name) in [
             ("anthropic", "claude-fable-5-2"),
+            ("anthropic", "claude-mythos-5-2"),
             ("anthropic", "claude-fable-5-1"),
+            ("anthropic", "claude-mythos-5-1"),
             ("anthropic", "claude-opus-5-5"),
             ("anthropic", "claude-sonnet-5-5"),
             ("anthropic", "sonnet"),
@@ -153,7 +140,9 @@ mod tests {
             ("anthropic", "haiku"),
             ("anthropic", "claude-opus-5"),
             ("anthropic", "claude-fable-5"),
+            ("anthropic", "claude-opus-4-8"),
             ("anthropic", "claude-sonnet-4-6"),
+            ("anthropic", "claude-next-9"),
             ("openrouter", "anthropic/claude-fable-5.2"),
             ("openai", "claude-fable-5-2"),
         ] {
@@ -165,14 +154,17 @@ mod tests {
     }
 
     /// Anthropic's per-model thinking table (2026-11-24): the always-thinking models refuse
-    /// both lower settings, Sonnet 5.5 refuses `disabled` and takes `between_tools`, Haiku 5.5
-    /// takes `disabled` and refuses `between_tools`; an earlier model and another type claim
-    /// nothing.
+    /// both lower settings, Sonnet 5.5 refuses `disabled` and takes `between_tools` (« Only
+    /// Claude Sonnet 5.5 accepts `between_tools` »), so every other model of the table, the
+    /// 4.x models included, refuses `between_tools`; Haiku 5.5 and Opus 5 take `disabled`. An id
+    /// the data does not know and another type claim nothing.
     #[test]
     fn a_thinking_type_the_model_does_not_take_is_refused() {
         for name in [
             "claude-fable-5-2",
+            "claude-mythos-5-2",
             "claude-fable-5-1",
+            "claude-mythos-5-1",
             "claude-fable-5",
             "claude-opus-5-5",
         ] {
@@ -206,11 +198,32 @@ mod tests {
                 "{name}"
             );
         }
+        for name in [
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-5-20251101",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5-20250929",
+        ] {
+            assert!(
+                refuses_thinking_type("anthropic", name, "between_tools"),
+                "{name}"
+            );
+            assert!(
+                !refuses_thinking_type("anthropic", name, "disabled"),
+                "{name}"
+            );
+        }
         for (provider, name, kind) in [
             ("anthropic", "claude-fable-5-2", "adaptive"),
             ("anthropic", "claude-sonnet-4-6", "disabled"),
             ("anthropic", "some-future-model", "disabled"),
+            ("anthropic", "claude-next-9", "between_tools"),
+            ("anthropic", "claude-next-9", "disabled"),
             ("openrouter", "anthropic/claude-fable-5.2", "disabled"),
+            ("openrouter", "anthropic/claude-opus-4.8", "between_tools"),
         ] {
             assert!(
                 !refuses_thinking_type(provider, name, kind),
@@ -246,7 +259,9 @@ mod tests {
             ("anthropic", "claude-opus-5-5"),
             ("anthropic", "claude-haiku-5-5"),
             ("anthropic", "claude-fable-5-2"),
+            ("anthropic", "claude-mythos-5-2"),
             ("anthropic", "claude-fable-5-1"),
+            ("anthropic", "claude-mythos-5-1"),
             ("anthropic", "claude-fable-5"),
             ("anthropic", "claude-opus-5"),
             ("anthropic", "claude-sonnet-5"),

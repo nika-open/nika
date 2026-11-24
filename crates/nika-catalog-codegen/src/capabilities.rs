@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::emit::{opt_rstr, rstr, str_slice_expr};
 use crate::error::CodegenError;
 use crate::providers::{ProviderEntry, validate_api_dialect};
-use crate::reasoning::{ReasoningFactsToml, emit_reasoning_facts};
+use crate::reasoning::{ReasoningFactsToml, emit_reasoning_facts, validate_reasoning_facts};
 use crate::schema::{CAPABILITIES_SCHEMA, assert_schema};
 
 // ─── TOML schema types ───────────────────────────────────────────────────
@@ -334,6 +334,9 @@ fn validate_caps_patch(
     validate_token_limit_param(patch.token_limit_param.as_deref(), where_)?;
     validate_modality_lists(patch, where_)?;
     validate_param_flags(patch.supported_parameters.as_deref(), where_)?;
+    if let Some(facts) = &patch.reasoning_facts {
+        validate_reasoning_facts(facts, where_)?;
+    }
     for level in patch.reasoning_efforts.iter().flatten() {
         if reasoning_level_variant(level).is_none() {
             return Err(format!(
@@ -856,7 +859,7 @@ fn emit_cap_patch(p: &CapsPatchEntry) -> String {
         &mut out,
         "reasoning_facts",
         p.reasoning_facts.as_ref(),
-        |facts: &ReasoningFactsToml| emit_reasoning_facts(*facts),
+        emit_reasoning_facts,
     );
     out.push('}');
     out

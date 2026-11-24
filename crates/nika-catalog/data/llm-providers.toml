@@ -87,6 +87,25 @@ max_output_tokens = 128000
 limits_source = "https://platform.claude.com/docs/en/models/fable-5-2/overview"
 as_of = "2026-11-24"
 
+# Claude Mythos 5.2 and 5.1 (model pages read 2026-11-24): 1M context and
+# 128K output, « Active (verification required) »: only organizations
+# verified through Anthropic's verification programs can call them.
+[[providers.models]]
+id = "claude-mythos-5-2"
+model = "claude-mythos-5-2"
+context_window_tokens = 1000000
+max_output_tokens = 128000
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-2/overview"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "claude-mythos-5-1"
+model = "claude-mythos-5-1"
+context_window_tokens = 1000000
+max_output_tokens = 128000
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-1/overview"
+as_of = "2026-11-24"
+
 [[providers.models]]
 id = "claude-fable-5-1"
 model = "claude-fable-5-1"
@@ -298,8 +317,9 @@ data_policy = { trains = "opt-out", retention = "30", zdr = "yes", source = "htt
 
 # The -latest aliases name Mistral Large 4 (1M context) and Small 4
 # (mistral-small-2603, 256k context) on their model cards, read 2026-11-24:
-# https://docs.mistral.ai/models/mistral-large-4-0.md and
-# https://docs.mistral.ai/models/mistral-small-4-0-26-03.md. Decimal k/M
+# https://docs.mistral.ai/models/mistral-large-4 (model ids mistral-large-4,
+# mistral-large-4-0, mistral-large-latest) and
+# https://docs.mistral.ai/models/mistral-small-4. Decimal k/M
 # keeps the bounds within the published limits. Neither card states a
 # maximum output, so the curated 8,192 stays and no limits_source is set.
 [[providers.models]]
@@ -406,7 +426,7 @@ id = "gemini"
 name = "Google Gemini"
 aliases = ["google"]
 env_var = "GEMINI_API_KEY"
-default_model = "gemini-2.5-flash"
+default_model = "gemini-3.5-flash-lite"
 cheap_model = "gemini-3.1-flash-lite"
 requires_key = true
 description = "Gemini Pro, Flash, and Ultra models."
@@ -420,8 +440,9 @@ data_policy = { trains = "split", retention = "paid: limited (unquantified) · g
 # the earliest shutdown dates and the recommended replacements: Gemini 2.5
 # Flash and 2.5 Pro on 2026-12-01 (their requests then route to Gemini 3.5
 # Flash-Lite and Gemini 3.8 Flash), Gemini 3.1 Flash-Lite on 2027-05-07.
-# The provider's default and cheap models stay where they are: moving them
-# is a maintainer decision, which the check-time advice informs.
+# The provider's default moves to Gemini 3.5 Flash-Lite, the replacement the
+# page names for Gemini 2.5 Flash; the cheap model keeps Gemini 3.1
+# Flash-Lite until its own date.
 [[providers.models]]
 id = "flash-25"
 model = "gemini-2.5-flash"
@@ -876,16 +897,19 @@ id = "vertex"
 name = "Google Vertex AI"
 aliases = ["gcp"]
 env_var = "GOOGLE_APPLICATION_CREDENTIALS"
-default_model = "gemini-2.5-flash"
+default_model = "gemini-3.5-flash-lite"
 cheap_model = "gemini-3.1-flash-lite"
 requires_key = true
 description = "GCP-managed AI gateway."
 api_dialect = "gemini"
 tags = ["enterprise", "function-calling", "multimodal", "streaming"]
 
+# Vertex AI retired gemini-2.5-flash on 2026-10-20 (model versions page, read
+# 2026-11-24: « gemini-3.8-flash or gemini-3.5-flash-lite »): the default
+# follows the Gemini API's replacement for it, Gemini 3.5 Flash-Lite.
 [[providers.models]]
 id = "default"
-model = "gemini-2.5-flash"
+model = "gemini-3.5-flash-lite"
 context_window_tokens = 1048576
 max_output_tokens = 8192
 
@@ -955,8 +979,8 @@ name = "Moonshot (Kimi)"
 aliases = ["kimi"]
 env_var = "MOONSHOT_API_KEY"
 key_prefixes = ["sk-"]
-default_model = "kimi-k2"
-cheap_model = "kimi-k2"
+default_model = "kimi-k3.1-pro"
+cheap_model = "kimi-k3.1-pro"
 requires_key = true
 description = "Moonshot AI — Kimi K3.1 Pro, K3, K2, K2.5 (international endpoint api.moonshot.ai/v1). rig-core native provider."
 api_dialect = "openai-chat"
@@ -964,6 +988,13 @@ tags = ["frontier", "function-calling", "long-context", "streaming", "structured
 # Trains with NO opt-out ("training and refining our underlying technology") · Singapore.
 data_policy = { trains = "yes", retention = "unspecified · Singapore servers", zdr = "no", source = "https://platform.kimi.ai/docs/agreement/userprivacy · 2026-07-29" }
 
+# The pricing page (https://platform.kimi.ai/docs/pricing/chat, read
+# 2026-11-24): « starting October 31, 2026, K2 series models will no longer
+# be available to newly registered users » and « We plan to retire all K2
+# series models by the end of December 2026 », with the migration pointed at
+# the Kimi K3.1 Pro quickstart. The default and cheap models move to Kimi
+# K3.1 Pro, the cheaper of the two K3 models; the K2 rows stay for runs that
+# name them.
 [[providers.models]]
 id = "k2"
 model = "kimi-k2"

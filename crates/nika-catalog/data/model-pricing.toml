@@ -20,6 +20,10 @@ source_sha256_16 = "32e77823e43dd1d5"
 # refresh never AUTHORS them, it re-attaches the live file's rows
 # by (provider, model_pattern) and names any orphan loudly. An
 # OMITTED research field means no sourced fact exists yet.
+# A row a vendor page contradicts carries that page's figure and a
+# `# corrected from` line naming it (CORRECTIONS in the refresh).
+# A row upstream dropped that the contains() fallback would price as
+# another row keeps its last prices under a `# kept from` line.
 
 # ── anthropic (19 models) ──
 
@@ -291,7 +295,7 @@ input_per_million = 0.15
 output_per_million = 0.6
 status = "deprecated"
 
-# ── google (36 models) ──
+# ── google (39 models) ──
 
 [[rules]]
 provider = "google"
@@ -322,6 +326,16 @@ max_output_tokens = 16384
 context_window_tokens = 16384
 open_weights = false
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gemini-3.1-flash-image`
+[[rules]]
+provider = "google"
+model_pattern = "gemini-3.1-flash-image-preview"
+input_per_million = 0.5
+output_per_million = 60.0
+max_output_tokens = 65536
+context_window_tokens = 65536
+open_weights = false
+
 [[rules]]
 provider = "google"
 model_pattern = "deep-research-preview-04-2026"
@@ -331,6 +345,18 @@ cache_read_per_million = 0.2
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gemini-3.1-flash-lite`
+[[rules]]
+provider = "google"
+model_pattern = "gemini-3.1-flash-lite-preview"
+input_per_million = 0.25
+output_per_million = 1.5
+cache_read_per_million = 0.025
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -379,6 +405,16 @@ max_output_tokens = 16384
 context_window_tokens = 8192
 open_weights = false
 status = "deprecated"
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gemini-3-pro-image`
+[[rules]]
+provider = "google"
+model_pattern = "gemini-3-pro-image-preview"
+input_per_million = 2.0
+output_per_million = 120.0
+max_output_tokens = 32768
+context_window_tokens = 131072
+open_weights = false
 
 [[rules]]
 provider = "google"
@@ -600,13 +636,14 @@ max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
 
+# corrected from https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon.md.txt: 65,536 output tokens; the 2026-12-01 prices, which over-state the cost until 2026-11-30
 [[rules]]
 provider = "google"
 model_pattern = "gemini-4-carbon"
-input_per_million = 2.0
-output_per_million = 10.0
-cache_read_per_million = 0.1
-max_output_tokens = 32768
+input_per_million = 4.0
+output_per_million = 20.0
+cache_read_per_million = 0.2
+max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
 
@@ -621,13 +658,14 @@ context_window_tokens = 1048576
 open_weights = false
 status = "deprecated"
 
+# corrected from https://ai.google.dev/gemini-api/docs/models/gemini-4-argon.md.txt: 65,536 output tokens; the 2026-12-01 prices, which over-state the cost until 2026-11-30
 [[rules]]
 provider = "google"
 model_pattern = "gemini-4-argon"
-input_per_million = 2.0
-output_per_million = 10.0
-cache_read_per_million = 0.1
-max_output_tokens = 32768
+input_per_million = 4.0
+output_per_million = 20.0
+cache_read_per_million = 0.2
+max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
 
@@ -1670,12 +1708,12 @@ max_output_tokens = 262144
 context_window_tokens = 1048576
 open_weights = false
 
+# corrected from https://docs.mistral.ai/inference/pricing: no cached-input price on the pricing page
 [[rules]]
 provider = "mistral"
 model_pattern = "mistral-small-latest"
 input_per_million = 0.15
 output_per_million = 0.6
-cache_read_per_million = 0.015
 max_output_tokens = 256000
 context_window_tokens = 262144
 open_weights = true
@@ -1741,12 +1779,12 @@ context_window_tokens = 262144
 open_weights = true
 status = "deprecated"
 
+# corrected from https://docs.mistral.ai/inference/pricing: no cached-input price on the pricing page
 [[rules]]
 provider = "mistral"
 model_pattern = "mistral-small-2603"
 input_per_million = 0.15
 output_per_million = 0.6
-cache_read_per_million = 0.015
 max_output_tokens = 256000
 context_window_tokens = 262144
 open_weights = true
@@ -2329,7 +2367,7 @@ context_window_tokens = 1000000
 open_weights = true
 status = "deprecated"
 
-# ── openai (40 models) ──
+# ── openai (46 models) ──
 
 [[rules]]
 provider = "openai"
@@ -2386,6 +2424,52 @@ model_pattern = "chatgpt-image-latest"
 input_per_million = 5.0
 output_per_million = 10.0
 cache_read_per_million = 1.25
+open_weights = false
+status = "deprecated"
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gpt-5.2`
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-5.2-chat-latest"
+input_per_million = 1.75
+output_per_million = 14.0
+cache_read_per_million = 0.175
+max_output_tokens = 16384
+context_window_tokens = 128000
+open_weights = false
+status = "deprecated"
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gpt-5`
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-5.3-chat-latest"
+input_per_million = 1.75
+output_per_million = 14.0
+cache_read_per_million = 0.175
+max_output_tokens = 16384
+context_window_tokens = 128000
+open_weights = false
+status = "deprecated"
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gpt-5.3-codex`
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-5.3-codex-spark"
+input_per_million = 1.75
+output_per_million = 14.0
+cache_read_per_million = 0.175
+max_output_tokens = 32000
+context_window_tokens = 128000
+open_weights = false
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gpt-4o`
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-4o-2024-05-13"
+input_per_million = 5.0
+output_per_million = 15.0
+max_output_tokens = 4096
+context_window_tokens = 128000
 open_weights = false
 status = "deprecated"
 
@@ -2470,6 +2554,18 @@ model_pattern = "gpt-4.1-mini"
 input_per_million = 0.4
 output_per_million = 1.6
 cache_read_per_million = 0.1
+max_output_tokens = 32768
+context_window_tokens = 1047576
+open_weights = false
+status = "deprecated"
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `gpt-4.1`
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-4.1-nano"
+input_per_million = 0.1
+output_per_million = 0.4
+cache_read_per_million = 0.025
 max_output_tokens = 32768
 context_window_tokens = 1047576
 open_weights = false
@@ -2708,6 +2804,18 @@ max_output_tokens = 128000
 context_window_tokens = 1050000
 open_weights = false
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `o3`
+[[rules]]
+provider = "openai"
+model_pattern = "o3-mini"
+input_per_million = 1.1
+output_per_million = 4.4
+cache_read_per_million = 0.55
+max_output_tokens = 100000
+context_window_tokens = 200000
+open_weights = false
+status = "deprecated"
+
 [[rules]]
 provider = "openai"
 model_pattern = "gpt-4o"
@@ -2754,7 +2862,7 @@ open_weights = false
 status = "deprecated"
 tokenizer = "o200k_base"
 
-# ── openrouter (372 models) ──
+# ── openrouter (384 models) ──
 
 [[rules]]
 provider = "openrouter"
@@ -2812,6 +2920,26 @@ max_output_tokens = 16384
 context_window_tokens = 256000
 open_weights = true
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `nvidia/nemotron-3.5-content-safety`
+[[rules]]
+provider = "openrouter"
+model_pattern = "nvidia/nemotron-3.5-content-safety:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 8192
+context_window_tokens = 128000
+open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `nvidia/nemotron-3-super-120b-a12b`
+[[rules]]
+provider = "openrouter"
+model_pattern = "nvidia/nemotron-3-super-120b-a12b:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 235929
+context_window_tokens = 262144
+open_weights = true
+
 [[rules]]
 provider = "openrouter"
 model_pattern = "nvidia/nemotron-3-ultra-550b-a55b:free"
@@ -2859,6 +2987,16 @@ cache_write_per_million = 0.083333
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `thinkingmachines/inkling-small`
+[[rules]]
+provider = "openrouter"
+model_pattern = "thinkingmachines/inkling-small:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 262144
+context_window_tokens = 1048576
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -3012,6 +3150,17 @@ output_per_million = 0.28
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `inclusionai/ling-3.0-flash`
+[[rules]]
+provider = "openrouter"
+model_pattern = "inclusionai/ling-3.0-flash-sante"
+input_per_million = 0.042
+output_per_million = 0.1232
+cache_read_per_million = 0.0084
+max_output_tokens = 32768
+context_window_tokens = 262144
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -3216,6 +3365,17 @@ output_per_million = 0.0
 max_output_tokens = 32768
 context_window_tokens = 262144
 open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `inclusionai/ling-3.0-flash`
+[[rules]]
+provider = "openrouter"
+model_pattern = "inclusionai/ling-3.0-flash-fin"
+input_per_million = 0.042
+output_per_million = 0.1232
+cache_read_per_million = 0.0084
+max_output_tokens = 32768
+context_window_tokens = 262144
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -3452,6 +3612,16 @@ input_per_million = 0.25
 output_per_million = 1.0
 cache_read_per_million = 0.05
 max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `thinkingmachines/inkling`
+[[rules]]
+provider = "openrouter"
+model_pattern = "thinkingmachines/inkling:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 262144
 context_window_tokens = 1048576
 open_weights = true
 
@@ -5353,6 +5523,17 @@ max_output_tokens = 131072
 context_window_tokens = 262144
 open_weights = false
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `xiaomi/mimo-v2.5`
+[[rules]]
+provider = "openrouter"
+model_pattern = "xiaomi/mimo-v2.5-pro"
+input_per_million = 0.435
+output_per_million = 0.87
+cache_read_per_million = 0.0036
+max_output_tokens = 131072
+context_window_tokens = 1050000
+open_weights = true
+
 [[rules]]
 provider = "openrouter"
 model_pattern = "xiaomi/mimo-v2.6-pro"
@@ -5431,6 +5612,17 @@ max_output_tokens = 942818
 context_window_tokens = 1047576
 open_weights = false
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `openai/gpt-5.2`
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/gpt-5.2-chat"
+input_per_million = 1.75
+output_per_million = 14.0
+cache_read_per_million = 0.175
+max_output_tokens = 32000
+context_window_tokens = 128000
+open_weights = false
+
 [[rules]]
 provider = "openrouter"
 model_pattern = "openai/gpt-5.4-mini"
@@ -5472,6 +5664,17 @@ max_output_tokens = 117964
 context_window_tokens = 131072
 open_weights = true
 
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `openai/o3`
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/o3-mini-high"
+input_per_million = 1.1
+output_per_million = 4.4
+cache_read_per_million = 0.55
+max_output_tokens = 100000
+context_window_tokens = 200000
+open_weights = false
+
 [[rules]]
 provider = "openrouter"
 model_pattern = "rekaai/reka-flash-3"
@@ -5497,6 +5700,17 @@ input_per_million = 0.044
 output_per_million = 0.177
 max_output_tokens = 4096
 context_window_tokens = 8192
+open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `tencent/hy3`
+[[rules]]
+provider = "openrouter"
+model_pattern = "tencent/hy3-preview"
+input_per_million = 0.18
+output_per_million = 0.6
+cache_read_per_million = 0.06
+max_output_tokens = 235929
+context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
@@ -5587,6 +5801,16 @@ cache_read_per_million = 0.182
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `openai/gpt-4`
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/gpt-4-turbo"
+input_per_million = 10.0
+output_per_million = 30.0
+max_output_tokens = 4096
+context_window_tokens = 128000
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -6191,6 +6415,17 @@ output_per_million = 30.0
 cache_read_per_million = 0.5
 max_output_tokens = 128000
 context_window_tokens = 1050000
+open_weights = false
+
+# kept from the previous snapshot: models.dev no longer lists it, and without this row it would be priced as `openai/o3`
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/o3-mini"
+input_per_million = 1.1
+output_per_million = 4.4
+cache_read_per_million = 0.55
+max_output_tokens = 100000
+context_window_tokens = 200000
 open_weights = false
 
 [[rules]]

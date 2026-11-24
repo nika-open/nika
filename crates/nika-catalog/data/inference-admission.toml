@@ -457,6 +457,51 @@ output_nano_per_token = 40000
 cached_nano_per_token = 200
 cache_write_nano_per_token = 10000
 
+# Claude Mythos 5.2 and 5.1: the pricing page and each model page of
+# 2026-11-24 (Mythos 5.2 $8 input, $40 output, $0.20 cache hit, $10
+# five-minute write; Mythos 5.1 $10, $50, $0.25, $12.50; both 1M context and
+# 128K output). Both are « Active (verification required) »: a call from an
+# organization Anthropic has not verified is refused by Anthropic.
+[[tariffs]]
+provider = "anthropic"
+billing_provider = "anthropic"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "claude-mythos-5-2"
+endpoints = ["https://api.anthropic.com/v1/messages"]
+source = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-2/overview.md"
+route_source = "https://platform.claude.com/docs/en/api/messages"
+as_of = "2026-11-24"
+source_sha256 = "488e03e9cc17c794593348133aa9869d650964d599af58604a9838a0ae47e816"
+limits_sha256 = "c25f05745d70f22179c785366d182932759b49bbda9361ce351942d759b1c611"
+context_tokens = 1048576
+max_output_tokens = 128000
+input_nano_per_token = 8000
+output_nano_per_token = 40000
+cached_nano_per_token = 200
+cache_write_nano_per_token = 10000
+
+[[tariffs]]
+provider = "anthropic"
+billing_provider = "anthropic"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "claude-mythos-5-1"
+endpoints = ["https://api.anthropic.com/v1/messages"]
+source = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-1/overview.md"
+route_source = "https://platform.claude.com/docs/en/api/messages"
+as_of = "2026-11-24"
+source_sha256 = "488e03e9cc17c794593348133aa9869d650964d599af58604a9838a0ae47e816"
+limits_sha256 = "f5adad27124089e0e8398d09e11e9c52cd4466f0e8ae8c1855917fe90042a3cd"
+context_tokens = 1048576
+max_output_tokens = 128000
+input_nano_per_token = 10000
+output_nano_per_token = 50000
+cached_nano_per_token = 250
+cache_write_nano_per_token = 12500
+
 # The two legacy models the catalogue still names: the pricing page as fetched
 # on 2026-10-16 (Claude Sonnet 4.6 bills its whole 1M window at standard
 # rates; Claude Haiku 4.5 has a 200K window), the limits from each model's own
@@ -955,3 +1000,52 @@ input_nano_per_token = 0
 output_nano_per_token = 0
 cached_nano_per_token = 0
 # END generated
+
+# Kimi K3.1 Pro and Kimi K3 on Moonshot's own endpoint: the pricing page of
+# 2026-11-24 (https://platform.kimi.ai/docs/pricing/chat; K3.1 Pro $2.00
+# input, $10.00 output, $0.20 cached input, $2.00 five-minute write; K3
+# $3.00, $15.00, $0.30, $3.00; « All K3 series models support a
+# 1,048,576-token context window », no tiering by context length), each
+# quickstart for the limits (max_completion_tokens up to 1,048,576) and the
+# chat API reference for the route. A tariff with no snapshot row is inserted at the head of
+# the pricing table, so Kimi K3.1 Pro comes last here and first there, before the `kimi-k3`
+# pattern it contains.
+[[tariffs]]
+provider = "moonshot"
+billing_provider = "moonshot"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "kimi-k3"
+endpoints = ["https://api.moonshot.ai/v1/chat/completions"]
+source = "https://platform.kimi.ai/docs/pricing/chat"
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart"
+route_source = "https://platform.kimi.ai/docs/api/chat"
+as_of = "2026-11-24"
+source_sha256 = "0c8f833852bee289c8e7d7db48d4140aa1afb9493de435fef5a8431732f868f7"
+limits_sha256 = "4474e3c7f6e33cab5565a3d3976b1a53e3aec626bb1470893d31543510dcaf1d"
+context_tokens = 1048576
+max_output_tokens = 1048576
+input_nano_per_token = 3000
+output_nano_per_token = 15000
+cached_nano_per_token = 300
+cache_write_nano_per_token = 3000
+
+[[tariffs]]
+provider = "moonshot"
+billing_provider = "moonshot"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "kimi-k3.1-pro"
+endpoints = ["https://api.moonshot.ai/v1/chat/completions"]
+source = "https://platform.kimi.ai/docs/pricing/chat"
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart"
+route_source = "https://platform.kimi.ai/docs/api/chat"
+as_of = "2026-11-24"
+source_sha256 = "0c8f833852bee289c8e7d7db48d4140aa1afb9493de435fef5a8431732f868f7"
+limits_sha256 = "f32e1417c27db603d01a7f22765b3f164ff222a7c44f704ffd2b64868bcc0763"
+context_tokens = 1048576
+max_output_tokens = 1048576
+input_nano_per_token = 2000
+output_nano_per_token = 10000
+cached_nano_per_token = 200
+cache_write_nano_per_token = 2000

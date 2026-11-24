@@ -2093,6 +2093,46 @@ impl<T> core::convert::From<T> for nika_catalog::model::ReasoningLevel
 pub fn nika_catalog::model::ReasoningLevel::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_catalog::model::ReasoningLevel where T: 'static
 pub fn nika_catalog::model::ReasoningLevel::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub enum nika_catalog::model::RefusedControl
+pub nika_catalog::model::RefusedControl::ForcedToolChoice
+pub nika_catalog::model::RefusedControl::ThinkingBetweenTools
+pub nika_catalog::model::RefusedControl::ThinkingDisabled
+impl core::clone::Clone for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::clone(&self) -> nika_catalog::model::RefusedControl
+impl core::cmp::Eq for nika_catalog::model::RefusedControl
+impl core::cmp::PartialEq for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::eq(&self, other: &nika_catalog::model::RefusedControl) -> bool
+impl core::fmt::Debug for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for nika_catalog::model::RefusedControl
+impl core::marker::StructuralPartialEq for nika_catalog::model::RefusedControl
+impl<D> owo_colors::OwoColorize for nika_catalog::model::RefusedControl
+impl<T, U> core::convert::Into<U> for nika_catalog::model::RefusedControl where U: core::convert::From<T>
+pub fn nika_catalog::model::RefusedControl::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::model::RefusedControl where U: core::convert::Into<T>
+pub type nika_catalog::model::RefusedControl::Error = core::convert::Infallible
+pub fn nika_catalog::model::RefusedControl::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::model::RefusedControl where U: core::convert::TryFrom<T>
+pub type nika_catalog::model::RefusedControl::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::model::RefusedControl::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::model::RefusedControl where T: core::clone::Clone
+pub type nika_catalog::model::RefusedControl::Owned = T
+pub fn nika_catalog::model::RefusedControl::clone_into(&self, target: &mut T)
+pub fn nika_catalog::model::RefusedControl::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::model::RefusedControl where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::model::RefusedControl where T: ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::model::RefusedControl where T: ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::model::RefusedControl where T: core::clone::Clone
+pub unsafe fn nika_catalog::model::RefusedControl::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::model::RefusedControl where T: 'static
+pub fn nika_catalog::model::RefusedControl::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub enum nika_catalog::model::ThinkingOff
 pub nika_catalog::model::ThinkingOff::BudgetZero
 pub nika_catalog::model::ThinkingOff::ByDefault
@@ -2423,9 +2463,12 @@ pub fn nika_catalog::model::PricingSnapshot::as_any(&self) -> &(dyn core::any::A
 #[non_exhaustive] pub struct nika_catalog::model::ReasoningFacts
 pub nika_catalog::model::ReasoningFacts::counts_in_output_cap: core::option::Option<bool>
 pub nika_catalog::model::ReasoningFacts::reasons_by_default: core::option::Option<bool>
+pub nika_catalog::model::ReasoningFacts::refuses: &'static [nika_catalog::model::RefusedControl]
 pub nika_catalog::model::ReasoningFacts::thinking_off: core::option::Option<nika_catalog::model::ThinkingOff>
 impl nika_catalog::model::ReasoningFacts
 pub const fn nika_catalog::model::ReasoningFacts::new(reasons_by_default: core::option::Option<bool>, counts_in_output_cap: core::option::Option<bool>, thinking_off: core::option::Option<nika_catalog::model::ThinkingOff>) -> Self
+pub fn nika_catalog::model::ReasoningFacts::refuses(&self, control: nika_catalog::model::RefusedControl) -> bool
+pub const fn nika_catalog::model::ReasoningFacts::with_refusals(self, refuses: &'static [nika_catalog::model::RefusedControl]) -> Self
 impl core::clone::Clone for nika_catalog::model::ReasoningFacts
 pub fn nika_catalog::model::ReasoningFacts::clone(&self) -> nika_catalog::model::ReasoningFacts
 impl core::cmp::Eq for nika_catalog::model::ReasoningFacts
@@ -4687,6 +4730,46 @@ impl<T> core::convert::From<T> for nika_catalog::model::ReasoningLevel
 pub fn nika_catalog::model::ReasoningLevel::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_catalog::model::ReasoningLevel where T: 'static
 pub fn nika_catalog::model::ReasoningLevel::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub enum nika_catalog::types::model::RefusedControl
+pub nika_catalog::types::model::RefusedControl::ForcedToolChoice
+pub nika_catalog::types::model::RefusedControl::ThinkingBetweenTools
+pub nika_catalog::types::model::RefusedControl::ThinkingDisabled
+impl core::clone::Clone for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::clone(&self) -> nika_catalog::model::RefusedControl
+impl core::cmp::Eq for nika_catalog::model::RefusedControl
+impl core::cmp::PartialEq for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::eq(&self, other: &nika_catalog::model::RefusedControl) -> bool
+impl core::fmt::Debug for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for nika_catalog::model::RefusedControl
+impl core::marker::StructuralPartialEq for nika_catalog::model::RefusedControl
+impl<D> owo_colors::OwoColorize for nika_catalog::model::RefusedControl
+impl<T, U> core::convert::Into<U> for nika_catalog::model::RefusedControl where U: core::convert::From<T>
+pub fn nika_catalog::model::RefusedControl::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_catalog::model::RefusedControl where U: core::convert::Into<T>
+pub type nika_catalog::model::RefusedControl::Error = core::convert::Infallible
+pub fn nika_catalog::model::RefusedControl::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_catalog::model::RefusedControl where U: core::convert::TryFrom<T>
+pub type nika_catalog::model::RefusedControl::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_catalog::model::RefusedControl::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_catalog::model::RefusedControl where T: core::clone::Clone
+pub type nika_catalog::model::RefusedControl::Owned = T
+pub fn nika_catalog::model::RefusedControl::clone_into(&self, target: &mut T)
+pub fn nika_catalog::model::RefusedControl::to_owned(&self) -> T
+impl<T> core::any::Any for nika_catalog::model::RefusedControl where T: 'static + ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_catalog::model::RefusedControl where T: ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_catalog::model::RefusedControl where T: ?core::marker::Sized
+pub fn nika_catalog::model::RefusedControl::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_catalog::model::RefusedControl where T: core::clone::Clone
+pub unsafe fn nika_catalog::model::RefusedControl::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_catalog::model::RefusedControl
+pub fn nika_catalog::model::RefusedControl::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_catalog::model::RefusedControl where T: 'static
+pub fn nika_catalog::model::RefusedControl::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub enum nika_catalog::types::model::ThinkingOff
 pub nika_catalog::types::model::ThinkingOff::BudgetZero
 pub nika_catalog::types::model::ThinkingOff::ByDefault
@@ -5017,9 +5100,12 @@ pub fn nika_catalog::model::PricingSnapshot::as_any(&self) -> &(dyn core::any::A
 #[non_exhaustive] pub struct nika_catalog::types::model::ReasoningFacts
 pub nika_catalog::types::model::ReasoningFacts::counts_in_output_cap: core::option::Option<bool>
 pub nika_catalog::types::model::ReasoningFacts::reasons_by_default: core::option::Option<bool>
+pub nika_catalog::types::model::ReasoningFacts::refuses: &'static [nika_catalog::model::RefusedControl]
 pub nika_catalog::types::model::ReasoningFacts::thinking_off: core::option::Option<nika_catalog::model::ThinkingOff>
 impl nika_catalog::model::ReasoningFacts
 pub const fn nika_catalog::model::ReasoningFacts::new(reasons_by_default: core::option::Option<bool>, counts_in_output_cap: core::option::Option<bool>, thinking_off: core::option::Option<nika_catalog::model::ThinkingOff>) -> Self
+pub fn nika_catalog::model::ReasoningFacts::refuses(&self, control: nika_catalog::model::RefusedControl) -> bool
+pub const fn nika_catalog::model::ReasoningFacts::with_refusals(self, refuses: &'static [nika_catalog::model::RefusedControl]) -> Self
 impl core::clone::Clone for nika_catalog::model::ReasoningFacts
 pub fn nika_catalog::model::ReasoningFacts::clone(&self) -> nika_catalog::model::ReasoningFacts
 impl core::cmp::Eq for nika_catalog::model::ReasoningFacts

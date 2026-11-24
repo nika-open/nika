@@ -209,7 +209,12 @@ fn build_request(
     names: &ToolNameMap,
 ) -> Result<HttpRequest, ProviderError> {
     let effort = effort_word(req, rp)?;
-    fixed_controls(req, rp.profile.id, &rp.wire_model)?;
+    // The model facts are those of Anthropic's own API: an operator-pointed endpoint (a gateway,
+    // a proxy) may answer otherwise, so it receives the request as declared and answers for
+    // itself.
+    if rp.base_url == rp.profile.base_url {
+        fixed_controls(req, rp.profile.id, &rp.wire_model)?;
+    }
     let key = rp.key.as_ref().ok_or_else(|| ProviderError::AuthFailed {
         reason: "anthropic requires an API key".to_owned(),
     })?;
@@ -326,7 +331,8 @@ const DEFAULT_TEMPERATURE: f32 = 1.0;
 /// and a provider extra `thinking.type` the model does not take
 /// ([`nika_catalog::refuses_thinking_type`]). The controls checked are the ones the body
 /// carries: a typed value, else a provider extra ([`request_body`] writes the typed one first).
-/// A declared value is never dropped.
+/// A declared value is never dropped. [`build_request`] applies these rules on Anthropic's own
+/// endpoint only.
 fn fixed_controls(req: &InferRequest, provider: &str, model: &str) -> Result<(), ProviderError> {
     let refused = |reason: String| ProviderError::AdmissionDenied { reason };
     let raw = |key: &str| req.extra.params.get(key);
@@ -1266,10 +1272,11 @@ mod tests {
         assert_eq!(body["thinking"]["budget_tokens"], 4_000);
     }
 
-    /// Anthropic's tool-use page (2026-11-24): Fable 5.2, Fable 5.1, Opus 5.5 and Sonnet 5.5
-    /// answer `tool_choice` `any` or `tool` with HTTP 400. Such a request is refused before any
-    /// byte, naming the repair; `auto` and `none` are sent, as is a forced choice on Haiku 5.5,
-    /// which accepts one, and a request with no tool carries no choice at all.
+    /// Anthropic's thinking-tool-workflows page (2026-11-24): Opus 5.5, Sonnet 5.5, Fable 5.2,
+    /// Mythos 5.2, Fable 5.1 and Mythos 5.1 answer `tool_choice` `any` or `tool` with HTTP 400.
+    /// Such a request is refused before any byte, naming the repair; `auto` and `none` are sent,
+    /// as is a forced choice on Haiku 5.5 and Fable 5, which accept one, and a request with no
+    /// tool carries no choice at all.
     #[tokio::test]
     async fn a_forced_tool_choice_is_refused_before_any_byte_where_the_model_refuses_it() {
         let tool = || ToolDef::new("nika:read", "read a file", json!({"type": "object"}));
@@ -1281,7 +1288,9 @@ mod tests {
         };
         for model in [
             "claude-fable-5-2",
+            "claude-mythos-5-2",
             "claude-fable-5-1",
+            "claude-mythos-5-1",
             "claude-opus-5-5",
             "claude-sonnet-5-5",
         ] {
@@ -1326,17 +1335,76 @@ mod tests {
                     .is_none()
             );
         }
-        let haiku = ask(ToolChoice::Required);
-        assert!(fixed_controls(&haiku, "anthropic", "claude-haiku-5-5").is_ok());
-        assert_eq!(
-            body_of("claude-haiku-5-5", &haiku, false).expect("body")["tool_choice"]["type"],
-            "any"
-        );
+        let forced = ask(ToolChoice::Required);
+        for model in [
+            "claude-haiku-5-5",
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-next-9",
+        ] {
+            assert!(
+                fixed_controls(&forced, "anthropic", model).is_ok(),
+                "{model}"
+            );
+            assert_eq!(
+                body_of(model, &forced, false).expect("body")["tool_choice"]["type"],
+                "any"
+            );
+        }
+    }
+
+    /// The refusals are facts of Anthropic's own API: through an operator-pointed endpoint (a
+    /// gateway) a forced tool choice, a raw `thinking.type` and a temperature the model refuses
+    /// on Anthropic are sent as declared, while the same requests on Anthropic's endpoint are
+    /// refused with nothing sent.
+    #[tokio::test]
+    async fn an_operator_pointed_endpoint_receives_the_request_as_declared() {
+        let answered = r#"{"id":"msg_1","model":"claude-opus-5-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":3,"output_tokens":1}}"#;
+        let forced = {
+            let mut r = req(vec![Message::text(Role::User, "x")]);
+            r.tools = vec![ToolDef::new("nika:read", "read", json!({"type": "object"}))];
+            r.tool_choice = ToolChoice::Required;
+            r
+        };
+        let mut raw = req(vec![Message::text(Role::User, "x")]);
+        raw.extra
+            .params
+            .insert("thinking".into(), json!({ "type": "disabled" }));
+        let mut warm = req(vec![Message::text(Role::User, "x")]);
+        warm.temperature = Some(0.2);
+        for (label, r) in [("forced", forced), ("thinking", raw), ("temperature", warm)] {
+            let fake = FakeHttp::with_json(200, answered);
+            let gateway = crate::ProviderRegistry::new(
+                Arc::clone(&fake),
+                crate::ProvidersConfig::new()
+                    .with_key("anthropic", Secret::new("sk-ant-test"))
+                    .with_base_url("anthropic", "https://gateway.example/v1/messages"),
+            )
+            .resolve("anthropic/claude-opus-5-5")
+            .expect("resolves");
+            infer(&gateway, r.clone())
+                .await
+                .expect("the gateway answers");
+            let sent = fake.captured();
+            assert_eq!(sent.len(), 1, "{label}: sent once");
+            assert_eq!(
+                sent[0].url, "https://gateway.example/v1/messages",
+                "{label}"
+            );
+
+            let fake = FakeHttp::with_json(200, answered);
+            let own = resolved_with(&fake, "anthropic/claude-opus-5-5", "sk-ant-test");
+            let why = infer(&own, r).await.expect_err("refused").to_string();
+            assert!(fake.captured().is_empty(), "{label}: nothing was sent");
+            assert!(why.contains("nothing was sent"), "{label}: {why}");
+        }
     }
 
     /// Anthropic's per-model thinking table (2026-11-24): a provider extra `thinking.type` the
-    /// model does not take is refused before any byte (`disabled` on Fable 5.2, Opus 5.5 and
-    /// Sonnet 5.5, `between_tools` everywhere but Sonnet 5.5), and the type it takes is sent.
+    /// model does not take is refused before any byte (`disabled` on the Fable and Mythos
+    /// models, Opus 5.5 and Sonnet 5.5, `between_tools` on every model of the table but Sonnet
+    /// 5.5), and the type it takes is sent. A model no rule names is never refused.
     #[tokio::test]
     async fn a_raw_thinking_type_the_model_refuses_is_refused_before_any_byte() {
         let with = |kind: &str| {
@@ -1350,8 +1418,13 @@ mod tests {
             ("claude-fable-5-2", "disabled"),
             ("claude-opus-5-5", "disabled"),
             ("claude-sonnet-5-5", "disabled"),
+            ("claude-mythos-5-1", "disabled"),
+            ("claude-fable-5", "disabled"),
             ("claude-fable-5-2", "between_tools"),
             ("claude-haiku-5-5", "between_tools"),
+            ("claude-opus-4-8", "between_tools"),
+            ("claude-sonnet-4-6", "between_tools"),
+            ("claude-haiku-4-5-20251001", "between_tools"),
         ] {
             let fake = FakeHttp::with_json(200, "{}");
             let rp = resolved_with(&fake, &format!("anthropic/{model}"), "sk-ant-test");
@@ -1370,7 +1443,10 @@ mod tests {
         for (model, kind) in [
             ("claude-sonnet-5-5", "between_tools"),
             ("claude-haiku-5-5", "disabled"),
+            ("claude-opus-5", "disabled"),
             ("claude-sonnet-4-6", "disabled"),
+            ("claude-next-9", "between_tools"),
+            ("claude-next-9", "disabled"),
         ] {
             assert!(
                 fixed_controls(&with(kind), "anthropic", model).is_ok(),

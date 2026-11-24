@@ -368,7 +368,8 @@ fn an_option_label_never_shows_a_price_the_admission_does_not_use() {
 
 /// An Anthropic key on Anthropic's own endpoint offers the Author the current Claude models first:
 /// Claude Sonnet 5.5 (the provider's catalog default), Opus 5.5, Haiku 5.5 and Fable 5.2, each a
-/// ready, priced pick; the earlier models follow, the ones the admission prices priced. The
+/// ready, priced pick; Mythos 5.2 and 5.1 (priced, reachable once Anthropic has verified the
+/// organization) and the earlier models follow, the ones the admission prices priced. The
 /// picker lists these offers as is.
 #[test]
 fn an_anthropic_key_offers_the_current_claude_models_sonnet_5_5_first() {
@@ -403,6 +404,8 @@ fn an_anthropic_key_offers_the_current_claude_models_sonnet_5_5_first() {
     assert_eq!(
         priced,
         [
+            ("anthropic/claude-mythos-5-2", 40.0),
+            ("anthropic/claude-mythos-5-1", 50.0),
             ("anthropic/claude-fable-5-1", 50.0),
             ("anthropic/claude-sonnet-4-6", 15.0),
             ("anthropic/claude-haiku-4-5-20251001", 5.0),

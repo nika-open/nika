@@ -54,8 +54,9 @@ impl ReasoningLevel {
 
 /// What the catalog records of a model's reasoning on the routes this engine serves: whether it
 /// reasons when the request names no reasoning control, whether that reasoning is spent inside the
-/// request's output cap, and how a `.nika` file turns it off. A `None` is not recorded: unknown,
-/// never a default.
+/// request's output cap, how a `.nika` file turns it off, and which request controls its
+/// provider refuses because of how it reasons. A `None` is not recorded: unknown, never a
+/// default; an empty refusal list claims no refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub struct ReasoningFacts {
@@ -65,10 +66,13 @@ pub struct ReasoningFacts {
     pub counts_in_output_cap: Option<bool>,
     /// How a `.nika` file turns its reasoning off on this engine.
     pub thinking_off: Option<ThinkingOff>,
+    /// The request controls the provider answers with an error on this model, as its rule
+    /// lists them (`refuses = [...]`); a model no rule lists for one is never refused it.
+    pub refuses: &'static [RefusedControl],
 }
 
 impl ReasoningFacts {
-    /// These facts; `None` for each one not recorded.
+    /// These facts; `None` for each one not recorded, and no refusal.
     #[must_use]
     pub const fn new(
         reasons_by_default: Option<bool>,
@@ -79,8 +83,36 @@ impl ReasoningFacts {
             reasons_by_default,
             counts_in_output_cap,
             thinking_off,
+            refuses: &[],
         }
     }
+
+    /// The same facts with these refused request controls.
+    #[must_use]
+    pub const fn with_refusals(mut self, refuses: &'static [RefusedControl]) -> Self {
+        self.refuses = refuses;
+        self
+    }
+
+    /// Whether the provider refuses `control` on this model.
+    #[must_use]
+    pub fn refuses(&self, control: RefusedControl) -> bool {
+        self.refuses.contains(&control)
+    }
+}
+
+/// A request control a provider's API answers with an error on a model because of how the model
+/// reasons (Anthropic's tool-use and thinking pages list them per model).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RefusedControl {
+    /// A forced tool choice (`tool_choice` of type `any` or `tool`); `auto` and `none` stay
+    /// accepted.
+    ForcedToolChoice,
+    /// `thinking: { type: "disabled" }`.
+    ThinkingDisabled,
+    /// `thinking: { type: "between_tools" }`.
+    ThinkingBetweenTools,
 }
 
 /// How a `.nika` file turns a model's reasoning off on this engine.

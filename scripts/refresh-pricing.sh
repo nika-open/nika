@@ -140,6 +140,42 @@ SUPPLEMENTS = [
     ("deepseek", "deepseek-reasoner", 0.15, 0.6, "deprecated"),
 ]
 
+# Corrections: an upstream row a vendor's own page contradicts, set to
+# the page's figure on every refresh, with the page and the reason
+# emitted above the row. A correction upstream already matches is
+# reported for removal; one whose row vanished is reported loudly. A
+# value of None removes the field (the page shows no such price).
+#
+# Gemini 4 Carbon and Argon (model pages, read 2026-11-24): a 65,536-token
+# synchronous output limit, and input, output and cache-read prices of
+# $2.00 / $10.00 / $0.10 through 2026-11-30, then $4.00 / $20.00 / $0.20
+# from 2026-12-01. The later prices are carried, so these rows over-state
+# the cost until 2026-11-30 rather than under-state it afterwards.
+# Mistral Small 4 (docs.mistral.ai/inference/pricing, read 2026-11-24): the
+# cached-input cell is empty, so no cache-read price is claimed.
+#
+# (provider, model, {field: value}, source, reason)
+GEMINI_4_DEC_1 = {
+    "max_output_tokens": 65536,
+    "input": 4.0,
+    "output": 20.0,
+    "cache_read": 0.2,
+}
+CORRECTIONS = [
+    ("google", "gemini-4-carbon", GEMINI_4_DEC_1,
+     "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon.md.txt",
+     "65,536 output tokens; the 2026-12-01 prices, which over-state the cost until 2026-11-30"),
+    ("google", "gemini-4-argon", GEMINI_4_DEC_1,
+     "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon.md.txt",
+     "65,536 output tokens; the 2026-12-01 prices, which over-state the cost until 2026-11-30"),
+    ("mistral", "mistral-small-latest", {"cache_read": None},
+     "https://docs.mistral.ai/inference/pricing",
+     "no cached-input price on the pricing page"),
+    ("mistral", "mistral-small-2603", {"cache_read": None},
+     "https://docs.mistral.ai/inference/pricing",
+     "no cached-input price on the pricing page"),
+]
+
 rules = []
 seen = set()
 for engine_id, upstream_id in PROVIDERS.items():
@@ -191,6 +227,46 @@ for prov, mid, inp, outp, status in SUPPLEMENTS:
             "open_weights": None, "status": status,
         })
 
+for prov, mid, fields, source, reason in CORRECTIONS:
+    row = next((r for r in rules if (r["provider"], r["pattern"]) == (prov, mid)), None)
+    if row is None:
+        print(f"ORPHAN correction, its row is gone upstream: {prov}/{mid}", file=sys.stderr)
+        continue
+    if all(row.get(f) == v for f, v in fields.items()):
+        print(f"NOTE correction now matches upstream, drop it: {prov}/{mid}", file=sys.stderr)
+    row.update(fields)
+    row["corrected"] = f"# corrected from {source}: {reason}"
+
+# Fallback guard: a row upstream dropped whose id contains a pattern still listed for its
+# provider would be priced through the contains() fallback as that other row (o3-mini as o3,
+# gpt-4.1-nano as gpt-4.1), a silent wrong cost. Such a row is carried forward from the live
+# file with its last prices and a `# kept from` line naming the row it would fall into; a
+# dropped row that falls into nothing is dropped (a call to it is refused as unpriced).
+live_rows = live.get("rules", [])
+listed = {(r["provider"], r["pattern"]) for r in rules}
+for old in live_rows:
+    prov, pat = old["provider"], old["model_pattern"]
+    if (prov, pat) in listed:
+        continue
+    into = sorted((r["pattern"] for r in rules
+                   if r["provider"] == prov and r["pattern"] != pat and r["pattern"] in pat),
+                  key=len, reverse=True)
+    if not into:
+        continue
+    listed.add((prov, pat))
+    rules.append({
+        "provider": prov, "pattern": pat,
+        "input": old["input_per_million"], "output": old["output_per_million"],
+        "cache_read": old.get("cache_read_per_million"),
+        "cache_write": old.get("cache_write_per_million"),
+        "max_output_tokens": old.get("max_output_tokens"),
+        "context_window_tokens": old.get("context_window_tokens"),
+        "open_weights": old.get("open_weights"), "status": old.get("status"),
+        "kept": (f"# kept from the previous snapshot: models.dev no longer lists it, and "
+                 f"without this row it would be priced as `{into[0]}`"),
+    })
+    print(f"KEPT {prov}/{pat}: it would fall into {into[0]}", file=sys.stderr)
+
 # Contains-fallback safety: longest pattern first within each provider.
 rules.sort(key=lambda r: (r["provider"], -len(r["pattern"]), r["pattern"]))
 
@@ -235,6 +311,10 @@ out.append("# vendored by the research lane with per-claim sources — this")
 out.append("# refresh never AUTHORS them, it re-attaches the live file's rows")
 out.append("# by (provider, model_pattern) and names any orphan loudly. An")
 out.append("# OMITTED research field means no sourced fact exists yet.")
+out.append("# A row a vendor page contradicts carries that page's figure and a")
+out.append("# `# corrected from` line naming it (CORRECTIONS in the refresh).")
+out.append("# A row upstream dropped that the contains() fallback would price as")
+out.append("# another row keeps its last prices under a `# kept from` line.")
 
 current = None
 for r in rules:
@@ -245,6 +325,10 @@ for r in rules:
         out.append(f"# ── {prov} ({n} models) ──")
         current = prov
     out.append("")
+    if r.get("corrected"):
+        out.append(r["corrected"])
+    if r.get("kept"):
+        out.append(r["kept"])
     out.append("[[rules]]")
     out.append(f'provider = "{prov}"')
     out.append(f'model_pattern = "{r["pattern"]}"')

@@ -11,4 +11,8 @@
   there: OpenCode and Junie are seen from the project file `wire` writes,
   Continue once it has been wired, and a repository that ships a
   `.cursor/mcp.json` no longer makes `detected` create a Cursor config in a
-  home that has none.
+  home that has none. `detected` now wires host by host: a config its writer
+  refuses is reported on its own line with the reason and left as it is, the
+  other hosts are wired, and the exit code is 3 so a script sees the skip. A
+  client wired by name and `wire all` still write nothing when one config is
+  refused.

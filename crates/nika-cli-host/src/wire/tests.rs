@@ -1024,6 +1024,112 @@ fn detected_plans_nothing_for_cursor_from_a_project_file_alone() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+const GEMINI_UNWIRED: &str = "{\"theme\":\"dark\"}\n";
+const CODEX_REFUSED: &str = "mcp_servers = \"mine\"\n";
+
+/// A home with two hosts: Gemini CLI, whose settings are healthy and not
+/// wired yet, and Codex, whose config its writer refuses (`mcp_servers`
+/// is not a table). Returns the home, then the Gemini and Codex files.
+fn refused_codex_home(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let home = temp_dir(name);
+    let gemini = home.join(".gemini").join("settings.json");
+    let codex = home.join(".codex").join("config.toml");
+    for (path, body) in [(&gemini, GEMINI_UNWIRED), (&codex, CODEX_REFUSED)] {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, body).expect("seed");
+    }
+    (home, gemini, codex)
+}
+
+/// Nobody named the hosts `detected` wires, the machine did: one config
+/// its writer refuses is reported on its own line with the reason and
+/// left byte-identical, the other hosts are wired, and the exit is ENV
+/// so a script sees that one was skipped. The preview says the same.
+#[test]
+fn detected_wires_the_other_hosts_when_one_config_is_refused() {
+    let (home, gemini, codex) = refused_codex_home("partial-home");
+    let dir = temp_dir("partial-dir");
+    let dir_str = dir.to_str().expect("utf8");
+    let read = |path: &Path| std::fs::read_to_string(path).expect("read");
+    let refusal = format!(
+        "codex: `mcp_servers` in {} is not a TOML table; nika wire leaves it as it is",
+        codex.display()
+    );
+
+    let plan = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions {
+            dry_run: true,
+            ..WireOptions::default()
+        },
+    );
+    assert_eq!(plan.code, crate::output::exit::ENV, "{plan:?}");
+    assert_eq!(
+        plan.text,
+        format!(
+            "dry-run · plan only · nothing written\n\
+             ✖ skipped {refusal}\n\
+             + would update gemini: {}\n\
+             → re-run without --dry-run to apply",
+            gemini.display()
+        )
+    );
+    assert_eq!(read(&gemini), GEMINI_UNWIRED, "a preview never writes");
+
+    let out = run_in(
+        WireTarget::Detected,
+        Some(&home),
+        dir_str,
+        WireOptions::default(),
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    assert_eq!(
+        out.text,
+        format!(
+            "✖ skipped {refusal}\n✔ updated gemini: {}",
+            gemini.display()
+        )
+    );
+    assert_eq!(
+        read(&codex),
+        CODEX_REFUSED,
+        "the refused config is untouched"
+    );
+    let wired = read_json(&gemini).expect("json");
+    assert_eq!(wired["mcpServers"]["nika"], nika_server(false));
+    assert_eq!(wired["theme"], "dark", "the rest of the file is kept");
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The same two hosts NAMED keep the all-or-nothing preflight: the
+/// person chose those targets, so one refused config writes nothing.
+#[test]
+fn a_named_list_still_writes_nothing_when_one_config_is_refused() {
+    let (home, gemini, codex) = refused_codex_home("named-home");
+    let dir = temp_dir("named-dir");
+    let out = wire_targets(
+        &[WireTarget::Gemini, WireTarget::Codex],
+        Some(&home),
+        dir.to_str().expect("utf8"),
+        false,
+    );
+    assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
+    assert!(out.text.starts_with("nothing written"), "{out:?}");
+    assert_eq!(
+        std::fs::read_to_string(&gemini).expect("read"),
+        GEMINI_UNWIRED
+    );
+    assert_eq!(
+        std::fs::read_to_string(&codex).expect("read"),
+        CODEX_REFUSED
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// H7 · the consent gate is PURE (the `model pull` confirm-gate
 /// precedent): dry-run or `--yes` proceeds, a terminal prompts, a
 /// bare pipe is refused.
@@ -1240,13 +1346,15 @@ fn dry_run_of_a_non_object_table_says_skipped() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// `detected` and `all` preflight every client before the first
+/// A named client and `all` preflight every client before the first
 /// write: one malformed config leaves every config untouched, exit ENV,
 /// never the first client written before the second is found invalid.
-/// (Driven through the shared door with project-scope clients, so no test
-/// ever reads this machine's HOME.)
+/// (`detected` wires host by host instead, see
+/// `detected_wires_the_other_hosts_when_one_config_is_refused`. Driven
+/// through the list door with project-scope clients, so no test ever
+/// reads this machine's HOME.)
 #[test]
-fn detected_wire_writes_nothing_when_one_client_is_malformed() {
+fn a_named_list_writes_nothing_when_one_client_is_malformed() {
     let dir = temp_dir("detected-preflight");
     let opencode = r#"{"mcp":["keep"]}"#;
     std::fs::write(dir.join("opencode.json"), opencode).expect("seed");

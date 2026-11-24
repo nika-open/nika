@@ -158,13 +158,52 @@ fn run_in(target: WireTarget, home: Option<&Path>, dir: &str, options: WireOptio
         );
     }
 
+    if target == WireTarget::Detected {
+        return wire_detected(&targets, home, dir, options.dry_run);
+    }
     wire_targets(&targets, home, dir, options.dry_run)
 }
 
-/// Wire `targets`, preflighted as one: every client is planned
-/// before the first write, and one the plan cannot wire as it is (a
-/// malformed config, a server table that is not an object) leaves every
-/// config untouched, exit ENV. A preview is that plan alone.
+/// The `detected` door wires host by host. Nobody named these targets,
+/// the machine did: a config its writer refuses (malformed, a server
+/// table that is not one) is reported on its own line and left as it
+/// is, the other hosts are wired, and the exit is ENV so a script sees
+/// that one was skipped. A preview is that plan alone, on the same exit.
+fn wire_detected(
+    targets: &[WireTarget],
+    home: Option<&Path>,
+    dir: &str,
+    dry_run: bool,
+) -> VerbOutput {
+    let mut actions = collect_plan(targets, home, dir);
+    if !dry_run {
+        for (one, action) in targets.iter().zip(&mut actions) {
+            // Refused or already wired: left exactly as it is.
+            if !matches!(action, WireAction::Skipped(_) | WireAction::Current(_)) {
+                *action = wire_one(*one, home, dir, false).unwrap_or_else(WireAction::Skipped);
+            }
+        }
+    }
+    let skipped = actions
+        .iter()
+        .any(|action| matches!(action, WireAction::Skipped(_)));
+    let text = if dry_run {
+        render_plan(&actions)
+    } else {
+        render(&actions)
+    };
+    if skipped {
+        VerbOutput::env(text)
+    } else {
+        VerbOutput::ok(text)
+    }
+}
+
+/// Wire the `targets` a person named (a client, or `all`), preflighted
+/// as one: every client is planned before the first write, and one the
+/// plan cannot wire as it is (a malformed config, a server table that is
+/// not an object) leaves every config untouched, exit ENV. A preview is
+/// that plan alone.
 fn wire_targets(
     targets: &[WireTarget],
     home: Option<&Path>,

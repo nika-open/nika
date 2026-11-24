@@ -185,7 +185,8 @@ check "monitor prints one line for a waiting run" "$out" "Nika: asks is waiting 
 
 # ── the missing-program note: said at session start, in any project
 out="$(printf '{"session_id":"t7","cwd":"/"}' | env PATH=/usr/bin:/bin "$HERE/session-status.sh")"
-check "session start says the program is missing" "$out" "refuses every shell command"
+check "session start says the program is missing" "$out" "refuses every shell command inside a Nika project"
+check "session start says commands run elsewhere" "$out" "elsewhere shell commands run"
 check "session start gives an install line" "$out" "brew install nika-open/tap/nika"
 
 # ── the stop gate: a failing workflow written through the shell is caught once

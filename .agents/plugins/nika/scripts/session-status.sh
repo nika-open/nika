@@ -3,9 +3,10 @@
 # session-status — SessionStart: the two things a person must hear FIRST.
 #
 #   1. The Nika program is missing. The plugin's guard then refuses every
-#      shell command (it cannot judge without its judge), in every project.
-#      Say so at once, with the install line, instead of letting the first
-#      `ls` fail with no warning.
+#      shell command inside a Nika project (it cannot judge without its
+#      judge) and lets them through, unjudged, elsewhere. Say so at once,
+#      with the install line, instead of letting the first `ls` fail with
+#      no warning.
 #   2. A run in THIS workspace is waiting for an answer (a scheduled run
 #      parked at night, a run left before a meeting).
 #
@@ -32,7 +33,7 @@ if [ -n "$session" ]; then
 fi
 
 if ! command -v nika >/dev/null 2>&1; then
-  emit "The Nika plugin is installed but the nika program is not on PATH. Until it is, the plugin refuses every shell command in this session, in any project. Tell the user this now, before anything else, in one or two sentences. To fix: brew install nika-open/tap/nika, or curl -LsSf https://nika.sh/install.sh | sh, then restart the session. To work without Nika: disable the plugin. Do not try shell commands until one of the two is done."
+  emit "The Nika plugin is installed but the nika program is not on PATH. Until it is, the plugin refuses every shell command inside a Nika project (a folder with a nika.yaml or a .nika/ folder, or any folder below one); elsewhere shell commands run, but no nika run is checked before it starts. Tell the user this now, before anything else, in one or two sentences. To fix: brew install nika-open/tap/nika, or curl -LsSf https://nika.sh/install.sh | sh, then restart the session. To work without Nika: disable the plugin. Inside a Nika project, do not try shell commands until one of the two is done."
   exit 0
 fi
 

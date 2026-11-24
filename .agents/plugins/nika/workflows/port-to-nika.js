@@ -1,7 +1,11 @@
 export const meta = {
   name: 'port-to-nika',
   description: 'Port many workflow files (n8n JSON, Agent Builder exports, shell or Python scripts) to checked .nika files, one agent per file, with a parity report',
-  phases: ['Find', 'Port', 'Report'],
+  phases: [
+    { title: 'Find', detail: 'list the files that describe an automation' },
+    { title: 'Port', detail: 'one agent per file, each result checked' },
+    { title: 'Report', detail: 'what is clean, what needs work, what could not be ported' },
+  ],
 }
 
 // args: { dir?: string, pattern?: string } — where to look and what to port.

@@ -738,15 +738,15 @@ mod tests {
     #[test]
     fn an_unconfined_server_warns_once_on_the_opening_call() {
         let dir = project("unconfined");
-        let script = Script::serving(tools())
-            .unconfined("UNSANDBOXED (no seatbelt/landlock on this host · net deny)");
+        let note = crate::sandbox::sandbox_note("noop", &nika_kernel::process::NetPolicy::Deny);
+        let script = Script::serving(tools()).unconfined(&note);
         approve(&dir, &script);
         let plane = McpToolPlane::with_connector(&dir, Box::new(script.clone()));
         let first = plane.call(&call("mcp:owned/ping", json!({}))).unwrap();
         assert!(!first.is_error);
         assert_eq!(
             first.warning.as_deref(),
-            Some("mcp `owned`: UNSANDBOXED (no seatbelt/landlock on this host · net deny)")
+            Some(format!("mcp `owned`: {note}").as_str())
         );
         let second = plane.call(&call("mcp:owned/ping", json!({}))).unwrap();
         assert!(second.warning.is_none(), "said once per session");
@@ -834,6 +834,103 @@ mod tests {
         assert_eq!(
             out.error_meta.as_ref().and_then(|m| m.spec_code.as_deref()),
             Some("NIKA-MCP-005")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A real stdio server for the production connector: it marks that it
+    /// started, then serves exactly the approved `ping` and answers one call.
+    const REAL_SERVER: &str = r#"#!/bin/sh
+: > "$1/started"
+read -r _init
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"real","version":"0"}}}'
+read -r _notif
+read -r _list
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ping","description":"Echo a greeting","inputSchema":{"type":"object","properties":{"who":{"type":"string"}}}}]}}'
+read -r _call
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"pong"}]}}'
+read -r _rest
+"#;
+
+    /// An approved project whose registry spawns [`REAL_SERVER`], and the
+    /// run plane over the production connector on a host with NO backend
+    /// (the `NoopSandbox` the one selection answers there) under `policy`.
+    fn no_backend_plane(
+        tag: &str,
+        policy: nika_runtime::sandbox_select::SandboxPolicy,
+    ) -> (PathBuf, McpToolPlane) {
+        let dir = project(tag);
+        let script = dir.join("real-mcp.sh");
+        std::fs::write(&script, REAL_SERVER).unwrap();
+        let args = vec![
+            script.to_string_lossy().into_owned(),
+            dir.to_string_lossy().into_owned(),
+        ];
+        let servers = json!({"mcp_servers_format": 1, "servers": {"owned": {
+            "command": "/bin/sh", "args": args}}});
+        std::fs::write(dir.join(SERVERS_PATH), servers.to_string()).unwrap();
+        let config = McpServerConfig::stdio("owned", "/bin/sh", args);
+        approve_server(&config, &Script::serving(tools()), &dir, 1_700_000_000).unwrap();
+        let connector = StdioConnector::new(dir.clone())
+            .with_sandbox(Arc::new(nika_kernel::command_sandbox::NoopSandbox))
+            .with_sandbox_policy(policy);
+        let plane = McpToolPlane::with_connector(&dir, Box::new(connector));
+        (dir, plane)
+    }
+
+    /// `nika run`'s door: with no backend under `auto`, the server is never
+    /// started and the task's tool failure is NIKA-1710, never retried.
+    #[cfg(unix)]
+    #[test]
+    fn the_run_plane_refuses_a_server_with_no_backend_under_auto() {
+        use nika_runtime::sandbox_select::SandboxPolicy;
+        let (dir, plane) = no_backend_plane("no-backend-auto", SandboxPolicy::Auto);
+        let out = plane
+            .call(&call("mcp:owned/ping", json!({"who": "x"})))
+            .expect("a refusal is a tool result");
+        assert!(out.is_error);
+        let meta = out.error_meta.as_ref().expect("coded");
+        assert_eq!(meta.spec_code.as_deref(), Some("NIKA-1710"));
+        assert!(!meta.transient, "a missing backend is not retried");
+        let expected = PinError::SandboxRequired {
+            server: "owned".to_owned(),
+            policy: SandboxPolicy::Auto,
+        };
+        assert_eq!(out.content, expected.to_string());
+        assert!(
+            out.content.contains("NIKA_SANDBOX=off"),
+            "the waiver is named: {}",
+            out.content
+        );
+        assert!(
+            !dir.join("started").exists(),
+            "the server was NEVER started"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Under the explicit waiver the run reaches the server unconfined, as
+    /// before, and the opening call's warning names the waiver.
+    #[cfg(unix)]
+    #[test]
+    fn the_run_plane_starts_an_unconfined_server_under_off_and_says_so() {
+        use nika_runtime::sandbox_select::SandboxPolicy;
+        let (dir, plane) = no_backend_plane("no-backend-off", SandboxPolicy::Off);
+        let out = plane
+            .call(&call("mcp:owned/ping", json!({"who": "x"})))
+            .expect("a call");
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(out.content, "pong");
+        assert_eq!(
+            out.warning.as_deref(),
+            Some(
+                "mcp `owned`: UNSANDBOXED (no seatbelt/landlock on this host — the server \
+                 runs unconfined under the NIKA_SANDBOX=off waiver · net deny)"
+            )
+        );
+        assert!(
+            dir.join("started").exists(),
+            "the waiver started the server"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

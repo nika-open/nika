@@ -53,6 +53,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub use nika_check::mcp_roles::McpToolRoles;
+use nika_runtime::sandbox_select::{SandboxPolicy, SandboxPolicyParseError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -283,6 +284,27 @@ pub enum PinError {
         /// un-expressible profile).
         why: String,
     },
+    /// The sandbox policy refused to start the server (NIKA-1710 · the
+    /// `exec` verb's refusal family): no OS sandbox backend on this host,
+    /// and `NIKA_SANDBOX` is `auto` (the default) or `require`. A server
+    /// always runs inside a boundary (the project tree · its `network`
+    /// arm), so it is judged as an `exec:` child under `permits:`. No
+    /// process was started; `NIKA_SANDBOX=off` is the explicit waiver.
+    SandboxRequired {
+        /// The configured server name.
+        server: String,
+        /// The policy the spawn was judged under.
+        policy: SandboxPolicy,
+    },
+    /// `NIKA_SANDBOX` holds anything but `auto | require | off`
+    /// (NIKA-1711 · the knob's own refusal): a mistyped security knob
+    /// starts no server, confined or not, and never falls back to `auto`.
+    SandboxPolicyInvalid {
+        /// The configured server name.
+        server: String,
+        /// The parse failure (it carries the value as written).
+        error: SandboxPolicyParseError,
+    },
     /// Local I/O on the lockfile failed (environment class — no spec code,
     /// the same posture as the registry client's `Env`).
     Io {
@@ -316,6 +338,8 @@ impl PinError {
             Self::Drift(_) => Some("NIKA-MCP-003"),
             Self::Corrupt { .. } => Some("NIKA-MCP-004"),
             Self::Sandbox { .. } => Some("NIKA-MCP-005"),
+            Self::SandboxRequired { .. } => Some("NIKA-1710"),
+            Self::SandboxPolicyInvalid { .. } => Some("NIKA-1711"),
             Self::Unapproved { .. } => Some("NIKA-MCP-006"),
             Self::Io { .. } => None,
         }
@@ -356,6 +380,23 @@ impl std::fmt::Display for PinError {
                  check that the platform sandbox is present (sandbox-exec on macOS · bwrap on Linux) \
                  and that the project path can be confined, then retry"
             ),
+            Self::SandboxRequired { server, policy } => write!(
+                f,
+                "[NIKA-1710] MCP server `{server}` was NOT started: no OS sandbox backend on this \
+                 host can confine it to the project tree, and NIKA_SANDBOX={} refuses to run it \
+                 unconfined\n  {} · or set NIKA_SANDBOX=off to start it unconfined: the waiver \
+                 is named on every connect and attested on the run journal",
+                policy.as_str(),
+                host_sandbox_fix()
+            ),
+            Self::SandboxPolicyInvalid { server, error } => write!(
+                f,
+                "[NIKA-1711] MCP server `{server}` was NOT started: invalid {} value {:?} — \
+                 expected auto | require | off\n  a mistyped security knob refuses rather than \
+                 defaults: fix the value, then retry",
+                SandboxPolicy::ENV_VAR,
+                error.0
+            ),
             Self::Io { path, why } => {
                 write!(f, "cannot use {}: {why}", path.display())
             }
@@ -383,6 +424,19 @@ impl std::fmt::Display for PinError {
 }
 
 impl std::error::Error for PinError {}
+
+/// The per-OS way to give this host an OS sandbox backend — the first exit
+/// the NIKA-1710 spawn refusal names (the `exec` composition's refusal
+/// names the same three hosts).
+fn host_sandbox_fix() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "install bubblewrap (apt install bubblewrap) and retry"
+    } else if cfg!(target_os = "macos") {
+        "macOS ships sandbox-exec with the OS, so a missing launcher means a broken host"
+    } else {
+        "this platform ships without an OS sandbox backend"
+    }
+}
 
 /// One pinned tool entry — the pin AND the approved snapshot (the snapshot
 /// is what makes the drift diff name the changed field).
@@ -1276,6 +1330,14 @@ mod tests {
                 server: server(),
                 why: why(),
             },
+            PinError::SandboxRequired {
+                server: server(),
+                policy: SandboxPolicy::Auto,
+            },
+            PinError::SandboxPolicyInvalid {
+                server: server(),
+                error: SandboxPolicyParseError("requrie".to_owned()),
+            },
             PinError::Io {
                 path: PathBuf::from(PINS_PATH),
                 why: why(),
@@ -1295,13 +1357,21 @@ mod tests {
                 PinError::Corrupt { .. } => "corrupt",
                 PinError::Unsupported { .. } => "unsupported",
                 PinError::Sandbox { .. } => "sandbox",
+                PinError::SandboxRequired { .. } => "sandbox-required",
+                PinError::SandboxPolicyInvalid { .. } => "sandbox-policy-invalid",
                 PinError::Io { .. } => "io",
                 PinError::Unapproved { .. } => "unapproved",
             })
             .collect();
         assert_eq!(kinds.len(), refusals.len(), "one refusal per variant");
         let codes: BTreeSet<&str> = refusals.iter().filter_map(PinError::code).collect();
-        assert_eq!(codes.len(), 6, "NIKA-MCP-001..006: {codes:?}");
+        // The pin family's six, and the `exec` verb's sandbox-policy pair
+        // (NIKA-1710 · NIKA-1711) the spawn refuses with.
+        assert_eq!(
+            codes.len(),
+            8,
+            "NIKA-MCP-001..006 · NIKA-1710/1711: {codes:?}"
+        );
         for code in codes {
             let out = nika_cli_host::explain::run_for(
                 code,

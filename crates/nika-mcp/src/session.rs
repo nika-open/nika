@@ -40,6 +40,7 @@ use nika_kernel::CancelCtx;
 use nika_kernel::command_sandbox::CommandSandbox;
 use nika_kernel::process::{NetPolicy, ShellCommand};
 use nika_kernel::tool_executor::StopOutcome;
+use nika_runtime::sandbox_select::{SandboxPolicy, SandboxPolicyParseError};
 use serde_json::{Value, json};
 
 use crate::client::McpServerConfig;
@@ -225,23 +226,29 @@ pub trait McpConnectDyn: Send + Sync {
 
 /// The production connector: every server spawns CONFINED by the platform
 /// sandbox ([`crate::sandbox::platform_sandbox`]) anchored at the project
-/// dir (the `.nika/` convention's root), with the scrubbed environment.
+/// dir (the `.nika/` convention's root), with the scrubbed environment —
+/// or, on a host with no backend, only under the `NIKA_SANDBOX=off` waiver.
 pub struct StdioConnector {
     /// The OS-confinement backend — ALWAYS present: there is no unsandboxed
     /// construction, so the unconfined fallback cannot exist as an accident
     /// (the deliberate `NoopSandbox` case is named loudly by the note).
     sandbox: Arc<dyn CommandSandbox>,
+    /// The `NIKA_SANDBOX` policy, read once here (the exec composition's
+    /// parser) and judged at every spawn; a mistyped value refuses them all.
+    policy: Result<SandboxPolicy, SandboxPolicyParseError>,
     project_dir: PathBuf,
     timeout: Duration,
     call_timeout: Duration,
 }
 
 impl StdioConnector {
-    /// A connector anchored at `project_dir`, under the platform sandbox.
+    /// A connector anchored at `project_dir`, under the platform sandbox and
+    /// the `NIKA_SANDBOX` policy of the process environment.
     #[must_use]
     pub fn new(project_dir: impl Into<PathBuf>) -> Self {
         Self {
             sandbox: crate::sandbox::platform_sandbox(),
+            policy: nika_runtime::sandbox_select::sandbox_policy_from_env(),
             project_dir: project_dir.into(),
             timeout: DEFAULT_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
@@ -253,6 +260,25 @@ impl StdioConnector {
     #[must_use]
     pub fn with_sandbox(mut self, sandbox: Arc<dyn CommandSandbox>) -> Self {
         self.sandbox = sandbox;
+        self
+    }
+
+    /// Override the sandbox policy (tests · a wiring layer that already
+    /// read the knob) — the environment is not read again.
+    #[must_use]
+    pub fn with_sandbox_policy(mut self, policy: SandboxPolicy) -> Self {
+        self.policy = Ok(policy);
+        self
+    }
+
+    /// Inject a raw policy read (the parser's verdict on a set value), so a
+    /// hermetic test drives the mistyped-knob refusal without the env.
+    #[cfg(test)]
+    pub(crate) fn with_policy_read(
+        mut self,
+        read: Result<SandboxPolicy, SandboxPolicyParseError>,
+    ) -> Self {
+        self.policy = read;
         self
     }
 
@@ -280,9 +306,17 @@ impl StdioConnector {
 
 impl McpConnectDyn for StdioConnector {
     fn connect(&self, config: &McpServerConfig) -> Result<Box<dyn McpSessionDyn>, PinError> {
+        let policy = self
+            .policy
+            .clone()
+            .map_err(|error| PinError::SandboxPolicyInvalid {
+                server: config.name.clone(),
+                error,
+            })?;
         let session = StdioSession::open(
             config,
             &self.sandbox,
+            policy,
             &self.project_dir,
             self.timeout,
             self.call_timeout,
@@ -355,24 +389,28 @@ pub struct StdioSession {
 
 impl StdioSession {
     /// Spawn `config` under `sandbox` anchored at `project_dir`, then
-    /// handshake. A confine refusal starts NO process ([`PinError::Sandbox`]);
-    /// a handshake failure carries the child's stderr tail and names the
-    /// confinement ([`PinError::Transport`]).
+    /// handshake. With no backend, `policy` must be the `off` waiver, else
+    /// NO process starts ([`PinError::SandboxRequired`]); a confine refusal
+    /// starts none either ([`PinError::Sandbox`]); a handshake failure
+    /// carries the child's stderr tail and names the confinement
+    /// ([`PinError::Transport`]).
     ///
     /// # Errors
     ///
-    /// [`PinError::Unsupported`] for a `url` entry · [`PinError::Sandbox`] ·
+    /// [`PinError::Unsupported`] for a `url` entry ·
+    /// [`PinError::SandboxRequired`] · [`PinError::Sandbox`] ·
     /// [`PinError::Transport`].
     pub fn open(
         config: &McpServerConfig,
         sandbox: &Arc<dyn CommandSandbox>,
+        policy: SandboxPolicy,
         project_dir: &Path,
         timeout: Duration,
         call_timeout: Duration,
     ) -> Result<Self, PinError> {
         let confinement = crate::sandbox::sandbox_note(sandbox.backend(), &config.network);
         let unconfined = (sandbox.backend() == "noop").then(|| confinement.clone());
-        let (child, rx, stderr) = spawn(config, sandbox, project_dir)?;
+        let (child, rx, stderr) = spawn(config, sandbox, policy, project_dir)?;
         let mut session = Self {
             server: config.name.clone(),
             child,
@@ -676,15 +714,18 @@ impl McpSessionDyn for StdioSession {
     }
 }
 
-/// Spawn the child + the two drain threads — through the OS sandbox FIRST
-/// (fail-closed): the configured command is confined to the derived
-/// boundary ([`McpServerConfig::sandbox_spec`]) and a confine refusal is
-/// [`PinError::Sandbox`] with NO process started (never a silent unconfined
-/// fallback).
+/// Spawn the child + the two drain threads — through the sandbox policy and
+/// the OS sandbox FIRST (fail-closed): with no backend only the `off`
+/// waiver starts a server ([`PinError::SandboxRequired`] otherwise, before
+/// the egress proxy or the child), and the configured command is confined
+/// to the derived boundary ([`McpServerConfig::sandbox_spec`]) — a confine
+/// refusal is [`PinError::Sandbox`] with NO process started (never a silent
+/// unconfined fallback).
 #[allow(clippy::disallowed_types, clippy::disallowed_methods)] // import-site note: persistent pipe · tokio unavailable here
 fn spawn(
     config: &McpServerConfig,
     sandbox: &Arc<dyn CommandSandbox>,
+    policy: SandboxPolicy,
     project_dir: &Path,
 ) -> Result<(KillOnDrop, mpsc::Receiver<Line>, StderrTail), PinError> {
     let transport = |why: String| PinError::Transport {
@@ -703,6 +744,9 @@ fn spawn(
         .command
         .as_deref()
         .ok_or_else(|| transport("no `command` configured".to_owned()))?;
+    // The sandbox policy (#889 · the exec verb's knob): no backend and no
+    // waiver refuses here, before the egress proxy or the child starts.
+    crate::sandbox::admit_spawn(&config.name, sandbox.backend(), policy)?;
     // OS confinement (ADR-095 Layer 6): the SAME seam the exec runner
     // uses — the confine transform is pure; a refusal is terminal.
     let mut inner = ShellCommand::new(command);
@@ -1016,8 +1060,16 @@ read -r _initialized
 
     fn open(config: &McpServerConfig, dir: &Path, call_timeout: Duration) -> StdioSession {
         let sandbox: Arc<dyn CommandSandbox> = Arc::new(AsGiven);
-        StdioSession::open(config, &sandbox, dir, Duration::from_secs(10), call_timeout)
-            .expect("the scripted server opens")
+        let policy = SandboxPolicy::Auto;
+        StdioSession::open(
+            config,
+            &sandbox,
+            policy,
+            dir,
+            Duration::from_secs(10),
+            call_timeout,
+        )
+        .expect("the scripted server opens")
     }
 
     /// A server that logs forty lines before it answers is

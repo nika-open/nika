@@ -113,6 +113,8 @@ them beside the pin, as `"roles": ["private-read", "egress"]` (`[]` for
 | live `tools/list` differs from the pins | `NIKA-MCP-003` · the drift diff | run, after the handshake, before any call |
 | the server refuses the call or answers `isError` | `NIKA-MCP-002` · the tool's own text | run · the tool's failure lane |
 | the pipe dies mid-call | `NIKA-MCP-001` · transient, the session is dropped and reopened on the next call | run |
+| no OS sandbox backend on this host, `NIKA_SANDBOX` is `auto` (the default) or `require` | `NIKA-1710` · no process started · `NIKA_SANDBOX=off` is the waiver | approve and run |
+| `NIKA_SANDBOX` holds anything but `auto`, `require` or `off` | `NIKA-1711` · no process started | approve and run |
 | the OS sandbox cannot confine the spawn | `NIKA-MCP-005` · no process started | approve and run |
 
 One session per server is kept for the run: spawn + handshake + verify are
@@ -130,10 +132,23 @@ approved definitions under their `mcp:<server>/<tool>` names.
 
 Every spawned server rides the same OS sandbox as the `exec` verb:
 
-- **macOS** Seatbelt (`sandbox-exec`) · **Linux** bubblewrap (`bwrap`) · any
-  other host runs it **unconfined and says so** on the connect line
-  (`UNSANDBOXED …`) — never a silent fallback. A host where the sandbox
-  exists but refuses the profile is `NIKA-MCP-005`, no process started.
+- **macOS** Seatbelt (`sandbox-exec`) · **Linux** bubblewrap (`bwrap`). A
+  host with neither does not start the server: under `NIKA_SANDBOX=auto`
+  (the default) or `require` the spawn is refused with `NIKA-1710` and no
+  process starts, the switch that refuses an `exec:` child under
+  `permits:`. A server always runs inside a boundary (the project tree and
+  its `network` arm), so `auto` requires confinement for it. A mistyped
+  `NIKA_SANDBOX` refuses every spawn (`NIKA-1711`). A host where the
+  sandbox exists but refuses the profile is `NIKA-MCP-005`, no process
+  started.
+- **The waiver**: `NIKA_SANDBOX=off` starts the server **unconfined and
+  says so** on the connect line (`UNSANDBOXED … under the NIKA_SANDBOX=off
+  waiver …`), and every `nika run` under it attests the waiver on the
+  journal's opening frame (`sandbox_policy: off` · `sandbox_waived:
+  true`), as it attests an unconfined `exec:` child. The run lane can
+  start any configured server, whatever its workflow names (an agent `**`
+  grant or a templated tool reaches one), so the record is not narrowed
+  to the `mcp:` tools a workflow spells out.
 - **Filesystem**: read + write confined to the project tree (the directory
   holding `.nika/`). System binaries and their loader paths stay readable —
   a `node` or `python3` installed anywhere runs; what it *reads and writes*
@@ -146,7 +161,8 @@ Every spawned server rides the same OS sandbox as the `exec` verb:
 
 The approve receipt names it first (`mcp \`owned\`: sandboxed (seatbelt ·
 net deny)`); a run stays quiet for a confined server and raises a `⚠`
-warning on the task the moment a server runs **unconfined**.
+warning on the task the moment a server runs **unconfined** under the
+waiver.
 
 ### The launcher trap (`npx -y …`)
 
@@ -177,6 +193,7 @@ out-of-tree cache writable.
 
 - `nika explain NIKA-MCP-001` · `NIKA-MCP-002` — the two spec-registered
   codes; `003`–`006` are the pin family's own, and their refusal text names
-  the fix.
+  the fix. `nika explain NIKA-1710` · `NIKA-1711` — the sandbox policy the
+  spawn shares with `exec`.
 - `docs/crate-specs/nika-mcp.md` — the crate contract (client · session ·
   pin · dispatch).

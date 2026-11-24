@@ -386,6 +386,7 @@ pub fn nika_runtime_laws::sandbox_select::SandboxRefusal::as_any(&self) -> &(dyn
 impl<T> typenum::type_operators::Same for nika_runtime_laws::sandbox_select::SandboxRefusal
 pub type nika_runtime_laws::sandbox_select::SandboxRefusal::Output = T
 pub fn nika_runtime_laws::sandbox_select::apply_sandbox_policy(decision: &nika_runtime_laws::sandbox_select::SandboxDecision, permits_declared: bool) -> core::result::Result<(nika_types::sandbox_policy::SandboxPolicy, nika_types::sandbox_policy::SandboxVerdict), nika_runtime_laws::sandbox_select::ComposeError>
+pub fn nika_runtime_laws::sandbox_select::mcp_server_verdict(policy: nika_types::sandbox_policy::SandboxPolicy, confined: bool) -> nika_types::sandbox_policy::SandboxVerdict
 pub fn nika_runtime_laws::sandbox_select::sandbox_policy_from_env() -> core::result::Result<nika_types::sandbox_policy::SandboxPolicy, nika_types::sandbox_policy::SandboxPolicyParseError>
 pub fn nika_runtime_laws::sandbox_select::select_command_sandbox() -> nika_runtime_laws::sandbox_select::SandboxDecision
 pub mod nika_runtime_laws::secret

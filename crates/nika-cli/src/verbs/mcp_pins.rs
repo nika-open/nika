@@ -464,6 +464,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `nika mcp approve` on a host with no OS sandbox backend under the
+    /// default `auto`: the production client refuses the spawn (NIKA-1710),
+    /// the verb exits environment-class, and nothing is pinned. The server
+    /// is a script that would mark its start; it never runs.
+    #[cfg(unix)]
+    #[test]
+    fn approve_refuses_a_server_with_no_backend_and_pins_nothing() {
+        use std::sync::Arc;
+
+        use nika_kernel::command_sandbox::NoopSandbox;
+        use nika_runtime::sandbox_select::SandboxPolicy;
+
+        let dir = tmp("no-backend");
+        let script = dir.join("srv.sh");
+        std::fs::write(&script, "#!/bin/sh\n: > \"$1/started\"\n").expect("server script");
+        let config = McpServerConfig::stdio(
+            "postgres",
+            "/bin/sh",
+            vec![
+                script.to_string_lossy().into_owned(),
+                dir.to_string_lossy().into_owned(),
+            ],
+        );
+        let client = StdioMcpClient::new(&config)
+            .with_project_dir(dir.clone())
+            .with_sandbox(Arc::new(NoopSandbox))
+            .with_sandbox_policy(SandboxPolicy::Auto);
+        let out = approve_with(&config, &client, &dir, &none(), 1);
+        assert_eq!(out.code, exit::ENV, "{}", out.text);
+        let refusal = PinError::SandboxRequired {
+            server: "postgres".to_owned(),
+            policy: SandboxPolicy::Auto,
+        };
+        assert_eq!(out.text, refusal.to_string());
+        assert!(out.text.starts_with("[NIKA-1710] "), "{}", out.text);
+        assert!(
+            !dir.join("started").exists(),
+            "the server was NEVER started"
+        );
+        assert!(!dir.join(PINS_PATH).exists(), "nothing was pinned");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_zero_tool_server_says_nothing_to_pin() {
         let dir = tmp("zero");

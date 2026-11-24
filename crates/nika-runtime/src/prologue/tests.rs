@@ -209,6 +209,30 @@ fn the_waiver_is_attested_on_the_opening_frame() {
     );
 }
 
+/// The MCP half of the witnessed waiver is the recorded posture alone: a
+/// host with no backend under `off` starts a server unconfined, so the
+/// waiver holds; every other cell, an unrecorded or a mistyped posture
+/// included, claims nothing. What the workflow names plays no part (the
+/// installed plane is the runtime's half, `tests/mcp_sandbox_waiver.rs`).
+#[test]
+fn an_mcp_server_the_posture_starts_unconfined_is_a_waiver() {
+    assert!(super::mcp_server_waived(Some("noop"), Some("off")));
+    for (backend, policy) in [
+        (Some("noop"), Some("auto")),
+        (Some("noop"), Some("require")),
+        (Some("seatbelt"), Some("off")),
+        (Some("landlock"), Some("off")),
+        (None, Some("off")),
+        (Some("noop"), None),
+        (Some("noop"), Some("requrie")),
+    ] {
+        assert!(
+            !super::mcp_server_waived(backend, policy),
+            "{backend:?} · {policy:?} starts no server unconfined"
+        );
+    }
+}
+
 /// F-P13 (NEP-0014 law 2) — the boot manifest journals the origin of
 /// every input the run binds (`inputs` = one JSON map field), and a run
 /// without origins carries NO claim (absent is honest).

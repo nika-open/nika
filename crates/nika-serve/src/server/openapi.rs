@@ -935,7 +935,7 @@ mod builder {
                         "max_cost_usd": {
                             "type": "number",
                             "minimum": 0,
-                            "description": "A ceiling for the re-attempts alone (USD). Stating it accepts that an attempt whose spend could not be read is followed by another; without it such a job stays `interrupted` (`unknown_spend`) under a resident that bounds cost. It never raises the ceiling that covers every attempt of the job."
+                            "description": "A ceiling for the re-attempts alone (USD). Stating it accepts that an attempt whose spend could not be read is followed by another; without it such a job stays `interrupted` (`unknown_spend`), whether or not a ceiling bounds the job. It never raises the ceiling that covers every attempt of the job."
                         }
                     }
                 }

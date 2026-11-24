@@ -69,9 +69,10 @@ and new scheduling, then drain running AND queued jobs for up to 30 seconds \
 with four workers (--shutdown-grace and --max-concurrent-jobs set another \
 grace and worker count). On grace expiry, running jobs become interrupted and \
 jobs still queued remain queued. Restart with the same --state-root resumes queued \
-jobs from their captured snapshots; interrupted jobs are not retried. SIGKILL \
-skips cleanup: the next start interrupts ownerless running jobs and resumes \
-queued jobs. A completed drain exits 0; grace expiry exits 1. The grace \
+jobs from their captured snapshots; an interrupted job stays interrupted unless \
+--retry-interrupted starts it again or a POST /v1/jobs/{id}/retry request asks for it. \
+SIGKILL skips cleanup: the next start interrupts ownerless running jobs (the same \
+policy applies to them) and resumes queued jobs. A completed drain exits 0; grace expiry exits 1. The grace \
 bounds execution draining, not filesystem cleanup or a stuck backend. \
 Allow extra time beyond it before a supervisor forces SIGKILL.";
 

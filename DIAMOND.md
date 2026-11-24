@@ -13,9 +13,9 @@ the authoritative architectural decision, see
   is needed. Never copy-pasted — every crate is rewritten clean.
 
 For the project's landing page, see [`README.md`](README.md). For
-the current status (0.124 is the current release line: work stays focused on
+the current status (0.125 is the current release line: work stays focused on
 maintenance, security and the media capabilities workflows need, native video
-is planned for 0.125, and no 1.0 launch is planned) and the historical
+is planned for a later release, and no 1.0 launch is planned) and the historical
 real-semver plan it followed until 0.123 (amended D-2026-06-20-N1 ·
 was "forever-v0.x"), see [`ROADMAP.md`](ROADMAP.md); the CHANGELOG top names the
 latest tagged release. For the earlier
@@ -156,9 +156,9 @@ is not planned; the list stays as the record of what the plan named:
 
 ## Release model (real semver · amended D-2026-06-20-N1)
 
-0.124 is the current release line: work stays focused on maintenance,
+0.125 is the current release line: work stays focused on maintenance,
 security and the media capabilities workflows need, and native video is
-planned for 0.125. The 1.0 rows of the ladder below were the plan until 0.123
+planned for a later release. The 1.0 rows of the ladder below were the plan until 0.123
 and are not planned.
 That plan was real semver toward a **1.0** public launch (was "forever-v0.x" ·
 retired D-2026-06-20-N1). Each release is diamond-grade for its declared scope —
@@ -192,7 +192,7 @@ and tests before implementation.
 
 The butterfly on the logo stood for what the rewrite aimed at: the
 chrysalis opening at a 1.0 launch (amended D-2026-06-20-N1). After 0.123 that
-launch is not planned; 0.124 is the current release line.
+launch is not planned; 0.125 is the current release line.
 
 ## License
 

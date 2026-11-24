@@ -442,7 +442,7 @@ file for you, and the check keeps it honest:
 | Where | What you get | Watch |
 |---|---|---|
 | **Your coding agent** · [nika-plugins](https://github.com/nika-open/nika-plugins) | Claude Code, Codex, Cursor and others learn to write a workflow, check it and repair what the check finds. | ▶ [above](media/gifs/agent-plugin.optimized.gif) |
-| **Your editor** · `nika lsp` | The language server inside the binary: the check's findings as you type, in any LSP client. The VS Code extension ([nika-vscode](https://github.com/nika-open/nika-vscode)) stays at 0.120 and is not qualified with 0.124; point its `nika.server.path` at your 0.124 binary ([known limits](https://docs.nika.sh/changelog/known-limits#the-vs-code-extension-stays-at-0-120)). | ▶ [The audit, as you type](media/gifs/editor-diagnostics.optimized.gif) |
+| **Your editor** · `nika lsp` | The language server inside the binary: the check's findings as you type, in any LSP client. The VS Code extension ([nika-vscode](https://github.com/nika-open/nika-vscode)) stays at 0.120 and is not qualified with 0.125; point its `nika.server.path` at your 0.125 binary ([known limits](https://docs.nika.sh/changelog/known-limits#the-vs-code-extension-stays-at-0-120)). | ▶ [The audit, as you type](media/gifs/editor-diagnostics.optimized.gif) |
 | **Your pull requests** · [nika-action](https://github.com/nika-open/nika-action) | One comment with the verdict, before anyone spends a token. | ▶ [Every pull request gets a verdict](media/gifs/pr-check-comment.optimized.gif) |
 | **Your app** · [nika-client](https://github.com/nika-open/nika-client) | Run a workflow from TypeScript ([the package](https://www.npmjs.com/package/@nika-open/nika)), get a typed result and verify its receipt, with the engine the package bundles or against your `nika serve`. | ▶ [Run it from your app, prove what ran](media/gifs/typescript-client.optimized.gif) · ▶ [One client, two doors](media/gifs/sdk-doors.optimized.gif) |
 
@@ -506,10 +506,10 @@ whole API.
 
 ## Know the limits
 
-- **0.124 is the current release line.** Work stays focused on
+- **0.125 is the current release line.** Work stays focused on
   maintenance, security and the media capabilities workflows need; native
-  video is planned for 0.125. The 0.123.x line is the previous one, and
-  there is no hosted service. The known limits are listed in plain words,
+  video is planned for a later release. The 0.124.x line is the previous
+  one, and there is no hosted service. The known limits are listed in plain words,
   each with a way around it:
   [Known limits in 0.125](https://docs.nika.sh/changelog/known-limits).
 - **Some requests cannot be expressed.** Nika then says what stopped it
@@ -606,7 +606,7 @@ judgement.
 | 🦋 | **[nika](https://github.com/nika-open/nika)** | **The engine and CLI: write, check, run and verify AI workflows** |
 | 📖 | [nika-docs](https://github.com/nika-open/nika-docs) | The documentation, live at [docs.nika.sh](https://docs.nika.sh) |
 | 📜 | [nika-spec](https://github.com/nika-open/nika-spec) | The language specification and the suite that proves an engine follows it |
-| 🧩 | [nika-vscode](https://github.com/nika-open/nika-vscode) | The editor extension, frozen at 0.120 and not qualified with 0.124: use `nika lsp` and the JSON Schema |
+| 🧩 | [nika-vscode](https://github.com/nika-open/nika-vscode) | The editor extension, frozen at 0.120 and not qualified with 0.125: use `nika lsp` and the JSON Schema |
 | 🟦 | [nika-client](https://github.com/nika-open/nika-client) | Run and verify workflows from TypeScript |
 | ✅ | [nika-action](https://github.com/nika-open/nika-action) | A GitHub Action that posts a `nika check` verdict on your pull requests |
 | 🚀 | [nika-actions-starter](https://github.com/nika-open/nika-actions-starter) | A ready template: workflows, editor setup and CI from the first push |
@@ -627,13 +627,13 @@ repositories drive this engine without adding to its authority.
 [Examples](examples/README.md) ·
 [Documentation](https://docs.nika.sh) ·
 [TypeScript SDK](https://www.npmjs.com/package/@nika-open/nika) ·
-[Editor extension (0.120, not qualified with 0.124)](https://marketplace.visualstudio.com/items?itemName=supernovae.nika) ·
+[Editor extension (0.120, not qualified with 0.125)](https://marketplace.visualstudio.com/items?itemName=supernovae.nika) ·
 [Open specification](https://github.com/nika-open/nika-spec) ·
 [Registry](https://github.com/nika-open/nika-registry) ·
 [Planning archive](https://github.com/orgs/supernovae-st/projects/3) ·
 [Website](https://nika.sh)
 
-Nika 0.124 is the current open-source release line, usable today and
+Nika 0.125 is the current open-source release line, usable today and
 maintained. The engine is
 [AGPL-3.0-or-later](LICENSE); the specification and the TypeScript SDK are
 Apache-2.0.

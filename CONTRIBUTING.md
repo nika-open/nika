@@ -3,7 +3,7 @@
 Welcome. Nika is a Rust workflow engine for AI. **0.124 is its current
 release line.** Work stays focused on maintenance, security and the media
 capabilities workflows need, so security fixes, bug fixes and compatibility
-fixes help most; native video is planned for 0.125. The engine is a
+fixes help most; native video is planned for a later release. The engine is a
 workspace of layered crates (the count is projected, never a gate — ADR-037
 horizon 50-90 · cap 100 · ruled D-2026-07-21-N1), each passing a 12-gate
 admission checklist before joining the workspace. This document explains how
@@ -20,7 +20,7 @@ See also: [`README.md`](README.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md),
 
 ## What is in scope
 
-0.124 is the current release line, and 0.123.x is the previous one. The
+0.125 is the current release line, and 0.124.x is the previous one. The
 `main` branch is the only maintenance branch: fixes land there and ship in
 the next release. Legacy v0.79.3 lives on `brouillon` (read-only · accessed
 via `git show brouillon:path`).
@@ -32,7 +32,7 @@ via `git show brouillon:path`).
 - **A media capability your workflows need** — open an issue that describes
   the use case before a PR.
 - **Other new features, new crate admissions, new ADRs** — out of scope for
-  the 0.124 line.
+  the 0.125 line.
 
 If you are unsure whether something is in scope, open an issue first.
 
@@ -40,7 +40,7 @@ If you are unsure whether something is in scope, open an issue first.
 
 ## Philosophy
 
-- **Real semver** (D-2026-06-20-N1). The current workspace version is declared in `Cargo.toml`; published binaries are listed in [GitHub Releases](https://github.com/nika-open/nika/releases). 0.124 is the current release line: work stays focused on maintenance, security and the media capabilities workflows need, and native video is planned for 0.125. Each version is diamond-grade for its declared scope.
+- **Real semver** (D-2026-06-20-N1). The current workspace version is declared in `Cargo.toml`; published binaries are listed in [GitHub Releases](https://github.com/nika-open/nika/releases). 0.125 is the current release line: work stays focused on maintenance, security and the media capabilities workflows need, and native video is planned for a later release. Each version is diamond-grade for its declared scope.
 - **Quality over speed.** No deadline pressure. A PR lands when it is ready.
 - **Perfect diamond.** Zero band-aid, zero residue, zero ghost reference. Every leftover gets fixed or flagged — never ignored.
 - **Craft, not extraction.** Legacy code on `brouillon` (v0.79.3) is a read-only reference. Diamond rewrites each crate from scratch, guided by the legacy.
@@ -212,7 +212,7 @@ lanes keep flowing.
 ## Reporting issues
 
 - **Bug**: GitHub Issues, include minimal repro and `nika --version`.
-- **Feature request** (engine behavior): new features beyond the media capabilities workflows need are out of scope for the 0.124 line. An issue that describes the use case still helps the record; a gap that is a defect of existing behavior is a bug.
+- **Feature request** (engine behavior): new features beyond the media capabilities workflows need are out of scope for the 0.125 line. An issue that describes the use case still helps the record; a gap that is a defect of existing behavior is a bug.
 - **Language change** (anything normative: syntax, verbs, permits, envelope): the spec's [NEP door](https://github.com/nika-open/nika-spec/blob/main/governance/nep-0000-the-nep-process.md) — nobody amends the standard directly, maintainers included. Engine issues cannot change the language.
 - **Security vulnerability**: see [`SECURITY.md`](SECURITY.md). Email `security@supernovae.studio`, **not** a public issue.
 

@@ -536,7 +536,7 @@ account and terms.
 
 ## Limits
 
-- 0.124 is the current release line. Work stays focused on maintenance,
+- 0.125 is the current release line. Work stays focused on maintenance,
   security and the media capabilities workflows need; native video is planned
   for 0.125. Its known limits are listed in plain words, each with a way around
   it: [Known limits in 0.125](https://docs.nika.sh/changelog/known-limits).

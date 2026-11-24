@@ -96,7 +96,7 @@ itself implement, qualify or release it.
 "real semver toward 1.0", amended D-2026-06-20-N1 · was "forever v0.x"). The
 plan was for Nika to ship a **1.0** at a first public launch and to add quality
 across later minors, each diamond-grade for its declared scope; after 0.123
-the launch is not planned, and 0.124 is the current release line, focused on
+the launch is not planned, and 0.125 is the current release line, focused on
 maintenance, security and the media capabilities workflows need. Unshipped
 features named below were the plan's, not commitments: **nothing ships as a
 surprise, nothing ships half-baked**. The SQLite precedent below was the model:
@@ -293,8 +293,8 @@ tracks implementation work; it does not change the default presentation.
 ## Tag scheme (real semver · amended D-2026-06-20-N1)
 
 The plan's scheme until 0.123: real semver toward a 1.0 launch, then
-`MAJOR.MINOR.PATCH`. After 0.123, releases stay on real semver: 0.124 is the
-current line and native video is planned for 0.125; the 1.0 rows below are
+`MAJOR.MINOR.PATCH`. After 0.123, releases stay on real semver: 0.125 is the
+current line and native video is planned for a later release; the 1.0 rows below are
 not planned.
 
 - **MINOR** within a major = additive (new crates · builtins · providers · polish).
@@ -976,9 +976,9 @@ Trusted reviewers may be delegated as the community grows. No DAO, no voting.
 
 ## Release cadence
 
-0.124 is the current release line: a release is cut when its fixes or the
+0.125 is the current release line: a release is cut when its fixes or the
 media capabilities workflows need are ready, and native video is planned for
-0.125. The cadence the plan described until 0.123 follows.
+a later release. The cadence the plan described until 0.123 follows.
 
 Per ADR-037 the cadence is **admission-driven**, not calendar-driven — and
 per D-2026-06-20-N1 the tag scheme is **real semver** (`MAJOR.MINOR.PATCH` ·

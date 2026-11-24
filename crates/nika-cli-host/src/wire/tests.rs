@@ -1368,6 +1368,127 @@ fn detected_refuses_an_oversized_file() {
     detected_refuses(crate::detect::hazards::Hazard::Oversized);
 }
 
+/// A settings file that is a link (into a dotfiles folder, say) stays a
+/// link: nika writes beside the real file, so the link survives and its
+/// target is the one updated, with the mode it had and no temporary file
+/// left in either folder. Under `detected` and by name, in a JSON config
+/// and in Codex's TOML, through an absolute link and a relative one.
+#[test]
+fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let hosts = [
+        (
+            WireTarget::Gemini,
+            GEMINI_UNWIRED,
+            "\"theme\": \"dark\"",
+            false,
+        ),
+        (WireTarget::Codex, "model = \"x\"\n", "model = \"x\"", true),
+    ];
+    for by_name in [false, true] {
+        for (target, seed, kept, relative) in hosts {
+            let home = temp_dir("linked-home");
+            let dir = temp_dir("linked-dir");
+            let dotfiles = home.join("dotfiles");
+            let real = dotfiles.join("settings");
+            std::fs::create_dir_all(&dotfiles).expect("dir");
+            std::fs::write(&real, seed).expect("seed");
+            std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+            let path = config_path(target, Some(&home), &dir).expect("path");
+            let folder = path.parent().expect("parent");
+            std::fs::create_dir_all(folder).expect("dir");
+            let points_to = if relative {
+                PathBuf::from("../dotfiles/settings")
+            } else {
+                real.clone()
+            };
+            std::os::unix::fs::symlink(&points_to, &path).expect("link");
+
+            let door = if by_name {
+                target
+            } else {
+                WireTarget::Detected
+            };
+            let out = run_in(
+                door,
+                Some(&home),
+                dir.to_str().expect("utf8"),
+                WireOptions::default(),
+            );
+            let line = format!("{}: {}", target.id(), path.display());
+            assert_eq!(out.text, format!("✔ updated {line}"), "{door:?}");
+            assert_eq!(out.code, crate::output::exit::OK, "{door:?}");
+
+            let meta = std::fs::symlink_metadata(&path).expect("lstat");
+            assert!(meta.file_type().is_symlink(), "{door:?}: still a link");
+            assert_eq!(std::fs::read_link(&path).expect("readlink"), points_to);
+            let body = std::fs::read_to_string(&real).expect("read");
+            assert!(body.contains(kept), "{door:?}: {body}");
+            assert_eq!(
+                wire_at(target, &path, true),
+                Ok(WireAction::Current(line)),
+                "{door:?}: the target holds the entry: {body}"
+            );
+            let mode = std::fs::metadata(&real).expect("stat").permissions().mode();
+            assert_eq!(mode & 0o777, 0o640, "{door:?}: the target keeps its mode");
+            for place in [folder, dotfiles.as_path()] {
+                let names: Vec<_> = std::fs::read_dir(place)
+                    .expect("list")
+                    .map(|entry| entry.expect("entry").file_name())
+                    .collect();
+                assert_eq!(names.len(), 1, "{door:?}: nothing left beside: {names:?}");
+            }
+            let _ = std::fs::remove_dir_all(home);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// A link whose target is gone is no file. `detected` does not see the
+/// host and writes nothing; a wire by name creates the config in the
+/// link's place, and never a file where the dead link pointed.
+#[test]
+fn a_dangling_settings_link_is_no_file() {
+    let home = temp_dir("dangling-home");
+    let dir = temp_dir("dangling-dir");
+    let gone = home.join("dotfiles").join("gone.json");
+    std::fs::create_dir_all(gone.parent().expect("parent")).expect("dir");
+    let path = home.join(".gemini").join("settings.json");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+    std::os::unix::fs::symlink(&gone, &path).expect("link");
+    let run = |door| {
+        run_in(
+            door,
+            Some(&home),
+            dir.to_str().expect("utf8"),
+            WireOptions::default(),
+        )
+    };
+
+    assert_eq!(detected_targets_in(&home, &dir), Vec::<WireTarget>::new());
+    let out = run(WireTarget::Detected);
+    assert!(out.text.starts_with("no MCP client detected"), "{out:?}");
+    assert_eq!(std::fs::read_link(&path).expect("still the link"), gone);
+    assert!(!gone.exists(), "detected follows no dead link");
+
+    let out = run(WireTarget::Gemini);
+    let line = format!("gemini: {}", path.display());
+    assert_eq!(out.text, format!("✔ created {line}"));
+    assert_eq!(out.code, crate::output::exit::OK);
+    let meta = std::fs::symlink_metadata(&path).expect("lstat");
+    assert!(
+        meta.file_type().is_file(),
+        "the config stands in the link's place"
+    );
+    assert!(!gone.exists(), "never followed into a new file");
+    assert_eq!(
+        wire_at(WireTarget::Gemini, &path, true),
+        Ok(WireAction::Current(line))
+    );
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// "Current" under `detected` is an entry that can RUN: a `command`
 /// that is a non-empty string, and args that are exactly the ones `wire`
 /// writes. Our args with no command launch nothing, and an args value

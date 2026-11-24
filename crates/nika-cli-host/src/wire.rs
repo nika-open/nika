@@ -1133,22 +1133,40 @@ fn server_table<'a>(
 /// `~/.claude.json` in place. A NEW file gets 0600 (these configs grow
 /// API keys); an existing file's mode is carried onto the temp file
 /// BEFORE the rename so the swap preserves it.
+///
+/// A settings file that is a LINK (into a dotfiles folder, say) stays
+/// one: the temp file and the rename go beside the file the link leads
+/// to ([`write_target`]), so the link survives and what it points at is
+/// what changes. Renaming over the link itself left a regular file in
+/// its place, and the dotfiles copy stale.
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("{}: cannot write: {e}", path.display()))?;
-    }
-    let tmp = path.with_file_name(format!(".nika-tmp-{}", std::process::id()));
     // The failure is the settings file's: the temporary file beside it is
     // nika's own business, and a name the person has never seen.
-    let result = write_atomic_via(&tmp, path, body)
-        .map_err(|e| format!("{}: cannot write: {e}", path.display()));
+    let refuse = |e: std::io::Error| format!("{}: cannot write: {e}", path.display());
+    let target = write_target(path).map_err(refuse)?;
+    if let Some(parent) = target.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(refuse)?;
+    }
+    let tmp = target.with_file_name(format!(".nika-tmp-{}", std::process::id()));
+    let result = write_atomic_via(&tmp, &target, body).map_err(refuse);
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp); // never litter the user's dir
     }
     result
+}
+
+/// Where a write to `path` lands: the file itself, or the one it links
+/// to, however many links away. A path that names nothing yet is its own
+/// target, and so is a link whose target is gone: that write replaces
+/// the dead link, and never creates a file where it pointed.
+fn write_target(path: &Path) -> std::io::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(real) => Ok(real),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(e) => Err(e),
+    }
 }
 
 /// The tmp-file half of [`write_atomic`], split so every error path

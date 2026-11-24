@@ -502,7 +502,7 @@ mod tests {
         assert!(
             confirm.contains(
                 "answer: nika try release-notes --answer summarize=true  \
-                 (boolean true/false, not yes)"
+                 (true or yes · false or no)"
             ),
             "{confirm}"
         );

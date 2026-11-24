@@ -762,25 +762,142 @@ fn append_paused_card(lines: &mut Vec<String>, view: &RunView, theme: &Theme) {
             &format!("paused · awaiting an answer for `{task}`")
         ),
     ));
+    if let Some(question) = view.paused_message.as_deref().and_then(quoted_question) {
+        lines.push(format!(
+            "    {}",
+            crate::vocab::hint(*theme, "question", &question)
+        ));
+    }
+    let gate = if paused_on_agent(view, task) {
+        PausedGate::Agent
+    } else {
+        PausedGate::Prompt(view.paused_mode.as_deref())
+    };
     lines.push(format!(
         "    {}",
-        crate::vocab::hint(
-            *theme,
-            "answer",
-            &pause_answer_hint(task, view.paused_mode.as_deref())
-        )
+        crate::vocab::hint(*theme, "answer", &pause_answer_hint(task, gate))
     ));
 }
 
-/// Confirm (stdlib default) takes a boolean. Input/choice take a string —
-/// teaching `=true` / « not yes » on those modes burns the ticket (P11).
-fn pause_answer_hint(task: &str, mode: Option<&str>) -> String {
-    match mode {
-        Some("input" | "choice") => {
+/// What a run paused on: a `nika:prompt` (with its `mode:`), or an `agent`
+/// task whose harness asked before an action outside its grants (NIKA-1806).
+#[derive(Clone, Copy)]
+enum PausedGate<'m> {
+    Prompt(Option<&'m str>),
+    Agent,
+}
+
+/// Whether the paused task is an `agent` task: its row's first started note
+/// names the verb (`agent · <subject>`, the display contract's started note).
+fn paused_on_agent(view: &RunView, task: &str) -> bool {
+    view.rows().iter().any(|row| {
+        row.id == task
+            && row
+                .started_note
+                .as_deref()
+                .is_some_and(|note| note.starts_with("agent ·"))
+    })
+}
+
+/// The answer each gate binds. A confirm prompt (the stdlib default) takes a
+/// boolean, and the resume binds `yes`/`no` to it as the TTY does. An agent's
+/// harness gate also asks in `confirm`, but its answer stays the text typed,
+/// so only `true`/`false` grant or deny. Input/choice take a string; teaching
+/// `=true` on those modes burns the ticket (P11).
+fn pause_answer_hint(task: &str, gate: PausedGate<'_>) -> String {
+    match gate {
+        PausedGate::Prompt(Some("input" | "choice")) => {
             format!("nika run --answer {task}=\"your answer\" FILE")
         }
-        _ => format!("nika run --answer {task}=true FILE  (boolean true/false, not yes)"),
+        PausedGate::Prompt(_) => {
+            format!("nika run --answer {task}=true FILE  (true or yes · false or no)")
+        }
+        PausedGate::Agent => format!("nika run --answer {task}=true FILE  (true or false)"),
     }
+}
+
+/// The longest question the paused card prints, in characters of the
+/// printed form (escapes included), before the closing `…`.
+const QUESTION_MAX_CHARS: usize = 160;
+
+/// A paused gate's question as one quoted terminal line, or `None` when it
+/// holds nothing printable. The text can carry content the run fetched, so
+/// nothing in it may act on the terminal or pass unseen: whitespace of any
+/// kind (a newline, a tab, a line separator) folds to one space; a control
+/// character (an escape sequence's lead byte, a bell, DEL, a C1 code) and an
+/// invisible format character (a bidirectional override, a zero-width
+/// character, a tag character) print as a visible `\u{…}` escape; `"` and
+/// `\` are escaped, so the text cannot close its quotes and append a line
+/// of its own. A long question is clipped with `…`, never inside an escape.
+fn quoted_question(message: &str) -> Option<String> {
+    let mut out = String::from("\"");
+    let mut printed = 0;
+    let mut clipped = false;
+    let mut blank = true;
+    for c in message.trim().chars() {
+        let piece = if c.is_whitespace() {
+            if blank {
+                continue;
+            }
+            blank = true;
+            " ".to_owned()
+        } else {
+            blank = false;
+            match c {
+                '"' => "\\\"".to_owned(),
+                '\\' => "\\\\".to_owned(),
+                c if c.is_control() || is_format_char(c) => format!("\\u{{{:x}}}", u32::from(c)),
+                c => c.to_string(),
+            }
+        };
+        let width = piece.chars().count();
+        if printed + width > QUESTION_MAX_CHARS {
+            clipped = true;
+            break;
+        }
+        out.push_str(&piece);
+        printed += width;
+    }
+    if printed == 0 {
+        return None;
+    }
+    let kept = out.trim_end().len();
+    out.truncate(kept);
+    if clipped {
+        out.push('…');
+    }
+    out.push('"');
+    Some(out)
+}
+
+/// The Unicode format characters (general category Cf): invisible, yet they
+/// reorder what a terminal shows (the bidirectional controls), join or split
+/// words unseen (the zero-width characters) or carry hidden text (the tags).
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00ad}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061c}'
+            | '\u{06dd}'
+            | '\u{070f}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
 }
 
 // `&Theme` (not by-value) to match the `frame`/`verdict_frame` borrow that

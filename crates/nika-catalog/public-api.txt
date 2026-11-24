@@ -10688,8 +10688,10 @@ pub fn nika_catalog::nickname_wire(provider: &str, name: &str) -> core::option::
 pub fn nika_catalog::output_caps(provider: &str, name: &str, room: u32) -> serde_json::value::Value
 pub fn nika_catalog::pasteable_for(bare: &str) -> core::option::Option<alloc::string::String>
 pub fn nika_catalog::pricing_snapshot() -> &'static nika_catalog::model::PricingSnapshot
+pub fn nika_catalog::refuses_forced_tool_choice(provider: &str, name: &str) -> bool
 pub fn nika_catalog::refuses_sampling(provider: &str, name: &str) -> bool
 pub fn nika_catalog::refuses_thinking_budget(provider: &str, name: &str) -> bool
+pub fn nika_catalog::refuses_thinking_type(provider: &str, name: &str, kind: &str) -> bool
 pub fn nika_catalog::resolve_mcp_name(name: &str) -> core::option::Option<alloc::string::String>
 pub fn nika_catalog::suggest(query: &str) -> alloc::vec::Vec<nika_catalog::suggest::Suggestion>
 pub fn nika_catalog::suggest_in(query: &str, namespace: nika_catalog::suggest::Namespace) -> alloc::vec::Vec<nika_catalog::suggest::Suggestion>

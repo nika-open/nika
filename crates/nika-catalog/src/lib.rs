@@ -48,7 +48,8 @@ pub mod lookup;
 // A model's output facts: its recorded limit and what an authoring seat reads of it.
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 mod output;
-// The controls a provider's API refuses on a model (fixed sampling, an adaptive thinking).
+// The controls a provider's API refuses on a model (fixed sampling, an adaptive thinking,
+// a forced tool choice, a thinking type it does not take).
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 mod sampling;
 pub mod suggest;
@@ -93,7 +94,10 @@ pub use output::output_caps;
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 pub use output::{generated_cap, model_output_limit};
 #[cfg(all(feature = "providers", feature = "capabilities"))]
-pub use sampling::{nickname_wire, refuses_sampling, refuses_thinking_budget};
+pub use sampling::{
+    nickname_wire, refuses_forced_tool_choice, refuses_sampling, refuses_thinking_budget,
+    refuses_thinking_type,
+};
 
 // ── Iteration helpers ───────────────────────────────────────────────────
 

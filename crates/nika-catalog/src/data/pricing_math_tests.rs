@@ -141,9 +141,11 @@ mod cache_aware {
 
     #[test]
     fn gpt4p1_variants_differentiated() {
-        let nano = find_pricing("gpt-4.1-nano").unwrap();
-        let mini = find_pricing("gpt-4.1-mini").unwrap();
-        let base = find_pricing("gpt-4.1").unwrap();
+        // OpenAI shut `gpt-4.1-nano` down on 2026-10-23 (its deprecations page) and the
+        // snapshot of 2026-11-24 no longer prices it there; OpenRouter still routes all three.
+        let nano = find_pricing_for("openrouter/openai/gpt-4.1-nano").unwrap();
+        let mini = find_pricing_for("openrouter/openai/gpt-4.1-mini").unwrap();
+        let base = find_pricing_for("openrouter/openai/gpt-4.1").unwrap();
         assert!(nano.input_per_million < mini.input_per_million);
         assert!(mini.input_per_million < base.input_per_million);
     }

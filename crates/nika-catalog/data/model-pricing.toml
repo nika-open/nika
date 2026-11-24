@@ -2,8 +2,8 @@ schema = "nika/model-pricing@1.3"
 
 [meta]
 source = "https://models.dev/api.json"
-as_of = "2026-10-12"
-source_sha256_16 = "abd9babb167a88e4"
+as_of = "2026-11-24"
+source_sha256_16 = "32e77823e43dd1d5"
 
 # ── GENERATED · do not hand-edit ────────────────────────────
 # Source: models.dev (MIT · anomalyco/models.dev) — see [meta].
@@ -21,7 +21,7 @@ source_sha256_16 = "abd9babb167a88e4"
 # by (provider, model_pattern) and names any orphan loudly. An
 # OMITTED research field means no sourced fact exists yet.
 
-# ── anthropic (18 models) ──
+# ── anthropic (19 models) ──
 
 [[rules]]
 provider = "anthropic"
@@ -33,6 +33,7 @@ cache_write_per_million = 3.75
 max_output_tokens = 64000
 context_window_tokens = 200000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "anthropic"
@@ -55,6 +56,7 @@ cache_write_per_million = 6.25
 max_output_tokens = 64000
 context_window_tokens = 200000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "anthropic"
@@ -66,6 +68,7 @@ cache_write_per_million = 3.75
 max_output_tokens = 64000
 context_window_tokens = 200000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "anthropic"
@@ -103,6 +106,17 @@ open_weights = false
 
 [[rules]]
 provider = "anthropic"
+model_pattern = "claude-fable-5-2"
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.2
+cache_write_per_million = 10.0
+max_output_tokens = 128000
+context_window_tokens = 1000000
+open_weights = false
+
+[[rules]]
+provider = "anthropic"
 model_pattern = "claude-haiku-4-5"
 input_per_million = 1.0
 output_per_million = 5.0
@@ -133,6 +147,7 @@ cache_write_per_million = 6.25
 max_output_tokens = 64000
 context_window_tokens = 200000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "anthropic"
@@ -227,7 +242,7 @@ input_per_million = 0.15
 output_per_million = 0.6
 cache_read_per_million = 0.003
 max_output_tokens = 393216
-context_window_tokens = 1000000
+context_window_tokens = 1048576
 open_weights = true
 status = "deprecated"
 
@@ -245,7 +260,7 @@ input_per_million = 0.15
 output_per_million = 0.6
 cache_read_per_million = 0.003
 max_output_tokens = 393216
-context_window_tokens = 1000000
+context_window_tokens = 1048576
 open_weights = true
 status = "deprecated"
 
@@ -256,7 +271,7 @@ input_per_million = 0.66
 output_per_million = 1.98
 cache_read_per_million = 0.022
 max_output_tokens = 393216
-context_window_tokens = 1000000
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -266,7 +281,7 @@ input_per_million = 0.15
 output_per_million = 0.6
 cache_read_per_million = 0.003
 max_output_tokens = 393216
-context_window_tokens = 1000000
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -276,16 +291,7 @@ input_per_million = 0.15
 output_per_million = 0.6
 status = "deprecated"
 
-# ── google (34 models) ──
-
-[[rules]]
-provider = "google"
-model_pattern = "gemini-2.5-computer-use-preview-10-2025"
-input_per_million = 1.25
-output_per_million = 10.0
-max_output_tokens = 64000
-context_window_tokens = 128000
-open_weights = false
+# ── google (36 models) ──
 
 [[rules]]
 provider = "google"
@@ -304,7 +310,7 @@ input_per_million = 2.0
 output_per_million = 12.0
 cache_read_per_million = 0.2
 max_output_tokens = 65536
-context_window_tokens = 131072
+context_window_tokens = 1048576
 open_weights = false
 
 [[rules]]
@@ -312,17 +318,8 @@ provider = "google"
 model_pattern = "gemini-3.5-live-translate-preview"
 input_per_million = 3.5
 output_per_million = 21.0
-max_output_tokens = 32768
+max_output_tokens = 16384
 context_window_tokens = 16384
-open_weights = false
-
-[[rules]]
-provider = "google"
-model_pattern = "gemini-3.1-flash-image-preview"
-input_per_million = 0.5
-output_per_million = 60.0
-max_output_tokens = 65536
-context_window_tokens = 65536
 open_weights = false
 
 [[rules]]
@@ -332,19 +329,8 @@ input_per_million = 2.0
 output_per_million = 12.0
 cache_read_per_million = 0.2
 max_output_tokens = 65536
-context_window_tokens = 131072
-open_weights = false
-
-[[rules]]
-provider = "google"
-model_pattern = "gemini-3.1-flash-lite-preview"
-input_per_million = 0.25
-output_per_million = 1.5
-cache_read_per_million = 0.025
-max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
-status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -363,6 +349,7 @@ output_per_million = 10.0
 max_output_tokens = 16384
 context_window_tokens = 8192
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -372,12 +359,13 @@ output_per_million = 20.0
 max_output_tokens = 16384
 context_window_tokens = 8192
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
 model_pattern = "gemini-3.1-flash-lite-image"
 input_per_million = 0.25
-output_per_million = 30.0
+output_per_million = 1.5
 max_output_tokens = 4096
 context_window_tokens = 65536
 open_weights = false
@@ -390,24 +378,7 @@ output_per_million = 20.0
 max_output_tokens = 16384
 context_window_tokens = 8192
 open_weights = false
-
-[[rules]]
-provider = "google"
-model_pattern = "gemini-3-pro-image-preview"
-input_per_million = 2.0
-output_per_million = 120.0
-max_output_tokens = 32768
-context_window_tokens = 131072
-open_weights = false
-
-[[rules]]
-provider = "google"
-model_pattern = "gemini-omni-flash-preview"
-input_per_million = 1.5
-output_per_million = 17.5
-max_output_tokens = 65536
-context_window_tokens = 131072
-open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -423,11 +394,12 @@ open_weights = false
 provider = "google"
 model_pattern = "gemini-2.5-flash-image"
 input_per_million = 0.3
-output_per_million = 30.0
+output_per_million = 2.5
 cache_read_per_million = 0.075
 max_output_tokens = 32768
 context_window_tokens = 32768
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -443,10 +415,11 @@ open_weights = false
 provider = "google"
 model_pattern = "gemini-3.1-flash-image"
 input_per_million = 0.5
-output_per_million = 60.0
+output_per_million = 3.0
 max_output_tokens = 32768
 context_window_tokens = 131072
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -477,6 +450,7 @@ cache_read_per_million = 0.025
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -496,6 +470,7 @@ output_per_million = 0.0
 max_output_tokens = 1
 context_window_tokens = 2048
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -529,7 +504,7 @@ open_weights = false
 provider = "google"
 model_pattern = "gemini-3-pro-image"
 input_per_million = 2.0
-output_per_million = 120.0
+output_per_million = 12.0
 max_output_tokens = 32768
 context_window_tokens = 65536
 open_weights = false
@@ -545,6 +520,35 @@ open_weights = false
 
 [[rules]]
 provider = "google"
+model_pattern = "gemma-4-26b-a4b-it"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 32768
+context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "google"
+model_pattern = "gemini-4-hydrogen"
+input_per_million = 1.5
+output_per_million = 7.5
+cache_read_per_million = 0.075
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "google"
+model_pattern = "gemini-pro-latest"
+input_per_million = 2.0
+output_per_million = 12.0
+cache_read_per_million = 0.2
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "google"
 model_pattern = "gemini-2.5-flash"
 input_per_million = 0.3
 output_per_million = 2.5
@@ -552,6 +556,7 @@ cache_read_per_million = 0.03
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -562,6 +567,7 @@ cache_read_per_million = 0.15
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -582,6 +588,7 @@ cache_read_per_million = 0.075
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "google"
@@ -595,10 +602,50 @@ open_weights = false
 
 [[rules]]
 provider = "google"
+model_pattern = "gemini-4-carbon"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+max_output_tokens = 32768
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "google"
 model_pattern = "gemini-2.5-pro"
 input_per_million = 1.25
 output_per_million = 10.0
 cache_read_per_million = 0.125
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+status = "deprecated"
+
+[[rules]]
+provider = "google"
+model_pattern = "gemini-4-argon"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+max_output_tokens = 32768
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "google"
+model_pattern = "gemma-4-31b-it"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 32768
+context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "google"
+model_pattern = "gemini-4-neon"
+input_per_million = 3.0
+output_per_million = 15.0
+cache_read_per_million = 0.15
 max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = false
@@ -630,6 +677,7 @@ provider = "groq"
 model_pattern = "openai/gpt-oss-safeguard-20b"
 input_per_million = 0.075
 output_per_million = 0.3
+cache_read_per_million = 0.0375
 max_output_tokens = 65536
 context_window_tokens = 131072
 open_weights = true
@@ -643,6 +691,7 @@ output_per_million = 0.79
 max_output_tokens = 32768
 context_window_tokens = 131072
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "groq"
@@ -652,6 +701,7 @@ output_per_million = 0.08
 max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "groq"
@@ -684,6 +734,7 @@ cache_read_per_million = 0.3
 max_output_tokens = 16384
 context_window_tokens = 131072
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "groq"
@@ -691,8 +742,9 @@ model_pattern = "qwen/qwen3.8-27b"
 input_per_million = 0.8
 output_per_million = 4.0
 max_output_tokens = 16384
-context_window_tokens = 131042
+context_window_tokens = 131072
 open_weights = true
+status = "beta"
 
 [[rules]]
 provider = "groq"
@@ -703,7 +755,7 @@ max_output_tokens = 4096
 context_window_tokens = 4096
 open_weights = true
 
-# ── huggingface (81 models) ──
+# ── huggingface (94 models) ──
 
 [[rules]]
 provider = "huggingface"
@@ -725,10 +777,19 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+input_per_million = 0.3
+output_per_million = 1.2
+max_output_tokens = 384000
+context_window_tokens = 1048576
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
 input_per_million = 2.0
 output_per_million = 2.0
-max_output_tokens = 66536
+max_output_tokens = 65536
 context_window_tokens = 262144
 open_weights = true
 
@@ -746,7 +807,7 @@ provider = "huggingface"
 model_pattern = "Qwen/Qwen3-235B-A22B-Thinking-2507"
 input_per_million = 0.3
 output_per_million = 3.0
-max_output_tokens = 131072
+max_output_tokens = 81920
 context_window_tokens = 262144
 open_weights = true
 energy = { wh_per_mtok_out = 176.0, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 B200 \u00b7 vLLM \u00b7 problem-solving \u00b7 0.6336 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
@@ -771,6 +832,15 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "meta-llama/Llama-3.1-70B-Instruct"
+input_per_million = 0.72
+output_per_million = 0.72
+max_output_tokens = 4096
+context_window_tokens = 131072
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "meta-llama/Llama-3.3-70B-Instruct"
 input_per_million = 0.59
 output_per_million = 0.79
@@ -780,19 +850,19 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
-model_pattern = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-input_per_million = 0.25
-output_per_million = 1.0
-max_output_tokens = 66536
+model_pattern = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+input_per_million = 0.09
+output_per_million = 0.3
+max_output_tokens = 16384
 context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "huggingface"
-model_pattern = "Qwen/Qwen3-Next-80B-A3B-Thinking"
-input_per_million = 0.3
-output_per_million = 2.0
-max_output_tokens = 131072
+model_pattern = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+input_per_million = 0.25
+output_per_million = 1.0
+max_output_tokens = 32768
 context_window_tokens = 262144
 open_weights = true
 
@@ -834,11 +904,38 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "meta-llama/Llama-3.2-1B-Instruct"
+input_per_million = 0.027
+output_per_million = 0.201
+max_output_tokens = 32000
+context_window_tokens = 60000
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "meta-llama/Llama-3.2-3B-Instruct"
+input_per_million = 0.0509
+output_per_million = 0.335
+max_output_tokens = 80000
+context_window_tokens = 80000
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "moonshotai/Kimi-K2-Instruct-0905"
 input_per_million = 1.0
 output_per_million = 3.0
 max_output_tokens = 16384
 context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "thinkingmachines/Inkling-2-Small"
+input_per_million = 0.3
+output_per_million = 1.0
+max_output_tokens = 131072
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -861,6 +958,15 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "thinkingmachines/Inkling-2-Mini"
+input_per_million = 0.12
+output_per_million = 0.5
+max_output_tokens = 65536
+context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 input_per_million = 0.2
 output_per_million = 0.7
@@ -873,7 +979,7 @@ provider = "huggingface"
 model_pattern = "thinkingmachines/Inkling-Small"
 input_per_million = 0.5
 output_per_million = 1.2
-max_output_tokens = 1048576
+max_output_tokens = 524288
 context_window_tokens = 524288
 open_weights = true
 
@@ -888,10 +994,19 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "MiniMaxAI/MiniMax-M3.1-Flash"
+input_per_million = 0.15
+output_per_million = 0.6
+max_output_tokens = 512000
+context_window_tokens = 1000000
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "deepseek-ai/DeepSeek-R1-0528"
 input_per_million = 3.0
 output_per_million = 5.0
-max_output_tokens = 163840
+max_output_tokens = 32768
 context_window_tokens = 163840
 open_weights = true
 
@@ -900,6 +1015,15 @@ provider = "huggingface"
 model_pattern = "deepseek-ai/DeepSeek-V3-0324"
 input_per_million = 0.27
 output_per_million = 1.12
+max_output_tokens = 163840
+context_window_tokens = 163840
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "meta-llama/Llama-Guard-4-12B"
+input_per_million = 0.18
+output_per_million = 0.18
 max_output_tokens = 163840
 context_window_tokens = 163840
 open_weights = true
@@ -998,19 +1122,19 @@ open_weights = true
 
 [[rules]]
 provider = "huggingface"
-model_pattern = "XiaomiMiMo/MiMo-V2-Flash"
-input_per_million = 0.1
-output_per_million = 0.3
-max_output_tokens = 4096
-context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "huggingface"
 model_pattern = "XiaomiMiMo/MiMo-V2.5-Pro"
 input_per_million = 1.0
 output_per_million = 3.0
 max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "moonshotai/Kimi-K3.1-Pro"
+input_per_million = 2.0
+output_per_million = 10.0
+max_output_tokens = 1048576
 context_window_tokens = 1048576
 open_weights = true
 
@@ -1028,8 +1152,7 @@ provider = "huggingface"
 model_pattern = "Qwen/Qwen3-Embedding-4B"
 input_per_million = 0.01
 output_per_million = 0.0
-max_output_tokens = 2048
-context_window_tokens = 32000
+context_window_tokens = 32768
 open_weights = true
 
 [[rules]]
@@ -1037,8 +1160,7 @@ provider = "huggingface"
 model_pattern = "Qwen/Qwen3-Embedding-8B"
 input_per_million = 0.01
 output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 32000
+context_window_tokens = 32768
 open_weights = true
 
 [[rules]]
@@ -1132,6 +1254,15 @@ input_per_million = 0.2
 output_per_million = 1.5
 max_output_tokens = 65536
 context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "google/gemma-2-27b-it"
+input_per_million = 0.65
+output_per_million = 0.65
+max_output_tokens = 2048
+context_window_tokens = 8192
 open_weights = true
 
 [[rules]]
@@ -1267,7 +1398,7 @@ provider = "huggingface"
 model_pattern = "openai/gpt-oss-120b"
 input_per_million = 0.25
 output_per_million = 0.69
-max_output_tokens = 32768
+max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
 energy = { wh_per_mtok_out = 11.0, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 B200 \u00b7 vLLM \u00b7 problem-solving \u00b7 0.0397 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
@@ -1304,7 +1435,7 @@ provider = "huggingface"
 model_pattern = "moonshotai/Kimi-K3"
 input_per_million = 3.0
 output_per_million = 15.0
-max_output_tokens = 131072
+max_output_tokens = 1000000
 context_window_tokens = 1000000
 open_weights = true
 
@@ -1313,10 +1444,19 @@ provider = "huggingface"
 model_pattern = "openai/gpt-oss-20b"
 input_per_million = 0.1
 output_per_million = 0.5
-max_output_tokens = 32768
+max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
 energy = { wh_per_mtok_out = 7.9, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 B200 \u00b7 vLLM \u00b7 problem-solving \u00b7 0.0284 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "tencent/Hy4-flash"
+input_per_million = 0.035
+output_per_million = 0.1405
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "huggingface"
@@ -1352,6 +1492,15 @@ input_per_million = 0.6
 output_per_million = 1.8
 max_output_tokens = 16384
 context_window_tokens = 65536
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
+model_pattern = "zai-org/GLM-4.6V"
+input_per_million = 0.3
+output_per_million = 0.9
+max_output_tokens = 32768
+context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
@@ -1431,6 +1580,15 @@ energy = { wh_per_mtok_out = 86.6, provenance = "independent-measured", scope = 
 
 [[rules]]
 provider = "huggingface"
+model_pattern = "Qwen/Qwen3-8B"
+input_per_million = 0.07
+output_per_million = 0.18
+max_output_tokens = 32768
+context_window_tokens = 40960
+open_weights = true
+
+[[rules]]
+provider = "huggingface"
 model_pattern = "zai-org/GLM-5"
 input_per_million = 1.0
 output_per_million = 3.2
@@ -1448,33 +1606,33 @@ max_output_tokens = 128000
 context_window_tokens = 262144
 open_weights = true
 
-# ── mistral (40 models) ──
+[[rules]]
+provider = "huggingface"
+model_pattern = "tencent/Hy4"
+input_per_million = 0.417
+output_per_million = 1.2505
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+
+# ── mistral (24 models) ──
 
 [[rules]]
 provider = "mistral"
-model_pattern = "labs-devstral-small-2512"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 256000
-context_window_tokens = 256000
+model_pattern = "deepseek-v4-1-flash-1017"
+input_per_million = 0.3
+output_per_million = 1.2
+cache_read_per_million = 0.007
+max_output_tokens = 128000
+context_window_tokens = 1048576
 open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
 model_pattern = "magistral-medium-latest"
-input_per_million = 2.0
-output_per_million = 5.0
-max_output_tokens = 16384
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "devstral-medium-latest"
-input_per_million = 0.4
-output_per_million = 2.0
+input_per_million = 1.5
+output_per_million = 7.5
+cache_read_per_million = 0.15
 max_output_tokens = 262144
 context_window_tokens = 262144
 open_weights = true
@@ -1489,37 +1647,28 @@ cache_read_per_million = 0.15
 max_output_tokens = 262144
 context_window_tokens = 262144
 open_weights = true
+status = "deprecated"
 determinism = "best-effort"
 
 [[rules]]
 provider = "mistral"
-model_pattern = "devstral-medium-2507"
-input_per_million = 0.4
-output_per_million = 2.0
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "labs-leanstral-1-5-1"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 128000
+model_pattern = "ministral-14b-latest"
+input_per_million = 0.2
+output_per_million = 0.2
+cache_read_per_million = 0.02
+max_output_tokens = 262144
 context_window_tokens = 262144
 open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
 model_pattern = "mistral-large-latest"
-input_per_million = 0.5
-output_per_million = 1.5
-cache_read_per_million = 0.05
+input_per_million = 0.7
+output_per_million = 2.1
+cache_read_per_million = 0.07
 max_output_tokens = 262144
-context_window_tokens = 262144
-open_weights = true
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "mistral"
@@ -1533,80 +1682,32 @@ open_weights = true
 
 [[rules]]
 provider = "mistral"
-model_pattern = "pixtral-large-latest"
-input_per_million = 2.0
-output_per_million = 6.0
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
 model_pattern = "voxtral-small-latest"
 input_per_million = 0.1
-output_per_million = 0.3
+output_per_million = 0.4
 max_output_tokens = 32000
 context_window_tokens = 32768
 open_weights = true
 
 [[rules]]
 provider = "mistral"
-model_pattern = "devstral-small-2505"
-input_per_million = 0.1
-output_per_million = 0.3
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "devstral-small-2507"
-input_per_million = 0.1
-output_per_million = 0.3
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
 model_pattern = "ministral-3b-latest"
-input_per_million = 0.04
-output_per_million = 0.04
-max_output_tokens = 128000
+input_per_million = 0.1
+output_per_million = 0.1
+cache_read_per_million = 0.01
+max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "mistral"
 model_pattern = "ministral-8b-latest"
-input_per_million = 0.1
-output_per_million = 0.1
-max_output_tokens = 128000
-context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "mistral"
-model_pattern = "mistral-medium-2505"
-input_per_million = 0.4
-output_per_million = 2.0
-max_output_tokens = 131072
-context_window_tokens = 131072
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "mistral-medium-2508"
-input_per_million = 0.4
-output_per_million = 2.0
+input_per_million = 0.15
+output_per_million = 0.15
+cache_read_per_million = 0.015
 max_output_tokens = 262144
 context_window_tokens = 262144
-open_weights = false
-status = "deprecated"
+open_weights = true
 
 [[rules]]
 provider = "mistral"
@@ -1617,6 +1718,7 @@ cache_read_per_million = 0.15
 max_output_tokens = 262144
 context_window_tokens = 262144
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "mistral"
@@ -1630,31 +1732,12 @@ open_weights = true
 
 [[rules]]
 provider = "mistral"
-model_pattern = "mistral-large-2411"
-input_per_million = 2.0
-output_per_million = 6.0
-max_output_tokens = 16384
-context_window_tokens = 131072
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
 model_pattern = "mistral-large-2512"
 input_per_million = 0.5
 output_per_million = 1.5
 cache_read_per_million = 0.05
 max_output_tokens = 262144
 context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "mistral"
-model_pattern = "mistral-small-2506"
-input_per_million = 0.1
-output_per_million = 0.3
-max_output_tokens = 16384
-context_window_tokens = 128000
 open_weights = true
 status = "deprecated"
 
@@ -1667,16 +1750,6 @@ cache_read_per_million = 0.015
 max_output_tokens = 256000
 context_window_tokens = 262144
 open_weights = true
-
-[[rules]]
-provider = "mistral"
-model_pattern = "open-mixtral-8x22b"
-input_per_million = 2.0
-output_per_million = 6.0
-max_output_tokens = 64000
-context_window_tokens = 64000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
@@ -1693,7 +1766,7 @@ model_pattern = "ministral-3b-2512"
 input_per_million = 0.1
 output_per_million = 0.1
 cache_read_per_million = 0.01
-max_output_tokens = 262144
+max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
 
@@ -1709,23 +1782,13 @@ open_weights = true
 
 [[rules]]
 provider = "mistral"
-model_pattern = "open-mistral-nemo"
+model_pattern = "zai-glm-5-3-flash"
 input_per_million = 0.15
-output_per_million = 0.15
-max_output_tokens = 128000
-context_window_tokens = 128000
+output_per_million = 0.5
+cache_read_per_million = 0.03
+max_output_tokens = 131072
+context_window_tokens = 1048576
 open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "open-mixtral-8x7b"
-input_per_million = 0.7
-output_per_million = 0.7
-max_output_tokens = 32000
-context_window_tokens = 32000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
@@ -1739,34 +1802,13 @@ open_weights = true
 
 [[rules]]
 provider = "mistral"
-model_pattern = "devstral-latest"
-input_per_million = 0.4
-output_per_million = 2.0
-max_output_tokens = 262144
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
 model_pattern = "mistral-large-4"
-input_per_million = 0.68
-output_per_million = 2.09
+input_per_million = 0.7
+output_per_million = 2.1
 cache_read_per_million = 0.07
 max_output_tokens = 262144
 context_window_tokens = 1048576
 open_weights = false
-status = "beta"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "open-mistral-7b"
-input_per_million = 0.25
-output_per_million = 0.25
-max_output_tokens = 8000
-context_window_tokens = 8000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
@@ -1780,42 +1822,13 @@ open_weights = false
 
 [[rules]]
 provider = "mistral"
-model_pattern = "devstral-2512"
-input_per_million = 0.4
-output_per_million = 2.0
-max_output_tokens = 262144
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
 model_pattern = "mistral-embed"
 input_per_million = 0.1
 output_per_million = 0.0
+cache_read_per_million = 0.01
 max_output_tokens = 3072
 context_window_tokens = 8000
 open_weights = false
-
-[[rules]]
-provider = "mistral"
-model_pattern = "mistral-nemo"
-input_per_million = 0.15
-output_per_million = 0.15
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "mistral"
-model_pattern = "pixtral-12b"
-input_per_million = 0.15
-output_per_million = 0.15
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "mistral"
@@ -1849,7 +1862,7 @@ context_window_tokens = 1048576
 open_weights = true
 status = "deprecated"
 
-# ── nvidia (106 models) ──
+# ── nvidia (52 models) ──
 
 [[rules]]
 provider = "nvidia"
@@ -1862,16 +1875,6 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "mistralai/mistral-large-3-675b-instruct-2512"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 262144
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "nvidia/llama-3.1-nemotron-safety-guard-8b-v3"
 input_per_million = 0.0
 output_per_million = 0.0
@@ -1881,71 +1884,13 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "nvidia/llama-3_2-nemoretriever-300m-embed-v1"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 2048
-context_window_tokens = 32768
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-content-safety-reasoning-4b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "abacusai/dracarys-llama-3.1-70b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 65536
-context_window_tokens = 131072
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-4-maverick-17b-128e-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/llama-3.1-nemotron-nano-vl-8b-v1"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 32768
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "nvidia/llama-3.1-nemotron-ultra-253b-v1"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 16384
 context_window_tokens = 128000
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -1955,16 +1900,16 @@ output_per_million = 0.0
 max_output_tokens = 8192
 context_window_tokens = 128000
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "nvidia/llama-3.3-nemotron-super-49b-v1"
+model_pattern = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 65536
-context_window_tokens = 131072
+max_output_tokens = 8192
+context_window_tokens = 1048576
 open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -1974,15 +1919,6 @@ output_per_million = 0.0
 max_output_tokens = 4096
 context_window_tokens = 128000
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "mistralai/ministral-14b-instruct-2512"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 262144
-open_weights = true
 status = "deprecated"
 
 [[rules]]
@@ -1991,7 +1927,7 @@ model_pattern = "nvidia/llama-nemotron-rerank-vl-1b-v2"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 4096
-context_window_tokens = 128000
+context_window_tokens = 10240
 open_weights = true
 
 [[rules]]
@@ -2008,19 +1944,7 @@ provider = "nvidia"
 model_pattern = "black-forest-labs/flux_1-kontext-dev"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 40960
-context_window_tokens = 40960
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/llama-3.1-nemotron-nano-8b-v1"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 131072
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2028,18 +1952,8 @@ model_pattern = "nvidia/llama-nemotron-embed-vl-1b-v2"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 2048
-context_window_tokens = 32768
+context_window_tokens = 8192
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "microsoft/phi-4-multimodal-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 128000
-open_weights = false
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2049,35 +1963,6 @@ output_per_million = 0.0
 max_output_tokens = 32768
 context_window_tokens = 131072
 open_weights = false
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "mistralai/mistral-small-4-119b-2603"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "qwen/qwen3-coder-480b-a35b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 66536
-context_window_tokens = 262144
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "deepseek-ai/deepseek-v4-flash-0731"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 384000
-context_window_tokens = 1000000
-open_weights = true
 status = "deprecated"
 
 [[rules]]
@@ -2106,6 +1991,7 @@ output_per_million = 0.0
 max_output_tokens = 65536
 context_window_tokens = 65536
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2121,67 +2007,23 @@ provider = "nvidia"
 model_pattern = "black-forest-labs/flux_2-klein-4b"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 40960
-context_window_tokens = 40960
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "mistralai/mistral-medium-3.5-128b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-3-super-120b-a12b"
-input_per_million = 0.2
-output_per_million = 0.8
-max_output_tokens = 262144
-context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "nvidia"
 model_pattern = "nvidia/nemotron-3-ultra-550b-a55b"
-input_per_million = 0.5
-output_per_million = 2.5
-cache_read_per_million = 0.15
+input_per_million = 0.0
+output_per_million = 0.0
 max_output_tokens = 65536
 context_window_tokens = 1000000
 open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "nvidia/nvidia-nemotron-nano-9b-v2"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 131072
-context_window_tokens = 131072
-open_weights = true
-status = "deprecated"
-energy = { wh_per_mtok_out = 30.3, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 H100 \u00b7 vLLM \u00b7 problem-solving \u00b7 0.1089 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "black-forest-labs/flux_1-schnell"
 input_per_million = 0.0
 output_per_million = 0.0
-context_window_tokens = 77
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "deepseek-ai/deepseek-v4-pro-0813"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 384000
-context_window_tokens = 1000000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2194,72 +2036,12 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "mistralai/mixtral-8x22b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 13108
-context_window_tokens = 65536
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-3-content-safety"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-mini-4b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "qwen/qwen3-next-80b-a3b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 262144
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "bytedance/seed-oss-36b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 262000
-context_window_tokens = 262000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "deepseek-ai/deepseek-v4.1-flash"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 384000
 context_window_tokens = 1000000
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "mistralai/mixtral-8x7b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 32768
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2279,61 +2061,11 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "qwen/qwen2.5-coder-32b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "mistralai/magistral-small-2506"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 32768
 context_window_tokens = 32768
-open_weights = false
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-3-nano-30b-a3b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 131072
-context_window_tokens = 131072
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nemotron-nano-12b-v2-vl"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 128000
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "deepseek-ai/deepseek-v4-flash"
-input_per_million = 0.14
-output_per_million = 0.28
-cache_read_per_million = 0.0028
-max_output_tokens = 393216
-context_window_tokens = 1048576
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "microsoft/phi-4-mini-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 131072
 open_weights = true
 status = "deprecated"
 
@@ -2342,8 +2074,16 @@ provider = "nvidia"
 model_pattern = "black-forest-labs/flux.1-dev"
 input_per_million = 0.0
 output_per_million = 0.0
-context_window_tokens = 4096
-open_weights = false
+open_weights = true
+
+[[rules]]
+provider = "nvidia"
+model_pattern = "minimaxai/minimax-m3.1-flash"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 262144
+context_window_tokens = 262144
+open_weights = true
 
 [[rules]]
 provider = "nvidia"
@@ -2355,113 +2095,17 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "upstage/solar-10.7b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "deepseek-ai/deepseek-v4-pro"
-input_per_million = 0.435
-output_per_million = 0.87
-cache_read_per_million = 0.003625
-max_output_tokens = 393216
-context_window_tokens = 1048576
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-3.1-70b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-3.3-70b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "nvidia/rerank-qa-mistral-4b"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 4096
 context_window_tokens = 128000
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-3.1-8b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 16000
-open_weights = true
 status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-3.2-1b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/llama-3.2-3b-instruct"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 32000
-context_window_tokens = 32768
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "mistralai/mistral-nemotron"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/cosmos-transfer1-7b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-open_weights = true
 
 [[rules]]
 provider = "nvidia"
 model_pattern = "nvidia/magpie-tts-zeroshot"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/cosmos-predict1-5b"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 4096
@@ -2478,32 +2122,12 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "nvidia/nv-embedcode-7b-v1"
+model_pattern = "stepfun-ai/step-5-preview"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 2048
-context_window_tokens = 32768
+max_output_tokens = 1048576
+context_window_tokens = 1048576
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "stepfun-ai/step-3.5-flash"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 256000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "stepfun-ai/step-3.7-flash"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 256000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2512,15 +2136,6 @@ input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 16384
 context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "thinkingmachines/inkling"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 1048576
 open_weights = true
 status = "deprecated"
 
@@ -2538,28 +2153,9 @@ provider = "nvidia"
 model_pattern = "openai/whisper-large-v3"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 4096
+max_output_tokens = 448
+context_window_tokens = 448
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "google/gemma-3n-e2b-it"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "google/gemma-3n-e4b-it"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2567,18 +2163,8 @@ model_pattern = "meta/llama-guard-4-12b"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 16384
-context_window_tokens = 128000
+context_window_tokens = 163840
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "minimaxai/minimax-m2.7"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 131072
-context_window_tokens = 204800
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2591,32 +2177,13 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "qwen/qwen3.5-122b-a10b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 65536
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "qwen/qwen3.5-397b-a17b"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 262144
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "google/gemma-3-12b-it"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 16384
 context_window_tokens = 131072
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2638,30 +2205,11 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "google/gemma-2-2b-it"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "google/gemma-3-4b-it"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 16384
 context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "minimaxai/minimax-m3"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 16384
-context_window_tokens = 1000000
 open_weights = true
 status = "deprecated"
 
@@ -2687,18 +2235,10 @@ provider = "nvidia"
 model_pattern = "moonshotai/kimi-k3"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 131072
+max_output_tokens = 1048576
 context_window_tokens = 1048576
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "nvidia/nv-embed-v1"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 2048
-context_window_tokens = 32768
-open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2714,8 +2254,6 @@ provider = "nvidia"
 model_pattern = "nvidia/studiovoice"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
 open_weights = true
 
 [[rules]]
@@ -2725,13 +2263,14 @@ input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 4096
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
 model_pattern = "openai/gpt-oss-20b"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 32768
+max_output_tokens = 131072
 context_window_tokens = 131072
 open_weights = true
 energy = { wh_per_mtok_out = 7.9, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 B200 \u00b7 vLLM \u00b7 problem-solving \u00b7 0.0284 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
@@ -2747,32 +2286,12 @@ open_weights = true
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "nvidia/gliner-pii"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "nvidia/streampetr"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 8192
 context_window_tokens = 128000
 open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "sarvamai/sarvam-m"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-status = "deprecated"
 
 [[rules]]
 provider = "nvidia"
@@ -2792,39 +2311,12 @@ open_weights = false
 
 [[rules]]
 provider = "nvidia"
-model_pattern = "meta/esm2-650m"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
 model_pattern = "nvidia/usdcode"
 input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 4096
 context_window_tokens = 128000
 open_weights = false
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "meta/esmfold"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-
-[[rules]]
-provider = "nvidia"
-model_pattern = "z-ai/glm-5.2"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 131072
-context_window_tokens = 1000000
-open_weights = true
 status = "deprecated"
 
 [[rules]]
@@ -2835,17 +2327,9 @@ output_per_million = 0.0
 max_output_tokens = 131072
 context_window_tokens = 1000000
 open_weights = true
+status = "deprecated"
 
-[[rules]]
-provider = "nvidia"
-model_pattern = "baai/bge-m3"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 1024
-context_window_tokens = 8192
-open_weights = true
-
-# ── openai (49 models) ──
+# ── openai (40 models) ──
 
 [[rules]]
 provider = "openai"
@@ -2898,43 +2382,10 @@ open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "gpt-5.2-chat-latest"
-input_per_million = 1.75
-output_per_million = 14.0
-cache_read_per_million = 0.175
-max_output_tokens = 16384
-context_window_tokens = 128000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-5.3-chat-latest"
-input_per_million = 1.75
-output_per_million = 14.0
-cache_read_per_million = 0.175
-max_output_tokens = 16384
-context_window_tokens = 128000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-5.3-codex-spark"
-input_per_million = 1.75
-output_per_million = 14.0
-cache_read_per_million = 0.175
-max_output_tokens = 32000
-context_window_tokens = 128000
-open_weights = false
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-4o-2024-05-13"
+model_pattern = "chatgpt-image-latest"
 input_per_million = 5.0
-output_per_million = 15.0
-max_output_tokens = 4096
-context_window_tokens = 128000
+output_per_million = 10.0
+cache_read_per_million = 1.25
 open_weights = false
 status = "deprecated"
 
@@ -2947,6 +2398,7 @@ cache_read_per_million = 1.25
 max_output_tokens = 16384
 context_window_tokens = 128000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -2957,28 +2409,7 @@ cache_read_per_million = 1.25
 max_output_tokens = 16384
 context_window_tokens = 128000
 open_weights = false
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-realtime-2.1"
-input_per_million = 4.0
-output_per_million = 24.0
-cache_read_per_million = 0.4
-max_output_tokens = 32000
-context_window_tokens = 128000
-open_weights = false
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-3.5-turbo"
-input_per_million = 0.5
-output_per_million = 1.5
-cache_read_per_million = 0.0
-max_output_tokens = 4096
-context_window_tokens = 16385
-open_weights = false
 status = "deprecated"
-tokenizer = "cl100k_base"
 
 [[rules]]
 provider = "openai"
@@ -2989,6 +2420,7 @@ cache_read_per_million = 0.175
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3003,20 +2435,41 @@ open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "gpt-4.1-mini"
-input_per_million = 0.4
-output_per_million = 1.6
-cache_read_per_million = 0.1
-max_output_tokens = 32768
-context_window_tokens = 1047576
+model_pattern = "gpt-6.1-terra"
+input_per_million = 1.0
+output_per_million = 5.0
+cache_read_per_million = 0.05
+cache_write_per_million = 1.25
+max_output_tokens = 128000
+context_window_tokens = 1050000
 open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "gpt-4.1-nano"
-input_per_million = 0.1
-output_per_million = 0.4
-cache_read_per_million = 0.025
+model_pattern = "gpt-6.2-astra"
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.4
+cache_write_per_million = 10.0
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-image-1.5"
+input_per_million = 5.0
+output_per_million = 10.0
+cache_read_per_million = 1.25
+open_weights = false
+status = "deprecated"
+
+[[rules]]
+provider = "openai"
+model_pattern = "gpt-4.1-mini"
+input_per_million = 0.4
+output_per_million = 1.6
+cache_read_per_million = 0.1
 max_output_tokens = 32768
 context_window_tokens = 1047576
 open_weights = false
@@ -3041,6 +2494,7 @@ cache_read_per_million = 0.02
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3055,16 +2509,6 @@ open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "gpt-4-turbo"
-input_per_million = 10.0
-output_per_million = 30.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "openai"
 model_pattern = "gpt-4o-mini"
 input_per_million = 0.15
 output_per_million = 0.6
@@ -3072,6 +2516,7 @@ cache_read_per_million = 0.075
 max_output_tokens = 16384
 context_window_tokens = 128000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3135,10 +2580,13 @@ open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "gpt-image-2"
-input_per_million = 5.0
-output_per_million = 30.0
-cache_read_per_million = 1.25
+model_pattern = "gpt-6.2-sol"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 2.5
+max_output_tokens = 128000
+context_window_tokens = 1050000
 open_weights = false
 
 [[rules]]
@@ -3150,6 +2598,7 @@ cache_read_per_million = 0.025
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3160,6 +2609,7 @@ cache_read_per_million = 0.005
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3180,6 +2630,7 @@ output_per_million = 120.0
 max_output_tokens = 272000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3201,6 +2652,7 @@ cache_read_per_million = 0.5
 max_output_tokens = 32768
 context_window_tokens = 1047576
 open_weights = false
+status = "deprecated"
 tokenizer = "o200k_base"
 determinism = "best-effort"
 
@@ -3213,6 +2665,7 @@ cache_read_per_million = 0.125
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3257,28 +2710,6 @@ open_weights = false
 
 [[rules]]
 provider = "openai"
-model_pattern = "o3-mini"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.55
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "openai"
-model_pattern = "o4-mini"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.275
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-status = "deprecated"
-
-[[rules]]
-provider = "openai"
 model_pattern = "gpt-4o"
 input_per_million = 2.5
 output_per_million = 10.0
@@ -3286,18 +2717,9 @@ cache_read_per_million = 1.25
 max_output_tokens = 16384
 context_window_tokens = 128000
 open_weights = false
+status = "deprecated"
 tokenizer = "o200k_base"
 determinism = "best-effort"
-
-[[rules]]
-provider = "openai"
-model_pattern = "o1-pro"
-input_per_million = 150.0
-output_per_million = 600.0
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-status = "deprecated"
 
 [[rules]]
 provider = "openai"
@@ -3306,15 +2728,6 @@ input_per_million = 20.0
 output_per_million = 80.0
 max_output_tokens = 100000
 context_window_tokens = 200000
-open_weights = false
-
-[[rules]]
-provider = "openai"
-model_pattern = "gpt-4"
-input_per_million = 30.0
-output_per_million = 60.0
-max_output_tokens = 8192
-context_window_tokens = 8192
 open_weights = false
 status = "deprecated"
 
@@ -3327,16 +2740,6 @@ cache_read_per_million = 0.125
 max_output_tokens = 128000
 context_window_tokens = 400000
 open_weights = false
-
-[[rules]]
-provider = "openai"
-model_pattern = "o1"
-input_per_million = 15.0
-output_per_million = 60.0
-cache_read_per_million = 7.5
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
 status = "deprecated"
 
 [[rules]]
@@ -3348,9 +2751,10 @@ cache_read_per_million = 0.5
 max_output_tokens = 100000
 context_window_tokens = 200000
 open_weights = false
+status = "deprecated"
 tokenizer = "o200k_base"
 
-# ── openrouter (375 models) ──
+# ── openrouter (372 models) ──
 
 [[rules]]
 provider = "openrouter"
@@ -3402,28 +2806,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "mistralai/mistral-small-3.2-24b-instruct"
-input_per_million = 0.09375
-output_per_million = 0.25
+input_per_million = 0.075
+output_per_million = 0.2
 max_output_tokens = 16384
 context_window_tokens = 256000
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "nvidia/nemotron-3.5-content-safety:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 128000
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "nvidia/nemotron-3-super-120b-a12b:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 235929
-context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
@@ -3461,7 +2847,7 @@ input_per_million = 0.0
 output_per_million = 0.0
 max_output_tokens = 460800
 context_window_tokens = 512000
-open_weights = false
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -3476,29 +2862,11 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "nousresearch/hermes-3-llama-3.1-405b"
-input_per_million = 1.0
-output_per_million = 1.0
-max_output_tokens = 16384
-context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "nousresearch/hermes-3-llama-3.1-70b"
-input_per_million = 0.7
-output_per_million = 0.7
-max_output_tokens = 16384
-context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "thinkingmachines/inkling-small:free"
+model_pattern = "baidu/ernie-5.5-flash-preview:free"
 input_per_million = 0.0
 output_per_million = 0.0
-max_output_tokens = 262144
-context_window_tokens = 1048576
+max_output_tokens = 921600
+context_window_tokens = 1024000
 open_weights = true
 
 [[rules]]
@@ -3541,12 +2909,22 @@ energy = { wh_per_mtok_out = 176.0, provenance = "independent-measured", scope =
 [[rules]]
 provider = "openrouter"
 model_pattern = "~deepseek/deepseek-v4-flash-latest"
-input_per_million = 0.0128
-output_per_million = 0.768
-cache_read_per_million = 0.0128
+input_per_million = 0.047
+output_per_million = 0.3
+cache_read_per_million = 0.035
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "deepseek/deepseek-v4.1-flash-1017"
+input_per_million = 0.03
+output_per_million = 0.2
+cache_read_per_million = 0.001
+max_output_tokens = 393216
+context_window_tokens = 1048576
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -3565,9 +2943,9 @@ model_pattern = "inference-net/schematron-v2-small"
 input_per_million = 0.05
 output_per_million = 0.23
 cache_read_per_million = 0.05
-max_output_tokens = 4096
+max_output_tokens = 8192
 context_window_tokens = 128000
-open_weights = true
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -3577,44 +2955,53 @@ output_per_million = 0.15
 cache_read_per_million = 0.03
 max_output_tokens = 8192
 context_window_tokens = 128000
-open_weights = true
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "meta-llama/llama-3.1-70b-instruct"
-input_per_million = 0.4
-output_per_million = 0.4
-max_output_tokens = 16384
+input_per_million = 0.72
+output_per_million = 0.72
+max_output_tokens = 8192
 context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "meta-llama/llama-3.3-70b-instruct"
-input_per_million = 0.22
-output_per_million = 0.5
-cache_read_per_million = 0.11
-max_output_tokens = 16384
+input_per_million = 0.71
+output_per_million = 0.71
+cache_read_per_million = 0.71
+max_output_tokens = 115200
 context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "nvidia/nemotron-3-super-120b-a12b"
-input_per_million = 0.08
-output_per_million = 0.45
-max_output_tokens = 235929
+input_per_million = 0.075
+output_per_million = 0.4
+max_output_tokens = 16384
 context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "nvidia/nemotron-3-ultra-550b-a55b"
-input_per_million = 0.6
-output_per_million = 2.4
-cache_read_per_million = 0.12
-max_output_tokens = 182520
+input_per_million = 0.5
+output_per_million = 2.2
+cache_read_per_million = 0.1
+max_output_tokens = 16384
 context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "nvidia/nemotron-3.5-super-vl:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 131072
+context_window_tokens = 1000000
 open_weights = true
 
 [[rules]]
@@ -3628,31 +3015,12 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "inclusionai/ling-3.0-flash-sante"
-input_per_million = 0.042
-output_per_million = 0.1232
-cache_read_per_million = 0.0084
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "meta-llama/llama-3.1-8b-instruct"
 input_per_million = 0.05
 output_per_million = 0.08
 cache_read_per_million = 0.025
 max_output_tokens = 117964
 context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "meta-llama/llama-3.2-1b-instruct"
-input_per_million = 0.027
-output_per_million = 0.201
-max_output_tokens = 54000
-context_window_tokens = 60000
 open_weights = true
 
 [[rules]]
@@ -3698,6 +3066,7 @@ provider = "openrouter"
 model_pattern = "qwen/qwen3-30b-a3b-instruct-2507"
 input_per_million = 0.1
 output_per_million = 0.3
+cache_read_per_million = 0.1
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
@@ -3714,15 +3083,6 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "qwen/qwen3-next-80b-a3b-thinking"
-input_per_million = 0.15
-output_per_million = 1.2
-max_output_tokens = 235929
-context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "qwen/qwen3-vl-235b-a22b-instruct"
 input_per_million = 0.21
 output_per_million = 1.9
@@ -3733,12 +3093,12 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "arcee-ai/trinity-large-thinking"
-input_per_million = 0.25
-output_per_million = 0.8
-cache_read_per_million = 0.06
-max_output_tokens = 80000
-context_window_tokens = 262144
+model_pattern = "thinkingmachines/inkling-2-small"
+input_per_million = 0.3
+output_per_million = 1.0
+cache_read_per_million = 0.03
+max_output_tokens = 943718
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -3753,20 +3113,20 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v4-flash-0731"
-input_per_million = 0.016
-output_per_million = 0.64
-cache_read_per_million = 0.016
+input_per_million = 0.047
+output_per_million = 0.3
+cache_read_per_million = 0.035
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "ibm-granite/granite-4.0-h-micro"
-input_per_million = 0.017
-output_per_million = 0.112
-max_output_tokens = 117900
-context_window_tokens = 131000
+model_pattern = "inclusionai/ling-3.2-flash:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 262144
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -3788,6 +3148,16 @@ cache_read_per_million = 0.002
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "thinkingmachines/inkling-2-mini"
+input_per_million = 0.075
+output_per_million = 0.3
+cache_read_per_million = 0.015
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -3813,10 +3183,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "~deepseek/deepseek-flash-latest"
-input_per_million = 0.0336
-output_per_million = 1.188
-cache_read_per_million = 0.0336
-max_output_tokens = 943718
+input_per_million = 0.03
+output_per_million = 0.2
+cache_read_per_million = 0.001
+max_output_tokens = 393216
 context_window_tokens = 1048576
 open_weights = false
 
@@ -3827,15 +3197,14 @@ input_per_million = 0.8
 output_per_million = 1.6
 max_output_tokens = 29491
 context_window_tokens = 32768
-open_weights = false
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-chat-v3-0324"
-input_per_million = 0.29
-output_per_million = 1.14
-cache_read_per_million = 0.11
-max_output_tokens = 115200
+input_per_million = 0.25
+output_per_million = 1.0
+max_output_tokens = 147456
 context_window_tokens = 163840
 open_weights = true
 
@@ -3850,19 +3219,10 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "inclusionai/ling-3.0-flash-fin"
-input_per_million = 0.042
-output_per_million = 0.1232
-cache_read_per_million = 0.0084
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "nvidia/nemotron-3-nano-30b-a3b"
 input_per_million = 0.06
 output_per_million = 0.24
+cache_read_per_million = 0.012
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
@@ -3896,11 +3256,12 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "qwen/qwen3-vl-30b-a3b-thinking"
-input_per_million = 0.29
-output_per_million = 1.0
-max_output_tokens = 235929
-context_window_tokens = 262144
+model_pattern = "ricursiveai/ripple-65b-preview"
+input_per_million = 0.1
+output_per_million = 0.3
+cache_read_per_million = 0.025
+max_output_tokens = 131072
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -3916,10 +3277,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "~anthropic/claude-fable-latest"
-input_per_million = 10.0
-output_per_million = 50.0
-cache_read_per_million = 0.25
-cache_write_per_million = 12.5
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.2
+cache_write_per_million = 10.0
 max_output_tokens = 128000
 context_window_tokens = 1000000
 open_weights = false
@@ -3937,11 +3298,12 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "bytedance-seed/seed-1.6-flash"
-input_per_million = 0.075
-output_per_million = 0.3
-max_output_tokens = 32768
-context_window_tokens = 262144
+model_pattern = "baidu/ernie-light-dt-1.0-intl"
+input_per_million = 1.13
+output_per_million = 3.94
+cache_read_per_million = 0.113
+max_output_tokens = 131072
+context_window_tokens = 1024000
 open_weights = false
 
 [[rules]]
@@ -3965,10 +3327,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v4-pro-0813"
-input_per_million = 0.66
-output_per_million = 1.98
-cache_read_per_million = 0.022
-max_output_tokens = 393216
+input_per_million = 0.111
+output_per_million = 4.44
+cache_read_per_million = 0.097
+max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
 
@@ -4037,31 +3399,31 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "inclusionai/ling-3.0-flash-vl"
-input_per_million = 0.021
-output_per_million = 0.0616
-cache_read_per_million = 0.0042
+input_per_million = 0.06
+output_per_million = 0.18
+cache_read_per_million = 0.012
 max_output_tokens = 32768
-context_window_tokens = 262144
+context_window_tokens = 131072
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "moondream/moondream3.1-9b-a2b"
+input_per_million = 0.3
+output_per_million = 2.5
+max_output_tokens = 4096
+context_window_tokens = 32000
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "nvidia/nemotron-3.5-lightning"
-input_per_million = 0.07
+input_per_million = 0.05
 output_per_million = 0.2
-cache_read_per_million = 0.04
+cache_read_per_million = 0.01
 max_output_tokens = 235929
-context_window_tokens = 262144
+context_window_tokens = 1048576
 open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/gpt-3.5-turbo-instruct"
-input_per_million = 1.5
-output_per_million = 2.0
-max_output_tokens = 3685
-context_window_tokens = 4095
-open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -4085,19 +3447,11 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "tencent/hunyuan-a13b-instruct"
-input_per_million = 0.14
-output_per_million = 0.57
-max_output_tokens = 117964
-context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "thinkingmachines/inkling:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 262144
+model_pattern = "reflection/beam-1.0-501b-a23b"
+input_per_million = 0.25
+output_per_million = 1.0
+cache_read_per_million = 0.05
+max_output_tokens = 131072
 context_window_tokens = 1048576
 open_weights = true
 
@@ -4125,10 +3479,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "~deepseek/deepseek-pro-latest"
-input_per_million = 0.25
+input_per_million = 0.0999
 output_per_million = 5.0
-cache_read_per_million = 0.2
-max_output_tokens = 943718
+cache_read_per_million = 0.0999
+max_output_tokens = 393216
 context_window_tokens = 1048576
 open_weights = false
 
@@ -4137,18 +3491,10 @@ provider = "openrouter"
 model_pattern = "anthracite-org/magnum-v4-72b"
 input_per_million = 2.5
 output_per_million = 5.0
+cache_read_per_million = 2.5
 max_output_tokens = 4096
 context_window_tokens = 32768
 open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "bytedance-seed/seed-2.0-code"
-input_per_million = 0.5
-output_per_million = 3.0
-max_output_tokens = 131072
-context_window_tokens = 262144
-open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -4171,9 +3517,9 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v4.1-flash"
-input_per_million = 0.15
-output_per_million = 0.6
-cache_read_per_million = 0.003
+input_per_million = 0.14
+output_per_million = 0.42
+cache_read_per_million = 0.0042
 max_output_tokens = 393216
 context_window_tokens = 1048576
 open_weights = true
@@ -4188,6 +3534,7 @@ cache_write_per_million = 0.083333
 max_output_tokens = 65535
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
@@ -4209,6 +3556,24 @@ cache_read_per_million = 0.03
 cache_write_per_million = 0.083333
 max_output_tokens = 65536
 context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "google/gemini-omni-1.1-flash"
+input_per_million = 1.5
+output_per_million = 9.0
+max_output_tokens = 65536
+context_window_tokens = 131072
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "google/gemini-omni-1.2-flash"
+input_per_million = 1.5
+output_per_million = 9.0
+max_output_tokens = 65536
+context_window_tokens = 131072
 open_weights = false
 
 [[rules]]
@@ -4238,7 +3603,7 @@ output_per_million = 6.0
 cache_read_per_million = 0.2
 max_output_tokens = 104857
 context_window_tokens = 131072
-open_weights = false
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -4262,9 +3627,9 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "mistralai/mistral-medium-3.1"
-input_per_million = 0.4
-output_per_million = 2.0
-cache_read_per_million = 0.04
+input_per_million = 0.44
+output_per_million = 2.2
+cache_read_per_million = 0.044
 max_output_tokens = 104857
 context_window_tokens = 131072
 open_weights = false
@@ -4281,12 +3646,50 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "mistralai/pixtral-large-2502"
+input_per_million = 2.0
+output_per_million = 6.0
+max_output_tokens = 102400
+context_window_tokens = 128000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "moondream/moondream3-preview"
+input_per_million = 0.3
+output_per_million = 2.5
+max_output_tokens = 4096
+context_window_tokens = 32000
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "nvidia/nemotron-3.5-super-vl"
+input_per_million = 0.15
+output_per_million = 0.47
+cache_read_per_million = 0.02
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "openai/gpt-oss-safeguard-20b"
 input_per_million = 0.075
 output_per_million = 0.3
 cache_read_per_million = 0.0375
 max_output_tokens = 65536
 context_window_tokens = 131072
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "prism-ml/ternary-bonsai-2-9b"
+input_per_million = 0.08
+output_per_million = 0.13
+cache_read_per_million = 0.04
+max_output_tokens = 65536
+context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
@@ -4334,29 +3737,11 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "apodex/apodex-1.1-mini:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 235929
-context_window_tokens = 262144
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "cohere/north-mini-code:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 64000
-context_window_tokens = 256000
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "deepseek/deepseek-chat-v3.1"
 input_per_million = 0.25
 output_per_million = 0.95
 cache_read_per_million = 0.13
-max_output_tokens = 32768
+max_output_tokens = 147456
 context_window_tokens = 163840
 open_weights = true
 
@@ -4372,11 +3757,11 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "meta-llama/llama-4-maverick"
-input_per_million = 0.1875
-output_per_million = 0.6525
-cache_read_per_million = 0.05
-max_output_tokens = 16384
-context_window_tokens = 1048576
+input_per_million = 0.35
+output_per_million = 1.0
+cache_read_per_million = 0.17
+max_output_tokens = 32768
+context_window_tokens = 524288
 open_weights = true
 
 [[rules]]
@@ -4402,8 +3787,8 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "mistralai/mistral-large-4-0"
-input_per_million = 0.68
-output_per_million = 2.09
+input_per_million = 0.7
+output_per_million = 2.1
 cache_read_per_million = 0.07
 max_output_tokens = 262144
 context_window_tokens = 1048576
@@ -4411,13 +3796,12 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "moonshotai/kimi-k2-thinking"
-input_per_million = 0.6
-output_per_million = 2.5
-cache_read_per_million = 0.15
-max_output_tokens = 98304
-context_window_tokens = 262144
-open_weights = true
+model_pattern = "particle-ai/particle-1:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -4439,15 +3823,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "poolside/laguna-xs-2.1:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "thedrummer/cydonia-24b-v4.1"
 input_per_million = 0.3
 output_per_million = 0.5
@@ -4459,11 +3834,11 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "~google/gemini-flash-latest"
-input_per_million = 0.75
-output_per_million = 3.75
+input_per_million = 1.5
+output_per_million = 7.5
 cache_read_per_million = 0.075
-cache_write_per_million = 0.041667
-max_output_tokens = 65536
+cache_write_per_million = 0.083333
+max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
 
@@ -4474,6 +3849,17 @@ input_per_million = 10.0
 output_per_million = 50.0
 cache_read_per_million = 0.25
 cache_write_per_million = 12.5
+max_output_tokens = 128000
+context_window_tokens = 1000000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "anthropic/claude-fable-5.2"
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.2
+cache_write_per_million = 10.0
 max_output_tokens = 128000
 context_window_tokens = 1000000
 open_weights = false
@@ -4521,10 +3907,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v4-flash"
-input_per_million = 0.03
-output_per_million = 1.28
-cache_read_per_million = 0.03
-max_output_tokens = 943718
+input_per_million = 0.09
+output_per_million = 0.18
+cache_read_per_million = 0.018
+max_output_tokens = 393216
 context_window_tokens = 1048576
 open_weights = true
 
@@ -4550,7 +3936,7 @@ open_weights = false
 provider = "openrouter"
 model_pattern = "ibm-granite/granite-4.2-8b"
 input_per_million = 0.06
-output_per_million = 0.25
+output_per_million = 0.15
 cache_read_per_million = 0.015
 max_output_tokens = 117964
 context_window_tokens = 131072
@@ -4569,47 +3955,51 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "inclusionai/ling-3.1-flash"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 235929
-context_window_tokens = 262144
-open_weights = false
+input_per_million = 0.075
+output_per_million = 0.225
+cache_read_per_million = 0.015
+max_output_tokens = 262144
+context_window_tokens = 1048576
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "microsoft/wizardlm-2-8x22b"
-input_per_million = 0.62
-output_per_million = 0.62
-max_output_tokens = 8000
-context_window_tokens = 65535
+model_pattern = "minimax/minimax-m3.1-flash"
+input_per_million = 0.1
+output_per_million = 0.4
+cache_read_per_million = 0.025
+max_output_tokens = 943718
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "mistralai/mistral-medium-3"
-input_per_million = 0.4
-output_per_million = 2.0
-cache_read_per_million = 0.04
+input_per_million = 0.44
+output_per_million = 2.2
+cache_read_per_million = 0.044
 max_output_tokens = 104857
 context_window_tokens = 131072
 open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "nousresearch/hermes-4-405b"
-input_per_million = 1.0
-output_per_million = 3.0
-max_output_tokens = 117964
-context_window_tokens = 131072
+model_pattern = "motif-technologies/motif-3"
+input_per_million = 0.3
+output_per_million = 1.2
+cache_read_per_million = 0.06
+max_output_tokens = 235929
+context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "poolside/laguna-s-2.1:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 32768
-context_window_tokens = 262144
+model_pattern = "nousresearch/hermes-4-405b"
+input_per_million = 1.0
+output_per_million = 3.0
+cache_read_per_million = 0.2
+max_output_tokens = 117964
+context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
@@ -4709,17 +4099,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "anthropic/claude-sonnet-4"
-input_per_million = 3.0
-output_per_million = 15.0
-cache_read_per_million = 0.3
-cache_write_per_million = 3.75
-max_output_tokens = 64000
-context_window_tokens = 200000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "anthropic/claude-sonnet-5"
 input_per_million = 2.0
 output_per_million = 10.0
@@ -4732,10 +4111,9 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-r1-0528"
-input_per_million = 0.5
-output_per_million = 2.15
-cache_read_per_million = 0.35
-max_output_tokens = 32768
+input_per_million = 0.571
+output_per_million = 2.286
+max_output_tokens = 32000
 context_window_tokens = 163840
 open_weights = true
 
@@ -4762,10 +4140,20 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "inclusionai/ling-3.0-tiny"
+input_per_million = 0.015
+output_per_million = 0.045
+cache_read_per_million = 0.003
+max_output_tokens = 250000
+context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "moonshotai/kimi-k2.7-code"
-input_per_million = 0.6712
-output_per_million = 3.35
-cache_read_per_million = 0.18
+input_per_million = 0.6
+output_per_million = 3.0
+cache_read_per_million = 0.12
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
@@ -4800,19 +4188,11 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "qwen/qwen-2.5-7b-instruct"
-input_per_million = 0.1
-output_per_million = 0.2
-max_output_tokens = 29491
-context_window_tokens = 32768
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "qwen/qwen3-235b-a22b-2507"
-input_per_million = 0.09
-output_per_million = 0.55
-max_output_tokens = 16384
+input_per_million = 0.14
+output_per_million = 0.8
+cache_read_per_million = 0.05
+max_output_tokens = 117964
 context_window_tokens = 262144
 open_weights = true
 
@@ -4822,6 +4202,15 @@ model_pattern = "qwen/qwen3-vl-8b-instruct"
 input_per_million = 0.25
 output_per_million = 0.75
 cache_read_per_million = 0.12
+max_output_tokens = 235929
+context_window_tokens = 262144
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "recursive/flint-v1.0:free"
+input_per_million = 0.0
+output_per_million = 0.0
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
@@ -4847,12 +4236,22 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "z-ai/glm-5.3-flashx-legal"
+input_per_million = 0.37
+output_per_million = 1.25
+cache_read_per_million = 0.075
+max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "~google/gemini-pro-latest"
 input_per_million = 2.0
-output_per_million = 12.0
-cache_read_per_million = 0.2
-cache_write_per_million = 0.375
-max_output_tokens = 65536
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 0.1875
+max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
 
@@ -4889,29 +4288,31 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v4-pro"
-input_per_million = 0.447876
-output_per_million = 0.895752
-cache_read_per_million = 0.037323
-max_output_tokens = 384000
+input_per_million = 1.28
+output_per_million = 2.56
+cache_read_per_million = 0.108
+max_output_tokens = 393216
 context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "liquid/lfm-2.5-2.6b:free"
-input_per_million = 0.0
-output_per_million = 0.0
-max_output_tokens = 8192
-context_window_tokens = 65536
-open_weights = true
+model_pattern = "google/gemini-4-hydrogen"
+input_per_million = 1.5
+output_per_million = 7.5
+cache_read_per_million = 0.075
+cache_write_per_million = 0.083333
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "meta-llama/llama-4-scout"
-input_per_million = 0.18
-output_per_million = 0.59
-max_output_tokens = 117964
-context_window_tokens = 1310720
+input_per_million = 0.1
+output_per_million = 0.3
+max_output_tokens = 16384
+context_window_tokens = 327680
 open_weights = true
 
 [[rules]]
@@ -4923,6 +4324,16 @@ cache_read_per_million = 0.03
 max_output_tokens = 204800
 context_window_tokens = 256000
 open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "moonshotai/kimi-k3.1-pro"
+input_per_million = 0.2403
+output_per_million = 8.4023
+cache_read_per_million = 0.2
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -4985,6 +4396,28 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "openai/gpt-6.1-terra-pro"
+input_per_million = 1.0
+output_per_million = 5.0
+cache_read_per_million = 0.05
+cache_write_per_million = 1.25
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/gpt-6.2-astra-pro"
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.4
+cache_write_per_million = 10.0
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "qwen/qwen3.5-flash-02-23"
 input_per_million = 0.065
 output_per_million = 0.26
@@ -4999,14 +4432,15 @@ input_per_million = 1.0
 output_per_million = 4.05
 cache_read_per_million = 0.17
 max_output_tokens = 471859
-context_window_tokens = 524288
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "undi95/remm-slerp-l2-13b"
-input_per_million = 0.35
-output_per_million = 0.65
+input_per_million = 0.3
+output_per_million = 0.5
+cache_read_per_million = 0.2
 max_output_tokens = 5529
 context_window_tokens = 6144
 open_weights = true
@@ -5014,10 +4448,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "~openai/gpt-astra-latest"
-input_per_million = 10.0
-output_per_million = 50.0
-cache_read_per_million = 1.0
-cache_write_per_million = 12.5
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.4
+cache_write_per_million = 10.0
 max_output_tokens = 128000
 context_window_tokens = 1050000
 open_weights = false
@@ -5025,10 +4459,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "~openai/gpt-terra-latest"
-input_per_million = 2.0
-output_per_million = 12.0
-cache_read_per_million = 0.2
-cache_write_per_million = 2.5
+input_per_million = 1.0
+output_per_million = 5.0
+cache_read_per_million = 0.05
+cache_write_per_million = 1.25
 max_output_tokens = 128000
 context_window_tokens = 1050000
 open_weights = false
@@ -5066,15 +4500,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "bytedance-seed/seed-1.6"
-input_per_million = 0.25
-output_per_million = 2.0
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "google/gemini-2.5-flash"
 input_per_million = 0.3
 output_per_million = 2.5
@@ -5083,6 +4508,7 @@ cache_write_per_million = 0.083333
 max_output_tokens = 65535
 context_window_tokens = 1048576
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
@@ -5150,15 +4576,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "moonshotai/kimi-k2-0905"
-input_per_million = 0.6
-output_per_million = 2.5
-max_output_tokens = 98304
-context_window_tokens = 262144
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "openai/gpt-5-image-mini"
 input_per_million = 2.5
 output_per_million = 2.0
@@ -5208,19 +4625,10 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "sao10k/l3.3-euryale-70b"
-input_per_million = 0.65
-output_per_million = 0.75
-max_output_tokens = 16384
-context_window_tokens = 131072
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "~moonshotai/kimi-latest"
-input_per_million = 0.73
-output_per_million = 10.0
-cache_read_per_million = 0.55
+input_per_million = 0.19
+output_per_million = 10.6066
+cache_read_per_million = 0.19
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
@@ -5248,6 +4656,16 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "~unbiased/pareto-latest"
+input_per_million = 0.8
+output_per_million = 3.2
+cache_read_per_million = 0.03
+max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "amazon/nova-premier-v1"
 input_per_million = 2.5
 output_per_million = 12.5
@@ -5255,44 +4673,66 @@ cache_read_per_million = 0.625
 max_output_tokens = 32000
 context_window_tokens = 1000000
 open_weights = false
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-chat"
-input_per_million = 0.32
-output_per_million = 0.89
-max_output_tokens = 16384
+input_per_million = 0.2574
+output_per_million = 1.0287
+max_output_tokens = 16000
 context_window_tokens = 163840
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "deepseek/deepseek-v3.2"
-input_per_million = 0.259
-output_per_million = 0.8
-cache_read_per_million = 0.14
+input_per_million = 0.26
+output_per_million = 0.38
+cache_read_per_million = 0.13
 max_output_tokens = 147456
 context_window_tokens = 163840
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "google/gemini-4-carbon"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 0.1875
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "gryphe/mythomax-l2-13b"
-input_per_million = 0.08
-output_per_million = 0.11
-max_output_tokens = 3686
+input_per_million = 0.3
+output_per_million = 0.5
+cache_read_per_million = 0.2
+max_output_tokens = 7372
 context_window_tokens = 8192
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "minimax/minimax-m2-her"
-input_per_million = 0.3
-output_per_million = 1.2
-cache_read_per_million = 0.03
-max_output_tokens = 2048
-context_window_tokens = 65536
-open_weights = false
+model_pattern = "liquid/lfm-2.5-24b-a2b"
+input_per_million = 0.05
+output_per_million = 0.7
+cache_read_per_million = 0.025
+max_output_tokens = 8192
+context_window_tokens = 128000
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "liquid/lfm-3-1.7b:free"
+input_per_million = 0.0
+output_per_million = 0.0
+max_output_tokens = 8192
+context_window_tokens = 262144
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -5326,10 +4766,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "openai/gpt-5.6-sol-pro"
-input_per_million = 2.0
-output_per_million = 10.0
-cache_read_per_million = 0.2
-cache_write_per_million = 2.5
+input_per_million = 4.0
+output_per_million = 20.0
+cache_read_per_million = 0.4
+cache_write_per_million = 5.0
 max_output_tokens = 128000
 context_window_tokens = 1050000
 open_weights = false
@@ -5358,6 +4798,17 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "openai/gpt-6.2-sol-pro"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 2.5
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "openai/gpt-chat-latest"
 input_per_million = 5.0
 output_per_million = 30.0
@@ -5368,13 +4819,13 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "poolside/laguna-xs-2.1"
-input_per_million = 0.06
-output_per_million = 0.12
+model_pattern = "particle-ai/particle-1"
+input_per_million = 0.07
+output_per_million = 0.5
 cache_read_per_million = 0.03
-max_output_tokens = 32768
-context_window_tokens = 262144
-open_weights = true
+max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -5399,10 +4850,10 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "qwen/qwen3.5-397b-a17b"
-input_per_million = 0.55
-output_per_million = 3.5
-cache_read_per_million = 0.225
-max_output_tokens = 235929
+input_per_million = 0.45
+output_per_million = 3.0
+cache_read_per_million = 0.22
+max_output_tokens = 81920
 context_window_tokens = 262144
 open_weights = true
 
@@ -5412,7 +4863,7 @@ model_pattern = "qwen/qwen3.8-2.4t-a95b"
 input_per_million = 2.0
 output_per_million = 6.0
 cache_read_per_million = 0.25
-max_output_tokens = 131072
+max_output_tokens = 65536
 context_window_tokens = 1048576
 open_weights = true
 
@@ -5428,10 +4879,11 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "stepfun/step-3.5-flash"
-input_per_million = 0.1
-output_per_million = 0.3
-max_output_tokens = 65536
+model_pattern = "radixark/daisyrose-27b"
+input_per_million = 0.15
+output_per_million = 1.875
+cache_read_per_million = 0.0375
+max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
 
@@ -5442,7 +4894,7 @@ input_per_million = 0.2
 output_per_million = 1.15
 cache_read_per_million = 0.04
 max_output_tokens = 230400
-context_window_tokens = 262144
+context_window_tokens = 256000
 open_weights = true
 
 [[rules]]
@@ -5450,10 +4902,10 @@ provider = "openrouter"
 model_pattern = "stepfun/step-5-preview"
 input_per_million = 1.0
 output_per_million = 2.7
-cache_read_per_million = 0.05
+cache_read_per_million = 0.1
 max_output_tokens = 64000
 context_window_tokens = 1000000
-open_weights = false
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -5471,7 +4923,7 @@ input_per_million = 0.14
 output_per_million = 0.28
 cache_read_per_million = 0.0028
 max_output_tokens = 131072
-context_window_tokens = 1050000
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -5488,10 +4940,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "~z-ai/glm-flash-latest"
-input_per_million = 0.0232
-output_per_million = 1.2
-cache_read_per_million = 0.0232
-max_output_tokens = 943718
+input_per_million = 0.0356
+output_per_million = 0.0815
+cache_read_per_million = 0.03
+max_output_tokens = 131072
 context_window_tokens = 1048576
 open_weights = false
 
@@ -5512,7 +4964,7 @@ output_per_million = 1.5
 cache_read_per_million = 0.15
 max_output_tokens = 64000
 context_window_tokens = 192000
-open_weights = false
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -5522,6 +4974,18 @@ output_per_million = 10.0
 cache_read_per_million = 0.125
 cache_write_per_million = 0.375
 max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
+status = "deprecated"
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "google/gemini-4-argon"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 0.1875
+max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
 
@@ -5547,39 +5011,27 @@ open_weights = true
 provider = "openrouter"
 model_pattern = "google/gemma-3-27b-it"
 input_per_million = 0.08
-output_per_million = 0.45
-cache_read_per_million = 0.04
-max_output_tokens = 117964
+output_per_million = 0.16
+max_output_tokens = 16384
 context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "google/gemma-4-31b-it"
-input_per_million = 0.09
-output_per_million = 0.34
-cache_read_per_million = 0.05
+input_per_million = 0.2
+output_per_million = 0.4
 max_output_tokens = 16384
 context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "inception/mercury-2.5"
-input_per_million = 0.04
-output_per_million = 0.15
-cache_read_per_million = 0.004
-max_output_tokens = 65536
-context_window_tokens = 260000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "meta/muse-glimmer-30b"
-input_per_million = 0.3
-output_per_million = 1.2
+input_per_million = 0.35
+output_per_million = 1.5
 cache_read_per_million = 0.04
-max_output_tokens = 16384
+max_output_tokens = 117964
 context_window_tokens = 131072
 open_weights = true
 
@@ -5615,16 +5067,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "poolside/laguna-s-2.1"
-input_per_million = 0.09
-output_per_million = 0.18
-cache_read_per_million = 0.009
-max_output_tokens = 131072
-context_window_tokens = 1048576
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "qwen/qwen3-coder-next"
 input_per_million = 0.12
 output_per_million = 0.8
@@ -5654,6 +5096,16 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "unbiased/pareto-26.10"
+input_per_million = 0.8
+output_per_million = 3.2
+cache_read_per_million = 0.03
+max_output_tokens = 131072
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "amazon/nova-micro-v1"
 input_per_million = 0.035
 output_per_million = 0.14
@@ -5663,51 +5115,52 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "deepseek/deepseek-r1"
-input_per_million = 0.7
-output_per_million = 2.5
-max_output_tokens = 16000
-context_window_tokens = 64000
-open_weights = true
-energy = { wh_per_mtok_out = 660.1, provenance = "independent-measured", scope = "gpu", source = "ml.energy leaderboard Dec 2025 \u00b7 B200 \u00b7 vLLM \u00b7 problem-solving \u00b7 2.3762 J/token (arXiv 2505.06371)", measured_at = "2025-12" }
+model_pattern = "google/gemini-4-neon"
+input_per_million = 3.0
+output_per_million = 15.0
+cache_read_per_million = 0.15
+cache_write_per_million = 0.083333
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "google/gemma-3-4b-it"
-input_per_million = 0.05
-output_per_million = 0.1
-max_output_tokens = 16384
+input_per_million = 0.04
+output_per_million = 0.05
+cache_read_per_million = 0.02
+max_output_tokens = 117964
 context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "minimax/minimax-m2.1"
-input_per_million = 0.3
-output_per_million = 1.2
-cache_read_per_million = 0.03
-max_output_tokens = 131072
-context_window_tokens = 204800
+model_pattern = "meta/muse-spark-open"
+input_per_million = 1.25
+output_per_million = 4.25
+cache_read_per_million = 0.15
+max_output_tokens = 943718
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "minimax/minimax-m2.5"
 input_per_million = 0.27
-output_per_million = 1.08
-cache_read_per_million = 0.027
-max_output_tokens = 128000
-context_window_tokens = 204800
+output_per_million = 0.95
+cache_read_per_million = 0.03
+max_output_tokens = 32768
+context_window_tokens = 198000
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "minimax/minimax-m2.7"
-input_per_million = 0.21
-output_per_million = 0.84
-cache_read_per_million = 0.042
-max_output_tokens = 176947
-context_window_tokens = 204800
+input_per_million = 0.6
+output_per_million = 1.8
+max_output_tokens = 131072
+context_window_tokens = 196608
 open_weights = true
 
 [[rules]]
@@ -5748,15 +5201,6 @@ cache_read_per_million = 0.015
 max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/gpt-3.5-turbo"
-input_per_million = 0.5
-output_per_million = 1.5
-max_output_tokens = 4096
-context_window_tokens = 16385
-open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -5812,6 +5256,28 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "openai/gpt-6.1-terra"
+input_per_million = 1.0
+output_per_million = 5.0
+cache_read_per_million = 0.05
+cache_write_per_million = 1.25
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "openai/gpt-6.2-astra"
+input_per_million = 8.0
+output_per_million = 40.0
+cache_read_per_million = 0.4
+cache_write_per_million = 10.0
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "perplexity/sonar-pro"
 input_per_million = 3.0
 output_per_million = 15.0
@@ -5822,20 +5288,20 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "qwen/qwen3.5-35b-a3b"
-input_per_million = 0.08
-output_per_million = 0.75
-cache_read_per_million = 0.04
-max_output_tokens = 32768
+input_per_million = 0.14
+output_per_million = 1.0
+cache_read_per_million = 0.05
+max_output_tokens = 81920
 context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "qwen/qwen3.6-35b-a3b"
-input_per_million = 0.1
-output_per_million = 0.95
-cache_read_per_million = 0.1
-max_output_tokens = 65536
+input_per_million = 0.05
+output_per_million = 0.7
+cache_read_per_million = 0.025
+max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
 
@@ -5879,13 +5345,13 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "xiaomi/mimo-v2.5-pro"
-input_per_million = 0.435
-output_per_million = 0.87
-cache_read_per_million = 0.0036
+model_pattern = "unbiased/pareto-26.9"
+input_per_million = 2.5
+output_per_million = 7.5
+cache_read_per_million = 0.25
 max_output_tokens = 131072
-context_window_tokens = 1050000
-open_weights = true
+context_window_tokens = 262144
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -5894,7 +5360,7 @@ input_per_million = 0.435
 output_per_million = 0.87
 cache_read_per_million = 0.0036
 max_output_tokens = 131072
-context_window_tokens = 1050000
+context_window_tokens = 1048576
 open_weights = true
 
 [[rules]]
@@ -5905,26 +5371,6 @@ output_per_million = 0.24
 max_output_tokens = 5120
 context_window_tokens = 300000
 open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "inception/mercury-2"
-input_per_million = 0.25
-output_per_million = 0.75
-cache_read_per_million = 0.025
-max_output_tokens = 50000
-context_window_tokens = 128000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "meituan/longcat-2.0"
-input_per_million = 0.3
-output_per_million = 1.2
-cache_read_per_million = 0.006
-max_output_tokens = 262144
-context_window_tokens = 1048756
-open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -5961,8 +5407,8 @@ provider = "openrouter"
 model_pattern = "morph/morph-v3-fast"
 input_per_million = 0.8
 output_per_million = 1.2
-max_output_tokens = 38000
-context_window_tokens = 81920
+max_output_tokens = 131072
+context_window_tokens = 262144
 open_weights = false
 
 [[rules]]
@@ -5980,19 +5426,9 @@ provider = "openrouter"
 model_pattern = "openai/gpt-4.1-nano"
 input_per_million = 0.1
 output_per_million = 0.4
-cache_read_per_million = 0.025
-max_output_tokens = 32768
+cache_read_per_million = 0.03
+max_output_tokens = 942818
 context_window_tokens = 1047576
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/gpt-5.2-chat"
-input_per_million = 1.75
-output_per_million = 14.0
-cache_read_per_million = 0.175
-max_output_tokens = 32000
-context_window_tokens = 128000
 open_weights = false
 
 [[rules]]
@@ -6029,31 +5465,12 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "openai/gpt-oss-120b"
-input_per_million = 0.037
-output_per_million = 0.17
+input_per_million = 0.05
+output_per_million = 0.25
+cache_read_per_million = 0.05
 max_output_tokens = 117964
 context_window_tokens = 131072
 open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/o3-mini-high"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.55
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/o4-mini-high"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.275
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -6066,21 +5483,20 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "scaledown/summarize"
+input_per_million = 0.04
+output_per_million = 0.0
+max_output_tokens = 4000
+context_window_tokens = 1000000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "tencent/hy-mt2-1.8b"
 input_per_million = 0.044
 output_per_million = 0.177
 max_output_tokens = 4096
 context_window_tokens = 8192
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "tencent/hy3-preview"
-input_per_million = 0.18
-output_per_million = 0.6
-cache_read_per_million = 0.06
-max_output_tokens = 235929
-context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
@@ -6105,30 +5521,10 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "upstage/solar-pro-3"
-input_per_million = 0.15
-output_per_million = 0.6
-cache_read_per_million = 0.015
-max_output_tokens = 117964
-context_window_tokens = 131072
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "x-ai/grok-build-0.1"
-input_per_million = 1.0
-output_per_million = 2.0
-cache_read_per_million = 0.2
-max_output_tokens = 230400
-context_window_tokens = 256000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "z-ai/glm-5.3-flashx"
 input_per_million = 0.37
 output_per_million = 1.25
-cache_read_per_million = 0.09
+cache_read_per_million = 0.075
 max_output_tokens = 131072
 context_window_tokens = 1048576
 open_weights = false
@@ -6174,68 +5570,23 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "minimax/minimax-01"
-input_per_million = 0.2
-output_per_million = 1.1
-max_output_tokens = 40000
-context_window_tokens = 1000192
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "minimax/minimax-m1"
-input_per_million = 0.55
-output_per_million = 2.2
-max_output_tokens = 40000
-context_window_tokens = 1000000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "minimax/minimax-m2"
-input_per_million = 0.3
-output_per_million = 1.2
-max_output_tokens = 176947
-context_window_tokens = 204800
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "minimax/minimax-m3"
-input_per_million = 0.3
-output_per_million = 1.2
-cache_read_per_million = 0.06
-max_output_tokens = 512000
+input_per_million = 0.23
+output_per_million = 0.96
+cache_read_per_million = 0.05
+max_output_tokens = 235929
 context_window_tokens = 1048576
-open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "moonshotai/kimi-k2"
-input_per_million = 0.57
-output_per_million = 2.3
-max_output_tokens = 98304
-context_window_tokens = 131072
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "moonshotai/kimi-k3"
-input_per_million = 0.73
-output_per_million = 10.0
-cache_read_per_million = 0.55
+input_per_million = 0.192
+output_per_million = 16.0
+cache_read_per_million = 0.182
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/gpt-4-turbo"
-input_per_million = 10.0
-output_per_million = 30.0
-max_output_tokens = 4096
-context_window_tokens = 128000
-open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -6287,10 +5638,10 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "openai/gpt-5.6-sol"
-input_per_million = 2.0
-output_per_million = 10.0
-cache_read_per_million = 0.2
-cache_write_per_million = 2.5
+input_per_million = 4.0
+output_per_million = 20.0
+cache_read_per_million = 0.4
+cache_write_per_million = 5.0
 max_output_tokens = 128000
 context_window_tokens = 1050000
 open_weights = false
@@ -6319,11 +5670,22 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "openai/gpt-6.2-sol"
+input_per_million = 2.0
+output_per_million = 10.0
+cache_read_per_million = 0.1
+cache_write_per_million = 2.5
+max_output_tokens = 128000
+context_window_tokens = 1050000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "openai/gpt-oss-20b"
-input_per_million = 0.018
-output_per_million = 0.09
-cache_read_per_million = 0.009
-max_output_tokens = 32768
+input_per_million = 0.03
+output_per_million = 0.13
+cache_read_per_million = 0.03
+max_output_tokens = 117964
 context_window_tokens = 131072
 open_weights = true
 
@@ -6370,9 +5732,9 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "upstage/solar-pro4"
-input_per_million = 0.09
-output_per_million = 0.36
-cache_read_per_million = 0.018
+input_per_million = 0.15
+output_per_million = 0.6
+cache_read_per_million = 0.03
 max_output_tokens = 131072
 context_window_tokens = 524288
 open_weights = false
@@ -6389,9 +5751,9 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "z-ai/glm-5.3-flash"
-input_per_million = 0.0232
-output_per_million = 1.2
-cache_read_per_million = 0.0232
+input_per_million = 0.12
+output_per_million = 0.38
+cache_read_per_million = 0.02
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
@@ -6399,9 +5761,9 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "z-ai/glm-5.3-prime"
-input_per_million = 2.8
-output_per_million = 8.8
-cache_read_per_million = 0.56
+input_per_million = 1.68
+output_per_million = 5.28
+cache_read_per_million = 0.336
 max_output_tokens = 131072
 context_window_tokens = 1000000
 open_weights = false
@@ -6415,6 +5777,26 @@ cache_read_per_million = 0.3
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "kt/midm-k-3.0-pro"
+input_per_million = 0.2
+output_per_million = 0.8
+cache_read_per_million = 0.04
+max_output_tokens = 235615
+context_window_tokens = 261795
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "liquid/lfm-3-1.7b"
+input_per_million = 0.08
+output_per_million = 0.2
+cache_read_per_million = 0.02
+max_output_tokens = 8192
+context_window_tokens = 262144
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -6480,12 +5862,31 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "scaledown/extract"
+input_per_million = 0.04
+output_per_million = 0.0
+max_output_tokens = 900000
+context_window_tokens = 1000000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "tencent/hy-mt2-7b"
 input_per_million = 0.074
 output_per_million = 0.295
 max_output_tokens = 4096
 context_window_tokens = 8192
 open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "tencent/hy4-flash"
+input_per_million = 0.035
+output_per_million = 0.1405
+cache_read_per_million = 0.0015
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
@@ -6512,6 +5913,7 @@ model_pattern = "~x-ai/grok-latest"
 input_per_million = 2.0
 output_per_million = 6.0
 cache_read_per_million = 0.5
+cache_write_per_million = 0.0
 max_output_tokens = 450000
 context_window_tokens = 500000
 open_weights = false
@@ -6523,6 +5925,26 @@ input_per_million = 2.5
 output_per_million = 10.0
 max_output_tokens = 8192
 context_window_tokens = 256000
+open_weights = true
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "meta/muse-wonder"
+input_per_million = 4.0
+output_per_million = 20.0
+cache_read_per_million = 0.2
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "nex-agi/nex-n2.6"
+input_per_million = 0.12
+output_per_million = 0.4
+cache_read_per_million = 0.024
+max_output_tokens = 235929
+context_window_tokens = 262144
 open_weights = true
 
 [[rules]]
@@ -6605,11 +6027,11 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "qwen/qwen3.8-27b"
-input_per_million = 0.04
-output_per_million = 2.3
-cache_read_per_million = 0.0198
-max_output_tokens = 235929
-context_window_tokens = 1000000
+input_per_million = 0.035
+output_per_million = 1.5
+cache_read_per_million = 0.0175
+max_output_tokens = 131072
+context_window_tokens = 1024000
 open_weights = true
 
 [[rules]]
@@ -6624,12 +6046,13 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "xiaomi/mimo-v2.5"
-input_per_million = 0.14
-output_per_million = 0.28
-cache_read_per_million = 0.0028
-max_output_tokens = 131072
-context_window_tokens = 1050000
+input_per_million = 0.4
+output_per_million = 2.0
+cache_read_per_million = 0.08
+max_output_tokens = 65536
+context_window_tokens = 1000000
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
@@ -6654,9 +6077,30 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "~z-ai/glm-latest"
-input_per_million = 0.055
-output_per_million = 5.0
+input_per_million = 0.0699
+output_per_million = 1.4
+cache_read_per_million = 0.0689
+max_output_tokens = 943718
+context_window_tokens = 1048576
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "elorian/glimpse"
+input_per_million = 0.6
+output_per_million = 3.0
 cache_read_per_million = 0.06
+max_output_tokens = 256000
+context_window_tokens = 262144
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
+model_pattern = "meta/muse-ember"
+input_per_million = 0.1
+output_per_million = 0.5
+cache_read_per_million = 0.004
+cache_write_per_million = 0.125
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = false
@@ -6682,11 +6126,12 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "qwen/qwen3.5-9b"
-input_per_million = 0.1
-output_per_million = 0.15
-max_output_tokens = 32768
+input_per_million = 0.17
+output_per_million = 0.25
+max_output_tokens = 235929
 context_window_tokens = 262144
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
@@ -6696,16 +6141,6 @@ output_per_million = 6.0
 cache_read_per_million = 0.25
 max_output_tokens = 128000
 context_window_tokens = 1000000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "unbiased/pareto"
-input_per_million = 2.5
-output_per_million = 7.5
-cache_read_per_million = 0.25
-max_output_tokens = 131072
-context_window_tokens = 262144
 open_weights = false
 
 [[rules]]
@@ -6760,26 +6195,6 @@ open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "openai/o3-mini"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.55
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/o4-mini"
-input_per_million = 1.1
-output_per_million = 4.4
-cache_read_per_million = 0.275
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
 model_pattern = "qwen/qwen-plus"
 input_per_million = 0.26
 output_per_million = 0.78
@@ -6812,6 +6227,17 @@ energy = { wh_per_mtok_out = 86.6, provenance = "independent-measured", scope = 
 
 [[rules]]
 provider = "openrouter"
+model_pattern = "qwen/qwen4-max"
+input_per_million = 1.425
+output_per_million = 4.275
+cache_read_per_million = 0.07125
+cache_write_per_million = 1.78125
+max_output_tokens = 131072
+context_window_tokens = 1000000
+open_weights = false
+
+[[rules]]
+provider = "openrouter"
 model_pattern = "x-ai/grok-4.20"
 input_per_million = 1.25
 output_per_million = 2.5
@@ -6823,8 +6249,9 @@ open_weights = false
 [[rules]]
 provider = "openrouter"
 model_pattern = "mancer/weaver"
-input_per_million = 0.4
-output_per_million = 0.75
+input_per_million = 0.3
+output_per_million = 0.5
+cache_read_per_million = 0.3
 max_output_tokens = 6000
 context_window_tokens = 8000
 open_weights = false
@@ -6837,15 +6264,6 @@ output_per_million = 10.0
 cache_read_per_million = 1.25
 max_output_tokens = 16384
 context_window_tokens = 128000
-open_weights = false
-
-[[rules]]
-provider = "openrouter"
-model_pattern = "openai/o1-pro"
-input_per_million = 150.0
-output_per_million = 600.0
-max_output_tokens = 100000
-context_window_tokens = 200000
 open_weights = false
 
 [[rules]]
@@ -6912,7 +6330,7 @@ provider = "openrouter"
 model_pattern = "z-ai/glm-4.6v"
 input_per_million = 0.3
 output_per_million = 0.9
-cache_read_per_million = 0.05
+cache_read_per_million = 0.055
 max_output_tokens = 32768
 context_window_tokens = 131072
 open_weights = true
@@ -6945,6 +6363,7 @@ cache_read_per_million = 0.11
 max_output_tokens = 98304
 context_window_tokens = 131072
 open_weights = true
+status = "deprecated"
 
 [[rules]]
 provider = "openrouter"
@@ -6969,19 +6388,19 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "z-ai/glm-5.1"
-input_per_million = 0.966
-output_per_million = 3.036
-cache_read_per_million = 0.1794
-max_output_tokens = 128000
+input_per_million = 1.4
+output_per_million = 4.4
+cache_read_per_million = 0.26
+max_output_tokens = 131072
 context_window_tokens = 204800
 open_weights = true
 
 [[rules]]
 provider = "openrouter"
 model_pattern = "z-ai/glm-5.2"
-input_per_million = 0.06
-output_per_million = 7.0
-cache_read_per_million = 0.059
+input_per_million = 0.62
+output_per_million = 2.42
+cache_read_per_million = 0.14
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
@@ -6989,9 +6408,9 @@ open_weights = true
 [[rules]]
 provider = "openrouter"
 model_pattern = "z-ai/glm-5.3"
-input_per_million = 0.079
-output_per_million = 4.8
-cache_read_per_million = 0.059
+input_per_million = 0.0699
+output_per_million = 1.4
+cache_read_per_million = 0.0689
 max_output_tokens = 943718
 context_window_tokens = 1048576
 open_weights = true
@@ -7008,23 +6427,23 @@ open_weights = true
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "z-ai/glm-5"
-input_per_million = 0.6
-output_per_million = 1.92
-cache_read_per_million = 0.12
-max_output_tokens = 128000
-context_window_tokens = 204800
-open_weights = true
+model_pattern = "tencent/hy4"
+input_per_million = 0.417
+output_per_million = 1.2505
+cache_read_per_million = 0.021
+max_output_tokens = 65536
+context_window_tokens = 1048576
+open_weights = false
 
 [[rules]]
 provider = "openrouter"
-model_pattern = "openai/o1"
-input_per_million = 15.0
-output_per_million = 60.0
-cache_read_per_million = 7.5
-max_output_tokens = 100000
-context_window_tokens = 200000
-open_weights = false
+model_pattern = "z-ai/glm-5"
+input_per_million = 1.0
+output_per_million = 3.2
+cache_read_per_million = 0.2
+max_output_tokens = 131072
+context_window_tokens = 204800
+open_weights = true
 
 [[rules]]
 provider = "openrouter"
@@ -7036,7 +6455,7 @@ max_output_tokens = 100000
 context_window_tokens = 200000
 open_weights = false
 
-# ── xai (8 models) ──
+# ── xai (7 models) ──
 
 [[rules]]
 provider = "xai"
@@ -7066,16 +6485,6 @@ output_per_million = 2.5
 cache_read_per_million = 0.2
 max_output_tokens = 30000
 context_window_tokens = 1000000
-open_weights = false
-
-[[rules]]
-provider = "xai"
-model_pattern = "grok-build-0.1"
-input_per_million = 1.0
-output_per_million = 2.0
-cache_read_per_million = 0.2
-max_output_tokens = 256000
-context_window_tokens = 256000
 open_weights = false
 
 [[rules]]

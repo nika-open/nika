@@ -450,6 +450,19 @@ mod route_tests {
             assert_eq!(row.price_native(1, 0, 1), Some(cached), "{model}");
             assert_eq!(row.price_native_written(1, 0, 0, 1), Some(write), "{model}");
         }
+        // Claude Fable 5.2 reads the pricing page and its model page of 2026-11-24: $8 input,
+        // $40 output, $0.20 cache hit (0.025x), $10 five-minute write, 1M window, 128K output.
+        let row = InferenceTariff::new("anthropic", "claude-fable-5-2", API).expect("fable 5.2");
+        assert_eq!(
+            (row.context_tokens, row.max_output_tokens),
+            (1_048_576, 128_000)
+        );
+        assert_eq!(row.as_of, "2026-11-24");
+        assert!(row.serves("claude-fable-5-2") && !row.serves("claude-fable-5-1"));
+        assert_eq!(row.price_native(1, 0, 0), Some(8_000));
+        assert_eq!(row.price_native(0, 1, 0), Some(40_000));
+        assert_eq!(row.price_native(1, 0, 1), Some(200));
+        assert_eq!(row.price_native_written(1, 0, 0, 1), Some(10_000));
         // The legacy models the catalogue still names read the pricing page of 2026-10-16 (live
         // gauntlet r09: the author offered them as « prix non connu ici »).
         for (model, (context, output_cap), [input, output, cached, write]) in [

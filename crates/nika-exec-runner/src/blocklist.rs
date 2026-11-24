@@ -212,7 +212,56 @@ pub(crate) fn check_command(command: &str) -> Result<(), ShellError> {
         }
     }
 
-    Ok(())
+    match shell_recursive_delete(command) {
+        Some(refusal) => Err(ShellError::Blocked {
+            reason: refusal.reason(),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// The recursive-delete class on a `shell:` line, judged STRUCTURALLY with
+/// the argv floor's own predicate on every simple command, not only the
+/// leading one: `sh` runs each segment between `;`, `|`, `&` and a newline,
+/// so `true & rm -fr /x`, `true;rm -fr /x` and a second line all reach a
+/// spawn. A line continuation (`\` + newline) is joined first, as `sh`
+/// joins it. Inside a segment every `rm` or `find` word is judged with the
+/// words after it, so an assignment prefix (`A=1 rm …`), a reserved word
+/// (`then rm …`, `! rm …`), `exec`, `time` or a `case` arm cannot hide the
+/// program; a redirection's target (`> /dev/null`) is dropped first, since
+/// it is not an operand. Over-blocking an `rm` word that is only an operand
+/// (`echo rm -rf /x`) is the safe side. Expansion and substitution
+/// characters never reach this point at run: [`check_shell_mode`] refuses
+/// them on the same line, so the words judged here are the words `sh` runs.
+fn shell_recursive_delete(command: &str) -> Option<nika_types::exec::ArgvFloorRefusal> {
+    let joined = command.replace("\\\r\n", "").replace("\\\n", "");
+    for segment in joined.split([';', '|', '&', '\n', '\r']) {
+        let folded = normalize_for_blocklist(segment).to_lowercase();
+        let dequoted: String = folded
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\'' | '\\'))
+            .collect();
+        let spaced = dequoted.replace('<', " < ").replace('>', " > ");
+        let mut words: Vec<&str> = Vec::new();
+        let mut redirect_target = false;
+        for word in spaced.split_whitespace() {
+            if matches!(word, "<" | ">") {
+                redirect_target = true;
+            } else if std::mem::take(&mut redirect_target) {
+                // The file a redirection names, never an operand.
+            } else {
+                words.push(word);
+            }
+        }
+        for (at, word) in words.iter().enumerate() {
+            let program = word.trim_start_matches(['(', ')', '{', '}', '!']);
+            let operands = words.get(at + 1..).unwrap_or_default();
+            if let Some(refusal) = nika_types::exec::recursive_delete_refusal(program, operands) {
+                return Some(refusal);
+            }
+        }
+    }
+    None
 }
 
 /// Check shell-mode-specific patterns (`alias`/`function`/`declare -f`).
@@ -475,6 +524,74 @@ mod tests {
     fn allows_rm_with_specific_paths() {
         assert!(check_command("rm /tmp/test.txt").is_ok());
         assert!(check_command("rm -f output.log").is_ok());
+        assert!(check_command("rm -rf build dist").is_ok());
+    }
+
+    /// The literal `rm -rf /` pattern missed every other spelling of the same
+    /// delete; the leading command is now judged with the argv floor's own
+    /// predicate.
+    #[test]
+    fn blocks_every_spelling_of_a_recursive_delete_outside() {
+        for cmd in [
+            "rm -fr /home",
+            "rm -Rf /var/data",
+            "rm -r -f /x",
+            "rm -R ../x",
+            "/bin/rm --recursive /x",
+            "rm -fr \"/x\" > /dev/null",
+            "find / -name x -delete",
+            // Every simple command of the line, not only the leading one.
+            "true & rm -fr /x",
+            "true;rm -fr /x",
+            "true\nrm -fr /x",
+            "true\r\nrm -fr /x",
+            "rm -fr \\\n/x",
+            "A=1 rm -fr /x",
+            ">log rm -fr /x",
+            "exec rm -fr /x",
+            "time rm -fr /x",
+            "! rm -fr /x",
+            "if true; then rm -fr /x; fi",
+            "case a in a) rm -fr /x;; esac",
+            "rm -fr build 2>/dev/null; rm -R ../x",
+            "rm -fr C:/x",
+        ] {
+            assert!(blocked(cmd), "must block: {cmd}");
+        }
+    }
+
+    /// A redirection target is not an operand, and a delete inside the
+    /// working directory stays admitted wherever it sits on the line.
+    #[test]
+    fn admits_a_shell_delete_that_stays_inside() {
+        for cmd in [
+            "rm -fr build > /dev/null",
+            "rm -fr build 2>/dev/null",
+            "rm -fr build >>/tmp/clean.log",
+            "rm -fr dist; make build",
+            "rm -rf target/debug && echo done",
+            "rm /tmp/one-file.json",
+        ] {
+            assert!(!blocked(cmd), "must admit: {cmd}");
+        }
+    }
+
+    /// The review question « can an expansion hide the target? »: at run the
+    /// shell-mode check, which follows `check_command` on the same line,
+    /// refuses every expansion and substitution character, so `$HOME`, `~`
+    /// and a glob never reach `sh`.
+    #[test]
+    fn an_expanding_delete_target_never_reaches_the_shell() {
+        for cmd in [
+            "rm -fr $HOME",
+            "rm -fr ~/x",
+            "rm -fr ./*",
+            "rm -fr `pwd`/x",
+            "rm -fr {a,/x}",
+        ] {
+            let refused = check_command(cmd).is_err() || check_shell_mode(cmd).is_err();
+            assert!(refused, "must refuse at run: {cmd}");
+        }
     }
 
     // ── Gate 6 PROPERTY (security): the full-string-scan invariant ──
@@ -696,6 +813,10 @@ mod tests {
             (&["sh", "-e", "deploy.sh"], false), // errexit, NOT inline eval
             (&["perl", "-e", "system('id')"], true),
             (&["echo", "hi"], false), // the benign negative
+            // The spec corpus case `envelope/sec-exec-blocklist-rm-rf`.
+            (&["rm", "-rf", "/tmp/nonexistent-xyz-nika-test"], true),
+            (&["rm", "-rf", "build"], false), // inside the working directory
+            (&["find", "/", "-delete"], true),
         ];
         for (argv, refused) in cases {
             let (program, rest) = argv.split_first().expect("non-empty case");

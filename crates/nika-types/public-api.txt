@@ -1802,6 +1802,9 @@ pub nika_types::exec::ArgvFloorRefusal::DdRawDisk
 pub nika_types::exec::ArgvFloorRefusal::InterpreterEval
 pub nika_types::exec::ArgvFloorRefusal::InterpreterEval::base: alloc::string::String
 pub nika_types::exec::ArgvFloorRefusal::NetcatExec
+pub nika_types::exec::ArgvFloorRefusal::RecursiveDelete
+pub nika_types::exec::ArgvFloorRefusal::RecursiveDelete::base: alloc::string::String
+pub nika_types::exec::ArgvFloorRefusal::RecursiveDelete::target: alloc::string::String
 impl nika_types::exec::ArgvFloorRefusal
 pub fn nika_types::exec::ArgvFloorRefusal::reason(&self) -> alloc::string::String
 impl core::clone::Clone for nika_types::exec::ArgvFloorRefusal
@@ -1872,6 +1875,7 @@ pub fn nika_types::exec::argv_floor_refusal<S: core::convert::AsRef<str>>(progra
 pub fn nika_types::exec::argv_program_refusal(program: &str) -> core::option::Option<nika_types::exec::ArgvFloorRefusal>
 pub fn nika_types::exec::interpreter_script_operand<'a>(program: &str, args: &[&'a str]) -> core::option::Option<&'a str>
 pub fn nika_types::exec::normalize_for_blocklist(s: &str) -> alloc::string::String
+pub fn nika_types::exec::recursive_delete_refusal<S: core::convert::AsRef<str>>(program: &str, args: &[S]) -> core::option::Option<nika_types::exec::ArgvFloorRefusal>
 pub mod nika_types::extract
 #[non_exhaustive] pub enum nika_types::extract::ExtractMode
 pub nika_types::extract::ExtractMode::Article

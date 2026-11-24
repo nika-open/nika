@@ -299,6 +299,15 @@ pub enum ArgvFloorRefusal {
     NetcatExec,
     /// `dd` with `if=`/`of=` — raw disk read/write.
     DdRawDisk,
+    /// A recursive delete (`rm -r`/`-R`/`--recursive`, `find … -delete`)
+    /// whose target is absolute or climbs out of the working directory —
+    /// the argv twin of the shell blocklist's `rm -rf /`.
+    RecursiveDelete {
+        /// The normalized lowercase basename (`rm` or `find`).
+        base: String,
+        /// The first target that leaves the working directory, verbatim.
+        target: String,
+    },
 }
 
 impl ArgvFloorRefusal {
@@ -324,8 +333,124 @@ impl ArgvFloorRefusal {
             Self::DdRawDisk => {
                 String::from("argv `dd if=/of=` (raw disk read/write) refused at the exec floor")
             }
+            Self::RecursiveDelete { base, target } => format!(
+                "argv `{base}` recursive delete of {target:?} refused at the exec floor \
+                 (the target is absolute or leaves the working directory)"
+            ),
         }
     }
+}
+
+/// The recursive-delete class of the floor: `rm` with a recursive flag,
+/// or `find` with `-delete`, aimed at a target that is absolute or climbs
+/// out of the working directory. Shared by [`argv_floor_refusal`] and the
+/// shell-form wrapper in `nika-exec-runner`, which judges the leading
+/// simple command of a `shell:` line with it — so `rm -fr /x`,
+/// `rm -r -f /x` and `["rm","-rf","/x"]` meet the same refusal.
+/// `None` = not a recursive delete, or every target stays inside.
+#[must_use]
+pub fn recursive_delete_refusal<S: AsRef<str>>(
+    program: &str,
+    args: &[S],
+) -> Option<ArgvFloorRefusal> {
+    let base = program_basename(program);
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    let target = match base.as_str() {
+        "rm" => rm_recursive_target(&args),
+        "find" => find_delete_target(&args),
+        _ => None,
+    }?;
+    Some(ArgvFloorRefusal::RecursiveDelete {
+        base,
+        target: target.to_owned(),
+    })
+}
+
+/// `rm`'s first target that leaves the working directory, when a
+/// recursive flag is present. Flags count wherever they sit before `--`:
+/// GNU `rm` permutes its argv, so `rm dir -rf` is recursive too.
+fn rm_recursive_target<'a>(args: &[&'a str]) -> Option<&'a str> {
+    let mut recursive = false;
+    let mut targets = Vec::new();
+    let mut options_ended = false;
+    for &arg in args {
+        if options_ended {
+            targets.push(arg);
+        } else if arg == "--" {
+            options_ended = true;
+        } else if let Some(long) = arg.strip_prefix("--") {
+            // GNU takes any unambiguous prefix (`--rec`); the only long
+            // option of `rm` that starts with `r` is `--recursive`.
+            recursive |= long.starts_with('r') && "recursive".starts_with(long);
+        } else if let Some(bundle) = arg.strip_prefix('-').filter(|b| !b.is_empty()) {
+            recursive |= bundle.contains(['r', 'R']);
+        } else {
+            targets.push(arg);
+        }
+    }
+    if !recursive {
+        return None;
+    }
+    targets.into_iter().find(|t| leaves_working_directory(t))
+}
+
+/// `find`'s first start path that leaves the working directory, when the
+/// expression deletes (`-delete`). Start paths are the operands before the
+/// expression; the leading options (`-H` `-L` `-P` · BSD `-E` `-X` `-d`
+/// `-s` `-x` · GNU `-D <debug>` `-O<level>`) are skipped, and BSD
+/// `-f <path>` names a start path. No start path means `.`, inside.
+fn find_delete_target<'a>(args: &[&'a str]) -> Option<&'a str> {
+    if !args.contains(&"-delete") {
+        return None;
+    }
+    let mut starts = Vec::new();
+    let mut i = 0;
+    while let Some(&arg) = args.get(i) {
+        match arg {
+            "-H" | "-L" | "-P" | "-E" | "-X" | "-d" | "-s" | "-x" | "--" => i += 1,
+            "-D" => i += 2,
+            "-f" => {
+                starts.extend(args.get(i + 1).copied());
+                i += 2;
+            }
+            _ if arg.starts_with("-O") => i += 1,
+            _ if arg.starts_with('-') || arg == "(" || arg == "!" => break,
+            _ => {
+                starts.push(arg);
+                i += 1;
+            }
+        }
+    }
+    starts.into_iter().find(|t| leaves_working_directory(t))
+}
+
+/// Whether a delete target is absolute or climbs above the working
+/// directory with `..`, read lexically, as `execve` hands it to the
+/// program: argv form expands no `~`, glob or variable. A Windows drive
+/// prefix (`C:\x`, `c:/x`, the drive-relative `C:x`) counts as absolute on
+/// every host, so the static verdict does not depend on where it is read;
+/// a UNC or `\\?\` path already opens on a separator.
+fn leaves_working_directory(target: &str) -> bool {
+    if target.starts_with(['/', '\\']) {
+        return true;
+    }
+    if let [drive, b':', ..] = target.as_bytes()
+        && drive.is_ascii_alphabetic()
+    {
+        return true;
+    }
+    let mut depth = 0_usize;
+    for part in target.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => match depth.checked_sub(1) {
+                Some(up) => depth = up,
+                None => return true,
+            },
+            _ => depth += 1,
+        }
+    }
+    false
 }
 
 /// Check an argv-form PROGRAM's IDENTITY against `DANGEROUS_PROGRAMS` (an
@@ -373,7 +498,7 @@ pub fn argv_floor_refusal<S: AsRef<str>>(program: &str, args: &[S]) -> Option<Ar
     {
         return Some(ArgvFloorRefusal::DdRawDisk);
     }
-    None
+    recursive_delete_refusal(program, &args)
 }
 
 #[cfg(test)]
@@ -483,6 +608,79 @@ mod tests {
         ] {
             assert!(argv_program_refusal(ok).is_none(), "must allow: {ok}");
         }
+    }
+
+    /// `rm` stays an ordinary program by identity; the floor refuses only a
+    /// recursive delete aimed outside the working directory, wherever the
+    /// flag sits and however it is spelled.
+    #[test]
+    fn floor_refuses_a_recursive_delete_outside_the_working_directory() {
+        for (program, args) in [
+            ("rm", &["-rf", "/tmp/nonexistent-xyz-nika-test"][..]),
+            ("rm", &["-rf", "/"]),
+            ("rm", &["-fr", "/home"]),
+            ("rm", &["-R", "/var/data"]),
+            ("rm", &["-r", "-f", "/x"]),
+            ("rm", &["--recursive", "/x"]),
+            ("rm", &["--rec", "/x"]),
+            ("rm", &["/x", "-rf"]),
+            ("rm", &["-rf", "--", "/x"]),
+            ("rm", &["-rf", "build", "../x"]),
+            ("rm", &["-rf", "a/../../x"]),
+            ("rm", &["-rf", ".."]),
+            ("/bin/rm", &["-rf", "/x"]),
+            ("RM", &["-rf", "/x"]),
+            ("\u{FF52}\u{FF4D}", &["-rf", "/x"]),
+            ("find", &["/", "-name", "*.log", "-delete"]),
+            ("find", &["-L", "../x", "-delete"]),
+            ("find", &["-f", "/x", "-delete"]),
+            ("rm", &["-rf", "C:\\Users"]),
+            ("rm", &["-rf", "c:/x"]),
+            ("rm", &["-rf", "D:x"]),
+            ("rm", &["-rf", "\\\\server\\share"]),
+            ("rm", &["-rf", "\\\\?\\C:\\x"]),
+        ] {
+            assert!(refused(program, args), "must refuse: {program} {args:?}");
+        }
+        assert_eq!(
+            argv_floor_refusal("rm", &["-rf", "/x"]),
+            Some(ArgvFloorRefusal::RecursiveDelete {
+                base: "rm".into(),
+                target: "/x".into(),
+            })
+        );
+    }
+
+    /// The silences: a delete that stays inside, a delete that is not
+    /// recursive, and argv text the program never reads as a path.
+    #[test]
+    fn floor_admits_a_delete_that_stays_inside_the_working_directory() {
+        for (program, args) in [
+            ("rm", &["-rf", "build"][..]),
+            ("rm", &["-rf", "./target", "dist/"]),
+            ("rm", &["-rf", "a/../b"]),
+            ("rm", &["-rf", "~"]),
+            ("rm", &["-f", "/tmp/one-file.json"]),
+            ("rm", &["/tmp/one-file.json"]),
+            ("rm", &["--", "-rf"]),
+            ("rm", &["--force", "/x"]),
+            ("find", &["/tmp", "-name", "x"]),
+            ("find", &[".", "-name", "*.tmp", "-delete"]),
+            ("find", &["-name", "*.tmp", "-delete"]),
+            ("ls", &["-R", "/"]),
+        ] {
+            assert!(allowed(program, args), "must allow: {program} {args:?}");
+        }
+    }
+
+    #[test]
+    fn recursive_delete_reason_names_the_target() {
+        let refusal = recursive_delete_refusal("rm", &["-rf", "/x"]).expect("refused");
+        assert_eq!(
+            refusal.reason(),
+            "argv `rm` recursive delete of \"/x\" refused at the exec floor \
+             (the target is absolute or leaves the working directory)"
+        );
     }
 
     #[test]

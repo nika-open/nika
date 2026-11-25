@@ -297,19 +297,20 @@ pub enum SchemaError {
         span: Option<Span>,
     },
 
-    /// W2 · a `tasks.*` reference outside the boundary (spec
+    /// W2 · a `tasks.*` or `group.*` reference outside the boundary (spec
     /// `04-variables.md` §the reference boundary · `NIKA-VAR-021`) —
     /// body fields read LOCAL names; the fix is machine-applicable.
     #[error(
-        "task `{task}` {surface} references `tasks.{reference}` — outside the boundary; hoist it into `with:` and read `${{{{ with.<name> }}}}` (`nika check --fix` applies it)"
+        "task `{task}` {surface} references `{reference}` — outside the boundary; hoist it into `with:` and read `${{{{ with.<name> }}}}` (`nika check --fix` applies it)"
     )]
     RefOutsideBoundary {
         /// The declaring task.
         task: String,
         /// The offending surface (`when:` · `for_each:` · a verb field
-        /// · `on_finally` non-parent).
+        /// · `on_error.recover:` · `on_finally` non-parent).
         surface: String,
-        /// The referenced task id.
+        /// The reference as its root reads it: `tasks.<id>` or
+        /// `group.<name>`.
         reference: String,
         /// Span of the offending expression.
         span: Option<Span>,

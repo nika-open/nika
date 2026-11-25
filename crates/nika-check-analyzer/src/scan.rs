@@ -148,20 +148,12 @@ fn check_group_ref(
     errors: &mut Vec<SchemaError>,
 ) {
     match ctx.task_rule {
-        TaskRefRule::Body(surface) => {
+        // a body surface reads local names only, and a resolution surface
+        // reads settled records, never a fold
+        TaskRefRule::Body(surface) | TaskRefRule::Resolution(surface) => {
             errors.push(SchemaError::RefOutsideBoundary {
                 task: ctx.task_id.to_owned(),
                 surface: surface.to_owned(),
-                reference: format!("group.{name}"),
-                span: Some(span),
-            });
-            return;
-        }
-        // a resolution surface reads settled records, never a fold
-        TaskRefRule::Resolution => {
-            errors.push(SchemaError::RefOutsideBoundary {
-                task: ctx.task_id.to_owned(),
-                surface: "outputs".to_owned(),
                 reference: format!("group.{name}"),
                 span: Some(span),
             });
@@ -193,9 +185,9 @@ enum TaskRefRule {
     /// the hoist is machine-applicable).
     Body(&'static str),
     /// A read-only resolution surface (workflow `outputs:` · `model:` ·
-    /// `on_error.recover`) — existence + record-shape checks apply ·
-    /// no edge semantics.
-    Resolution,
+    /// `on_error.recover:`, the name a refusal prints) — existence +
+    /// record-shape checks apply · no edge semantics.
+    Resolution(&'static str),
 }
 
 /// Where a scanned string lives — drives the boundary / loop-local /
@@ -235,21 +227,21 @@ pub(super) fn scan_workflow(wf: &RawWorkflow, errors: &mut Vec<SchemaError>) {
     // edge/loop-local rule): `outputs:` (fixture variables/001) and the
     // one templated envelope field, `model:` (deep/019 — an unresolved
     // ref there is NIKA-VAR-001 like any task surface).
-    let envelope_ctx = |location: &str| ScanCtx {
+    let envelope_ctx = |location: &'static str, surface: &'static str| ScanCtx {
         location: location.to_owned(),
         task_id: "",
-        task_rule: TaskRefRule::Resolution,
+        task_rule: TaskRefRule::Resolution(surface),
         with_names: None,
         allow_loop_locals: false,
         unwind_producers: None,
     };
-    let outputs_ctx = envelope_ctx("outputs");
+    let outputs_ctx = envelope_ctx("outputs", "outputs:");
     for (_, decl) in &wf.outputs {
         let value = decl.value();
         scan_string(value, &outputs_ctx, &index, errors);
     }
     if let Some(model) = &wf.model {
-        scan_string(model, &envelope_ctx("model"), &index, errors);
+        scan_string(model, &envelope_ctx("model", "model:"), &index, errors);
     }
 }
 
@@ -365,7 +357,7 @@ fn scan_task(task: &RawTask, index: &WorkflowIndex<'_>, errors: &mut Vec<SchemaE
     let no_edge_ctx = ScanCtx {
         location: format!("task `{id}` on_error"),
         task_id: id,
-        task_rule: TaskRefRule::Resolution,
+        task_rule: TaskRefRule::Resolution("on_error.recover:"),
         with_names: Some(&with_names),
         allow_loop_locals: has_for_each,
         unwind_producers: None,
@@ -739,7 +731,7 @@ fn check_task_ref(
             errors.push(SchemaError::RefOutsideBoundary {
                 task: ctx.task_id.to_owned(),
                 surface: "an unwind task".to_owned(),
-                reference: id.to_owned(),
+                reference: format!("tasks.{id}"),
                 span: Some(span),
             });
             return;
@@ -754,12 +746,12 @@ fn check_task_ref(
                 errors.push(SchemaError::RefOutsideBoundary {
                     task: ctx.task_id.to_owned(),
                     surface: surface.to_owned(),
-                    reference: id.to_owned(),
+                    reference: format!("tasks.{id}"),
                     span: Some(span),
                 });
                 return;
             }
-            TaskRefRule::Boundary | TaskRefRule::Resolution => {}
+            TaskRefRule::Boundary | TaskRefRule::Resolution(_) => {}
         }
     }
     // The BARE envelope first · `${{ tasks }}` yields an EMPTY id. It
@@ -848,7 +840,7 @@ fn task_output_form(id: &str, rule: TaskRefRule) -> String {
         TaskRefRule::Body(_) => format!(
             "`{id}` is a task: bind `tasks.{id}.output` in `with:` and read that binding here"
         ),
-        TaskRefRule::Boundary | TaskRefRule::Resolution => {
+        TaskRefRule::Boundary | TaskRefRule::Resolution(_) => {
             format!("`{id}` is a task: its result is `tasks.{id}.output`")
         }
     }

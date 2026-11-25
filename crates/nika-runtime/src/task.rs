@@ -38,7 +38,7 @@ use crate::retry::jitter_key;
 pub(crate) use crate::retry::on_error_applies;
 use crate::usage::UsageSplit;
 use crate::witness::PermitWitness;
-pub(crate) use with_map::references_loop_locals;
+pub(crate) use with_map::{folded_groups, references_loop_locals};
 use with_map::{render_boundary_with, render_with};
 
 mod fan_out;
@@ -374,7 +374,8 @@ where
         // AUTHORED (an `--answer` binding below is the operator's act,
         // never an ingress) over the wave-frozen records. Carried on the
         // Finish; the settle spine stamps it.
-        let integrity = crate::integrity::task_integrity(task, records);
+        let integrity =
+            crate::integrity::task_integrity(task, records, &folded_groups(task, &wf.tasks));
 
         // ── ADR-099 resume identity + the skip verdict — extracted
         //    (the 100-line fn ratchet · semantics unchanged) ──
@@ -878,15 +879,15 @@ where
             // The `returns:` contract, resolved ONCE (spec 09 · W3) — `None` = gradual.
             let contract = crate::contract::TaskContract::of(task, types);
             // F-O1 PR-2 · the re-gate's per-template oracle — computed ONCE, used per attempt.
-            let value_taint = crate::integrity::ValueTaint::of_task(task, scope.records());
+            let groups = folded_groups(task, &wf.tasks);
+            let value_taint = crate::integrity::ValueTaint::of_task(task, scope.records(), &groups);
             // law 6 · the child budget reads the ledger AT CALL TIME (per attempt).
             let ctx = || {
                 let mut ctx = self.task_ctx((task, wf), budget, ledger, witness, run_start);
                 ctx.stopped = Some(stopped.clone());
                 // B5 · one answer, one ask: a replay never re-arms an answer already spent.
-                if agent_buffer.gate_answer_spent() {
-                    ctx.gate_answer = None;
-                }
+                ctx.gate_answer
+                    .take_if(|_| agent_buffer.gate_answer_spent());
                 ctx
             };
             let attempts = async {

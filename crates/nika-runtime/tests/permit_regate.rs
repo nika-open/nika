@@ -16,11 +16,13 @@
 //! task hoists its tainted read into `with:` (NIKA-VAR-021's idiom — the
 //! verb field then reads `${{ with.<name> }}`).
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use nika_cap::Integrity;
 use nika_check::check;
 use nika_event::{Event, EventKind};
-use nika_kernel::tool_executor::ToolResult;
+use nika_kernel::tool_executor::{ToolExecError, ToolResult};
 use nika_kernel_mock::{
     MockClock, MockProvider, MockShell, MockToolDefinitionProvider, MockToolExecutor,
 };
@@ -41,6 +43,29 @@ async fn run_with_ingress(
     ingress_payload: &str,
     shell: MockShell,
 ) -> (RunOutcome, Arc<MockToolExecutor>, MockShell) {
+    let tools =
+        MockToolExecutor::new().enqueue_ok(ToolResult::success("r1", ingress_payload.to_owned()));
+    let run = run_with_mocks(yaml, tools, shell, RuntimeConfig::default()).await;
+    (run.outcome, run.tools, run.shell)
+}
+
+/// One mocked run: the outcome, the event stream and the mock handles.
+struct MockRun {
+    outcome: RunOutcome,
+    events: Vec<Event>,
+    tools: Arc<MockToolExecutor>,
+    shell: MockShell,
+}
+
+/// Run one checked-clean workflow against the given mocks, keeping the
+/// event stream (a cleanup's refusal and a parked recovery are visible
+/// there and nowhere else).
+async fn run_with_mocks(
+    yaml: &str,
+    tools: MockToolExecutor,
+    shell: MockShell,
+    config: RuntimeConfig,
+) -> MockRun {
     let wf = parse(yaml, FileId::new(0), ParseMode::Strict).expect("fixture parses");
     let report = check(&wf);
     assert!(
@@ -48,9 +73,7 @@ async fn run_with_ingress(
         "the re-gate is a RUNTIME law — the static ladder defers the dynamic value: {:?}",
         report.findings
     );
-    let tools = Arc::new(
-        MockToolExecutor::new().enqueue_ok(ToolResult::success("r1", ingress_payload.to_owned())),
-    );
+    let tools = Arc::new(tools);
     let registry = Arc::new(ProviderRegistry::without_http(ProvidersConfig::default()));
     let invoke = Arc::new(InvokeVerb::new(Arc::clone(&tools)));
     let runtime = Runtime::new(
@@ -64,7 +87,7 @@ async fn run_with_ingress(
             "mock/echo",
         ),
         MockClock::new(),
-        RuntimeConfig::default(),
+        config,
     );
     let mut stamper = DeterministicStamper::new();
     let mut sink = VecSink::new();
@@ -72,7 +95,12 @@ async fn run_with_ingress(
         .run(&wf, &report, &mut stamper, &mut sink)
         .await
         .expect("clean run");
-    (outcome, tools, shell)
+    MockRun {
+        outcome,
+        events: sink.into_events(),
+        tools,
+        shell,
+    }
 }
 
 /// The workflow spine of the exec fixtures: one fetch (the untrusted
@@ -263,18 +291,17 @@ async fn untrusted_cwd_escaping_is_refused() {
 /// its producer's tainted output — is now behind a STATIC wall, and
 /// this fixture pins the wall.
 ///
-/// The runtime label is set by a net ingress and by nothing else
-/// (`nika_cap::invoke_tool_is_ingress` · `nika:fetch` ∪ untrusted
-/// `mcp:`), and a net ingress reaching an `exec:` is exactly what the
-/// order law (`NIKA-SEC-015`) refuses. The two facts together make the
-/// overlay unreachable from any file that passes `check` — and the
-/// runtime will not run a dirty report, so there is no « run it anyway »
-/// arm to write either.
+/// A net ingress (`nika_cap::invoke_tool_is_ingress` · `nika:fetch` ∪
+/// untrusted `mcp:`) reaching an `exec:` is exactly what the order law
+/// (`NIKA-SEC-015`) refuses, so a fetched producer gives the overlay no
+/// fixture that passes `check` — and the runtime will not run a dirty
+/// report, so there is no « run it anyway » arm to write either.
 ///
-/// **Stated gap, not a silent one.** The overlay code stays: it is
-/// defence in depth, and the day another untrusted ingress exists that
-/// the order law does not cover, it is what catches it. Today it has no
-/// fixture, and this comment is where that is said.
+/// An `exec:` output is untrusted too, and the order law covers only
+/// net-effecting producers, so an exec producer reaches the overlay from
+/// a file that passes `check`:
+/// `an_unwind_cleanup_reading_a_fold_of_its_producer_is_refused` pins
+/// that lane through a fold.
 #[tokio::test]
 async fn an_unwind_cleanup_reading_the_producers_taint_is_refused_statically() {
     let yaml = "nika: regate-finally\npermits:\n  exec: [\"tar\"]\n  net: { http: [\"news.example\"] }\n  tools: [\"nika:fetch\"]\ntasks:\n  dl:\n    invoke:\n      tool: \"nika:fetch\"\n      args: { url: \"https://news.example/payload.txt\" }\n  dl_cleanup:\n    after: { dl: unwind }\n    exec: { command: [\"tar\", \"-xf\", \"${{ tasks.dl.output }}\"] }\n";
@@ -394,4 +421,264 @@ async fn run_with_ingress_sink(yaml: &str) -> Vec<Event> {
         .expect("clean run");
     assert!(outcome.ok, "{:?}", outcome.records);
     sink.into_events()
+}
+
+/// The exec spine of the fold fixtures: a `git` member of group `logs`
+/// whose subject line (an exec output is untrusted content) reaches a `tar`
+/// argv through `{read}`. No `fs.read` and no net: neither the trifecta nor
+/// the order law has a leg here, so the refusal is the run's re-gate alone.
+const FOLD_EXEC: &str = "nika: regate-fold\npermits:\n  exec: [\"git\", \"tar\"]\ntasks:\n  subjects:\n    group: logs\n    exec: { command: [\"git\", \"log\", \"--format=%s\", \"-n\", \"1\"] }\n  pack:\n    with: { got: \"{read}\" }\n    exec: { command: [\"tar\", \"-cf\", \"out.tar\", \"${{ with.got }}\"] }\n";
+
+/// A subject line that is a re-entry option token where `tar` expects a
+/// file name.
+const HOSTILE_SUBJECT: &str = "--checkpoint-action=exec=sh id\n";
+
+/// The `group.<name>` fold holds each member's record (spec 03 §group), so
+/// it carries the member's untrusted label into the argv exactly as the
+/// direct read does: the option token is refused pre-spawn, and the refusal
+/// names the member as the taint source.
+#[tokio::test]
+async fn an_exec_argv_reading_a_fold_of_an_untrusted_member_is_refused() {
+    for read in [
+        "${{ tasks.subjects.output }}",
+        "${{ group.logs[0].output }}",
+    ] {
+        let yaml = FOLD_EXEC.replace("{read}", read);
+        let shell = MockShell::new().enqueue_ok(HOSTILE_SUBJECT);
+        let (outcome, _, shell) = run_with_ingress(&yaml, "unused", shell).await;
+        assert!(!outcome.ok, "{read}: a re-gate refusal fails the run");
+        assert_eq!(outcome.records["subjects"].status, TaskStatus::Success);
+        let rec = &outcome.records["pack"];
+        assert_eq!(rec.status, TaskStatus::Failure, "{read}");
+        let err = rec.error.as_ref().expect("the refusal record");
+        assert_eq!(err.code, "NIKA-SEC-004", "{read}: {}", err.message);
+        assert!(
+            err.message.contains("taint path: subjects -> exec.argv[3]")
+                && err.message.contains("option token"),
+            "{read}: the member is the source, the class is named: {}",
+            err.message
+        );
+        assert_eq!(
+            shell.executed_commands().len(),
+            1,
+            "{read}: only `git` ran — `tar` never reached the runner"
+        );
+    }
+}
+
+/// The `mcp:*` border through a fold: the fetched member's URL escapes
+/// `net.http`, refused before the tool dispatch, the member named.
+#[tokio::test]
+async fn an_mcp_arg_reading_a_fold_of_an_untrusted_member_is_refused() {
+    let yaml = "nika: regate-mcp-fold\npermits:\n  net: { http: [\"news.example\", \"api.example.com\"] }\n  tools: [\"nika:fetch\", \"mcp:store/put\"]\ntasks:\n  dl:\n    group: pages\n    invoke:\n      tool: \"nika:fetch\"\n      args: { url: \"https://news.example/payload.txt\" }\n  put:\n    with: { u: \"${{ group.pages[0].output }}\" }\n    invoke:\n      tool: \"mcp:store/put\"\n      args: { url: \"${{ with.u }}\" }\n";
+    let (outcome, tools, _) =
+        run_with_ingress(yaml, "https://evil.example/x", MockShell::new()).await;
+    assert!(!outcome.ok);
+    let err = outcome.records["put"].error.as_ref().expect("the refusal");
+    assert_eq!(err.code, "NIKA-SEC-004");
+    assert!(
+        err.message.contains("dl -> mcp:store/put.args.url")
+            && err.message.contains("host \"evil.example\""),
+        "the mcp sink, the member as source, the escaped host: {}",
+        err.message
+    );
+    assert_eq!(
+        tools.captured_calls().len(),
+        1,
+        "only the fetch dispatched — the mcp call never reached the executor"
+    );
+}
+
+/// A `with:` binding that reads the `for_each` item renders once per
+/// iteration with the item bound (spec 03 §`for_each`), so it carries the
+/// item's label: the caller-supplied option token is refused through
+/// `with.one` exactly as it is through `item`.
+#[tokio::test]
+async fn an_exec_argv_reading_an_item_binding_is_refused_like_the_item() {
+    for read in ["${{ item }}", "${{ with.one }}"] {
+        let yaml = format!(
+            "nika: regate-item\ninputs:\n  names: {{ type: {{ array: string }}, default: [\"--checkpoint-action=exec=sh id\"] }}\npermits:\n  exec: [\"tar\"]\ntasks:\n  untar:\n    for_each: {{ items: \"${{{{ inputs.names }}}}\", max_items: 10 }}\n    with: {{ one: \"${{{{ item }}}}\" }}\n    exec: {{ command: [\"tar\", \"-xf\", \"{read}\"] }}\n"
+        );
+        let (outcome, _, shell) = run_with_ingress(&yaml, "unused", MockShell::new()).await;
+        assert!(!outcome.ok, "{read}: a re-gate refusal fails the run");
+        let err = outcome.records["untar"]
+            .error
+            .as_ref()
+            .expect("the refusal record");
+        assert_eq!(err.code, "NIKA-SEC-004", "{read}: {}", err.message);
+        assert!(
+            err.message.contains("option token"),
+            "{read}: the refusal names the class: {}",
+            err.message
+        );
+        assert!(
+            shell.executed_commands().is_empty(),
+            "{read}: the refusal is pre-spawn"
+        );
+    }
+}
+
+/// A literal `for_each:` list is rendered as a template tree: a string in it
+/// that reads a caller-supplied binding carries the caller boundary into the
+/// item, and the re-gate refuses the option token it resolves to.
+#[tokio::test]
+async fn an_exec_argv_reading_an_item_of_a_templated_literal_list_is_refused() {
+    let yaml = exec_workflow(
+        "permits:\n  exec: [\"tar\"]",
+        "--checkpoint-action=exec=sh id",
+        "  untar:\n    with: { p: \"${{ inputs.payload }}\" }\n    for_each: { items: [\"${{ with.p }}\"] }\n    exec: { command: [\"tar\", \"-xf\", \"${{ item }}\"] }",
+    );
+    let (outcome, _, shell) = run_with_ingress(&yaml, "unused", MockShell::new()).await;
+    assert!(!outcome.ok, "a re-gate refusal fails the run");
+    let err = outcome.records["untar"]
+        .error
+        .as_ref()
+        .expect("the refusal record");
+    assert_eq!(err.code, "NIKA-SEC-004", "{}", err.message);
+    assert!(
+        err.message
+            .contains("taint path: inputs.payload -> exec.argv[2]")
+            && err.message.contains("option token"),
+        "the caller boundary is the source, the class is named: {}",
+        err.message
+    );
+    assert!(
+        shell.executed_commands().is_empty(),
+        "the refusal is pre-spawn"
+    );
+}
+
+/// A wave parallelism of one: the FIFO mock queues stay aligned with the
+/// declaration order inside a wave.
+fn sequential() -> RuntimeConfig {
+    RuntimeConfig::new(NonZeroUsize::new(1), 0)
+}
+
+/// The position of the first `kind` event of `task` in the stream.
+fn position_of(events: &[Event], kind: EventKind, task: &str) -> Option<usize> {
+    events.iter().position(|event| {
+        event.kind == kind
+            && event.fields.iter().any(|kv| {
+                kv.key == "task" && matches!(&kv.value, FieldValue::String(s) if s == task)
+            })
+    })
+}
+
+/// The laundering twin of [`FOLD_EXEC`]: the fold reaches the `tar` argv
+/// through a `nika:jq` hop, so the label crosses the hop on the hop's
+/// RECORD (stamped before its dispatch), never on a binding of `pack`.
+const FOLD_LAUNDER: &str = "nika: regate-fold-launder\npermits:\n  exec: [\"git\", \"tar\"]\n  tools: [\"nika:jq\"]\ntasks:\n  subjects:\n    group: logs\n    exec: { command: [\"git\", \"log\", \"--format=%s\", \"-n\", \"1\"] }\n  merge:\n    with: { got: \"${{ group.logs }}\" }\n    invoke: { tool: \"nika:jq\", args: { expression: \".[0].output\", input: \"${{ with.got }}\" } }\n  pack:\n    with: { got: \"${{ tasks.merge.output }}\" }\n    exec: { command: [\"tar\", \"-cf\", \"out.tar\", \"${{ with.got }}\"] }\n";
+
+/// The hop's record carries the member's label (the record label the task
+/// lane stamps reads the fold through the membership), so the option token
+/// the hop hands on is refused at the `tar` argv, the member named.
+#[tokio::test]
+async fn a_fold_laundered_through_a_jq_hop_is_refused_at_the_later_argv() {
+    // The mocked hop returns what `.[0].output` selects: the subject line.
+    let tools = MockToolExecutor::new().enqueue_ok(ToolResult::success("jq", HOSTILE_SUBJECT));
+    let shell = MockShell::new().enqueue_ok(HOSTILE_SUBJECT);
+    let run = run_with_mocks(FOLD_LAUNDER, tools, shell, sequential()).await;
+    assert!(!run.outcome.ok, "a re-gate refusal fails the run");
+    let merge = &run.outcome.records["merge"];
+    assert_eq!(merge.status, TaskStatus::Success);
+    assert_eq!(
+        merge.integrity,
+        Integrity::untrusted("subjects"),
+        "the hop's record carries the member's label, the member named"
+    );
+    let rec = &run.outcome.records["pack"];
+    assert_eq!(rec.status, TaskStatus::Failure);
+    let err = rec.error.as_ref().expect("the refusal record");
+    assert_eq!(err.code, "NIKA-SEC-004", "{}", err.message);
+    assert!(
+        err.message.contains("taint path: subjects -> exec.argv[3]")
+            && err.message.contains("option token"),
+        "the member is the source across the hop: {}",
+        err.message
+    );
+    assert_eq!(
+        run.tools.captured_calls().len(),
+        1,
+        "the hop dispatched once"
+    );
+    assert_eq!(
+        run.shell.executed_commands().len(),
+        1,
+        "only `git` ran — `tar` never reached the runner"
+    );
+}
+
+/// A recovery parked on a later referent (spec 05 §recover): `stage` fails
+/// in wave 2 and its recover reads `later`, which settles in wave 3, so the
+/// recovery resolves over the final view, and its alias of the fold keeps
+/// the member's label there.
+const FOLD_PARKED_RECOVER: &str = "nika: regate-fold-recover\npermits:\n  exec: [\"git\"]\n  tools: [\"nika:jq\"]\ntasks:\n  subjects:\n    group: logs\n    exec: { command: [\"git\", \"log\", \"--format=%s\", \"-n\", \"1\"] }\n  stage:\n    with: { got: \"${{ group.logs[0].output }}\" }\n    invoke: { tool: \"nika:jq\", args: { expression: \".\", input: \"fixed\" } }\n    on_error: { recover: \"${{ with.got }} ${{ tasks.later.output }}\" }\n  mid:\n    after: { subjects: success }\n    exec: { command: [\"git\", \"status\", \"--short\"] }\n  later:\n    after: { mid: success }\n    invoke: { tool: \"nika:jq\", args: { expression: \".\", input: \"tail\" } }\n";
+
+#[tokio::test]
+async fn a_parked_recovery_over_a_fold_alias_carries_the_member_label() {
+    // One consumer per mock per wave: `stage` takes the tool error in wave
+    // 2 while `mid` takes the shell, and `later` takes the tool in wave 3.
+    let tools = MockToolExecutor::new()
+        .enqueue_err(ToolExecError::NotFound {
+            name: "nika:jq".to_owned(),
+        })
+        .enqueue_ok(ToolResult::success("jq", "tail"));
+    let shell = MockShell::new().enqueue_ok(HOSTILE_SUBJECT).enqueue_ok("");
+    let run = run_with_mocks(FOLD_PARKED_RECOVER, tools, shell, sequential()).await;
+    let stage = &run.outcome.records["stage"];
+    assert_eq!(stage.status, TaskStatus::Success, "{:?}", stage.error);
+    assert!(
+        stage.recovered_from.is_some(),
+        "the value is the recovery's"
+    );
+    assert_eq!(
+        stage.integrity,
+        Integrity::untrusted("subjects"),
+        "the parked recovery is labelled over the final view, the member named"
+    );
+    let recovered =
+        position_of(&run.events, EventKind::TaskRecovered, "stage").expect("stage recovered");
+    let later =
+        position_of(&run.events, EventKind::TaskCompleted, "later").expect("later completed");
+    assert!(
+        later < recovered,
+        "the recovery parked until its referent settled: later #{later}, stage #{recovered}"
+    );
+}
+
+/// An unwind cleanup whose argv reads a fold of its producer (the cleanup
+/// lane binds the membership over the producer's fresh record): the option
+/// token is refused before the spawn, and the refusal, journaled on the
+/// `on_finally` plane since a cleanup failure never propagates, names the
+/// member.
+const FOLD_CLEANUP: &str = "nika: regate-fold-cleanup\npermits:\n  exec: [\"git\", \"tar\"]\ntasks:\n  subjects:\n    group: logs\n    exec: { command: [\"git\", \"log\", \"--format=%s\", \"-n\", \"1\"] }\n  pack:\n    after: { subjects: unwind }\n    with: { got: \"${{ group.logs[0].output }}\" }\n    exec: { command: [\"tar\", \"-cf\", \"out.tar\", \"${{ with.got }}\"] }\n";
+
+#[tokio::test]
+async fn an_unwind_cleanup_reading_a_fold_of_its_producer_is_refused() {
+    let shell = MockShell::new().enqueue_ok(HOSTILE_SUBJECT);
+    let run = run_with_mocks(FOLD_CLEANUP, MockToolExecutor::new(), shell, sequential()).await;
+    assert_eq!(run.outcome.records["subjects"].status, TaskStatus::Success);
+    assert_eq!(
+        run.shell.executed_commands().len(),
+        1,
+        "only `git` ran — the cleanup's `tar` never reached the runner"
+    );
+    let journaled: Vec<String> = run
+        .events
+        .iter()
+        .filter(|event| event.kind == EventKind::PermitChecked)
+        .map(|event| format!("{:?}", event.fields))
+        .filter(|fields| fields.contains("on_finally") && fields.contains("NIKA-SEC-004"))
+        .collect();
+    assert_eq!(
+        journaled.len(),
+        1,
+        "one journaled cleanup refusal: {journaled:?}"
+    );
+    assert!(
+        journaled[0].contains("taint path: subjects -> exec.argv[3]")
+            && journaled[0].contains("option token"),
+        "the member is the source in the cleanup lane: {}",
+        journaled[0]
+    );
 }

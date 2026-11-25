@@ -416,6 +416,7 @@ fn reach_of_file(
             let judged = Judged {
                 wf: &child,
                 waves: &analyzed.topo_waves,
+                edges: &analyzed.edges,
                 nested: &nested,
             };
             reach.born = judged.flow(Entry::Born);
@@ -437,6 +438,7 @@ fn reach_of_file(
 struct Judged<'a> {
     wf: &'a RawWorkflow,
     waves: &'a [Vec<usize>],
+    edges: &'a [crate::analyzer::Edge],
     nested: &'a BTreeMap<String, (String, Reach)>,
 }
 
@@ -457,7 +459,7 @@ impl Judged<'_> {
             entry,
             exec_reads_files: Some(true),
         };
-        let flow = content_flow::analyze_content_flow(self.wf, self.waves, &sources);
+        let flow = content_flow::analyze_content_flow(self.wf, self.waves, self.edges, &sources);
         let output = content_flow::output_origin(self.wf, &flow, entry)
             .map(|(name, origin)| self.origin_witness(&name, &origin));
         let egress = self.wf.tasks.iter().enumerate().find_map(|(i, task)| {

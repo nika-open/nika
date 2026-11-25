@@ -405,6 +405,52 @@ tasks:
     }
 
     #[test]
+    fn var_021_names_a_fold_by_its_own_root_and_a_recover_by_its_surface() {
+        // The message quotes the reference as its root reads it: a fold is
+        // `group.probes`, never `tasks.group.probes`; a recover is
+        // `on_error.recover:`, never the workflow's `outputs`.
+        let render = |yaml: &str| -> Vec<String> {
+            analyze_yaml(yaml)
+                .expect_err("a fold outside `with:`")
+                .iter()
+                .filter(|e| matches!(e, SchemaError::RefOutsideBoundary { .. }))
+                .map(std::string::ToString::to_string)
+                .collect()
+        };
+        let body = render(&GROUP_OK.replace(
+            "    with:\n      legs: \"${{ group.probes }}\"\n",
+            "    when: \"${{ group.probes }}\"\n",
+        ));
+        assert_eq!(body.len(), 1, "one VAR-021: {body:?}");
+        assert!(
+            body[0].starts_with(
+                "task `summary` when: references `group.probes` — outside the boundary"
+            ),
+            "{body:?}"
+        );
+        let recover = render(&GROUP_OK.replace(
+            "    exec: { command: [\"report\"] }\n",
+            "    exec: { command: [\"report\"] }\n    on_error: { recover: \"${{ group.probes }}\" }\n",
+        ));
+        assert_eq!(recover.len(), 1, "one VAR-021: {recover:?}");
+        assert!(
+            recover[0].starts_with(
+                "task `summary` on_error.recover: references `group.probes` — outside the boundary"
+            ),
+            "{recover:?}"
+        );
+        // The task twin keeps its root in the quote.
+        let task = render(
+            "nika: t\ntasks:\n  a:\n    exec: { command: [\"echo\"] }\n  b:\n    exec: { command: [\"echo\", \"${{ tasks.a.output }}\"] }\n",
+        );
+        assert!(
+            task[0]
+                .starts_with("task `b` a verb field references `tasks.a` — outside the boundary"),
+            "{task:?}"
+        );
+    }
+
+    #[test]
     fn empty_tasks_array_errors() {
         // Conformance fixture envelope/006-empty-tasks-array (W1 form: an
         // empty MAP — the sequence form dies earlier as NIKA-PARSE-022).
@@ -481,7 +527,7 @@ tasks:
         let errors = analyze_yaml(yaml).expect_err("ref outside the boundary");
         assert_has(
             &errors,
-            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "test" && surface == "when:"),
+            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "tasks.test" && surface == "when:"),
             "VAR-021 in when:",
         );
     }
@@ -522,7 +568,7 @@ tasks:
         let errors = analyze_yaml(yaml).expect_err("ref outside the boundary");
         assert_has(
             &errors,
-            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "research" && surface == "a verb field"),
+            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "tasks.research" && surface == "a verb field"),
             "VAR-021 via prompt",
         );
     }
@@ -543,7 +589,7 @@ tasks:
         let errors = analyze_yaml(yaml).expect_err("ref outside the boundary");
         assert_has(
             &errors,
-            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "discover" && surface == "for_each:"),
+            |e| matches!(e, SchemaError::RefOutsideBoundary { reference, surface, .. } if reference == "tasks.discover" && surface == "for_each:"),
             "VAR-021 via for_each",
         );
     }

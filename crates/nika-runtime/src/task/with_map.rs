@@ -69,8 +69,12 @@ pub(crate) fn references_loop_locals(value: &Value) -> bool {
 /// `with:` and never walks `tasks:`. Membership is declared, never
 /// matched — the checker refused a fold of a group no task declares
 /// (`NIKA-DAG-008`), so a name absent here is unreachable at run time
-/// and would read loud (NIKA-1702) if it ever were.
-fn folded_groups(task: &RawTask, tasks: &[Spanned<RawTask>]) -> BTreeMap<String, Vec<String>> {
+/// and would read loud (NIKA-1702) if it ever were. The integrity label
+/// reads the same membership (a fold carries its members' labels).
+pub(crate) fn folded_groups(
+    task: &RawTask,
+    tasks: &[Spanned<RawTask>],
+) -> BTreeMap<String, Vec<String>> {
     use nika_check::analyzer::edges::{group_members, group_refs_in_value};
     let mut names = Vec::new();
     for (_key, value) in &task.with {

@@ -185,7 +185,7 @@ impl<'a> Graph<'a> {
                 .map(|(i, t)| (t.value.id.value.as_str(), i))
                 .collect(),
             members: group_members(&wf.tasks),
-            outputs: super::born_flow(wf, topo_waves, calls).outputs,
+            outputs: super::born_flow(wf, edges, topo_waves, calls).outputs,
             acts_below: nearest(&up, &acting, true),
             confirm_above: nearest(&down, &confirms, false),
         }

@@ -135,11 +135,11 @@ fn every_valid_program_imports_whole_with_its_exact_bytes() {
     assert!(unplaced.is_empty(), "every node is placed: {unplaced:#?}");
 }
 
-#[test]
-fn every_scalar_leaf_takes_a_new_value_in_place() {
+/// Every scalar leaf takes a new value in place, on shard `k`.
+fn scalar_leaves(k: usize) {
     let mut tally: BTreeMap<String, usize> = BTreeMap::new();
     let mut wrong = Vec::new();
-    for (name, document) in imported() {
+    for (name, document) in shard(k) {
         for node in document.nodes() {
             if node.path.is_root() || matches!(node.kind, NodeKind::Mapping | NodeKind::Sequence) {
                 continue;
@@ -180,11 +180,106 @@ fn every_scalar_leaf_takes_a_new_value_in_place() {
     );
 }
 
+/// How many tests carry each per-node edit law (scalar leaves, collections).
+/// Every edit re-reads the
+/// whole document, so a program costs about the square of its size: the deep
+/// recipes of 2026-11-25 (35 to 41 KB each) took the single test to 302 s,
+/// over the 300 s nextest ceiling, with 88 % of the time in those 17 files.
+/// Each shard is its own test, so nextest spreads the law over its slots.
+const SHARDS: usize = 8;
+const _: () = assert!(SHARDS == 8, "`sharded!` writes shard_0 to shard_7");
+
+/// The programs of shard `k`: dealt by weight, the heaviest first onto the
+/// lightest shard (ties by name, then by shard number), so the deal depends
+/// only on the corpus and every program lands in exactly one shard.
+fn shard(k: usize) -> Vec<(String, Document)> {
+    let weight = |document: &Document| {
+        let len = document.source().len();
+        len.saturating_mul(len)
+    };
+    let mut programs = imported();
+    programs.sort_by(|(a_name, a), (b_name, b)| {
+        weight(b).cmp(&weight(a)).then_with(|| a_name.cmp(b_name))
+    });
+    let mut load = [0_usize; SHARDS];
+    let mut out = Vec::new();
+    for (name, document) in programs {
+        let lightest = (0..SHARDS).min_by_key(|&s| (load[s], s)).unwrap();
+        load[lightest] = load[lightest].saturating_add(weight(&document));
+        if lightest == k {
+            out.push((name, document));
+        }
+    }
+    out
+}
+
 #[test]
-fn every_collection_takes_an_entry_and_every_entry_can_go() {
+fn the_shards_deal_every_program_once() {
+    let mut dealt: Vec<String> = (0..SHARDS)
+        .flat_map(|k| shard(k).into_iter().map(|(name, _)| name))
+        .collect();
+    dealt.sort();
+    let mut all: Vec<String> = imported().into_iter().map(|(name, _)| name).collect();
+    all.sort();
+    assert_eq!(dealt, all);
+    assert!((0..SHARDS).all(|k| !shard(k).is_empty()), "an empty shard");
+}
+
+/// One test per shard of a corpus law: `mod $law` holds `shard_0` to
+/// `shard_7`, each calling `$body(k)`.
+macro_rules! sharded {
+    ($law:ident, $body:path) => {
+        mod $law {
+            #[test]
+            fn shard_0() {
+                $body(0);
+            }
+            #[test]
+            fn shard_1() {
+                $body(1);
+            }
+            #[test]
+            fn shard_2() {
+                $body(2);
+            }
+            #[test]
+            fn shard_3() {
+                $body(3);
+            }
+            #[test]
+            fn shard_4() {
+                $body(4);
+            }
+            #[test]
+            fn shard_5() {
+                $body(5);
+            }
+            #[test]
+            fn shard_6() {
+                $body(6);
+            }
+            #[test]
+            fn shard_7() {
+                $body(7);
+            }
+        }
+    };
+}
+
+sharded!(
+    every_scalar_leaf_takes_a_new_value_in_place,
+    super::scalar_leaves
+);
+sharded!(
+    every_collection_takes_an_entry_and_every_entry_can_go,
+    super::collections_and_entries
+);
+
+/// Every collection takes an entry and every entry can go, on shard `k`.
+fn collections_and_entries(k: usize) {
     let mut tally: BTreeMap<String, usize> = BTreeMap::new();
     let mut wrong = Vec::new();
-    for (name, document) in imported() {
+    for (name, document) in shard(k) {
         for node in document.nodes() {
             let mut edits = Vec::new();
             match &node.value {

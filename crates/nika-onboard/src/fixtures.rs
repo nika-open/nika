@@ -46,7 +46,9 @@ fn composition_siblings(body: &str) -> Vec<String> {
 
 /// The `examples/fixtures/<tail>` references a body reads, each tail
 /// cut at its first glob star (a `photos/**` read pulls the whole
-/// `photos/` dir) and stripped of a trailing `/`.
+/// `photos/` dir) and stripped of a trailing `/`. A star inside a name
+/// cuts back to the directory holding it: `quotes/quote-*.txt` pulls
+/// `quotes/`, since the bare `quotes/quote-` names no path.
 #[must_use]
 pub fn fixture_prefixes(body: &str) -> Vec<String> {
     const MARK: &str = "examples/fixtures/";
@@ -56,7 +58,13 @@ pub fn fixture_prefixes(body: &str) -> Vec<String> {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '*'))
             .collect();
-        let cut = tail.split('*').next().unwrap_or("");
+        let cut = match tail.split_once('*') {
+            Some((before, _)) if !before.is_empty() && !before.ends_with('/') => {
+                before.rsplit_once('/').map_or("", |(dir, _)| dir)
+            }
+            Some((before, _)) => before,
+            None => tail.as_str(),
+        };
         let cut = cut.trim_end_matches('/');
         if !cut.is_empty() && !out.iter().any(|p| p == cut) {
             out.push(cut.to_owned());
@@ -194,6 +202,63 @@ mod tests {
             covered >= 3,
             "the corpus carries fixture-reading jobs; the law must bite: {covered}"
         );
+    }
+
+    /// A star cuts the tail where it stands when it opens a segment, and
+    /// back to the holding directory when it sits inside a name: the
+    /// result is always a path the pack can hold, never a name fragment.
+    #[test]
+    fn a_star_inside_a_name_cuts_back_to_its_directory() {
+        let cases: [(&str, &[&str]); 7] = [
+            ("examples/fixtures/quotes/quote-*.txt", &["quotes"]),
+            ("examples/fixtures/photos/**", &["photos"]),
+            ("examples/fixtures/ci/logs/*.log", &["ci/logs"]),
+            ("examples/fixtures/a/b-*/c.txt", &["a"]),
+            ("examples/fixtures/rfq.yaml", &["rfq.yaml"]),
+            // At the fixture root itself there is no directory to cut to.
+            ("examples/fixtures/top-*.csv", &[]),
+            (
+                "examples/fixtures/q/rfq.yaml examples/fixtures/q/quote-*.txt examples/fixtures/q",
+                &["q/rfq.yaml", "q"],
+            ),
+        ];
+        for (body, want) in cases {
+            assert_eq!(fixture_prefixes(body), want, "{body}");
+        }
+    }
+
+    /// `quote-compare-decide` reads its quotes through `quote-*.txt`: the
+    /// take stages the folder, so the three quotes land with the pack's
+    /// exact bytes beside the request for quotation.
+    #[test]
+    fn the_quote_recipe_takes_its_three_quotes_along() {
+        let body = nika_pack::example("quote-compare-decide").expect("pack");
+        assert_eq!(
+            fixture_prefixes(body),
+            ["quote-compare-decide/rfq.yaml", "quote-compare-decide"],
+        );
+        let dir = std::env::temp_dir().join(format!("nika-fixtures-quotes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("tmpdir");
+        let dest = dir.join("quote-compare-decide.nika");
+        std::fs::write(&dest, body).expect("take the body");
+        let (written, kept) = materialize(body, &dest).expect("ingredients follow");
+        assert_eq!((written, kept), (4, 0), "three quotes and the request");
+        let pack = nika_pack::example_fixture_files();
+        for name in ["quote-a.txt", "quote-b.txt", "quote-c.txt", "rfq.yaml"] {
+            let tail = format!("quote-compare-decide/{name}");
+            let (_, bytes) = pack
+                .iter()
+                .find(|(t, _)| *t == tail)
+                .expect("the pack carries the file");
+            let on_disk = dir.join("examples").join("fixtures").join(&tail);
+            assert_eq!(
+                std::fs::read(&on_disk).expect("staged"),
+                *bytes,
+                "{tail} lands byte for byte"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `nika try 10-compose-pipeline` must stage the child it invokes

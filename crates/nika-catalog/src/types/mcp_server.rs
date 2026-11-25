@@ -9,6 +9,34 @@
 
 use super::{Category, EnvVarSpec, McpPackage, McpRemote};
 
+/// Whether a shelf entry is safe to recommend as listed.
+///
+/// `#[non_exhaustive]` for additive variants; a non-current entry carries a
+/// [`McpServer::status_note`] that says why, in plain words.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum McpStatus {
+    /// Its distribution answered the last refresh probe and nothing restricts its use.
+    Current,
+    /// Its vendor or registry marks the listed distribution deprecated.
+    Deprecated,
+    /// Its vendor restricts which clients may connect: the note says how.
+    Restricted,
+}
+
+impl McpStatus {
+    /// The TOML and wire word: `current`, `deprecated` or `restricted`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Deprecated => "deprecated",
+            Self::Restricted => "restricted",
+        }
+    }
+}
+
 /// Pricing model for an MCP server's underlying service.
 ///
 /// Mirrors the small, closed set used by CLI UX (`nika mcp list` colouring,
@@ -101,6 +129,10 @@ pub struct McpServer {
     pub pricing: McpPricing,
     /// ISO date (YYYY-MM-DD) of the last `xtask verify-catalog` success.
     pub last_verified: &'static str,
+    /// Whether the entry is current, deprecated or restricted.
+    pub status: McpStatus,
+    /// Why a non-current entry is not current, in plain words; `None` when current.
+    pub status_note: Option<&'static str>,
     /// Typed tags describing MCP server capabilities and permissioning.
     /// Every MCP server MUST carry `Tag::ReadOnly` XOR `Tag::Destructive`.
     /// Sorted + deduplicated (enforced by build.rs assertion).
@@ -115,7 +147,9 @@ pub struct McpServer {
 
 impl McpServer {
     /// Explicit constructor — required because [`McpServer`] is
-    /// `#[non_exhaustive]` (invariant #19).
+    /// `#[non_exhaustive]` (invariant #19). The entry is [`McpStatus::Current`] with no
+    /// note; [`Self::with_status`] says otherwise. The signature is the published one, so a
+    /// caller written against 0.125.1 builds unchanged.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     // REASON: 14 fields reflect the real MCP-registry wire surface
@@ -151,9 +185,21 @@ impl McpServer {
             category,
             pricing,
             last_verified,
+            status: McpStatus::Current,
+            status_note: None,
             tags,
             extra_tags,
             effect_hints,
+        }
+    }
+
+    /// The same entry with its status and the note that says why it is not current.
+    #[must_use]
+    pub const fn with_status(self, status: McpStatus, status_note: Option<&'static str>) -> Self {
+        Self {
+            status,
+            status_note,
+            ..self
         }
     }
 }
@@ -186,6 +232,8 @@ mod tests {
             category: Category::Anthropic,
             pricing: McpPricing::Free,
             last_verified: "2026-04-14",
+            status: McpStatus::Current,
+            status_note: None,
             tags: &[],
             extra_tags: &[],
             effect_hints: &[],
@@ -193,6 +241,41 @@ mod tests {
         assert_eq!(s.id, "filesystem");
         assert_eq!(s.category, Category::Anthropic);
         assert!(s.effect_hints.is_empty(), "no manifest vendored");
+        assert_eq!(s.status.as_str(), "current");
+        assert_eq!(McpStatus::Deprecated.as_str(), "deprecated");
+        assert_eq!(McpStatus::Restricted.as_str(), "restricted");
+    }
+
+    /// `new` keeps its published arity and builds a current entry; `with_status` changes
+    /// the status and its note and nothing else.
+    #[test]
+    fn new_is_current_and_with_status_sets_only_the_status() {
+        const S: McpServer = McpServer::new(
+            "legacy",
+            &[],
+            "Legacy",
+            "A server its vendor retired.",
+            &[],
+            &[],
+            &[],
+            None,
+            Category::Anthropic,
+            McpPricing::Free,
+            "2026-11-24",
+            &[],
+            &[],
+            &[],
+        );
+        assert_eq!((S.status, S.status_note), (McpStatus::Current, None));
+        let retired = S.with_status(McpStatus::Deprecated, Some("the vendor archived it"));
+        assert_eq!(
+            (retired.status, retired.status_note),
+            (McpStatus::Deprecated, Some("the vendor archived it"))
+        );
+        assert_eq!(
+            (retired.id, retired.title, retired.last_verified),
+            ("legacy", "Legacy", "2026-11-24")
+        );
     }
 
     #[test]

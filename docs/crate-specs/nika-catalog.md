@@ -96,6 +96,14 @@ pub enum   AuthMode      { None, Bearer, OAuth }
 pub enum   PyRunner      { Uvx, Pipx }
 pub enum   Category      { /* 18 variants */ }
 
+// The MCP shelf on the wire (`features = serde + mcp`): what
+// `nika catalog --mcp --json` and the oracle's `nika_catalog { mcp: true }`
+// emit. A separate envelope from `export::CatalogExport`, whose two
+// top-level keys are locked: `{ catalog_version: 1, mcp_servers: [...] }`,
+// every enum as its TOML word (`streamable-http`, `oauth`, `tool-hub`),
+// env vars by name only.
+pub fn mcp_export::mcp_shelf_export() -> McpShelfExport
+
 pub struct Embedding {
     pub id, provider, model,
     pub dimensions, max_input_tokens, normalized_by_default,
@@ -129,7 +137,7 @@ pub struct ModelCapabilities {
     pub supports_vision,
 }
 
-pub enum Tag { /* 42 variants: capabilities, economics, deployment, domain, MCP permissioning */ }
+pub enum Tag { /* 43 variants: capabilities, economics, deployment, domain, MCP permissioning */ }
 pub struct ParseTagError      { pub input: String }
 pub struct ParseCategoryError { pub input: String }
 
@@ -157,7 +165,7 @@ pub fn output_caps(provider: &str, name: &str, room: u32) -> serde_json::Value; 
 
 // ── Iteration ──────────────────────────────────────────────────────────
 pub fn all_providers()   -> &'static [Provider];    // 21
-pub fn all_mcp_servers() -> &'static [McpServer];   // 105
+pub fn all_mcp_servers() -> &'static [McpServer];   // 120
 pub fn all_embeddings()  -> &'static [Embedding];
 pub fn all_builtins()    -> &'static [Builtin];     // 63
 pub fn all_transforms()  -> &'static [TransformDef];// 65
@@ -186,13 +194,13 @@ impl nika_error::NikaErrorCode for CatalogError;
 |---|---|---|---|
 | Providers | **21** (7 cloud + 7 openai-compat + 5 enterprise + native + mock) | phf+unicase | insensitive |
 | Provider aliases | merged into provider map (`claude→anthropic`, `gpt→openai`, `gcp→vertex`, …) | phf+unicase | insensitive |
-| MCP servers | **105** (post Phase A cleanup, multi-distribution) | phf+unicase | insensitive |
+| MCP servers | **120** (multi-distribution, each with a status: current, deprecated or restricted) | phf+unicase | insensitive |
 | Embeddings | **13** (voyage, OpenAI, Cohere, Gemini families) | phf+unicase | insensitive |
 | Builtins | **63** (across 10 categories) | sorted + binary_search | sensitive |
 | Transforms | **65** (across 15 categories incl. Escape) | sorted + binary_search | sensitive |
-| Pricing | **62** patterns | sorted + 2-pass match | N/A |
-| Capability rules | **9** rules + 1 defaults | TOML + first-match-wins | insensitive (ASCII) |
-| `Tag` variants | **42** | enum | N/A |
+| Pricing | **681** snapshot rows, plus the admitted tariffs | sorted + 2-pass match | N/A |
+| Capability rules | **66** rules + 1 defaults | TOML + first-match-wins | insensitive (ASCII) |
+| `Tag` variants | **43** | enum | N/A |
 
 ---
 
@@ -206,7 +214,7 @@ crates/nika-catalog/
 ├── build/
 │   └── capabilities.rs           (~380 LOC — capabilities TOML codegen, split Session 2a)
 ├── data/
-│   ├── mcp-servers.toml
+│   ├── mcp-servers.toml          ← per-entry last_verified · scripts/refresh-mcp-servers.sh
 │   ├── llm-providers.toml        ← 21 providers + api_dialect
 │   ├── embeddings.toml
 │   └── model-capabilities.toml   ← 9 rules, @1.0 schema
@@ -233,7 +241,7 @@ crates/nika-catalog/
         ├── mcp_server.rs         ← McpServer + McpPricing
         ├── model.rs              ← ModelCapabilities + TokenLimitParam + ModelPricing + CostEstimate
         ├── provider.rs           ← Provider + ProviderModel + validate_key_format
-        ├── tags.rs               ← Tag (42 variants) + ParseTagError
+        ├── tags.rs               ← Tag (43 variants) + ParseTagError
         ├── transform.rs          ← TransformDef + TransformArity + NullBehavior + TransformCategory
         └── builtin.rs            ← Builtin + BuiltinCategory
 ```
@@ -302,7 +310,7 @@ serde_json = { workspace = true }
 | `src/data/generated.rs` `#[cfg(test)] mod tests` | cross-catalog invariants (provider ↔ embedding FK, dual-role services, tag XOR) | ~22 |
 | `src/data/models.rs` `#[cfg(test)]` | capabilities by (provider, model), pricing 2-pass, scoped pricing | ~25 |
 | `src/data/models.rs::parity_tests` | **proptest 10 000 cases** + 26 spot-checks + insta snapshot vs extracted pre-Session-2a body (DELETE at the 1.0 launch — see module doc) | ~3 |
-| `src/types/*` `#[cfg(test)]` | constructors, Copy/Send/Sync asserts, TOML roundtrip, Tag enum count=42 | ~20 |
+| `src/types/*` `#[cfg(test)]` | constructors, Copy/Send/Sync asserts, TOML roundtrip, Tag enum count=43 | ~20 |
 | `src/suggest.rs` `#[cfg(test)]` | typo correction, case-insensitivity, namespace filtering | ~7 |
 | `src/validate.rs` `#[cfg(test)]` | cross-ref integrity | ~6 |
 | `src/lookup.rs` `#[cfg(test)]` | public API integration, unknown → None | ~7 |

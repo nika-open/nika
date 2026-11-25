@@ -139,6 +139,27 @@ scope = { providers = ["openai"] }
 match = { kind = "exact_any", models = ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"] }
 caps  = { token_limit_param = "max-completion-tokens" }
 
+# GPT-6.2 Sol and Astra, GPT-6.1 Terra on the openai provider (model pages, read 2026-11-24):
+# « Input modalities: text, image », « Unsupported modalities: audio, video », structured
+# outputs and function calling. Sol and Astra: « The API rejects requests that set reasoning
+# effort to `none` », with no other level listed. Terra: « `reasoning.effort` supports `none`,
+# `low`, `medium` (default), `high`, `xhigh`, and `max` ». No level is recorded as
+# `reasoning_efforts`: that list qualifies an explicit effort on the wire, and the
+# OpenAI-compatible wire writes `thinking: {type: enabled}` beside `reasoning_effort`, a key
+# these pages do not document. Temperature is not stated on these pages, so no sampling claim
+# is made. Exact names only.
+[[rules]]
+name  = "openai-gpt6-2"
+scope = { providers = ["openai"] }
+match = { kind = "exact_any", models = ["gpt-6.2-sol", "gpt-6.2-astra"] }
+caps  = { reasoning = true, input_modalities = ["image", "text"], output_modalities = ["text"], supported_parameters = ["reasoning-effort"], json_mode = "schema" }
+
+[[rules]]
+name  = "openai-gpt6-1-terra"
+scope = { providers = ["openai"] }
+match = { kind = "exact", model = "gpt-6.1-terra" }
+caps  = { reasoning = true, input_modalities = ["image", "text"], output_modalities = ["text"], supported_parameters = ["reasoning-effort"], json_mode = "schema" }
+
 # OpenAI gpt-oss-120b under the openai provider id, as the Scaleway Generative APIs serve it.
 # Advertised (fetched 2026-09-24,
 # https://www.scaleway.com/en/docs/generative-apis/how-to/query-reasoning-models/): a
@@ -186,23 +207,73 @@ caps  = { tokenizer = "cl100k", input_modalities = ["image", "text"], output_mod
 #      `thinking.type: enabled` budget is refused with HTTP 400 (no thinking-budget
 #      parameter here), and fixed sampling, so a temperature, top_p or top_k other than the
 #      default is refused with HTTP 400 (supports_temperature = false). They think by default
-#      and the thinking counts in max_tokens. Claude Fable 5.1, Fable 5 and Opus 5.5 keep
-#      thinking always on; the others document a lower setting (`disabled`, or
-#      `between_tools` on Sonnet 5.5) that this engine does not send. Effort steers how much
-#      they think (`output_config.effort`): each documents low, medium, high, xhigh and max;
-#      the levels this engine names are recorded (low, high, max). Exact ids only, and
-#      ⚠ BEFORE [8a], which they would otherwise fall into.
+#      and the thinking counts in max_tokens. Effort steers how much they think
+#      (`output_config.effort`): each documents low, medium, high, xhigh and max; the levels
+#      this engine names are recorded (low, high, max). Claude Fable 5.2 keeps every one of
+#      these API facts from Fable 5.1 (its model page and migration guide, 2026-11-24).
+#      Claude Mythos 5.2 and 5.1 (model pages, thinking and effort pages, 2026-11-24): the
+#      same facts, « Adaptive (always on) », « Text and images → text », reachable only by
+#      organizations Anthropic has verified.
+#
+#      `refuses` lists what Anthropic answers with HTTP 400 on every request (read
+#      2026-11-24): a forced tool choice (`tool_choice` `any` or `tool`) on Opus 5.5,
+#      Sonnet 5.5, Fable 5.2, Mythos 5.2, Fable 5.1 and Mythos 5.1, while « Other models:
+#      Forced tool use is accepted » (thinking-tool-workflows page); `thinking.type:
+#      disabled` on the always-thinking models and Sonnet 5.5; and `between_tools` on every
+#      model of the per-model table but Sonnet 5.5 (« Only Claude Sonnet 5.5 accepts
+#      "between_tools" », thinking-troubleshooting page). A refusal that depends on the
+#      effort level (Sonnet 5.5's `between_tools` above high, Haiku 5.5's and Opus 5's
+#      `disabled` at xhigh or max) is not listed. A model no rule names is never refused:
+#      Anthropic answers. Exact ids only, and ⚠ BEFORE [8a], which they would otherwise
+#      fall into.
 [[rules]]
 name  = "claude-5-always-thinking-on-anthropic"
 scope = { providers = ["anthropic"] }
-match = { kind = "exact_any", models = ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5"] }
-caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "never" } }
+match = { kind = "exact_any", models = ["claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5"] }
+caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "never", refuses = ["forced-tool-choice", "thinking-disabled", "thinking-between-tools"] } }
+
+[[rules]]
+name  = "claude-fable-5-on-anthropic"
+scope = { providers = ["anthropic"] }
+match = { kind = "exact", model = "claude-fable-5" }
+caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "never", refuses = ["thinking-disabled", "thinking-between-tools"] } }
+
+[[rules]]
+name  = "claude-sonnet-5-5-on-anthropic"
+scope = { providers = ["anthropic"] }
+match = { kind = "exact", model = "claude-sonnet-5-5" }
+caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "not-reached", refuses = ["forced-tool-choice", "thinking-disabled"] } }
 
 [[rules]]
 name  = "claude-5-adaptive-thinking-on-anthropic"
 scope = { providers = ["anthropic"] }
-match = { kind = "exact_any", models = ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5"] }
-caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "not-reached" } }
+match = { kind = "exact_any", models = ["claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5"] }
+caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = true, in_output_cap = true, off = "not-reached", refuses = ["thinking-between-tools"] } }
+
+# [8-opus-4] Claude Opus 4.8 and 4.7 on Anthropic's own API (thinking page and effort page,
+#      read 2026-11-24): a temperature, top_p or top_k other than the default is refused with
+#      HTTP 400 (supports_temperature = false), as is a `thinking.type: enabled` budget (no
+#      thinking-budget parameter here). Thinking stays off until a request sets
+#      `thinking.type: adaptive`, which this engine does not send, so no .nika control is
+#      needed to keep it off. Effort steers them (`output_config.effort`, API default high);
+#      the levels this engine names are recorded. `between_tools` is refused, as on every
+#      model of the per-model table but Sonnet 5.5. ⚠ BEFORE [8a], which they would
+#      otherwise fall into.
+[[rules]]
+name  = "claude-opus-4-adaptive-on-anthropic"
+scope = { providers = ["anthropic"] }
+match = { kind = "exact_any", models = ["claude-opus-4-8", "claude-opus-4-7"] }
+caps  = { supports_temperature = false, reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "reasoning-effort", "streaming-thinking"], json_mode = "schema", reasoning_efforts = ["low", "high", "max"], reasoning_facts = { by_default = false, in_output_cap = true, off = "by-default", refuses = ["thinking-between-tools"] } }
+
+# [8-claude-4] The earlier Claude models of Anthropic's per-model thinking table (Opus 4.6,
+#      Sonnet 4.6, Opus 4.5, Haiku 4.5, Sonnet 4.5, read 2026-11-24), under their ids and the
+#      dated ids the catalogue prices: the caps and facts of [8a], plus the one refusal the
+#      table gives them, `between_tools`. ⚠ BEFORE [8a].
+[[rules]]
+name  = "claude-4-thinking-table-on-anthropic"
+scope = { providers = ["anthropic"] }
+match = { kind = "exact_any", models = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-5", "claude-opus-4-5-20251101", "claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-sonnet-4-5", "claude-sonnet-4-5-20250929"] }
+caps  = { reasoning = true, tokenizer = "claude-v3", input_modalities = ["image", "pdf", "text"], output_modalities = ["text"], supported_parameters = ["prompt-caching", "streaming-thinking", "thinking-budget"], json_mode = "schema", reasoning_facts = { by_default = false, in_output_cap = true, off = "by-default", refuses = ["thinking-between-tools"] } }
 
 # [8a] Claude on Anthropic's own API: the caps of [9], plus the reasoning facts of the
 #      Anthropic wire: no thinking unless a task's thinking budget asks, and thinking counts
@@ -352,6 +423,18 @@ match = { kind = "prefix_any", prefixes = ["gemini-2.5-flash"] }
 caps  = { reasoning = true, tokenizer = "gemini", input_modalities = ["audio", "image", "text", "video"], output_modalities = ["text"], supported_parameters = ["parallel-tool-calls", "reasoning-effort", "web-search"], json_mode = "schema" }
 
 # [18] Any other Gemini model. routing_complete=true.
+# Gemini 4 Neon, Hydrogen, Carbon and Argon on the Gemini API (model pages and thinking page,
+# read 2026-11-24): « Inputs Text, Image, Video, Audio, and PDF »; thinking « Supported »
+# (low, medium, high, xhigh on Neon and Hydrogen; low, medium, high on Carbon and Argon), on
+# by default (« On (medium) » on Carbon and Argon, « On (high) » on Neon and Hydrogen), and
+# the near-off level « minimal » is « Not supported on Gemini 4 models », so no setting turns
+# it off. Whether the thinking counts in the output limit is not stated. Exact names only.
+[[rules]]
+name  = "gemini-4-api"
+scope = { providers = ["gemini"] }
+match = { kind = "exact_any", models = ["gemini-4-neon", "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon"] }
+caps  = { reasoning = true, tokenizer = "gemini", input_modalities = ["audio", "image", "pdf", "text", "video"], output_modalities = ["text"], reasoning_facts = { by_default = true, off = "never" } }
+
 [[rules]]
 name             = "gemini-any-model"
 scope            = { providers = ["gemini", "vertex"] }
@@ -374,8 +457,20 @@ scope = { providers = ["mistral"] }
 match = { kind = "prefix_any", prefixes = ["mistral-small-2503", "mistral-small-2506", "mistral-small-latest", "mistral-small-3", "mistral-small-4"] }
 caps  = { tokenizer = "mistral-v3", input_modalities = ["image", "text"], output_modalities = ["text"], supported_parameters = [], json_mode = "schema" }
 
-# [20] Mistral vision models (pixtral, large, medium). mistral-large-latest
-#      → mistral-large-2512 (Mistral Large 3) with vision confirmed.
+# [20-large-4] Mistral Large 4: its model card (https://docs.mistral.ai/models/mistral-large-4,
+#      read 2026-11-24) names the ids mistral-large-4, mistral-large-4-0 and
+#      mistral-large-latest (alias mistral-large), and the reasoning page
+#      (https://docs.mistral.ai/inference/conversations/reasoning) says « Mistral Large 4
+#      always reasons, so no level matches none » and « does not accept none, minimal,
+#      xhigh, or max ». The caps of [20] otherwise. ⚠ BEFORE [20].
+[[rules]]
+name  = "mistral-large-4"
+scope = { providers = ["mistral"] }
+match = { kind = "exact_any", models = ["mistral-large-latest", "mistral-large-4", "mistral-large-4-0", "mistral-large"] }
+caps  = { reasoning = true, tokenizer = "mistral-v3", input_modalities = ["image", "text"], output_modalities = ["text"], supported_parameters = [], json_mode = "schema", reasoning_facts = { by_default = true, off = "never" } }
+
+# [20] Mistral vision models (pixtral, large, medium), the Large ids [20-large-4] does not
+#      name included (mistral-large-2512, Mistral Large 3).
 [[rules]]
 name  = "mistral-vision-models"
 scope = { providers = ["mistral"] }
@@ -462,6 +557,23 @@ routing_complete = true
 # New Chinese-frontier providers + capability fallbacks for 8 in-catalog
 # providers that previously had no rules (all were inheriting defaults ——
 # vision=true, which is WRONG for most of them).
+
+# [29a] Kimi K3.1 Pro (and its -highspeed variant) and Kimi K3, read 2026-11-24: each
+#       quickstart says thinking is always on, reasoning_effort takes low, high or max
+#       (default max), and temperature / top_p are fixed (« omit them from requests »);
+#       the models page gives native visual understanding. https://platform.kimi.ai/docs/
+#       guide/kimi-k3-1-pro-quickstart · guide/kimi-k3-quickstart · models. Whether the
+#       thinking counts in max_completion_tokens is not stated, so in_output_cap stays
+#       unset. json_mode and parallel-tool-calls carry the [29] family claim. The levels are
+#       not recorded as `reasoning_efforts`, which would qualify an explicit effort on the
+#       direct route: the OpenAI-compatible wire writes `thinking: {type: enabled}` beside
+#       `reasoning_effort`, and the chat reference says the K3 series « does not use the
+#       thinking parameter » (https://platform.kimi.ai/docs/api/chat, 2026-11-24).
+[[rules]]
+name  = "moonshot-kimi-k3"
+scope = { providers = ["moonshot"] }
+match = { kind = "exact_any", models = ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "kimi-k3"] }
+caps  = { supports_temperature = false, reasoning = true, input_modalities = ["image", "text"], output_modalities = ["text"], supported_parameters = ["parallel-tool-calls", "reasoning-effort"], json_mode = "schema", reasoning_facts = { by_default = true, off = "never" } }
 
 # [29] Moonshot Kimi K2 — text base models. -vision-preview suffix gets
 #      vision but those model IDs are not in our catalog yet (deferred).

@@ -318,22 +318,30 @@ mod tests {
             .find(|r| r.provider == "google" && r.model_pattern == "gemini-3.1-pro-preview")
             .expect("snapshot row");
         assert_eq!((pro.input_per_million, pro.output_per_million), (2.0, 12.0));
-        // A tariffed model newer than the snapshot gains its row, first in the table.
-        let argon = p
-            .rules
-            .iter()
-            .position(|r| r.model_pattern == "gemini-4-argon")
-            .expect("a row from the tariff");
-        let row = &p.rules[argon];
+        // The snapshot of 2026-11-24 prices Gemini 4 Argon under `google` at $2/$10: the
+        // tariff's dated $4/$20 replaces it on that row, and no second row appears.
+        let argon: Vec<_> = (p.rules.iter())
+            .filter(|r| r.model_pattern == "gemini-4-argon")
+            .collect();
+        assert_eq!(argon.len(), 1, "one row");
         assert_eq!(
             (
-                row.provider.as_str(),
-                row.input_per_million,
-                row.output_per_million
+                argon[0].provider.as_str(),
+                argon[0].input_per_million,
+                argon[0].output_per_million
             ),
-            ("gemini", 4.0, 20.0)
+            ("google", 4.0, 20.0)
         );
-        assert!(argon < p.rules.len() / 2, "ahead of the snapshot rows");
+        // A tariffed model the snapshot does not price gains its row, first in the table.
+        let free = (p.rules.iter())
+            .position(|r| {
+                r.provider == "openrouter"
+                    && r.model_pattern == "nvidia/nemotron-3-super-120b-a12b:free"
+            })
+            .expect("a row from the tariff");
+        let row = &p.rules[free];
+        assert_eq!((row.input_per_million, row.output_per_million), (0.0, 0.0));
+        assert!(free < p.rules.len() / 2, "ahead of the snapshot rows");
     }
     #[test]
     fn dated_tariffs_emit_and_invalid_axes_refuse() {

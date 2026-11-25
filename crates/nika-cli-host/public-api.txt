@@ -8,6 +8,7 @@ pub use nika_cli_host::access::resolve_plan
 pub use nika_cli_host::access::resolve_plan_over
 pub mod nika_cli_host::catalog
 pub fn nika_cli_host::catalog::run(json: bool, theme: nika_display::theme::Theme) -> nika_cli_host::output::VerbOutput
+pub fn nika_cli_host::catalog::run_mcp(json: bool, theme: nika_display::theme::Theme) -> nika_cli_host::output::VerbOutput
 pub mod nika_cli_host::clients_registry
 pub struct nika_cli_host::clients_registry::ClientsRegistry
 pub nika_cli_host::clients_registry::ClientsRegistry::clients: alloc::vec::Vec<nika_cli_host::clients_registry::RegistryClient>

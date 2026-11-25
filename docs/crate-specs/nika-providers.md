@@ -881,7 +881,18 @@ temperature: a `temperature` other than the default 1, a `top_p` or a `top_k`.
 lists no thinking-budget parameter: `thinking.budget_tokens`. Both are `false`
 wherever the catalog records no such refusal, an unrecorded model and a
 provider that does not speak the Messages API included. The Claude 5 models
-above refuse both.
+above refuse both, as do Claude Opus 4.8 and 4.7.
+
+Two more refusals are recorded per model, from Anthropic's tool-use page and
+per-model thinking table (2026-11-24). `refuses_forced_tool_choice` covers a
+`tool_choice` of type `any` or `tool` on Claude Fable 5.2, Fable 5.1, Opus 5.5
+and Sonnet 5.5; `auto` and `none` stay accepted, and a request with no tool
+carries no choice. `refuses_thinking_type` covers a `thinking.type` that turns
+the reasoning down: `disabled` and `between_tools` on a model whose reasoning
+cannot be turned off, and, on one that documents a lower setting, the type it
+does not take (`disabled` on Sonnet 5.5, `between_tools` on the others). A type
+the model takes may still be refused at some effort levels; that is not
+claimed.
 
 `refuses_sampling` also covers OpenAI's own API (the `openai` provider and its
 alias) whose model takes no temperature: the o-series and GPT-5, GPT-5 mini
@@ -897,7 +908,9 @@ first and an extra never overrides it. A refused control, typed or raw,
 refuses the request before any byte, naming the model, the value and the
 repair (remove it, then steer in the prompt or set `run.reasoning.effort`).
 Nothing is dropped silently. A raw `temperature` equal to the default, a raw
-`thinking` without a budget and the earlier Claude models are sent as declared.
+`thinking` without a budget whose type the model takes, and the earlier Claude
+models are sent as declared. A forced tool choice is refused the same way,
+with its repair: let the model choose (`auto`), or ask for a structured output.
 
 ### Closed numeric admission checkpoints
 

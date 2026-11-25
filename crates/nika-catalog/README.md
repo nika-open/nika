@@ -1,7 +1,7 @@
 # nika-catalog
 
-Compile-time capability vocabulary — 39 LLM providers, 105 MCP servers,
-13 embeddings, 30 builtins, 57 capability rules (as of 0.125.0).
+Compile-time capability vocabulary — 39 LLM providers, 120 MCP servers,
+13 embeddings, 30 builtins, 66 capability rules (as of 2026-11-24).
 
 <!-- The five counts above are not typed from memory. Three of them are
      asserted by this crate's own tests (`src/lib.rs` · `all_providers`,
@@ -43,10 +43,10 @@ let (providers, builtins) = (all_providers().len(), all_builtins().len()); // 39
 ## Catalog surface (0.125.0)
 
 - **39 LLM providers** · Anthropic · OpenAI · Google · DeepSeek · Mistral · xAI · Scaleway · Groq · Ollama · LM Studio · + 29 more (31 speak the OpenAI chat dialect)
-- **105 MCP servers** · vocabulary per [MCP spec](https://modelcontextprotocol.io)
+- **120 MCP servers** · vocabulary per [MCP spec](https://modelcontextprotocol.io)
 - **13 embedding models** · BGE-M3 (multilingual default · Phase 0 lock per ADR-005) + alternatives
 - **30 builtins** · the `nika:*` tools in six categories (core · file · data · network · introspection · media)
-- **57 capability rules** · what each model accepts (modalities, token-limit parameter, JSON mode, supported parameters), first match wins
+- **66 capability rules** · what each model accepts (modalities, token-limit parameter, JSON mode, supported parameters), first match wins
 
 ## Features
 

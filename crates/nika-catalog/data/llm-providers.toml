@@ -76,6 +76,36 @@ max_output_tokens = 128000
 limits_source = "https://platform.claude.com/docs/en/about-claude/models/overview"
 as_of = "2026-10-12"
 
+# Claude Fable 5.2 (released 2026-11-09): 1M context and 128K output on its
+# model page. Claude Fable 5.1 stays active (retirement not sooner than
+# 2027-09-01 on the deprecations page) and keeps its row.
+[[providers.models]]
+id = "claude-fable-5-2"
+model = "claude-fable-5-2"
+context_window_tokens = 1000000
+max_output_tokens = 128000
+limits_source = "https://platform.claude.com/docs/en/models/fable-5-2/overview"
+as_of = "2026-11-24"
+
+# Claude Mythos 5.2 and 5.1 (model pages read 2026-11-24): 1M context and
+# 128K output, « Active (verification required) »: only organizations
+# verified through Anthropic's verification programs can call them.
+[[providers.models]]
+id = "claude-mythos-5-2"
+model = "claude-mythos-5-2"
+context_window_tokens = 1000000
+max_output_tokens = 128000
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-2/overview"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "claude-mythos-5-1"
+model = "claude-mythos-5-1"
+context_window_tokens = 1000000
+max_output_tokens = 128000
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-1/overview"
+as_of = "2026-11-24"
+
 [[providers.models]]
 id = "claude-fable-5-1"
 model = "claude-fable-5-1"
@@ -152,11 +182,14 @@ model = "gpt-5.2"
 context_window_tokens = 272000
 max_output_tokens = 128000
 
+# gpt-5-mini: shut down not before 2026-12-11, successor gpt-6.1-terra
+# (OpenAI deprecations page, read 2026-11-24).
 [[providers.models]]
 id = "gpt-5-mini"
 model = "gpt-5-mini"
 context_window_tokens = 272000
 max_output_tokens = 128000
+lifecycle = { retires_not_before = "2026-12-11", successor = "gpt-6.1-terra", source = "https://developers.openai.com/api/docs/deprecations.md", as_of = "2026-11-24" }
 
 # B18 / issue 1306: gpt-4o-mini was priced and runnable but absent from
 # the 2-model openai row — the catalog is the resolver allowlist, so
@@ -200,6 +233,33 @@ context_window_tokens = 1050000
 max_output_tokens = 128000
 limits_source = "https://developers.openai.com/api/docs/models/gpt-6-sol.md"
 as_of = "2026-10-16"
+
+# GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra (model pages read
+# 2026-11-24): the same 1,050,000-token window, 128,000 output and 272K
+# long-prompt rate. The GPT-6.2 models refuse reasoning effort `none`.
+[[providers.models]]
+id = "gpt-6.2-sol"
+model = "gpt-6.2-sol"
+context_window_tokens = 1050000
+max_output_tokens = 128000
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.2-sol.md"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "gpt-6.2-astra"
+model = "gpt-6.2-astra"
+context_window_tokens = 1050000
+max_output_tokens = 128000
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.2-astra.md"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "gpt-6.1-terra"
+model = "gpt-6.1-terra"
+context_window_tokens = 1050000
+max_output_tokens = 128000
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md"
+as_of = "2026-11-24"
 
 # GPT-5.5 and GPT-5.6 Sol: the same window and output cap on their model
 # pages, and the same 272K long-prompt rate.
@@ -255,16 +315,23 @@ tags = ["code", "european", "frontier", "function-calling", "open-source", "stre
 # Trains UNLESS the account opts out (§8) · 30d rolling abuse · ZDR activated on request.
 data_policy = { trains = "opt-out", retention = "30", zdr = "yes", source = "https://legal.mistral.ai/terms/privacy-policy · 2026-07-29" }
 
+# The -latest aliases name Mistral Large 4 (1M context) and Small 4
+# (mistral-small-2603, 256k context) on their model cards, read 2026-11-24:
+# https://docs.mistral.ai/models/mistral-large-4 (model ids mistral-large-4,
+# mistral-large-4-0, mistral-large-latest) and
+# https://docs.mistral.ai/models/mistral-small-4. Decimal k/M
+# keeps the bounds within the published limits. Neither card states a
+# maximum output, so the curated 8,192 stays and no limits_source is set.
 [[providers.models]]
 id = "large"
 model = "mistral-large-latest"
-context_window_tokens = 128000
+context_window_tokens = 1000000
 max_output_tokens = 8192
 
 [[providers.models]]
 id = "small"
 model = "mistral-small-latest"
-context_window_tokens = 32000
+context_window_tokens = 256000
 max_output_tokens = 8192
 
 [[providers]]
@@ -359,7 +426,7 @@ id = "gemini"
 name = "Google Gemini"
 aliases = ["google"]
 env_var = "GEMINI_API_KEY"
-default_model = "gemini-2.5-flash"
+default_model = "gemini-3.5-flash-lite"
 cheap_model = "gemini-3.1-flash-lite"
 requires_key = true
 description = "Gemini Pro, Flash, and Ultra models."
@@ -369,7 +436,13 @@ tags = ["code-execution", "frontier", "function-calling", "long-context", "multi
 data_policy = { trains = "split", retention = "paid: limited (unquantified) · grounding: 30 · unpaid: unspecified", zdr = "no", source = "https://ai.google.dev/gemini-api/terms · 2026-07-29" }
 
 # Each model page (markdown, 2026-10-16): a 1,048,576-token input limit and
-# a 65,536-token output limit.
+# a 65,536-token output limit. The deprecations page (read 2026-11-24) gives
+# the earliest shutdown dates and the recommended replacements: Gemini 2.5
+# Flash and 2.5 Pro on 2026-12-01 (their requests then route to Gemini 3.5
+# Flash-Lite and Gemini 3.8 Flash), Gemini 3.1 Flash-Lite on 2027-05-07.
+# The provider's default moves to Gemini 3.5 Flash-Lite, the replacement the
+# page names for Gemini 2.5 Flash; the cheap model keeps Gemini 3.1
+# Flash-Lite until its own date.
 [[providers.models]]
 id = "flash-25"
 model = "gemini-2.5-flash"
@@ -377,12 +450,41 @@ context_window_tokens = 1048576
 max_output_tokens = 65536
 limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash.md.txt"
 as_of = "2026-10-16"
+lifecycle = { retires_not_before = "2026-12-01", successor = "gemini-3.5-flash-lite", source = "https://ai.google.dev/gemini-api/docs/deprecations.md.txt", as_of = "2026-11-24" }
 
 [[providers.models]]
 id = "flash-lite-31"
 model = "gemini-3.1-flash-lite"
 context_window_tokens = 1048576
 max_output_tokens = 65536
+lifecycle = { retires_not_before = "2027-05-07", successor = "gemini-3.5-flash-lite", source = "https://ai.google.dev/gemini-api/docs/deprecations.md.txt", as_of = "2026-11-24" }
+
+# Gemini 4 Neon, Hydrogen and Carbon (model pages read 2026-11-24): a
+# 1,048,576-token unified context and 65,536 output tokens by default on a
+# synchronous call (long decode, which goes further, is not used here).
+[[providers.models]]
+id = "gemini-4-neon"
+model = "gemini-4-neon"
+context_window_tokens = 1048576
+max_output_tokens = 65536
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon.md.txt"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "gemini-4-hydrogen"
+model = "gemini-4-hydrogen"
+context_window_tokens = 1048576
+max_output_tokens = 65536
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen.md.txt"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "gemini-4-carbon"
+model = "gemini-4-carbon"
+context_window_tokens = 1048576
+max_output_tokens = 65536
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon.md.txt"
+as_of = "2026-11-24"
 
 [[providers.models]]
 id = "gemini-4-argon"
@@ -439,6 +541,7 @@ context_window_tokens = 1048576
 max_output_tokens = 65536
 limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro.md.txt"
 as_of = "2026-10-16"
+lifecycle = { retires_not_before = "2026-12-01", successor = "gemini-3.8-flash", source = "https://ai.google.dev/gemini-api/docs/deprecations.md.txt", as_of = "2026-11-24" }
 
 [[providers.models]]
 id = "gemini-2.5-flash-lite"
@@ -794,16 +897,19 @@ id = "vertex"
 name = "Google Vertex AI"
 aliases = ["gcp"]
 env_var = "GOOGLE_APPLICATION_CREDENTIALS"
-default_model = "gemini-2.5-flash"
+default_model = "gemini-3.5-flash-lite"
 cheap_model = "gemini-3.1-flash-lite"
 requires_key = true
 description = "GCP-managed AI gateway."
 api_dialect = "gemini"
 tags = ["enterprise", "function-calling", "multimodal", "streaming"]
 
+# Vertex AI retired gemini-2.5-flash on 2026-10-20 (model versions page, read
+# 2026-11-24: « gemini-3.8-flash or gemini-3.5-flash-lite »): the default
+# follows the Gemini API's replacement for it, Gemini 3.5 Flash-Lite.
 [[providers.models]]
 id = "default"
-model = "gemini-2.5-flash"
+model = "gemini-3.5-flash-lite"
 context_window_tokens = 1048576
 max_output_tokens = 8192
 
@@ -873,15 +979,22 @@ name = "Moonshot (Kimi)"
 aliases = ["kimi"]
 env_var = "MOONSHOT_API_KEY"
 key_prefixes = ["sk-"]
-default_model = "kimi-k2"
-cheap_model = "kimi-k2"
+default_model = "kimi-k3.1-pro"
+cheap_model = "kimi-k3.1-pro"
 requires_key = true
-description = "Moonshot AI — Kimi K2, K2.5 (international endpoint api.moonshot.ai/v1). rig-core native provider."
+description = "Moonshot AI — Kimi K3.1 Pro, K3, K2, K2.5 (international endpoint api.moonshot.ai/v1). rig-core native provider."
 api_dialect = "openai-chat"
 tags = ["frontier", "function-calling", "long-context", "streaming", "structured-output"]
 # Trains with NO opt-out ("training and refining our underlying technology") · Singapore.
 data_policy = { trains = "yes", retention = "unspecified · Singapore servers", zdr = "no", source = "https://platform.kimi.ai/docs/agreement/userprivacy · 2026-07-29" }
 
+# The pricing page (https://platform.kimi.ai/docs/pricing/chat, read
+# 2026-11-24): « starting October 31, 2026, K2 series models will no longer
+# be available to newly registered users » and « We plan to retire all K2
+# series models by the end of December 2026 », with the migration pointed at
+# the Kimi K3.1 Pro quickstart. The default and cheap models move to Kimi
+# K3.1 Pro, the cheaper of the two K3 models; the K2 rows stay for runs that
+# name them.
 [[providers.models]]
 id = "k2"
 model = "kimi-k2"
@@ -893,6 +1006,25 @@ id = "k2-5"
 model = "kimi-k2.5"
 context_window_tokens = 256000
 max_output_tokens = 8192
+
+# The K3 series (read 2026-11-24): every K3 model has a 1,048,576-token
+# context on the pricing page, and each quickstart sets max_completion_tokens
+# up to 1,048,576 (default 131,072), with thinking always on.
+[[providers.models]]
+id = "kimi-k3.1-pro"
+model = "kimi-k3.1-pro"
+context_window_tokens = 1048576
+max_output_tokens = 1048576
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart"
+as_of = "2026-11-24"
+
+[[providers.models]]
+id = "kimi-k3"
+model = "kimi-k3"
+context_window_tokens = 1048576
+max_output_tokens = 1048576
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart"
+as_of = "2026-11-24"
 
 [[providers]]
 id = "qwen"

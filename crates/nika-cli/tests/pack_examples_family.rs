@@ -126,6 +126,11 @@ enum Kit {
 struct Expect {
     rc: Option<i32>,
     finding: Option<String>,
+    /// JSON pointer → value, read from the run's `--output json` object.
+    /// An answered gate and a declined one both exit 0, so a row that
+    /// says yes pins a value its yes branch alone produces.
+    #[serde(default)]
+    outputs: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -164,8 +169,13 @@ fn validate(m: &Manifest) {
     assert!(!m.entries.is_empty(), "the manifest names examples");
     for e in &m.entries {
         assert!(
-            e.expect.rc.is_some() ^ e.expect.finding.is_some(),
-            "`{}`: expect is exactly one of rc / finding",
+            e.expect.rc.is_some() || e.expect.finding.is_some(),
+            "`{}`: expect names an rc, a finding, or both",
+            e.slug
+        );
+        assert!(
+            e.expect.finding.is_none() || e.expect.rc != Some(0),
+            "`{}`: a finding is a refusal, never rc 0",
             e.slug
         );
         if let Some(model) = &e.model {
@@ -185,6 +195,11 @@ fn validate(m: &Manifest) {
         assert!(
             e.known_fail.is_none() || e.needs.is_none(),
             "`{}`: known_fail and needs are mutually exclusive — one row, one honesty",
+            e.slug
+        );
+        assert!(
+            e.expect.outputs.is_empty() || e.door == Door::Run,
+            "`{}`: `outputs` reads `nika run --output json` — it needs `door: run`",
             e.slug
         );
         if e.door == Door::Try {
@@ -239,22 +254,46 @@ impl Room {
     }
 }
 
+/// Every `secrets.*.key` a shipped example reads, from its parsed
+/// `secrets:` block. A child that inherited a live one could make real
+/// egress or spend (a QR Code AI key buys art codes, a webhook posts to a
+/// team), so the scrub reads the corpus instead of a list kept by hand,
+/// which misnamed one key and missed others when the recipes landed.
+/// Provider keys also ride the `*_API_KEY` sweep.
+fn corpus_secret_keys() -> &'static BTreeSet<String> {
+    static KEYS: std::sync::LazyLock<BTreeSet<String>> = std::sync::LazyLock::new(|| {
+        let mut keys = BTreeSet::new();
+        for slug in nika_pack::example_slugs() {
+            let body = nika_pack::example(&slug).expect("a listed example has a body");
+            let wf = nika_schema::parse(
+                body,
+                nika_schema::FileId::new(0),
+                nika_schema::ParseMode::Lenient,
+            )
+            .unwrap_or_else(|e| panic!("`{slug}` must parse to name its secrets: {e}"));
+            keys.extend(wf.secrets.iter().map(|(_, s)| s.value.key.clone()));
+        }
+        keys
+    });
+    &KEYS
+}
+
 /// The child environment law: the operator's exports never leak into a
 /// corpus run — `NIKA_*`, provider keys, and the secret vars the corpus
 /// references are all scrubbed; HOME and TMPDIR are the entry's own;
 /// PATH survives (an `exec` example must find the same programs the
 /// operator does).
 fn hermetic(cmd: &mut Command, room: &Room) {
-    /// The secret vars corpus workflows reference — a child that
-    /// inherited a live one could make real egress behind a per-task
-    /// `model:` pin the envelope override cannot reach. Provider keys
-    /// ride the `*_API_KEY` sweep below.
-    const SCRUB_EXACT: [&str; 2] = ["ALERTS_WEBHOOK_URL", "ONCALL_WEBHOOK"];
     for (key, _) in std::env::vars_os() {
         let k = key.to_string_lossy();
-        if k.starts_with("NIKA_") || k.ends_with("_API_KEY") || SCRUB_EXACT.contains(&k.as_ref()) {
+        if k.starts_with("NIKA_") || k.ends_with("_API_KEY") {
             cmd.env_remove(&key);
         }
+    }
+    // Unconditional: the child never sees a corpus key, whatever this
+    // process inherited.
+    for key in corpus_secret_keys() {
+        cmd.env_remove(key);
     }
     cmd.env("HOME", room.cwd.join("home"))
         .env("TMPDIR", room.path("tmp"))
@@ -408,25 +447,40 @@ fn stage_git_repo(dir: &Path) {
 /// `--model`: the mock rehearsal IS the default seat), `run`
 /// carries the trio plus the row's model/answers/vars.
 fn entry_command(entry: &Entry, room: &Room, body: &str) -> Command {
+    entry_command_answering(entry, room, body, &entry.answers)
+}
+
+/// The row's command with these gate answers in place of its own.
+fn entry_command_answering(
+    entry: &Entry,
+    room: &Room,
+    body: &str,
+    answers: &BTreeMap<String, String>,
+) -> Command {
     let mut cmd = nika();
     match entry.door {
         Door::Try => {
             cmd.arg("try")
                 .arg(&entry.slug)
                 .args(["--no-progress", "--max-cost-usd", "0.01"]);
-            for (task, value) in &entry.answers {
+            for (task, value) in answers {
                 cmd.args(["--answer", &format!("{task}={value}")]);
             }
         }
         Door::Run => {
             let path = stage_run_room(room, entry, body);
-            cmd.arg("run")
-                .arg(&path)
-                .args(["--no-progress", "--max-cost-usd", "0.01"]);
+            cmd.arg("run").arg(&path).args(["--max-cost-usd", "0.01"]);
+            // `--output json` already sends progress to stderr, and the
+            // two flags exclude each other.
+            if entry.expect.outputs.is_empty() {
+                cmd.arg("--no-progress");
+            } else {
+                cmd.args(["--output", "json"]);
+            }
             if let Some(model) = &entry.model {
                 cmd.args(["--model", model]);
             }
-            for (task, value) in &entry.answers {
+            for (task, value) in answers {
                 cmd.args(["--answer", &format!("{task}={value}")]);
             }
         }
@@ -437,7 +491,40 @@ fn entry_command(entry: &Entry, room: &Room, body: &str) -> Command {
     cmd
 }
 
-fn launch_entry(entry: &Entry, room: &Room, body: &str) -> (Outcome, Option<String>) {
+/// The loopback address an example names as its `const.server`
+/// (comfyui-image-chain queues renders at `http://127.0.0.1:8188`).
+fn loopback_server_of(body: &str) -> Option<std::net::SocketAddr> {
+    let doc: serde_yaml_bw::Value = serde_yaml_bw::from_str(body).ok()?;
+    let server = doc.get("const")?.get("server")?.as_str()?;
+    let authority = server.strip_prefix("http://")?.split('/').next()?;
+    let addr: std::net::SocketAddr = authority.parse().ok()?;
+    addr.ip().is_loopback().then_some(addr)
+}
+
+/// A row must not reach a program on this machine: when its example's
+/// server is a loopback address and something answers there, the row fails
+/// before it launches. A connect, not a bind: a server bound to every
+/// address still answers on the loopback.
+fn local_server_failure(body: &str) -> Option<String> {
+    let addr = loopback_server_of(body)?;
+    std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300))
+        .is_ok()
+        .then(|| {
+            format!(
+                "a program answers on {addr}, the example's `const.server`: \
+                 stop it and run the family again"
+            )
+        })
+}
+
+fn launch_entry(
+    entry: &Entry,
+    room: &Room,
+    body: &str,
+) -> Result<(Outcome, Option<String>), String> {
+    if let Some(why) = local_server_failure(body) {
+        return Err(why);
+    }
     let mut feed = (entry.slug == "snippets/weekly-radar").then(radar_http::RadarHttp::new);
     let staged = feed.as_ref().map(|feed| {
         feed.staged_body(body)
@@ -457,7 +544,7 @@ fn launch_entry(entry: &Entry, room: &Room, body: &str) -> (Outcome, Option<Stri
         feed.as_mut(),
     );
     let feed_failure = feed.as_ref().and_then(|feed| feed.verify(&room.cwd).err());
-    (outcome, feed_failure)
+    Ok((outcome, feed_failure))
 }
 
 // ── The verdicts ────────────────────────────────────────────────────────────
@@ -482,6 +569,11 @@ fn judge(entry: &Entry, o: &Outcome) -> Option<String> {
             entry.timeout.unwrap_or(MAX_TIMEOUT_SECS)
         ));
     }
+    exit_failure(entry, o).or_else(|| outputs_failure(entry, o))
+}
+
+/// The row's exit code and typed finding.
+fn exit_failure(entry: &Entry, o: &Outcome) -> Option<String> {
     match (&entry.expect.rc, &entry.expect.finding) {
         (Some(rc), None) => {
             if o.code == Some(*rc) {
@@ -490,17 +582,48 @@ fn judge(entry: &Entry, o: &Outcome) -> Option<String> {
                 Some(format!("rc {:?} ≠ expected {rc}", o.code))
             }
         }
-        (None, Some(code)) => {
+        (rc, Some(code)) => {
             if o.code == Some(0) {
                 Some(format!("rc 0 but the row expects the finding {code}"))
+            } else if rc.is_some_and(|rc| o.code != Some(rc)) {
+                Some(format!(
+                    "rc {:?} ≠ expected {} for the finding {code}",
+                    o.code,
+                    rc.unwrap_or_default()
+                ))
             } else if o.out.contains(code.as_str()) || o.err.contains(code.as_str()) {
                 None
             } else {
                 Some(format!("rc {:?} without the expected {code}", o.code))
             }
         }
-        _ => Some("expect carries neither rc nor finding".to_owned()),
+        (None, None) => Some("expect carries neither rc nor finding".to_owned()),
     }
+}
+
+/// The values a row pins in the run's typed outputs: `--output json`
+/// prints ONE object on stdout. `None` = every pointer holds its value.
+fn outputs_failure(entry: &Entry, o: &Outcome) -> Option<String> {
+    if entry.expect.outputs.is_empty() {
+        return None;
+    }
+    let doc: serde_json::Value = match serde_json::from_str(o.out.trim()) {
+        Ok(doc) => doc,
+        Err(e) => return Some(format!("stdout is not the outputs object ({e})")),
+    };
+    let wrong: Vec<String> = entry
+        .expect
+        .outputs
+        .iter()
+        .filter_map(|(pointer, want)| {
+            let got = doc.pointer(pointer);
+            (got != Some(want)).then(|| {
+                let got = got.map_or_else(|| "nothing".to_owned(), ToString::to_string);
+                format!("{pointer}: want {want}, got {got}")
+            })
+        })
+        .collect();
+    (!wrong.is_empty()).then(|| format!("outputs differ: {}", wrong.join(" · ")))
 }
 
 /// #1605 · a `door: try` rehearsal names, before its run, the
@@ -591,70 +714,51 @@ fn every_shipped_example_runs_per_its_manifest_row() {
         "macos" => "darwin",
         other => other,
     };
-    let mut tally = (0usize, 0usize, 0usize, 0usize); // ran · green · known-fail · skipped
+    // ran · green · typed refusal · known-fail · skipped
+    let mut tally = (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut failures: Vec<String> = Vec::new();
 
     for entry in &m.entries {
         let row = &entry.slug;
         if let Some(need) = &entry.needs {
-            tally.3 += 1;
+            tally.4 += 1;
             println!("SKIP       {row} (needs: {})", need_name(*need));
             continue;
         }
         let body = nika_pack::example(row).expect("completeness gate ran first");
         let room = Room::enter(row);
-        let (outcome, feed_failure) = launch_entry(entry, &room, body);
         tally.0 += 1;
+        let (outcome, feed_failure) = match launch_entry(entry, &room, body) {
+            Ok(launched) => launched,
+            Err(why) => {
+                failures.push(format!("{row}: {why}"));
+                continue;
+            }
+        };
 
         match entry
             .known_fail
             .as_ref()
             .filter(|kf| kf.on.iter().any(|o| o == os))
         {
-            // The XFAIL leg: the run must STAY red on this OS, carrying the
-            // class's finding when the row names one. Green = healed = the
-            // manifest is now lying — fail and ask for the promotion.
-            Some(kf) => {
-                let healed = !outcome.timed_out && outcome.code == Some(0);
-                let finding_seen = kf.finding.as_ref().is_none_or(|code| {
-                    outcome.out.contains(code.as_str()) || outcome.err.contains(code.as_str())
-                });
-                if healed {
-                    failures.push(format!(
-                        "{row}: known-fail ({}) came back GREEN — the wound healed; \
-                         promote the row to a plain expectation and close {}",
-                        kf.class, kf.issue
-                    ));
-                } else if !finding_seen {
-                    failures.push(format!(
-                        "{row}: red but without {} — the class moved:\n{}\n{}",
-                        kf.finding.as_deref().unwrap_or("?"),
-                        tail(&outcome.out),
-                        tail(&outcome.err)
-                    ));
-                } else {
-                    tally.2 += 1;
-                    println!(
-                        "KNOWN-FAIL {row} ({} · {} · {} · {:.0?})",
-                        kf.class, kf.issue, os, outcome.elapsed
-                    );
+            Some(kf) => match known_fail_verdict(row, kf, os, &outcome) {
+                Ok(line) => {
+                    tally.3 += 1;
+                    println!("{line}");
                 }
-            }
+                Err(why) => failures.push(why),
+            },
             None => match judge(entry, &outcome)
                 .or(feed_failure)
                 .or_else(|| reach_failure(entry, body, &outcome))
             {
                 None => {
-                    tally.1 += 1;
-                    let door = match entry.door {
-                        Door::Try => "try",
-                        Door::Run => "run",
-                    };
-                    println!(
-                        "GREEN      {row} ({door} · rc={} · {:.0?})",
-                        outcome.code.unwrap_or(-1),
-                        outcome.elapsed
-                    );
+                    if entry.expect.finding.is_some() {
+                        tally.2 += 1;
+                    } else {
+                        tally.1 += 1;
+                    }
+                    println!("{}", verdict_line(entry, &outcome));
                 }
                 Some(why) => failures.push(format!(
                     "{row}: {why}\n--- stdout tail ---\n{}\n--- stderr tail ---\n{}",
@@ -666,15 +770,16 @@ fn every_shipped_example_runs_per_its_manifest_row() {
     }
 
     println!(
-        "pack examples family · {} entries: {} ran · {} green · {} known-fail · {} skipped",
+        "pack examples family · {} entries: {} ran · {} green · {} typed refusal · {} known-fail · {} skipped",
         m.entries.len(),
         tally.0,
         tally.1,
         tally.2,
-        tally.3
+        tally.3,
+        tally.4
     );
     assert_eq!(
-        tally.0 + tally.3,
+        tally.0 + tally.4,
         m.entries.len(),
         "every row is either launched or counted as skipped — no silent third state"
     );
@@ -684,6 +789,62 @@ fn every_shipped_example_runs_per_its_manifest_row() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// The XFAIL leg: the run must STAY red on this OS, carrying the class's
+/// finding when the row names one. Green = healed = the manifest is now
+/// lying — fail and ask for the promotion.
+fn known_fail_verdict(
+    row: &str,
+    kf: &KnownFail,
+    os: &str,
+    outcome: &Outcome,
+) -> Result<String, String> {
+    let healed = !outcome.timed_out && outcome.code == Some(0);
+    let finding_seen = kf.finding.as_ref().is_none_or(|code| {
+        outcome.out.contains(code.as_str()) || outcome.err.contains(code.as_str())
+    });
+    if healed {
+        Err(format!(
+            "{row}: known-fail ({}) came back GREEN — the wound healed; \
+             promote the row to a plain expectation and close {}",
+            kf.class, kf.issue
+        ))
+    } else if !finding_seen {
+        Err(format!(
+            "{row}: red but without {} — the class moved:\n{}\n{}",
+            kf.finding.as_deref().unwrap_or("?"),
+            tail(&outcome.out),
+            tail(&outcome.err)
+        ))
+    } else {
+        Ok(format!(
+            "KNOWN-FAIL {row} ({} · {} · {} · {:.0?})",
+            kf.class, kf.issue, os, outcome.elapsed
+        ))
+    }
+}
+
+/// The printed line of a row that met its expectation. A typed refusal ran
+/// no task of its example: it is named and counted apart, never as green.
+fn verdict_line(entry: &Entry, outcome: &Outcome) -> String {
+    let door = match entry.door {
+        Door::Try => "try",
+        Door::Run => "run",
+    };
+    let rc = outcome.code.unwrap_or(-1);
+    let elapsed = outcome.elapsed;
+    if let Some(code) = &entry.expect.finding {
+        format!(
+            "REFUSED    {} ({door} · rc={rc} · {code} · {elapsed:.0?})",
+            entry.slug
+        )
+    } else {
+        format!(
+            "GREEN      {} ({door} · rc={rc} · {elapsed:.0?})",
+            entry.slug
+        )
+    }
 }
 
 fn need_name(need: Need) -> &'static str {
@@ -751,4 +912,224 @@ fn release_train_try_rehearses_with_isolated_inputs() {
     assert!(!room.cwd.join("schemas").exists());
     assert!(!room.cwd.join(".nika").exists());
     let _ = std::fs::remove_dir_all(room.root);
+}
+
+/// The recipes whose first task is a confirm gate with no default: every
+/// later task waits on its answer. Their manifest rows answer yes and pin
+/// an output of the yes branch; this law pins the other side.
+const ROOT_GATED: [&str; 7] = [
+    "comfyui-image-chain",
+    "feed-digest",
+    "lead-enrichment",
+    "listing-link-audit",
+    "qr-art-forge",
+    "refund-chaser",
+    "seo-site-audit",
+];
+
+/// Unanswered, each root-gated recipe pauses at its gate (exit 4, the gate
+/// named) before it writes anything: its run room holds no `out/`. The
+/// same row answered yes writes `out/<slug>/`, so the check can fail.
+#[test]
+fn the_root_gated_recipes_pause_unanswered_and_write_nothing() {
+    let m = manifest();
+    for slug in ROOT_GATED {
+        let row = m
+            .entries
+            .iter()
+            .find(|e| e.slug == slug)
+            .unwrap_or_else(|| panic!("`{slug}` has a manifest row"));
+        assert!(
+            row.door == Door::Run && row.answers.get("approve").map(String::as_str) == Some("true"),
+            "`{slug}`: its row runs the answered side through `nika run`"
+        );
+        let body = nika_pack::example(slug).expect("a shipped example");
+        if let Some(why) = local_server_failure(body) {
+            panic!("{slug}: {why}");
+        }
+        for answered in [false, true] {
+            let room = Room::enter(&format!("gate-{answered}-{slug}"));
+            let path = stage_run_room(&room, row, body);
+            let mut cmd = nika();
+            cmd.arg("run").arg(&path).args([
+                "--no-progress",
+                "--max-cost-usd",
+                "0.01",
+                "--model",
+                HERMETIC_MODEL,
+            ]);
+            if answered {
+                cmd.args(["--answer", "approve=true"]);
+            }
+            let outcome = launch(cmd, &room, 60, None);
+            let out = room.cwd.join("out");
+            let said = format!("{}\n{}", tail(&outcome.out), tail(&outcome.err));
+            assert!(!outcome.timed_out, "{slug}: timed out\n{said}");
+            if answered {
+                assert_eq!(outcome.code, Some(0), "{slug}: answered yes\n{said}");
+                assert!(
+                    out.join(slug).is_dir(),
+                    "{slug}: the answered run writes out/{slug}/, so the unanswered check can fail"
+                );
+            } else {
+                assert_eq!(
+                    outcome.code,
+                    Some(4),
+                    "{slug}: an unanswered gate pauses\n{said}"
+                );
+                assert!(
+                    said.contains("awaiting an answer for `approve`"),
+                    "{slug}: the pause names its gate\n{said}"
+                );
+                assert!(!out.exists(), "{slug}: the paused run wrote {out:?}");
+            }
+            let _ = std::fs::remove_dir_all(room.root);
+        }
+    }
+}
+
+/// A row that answers yes pins values its yes branch alone produces, so the
+/// same row answered no must miss at least one of them. An exit code cannot
+/// tell the two apart, and a count can be the same on both sides:
+/// lead-enrichment scores its leads on either answer, so only the status of
+/// its writes differs (measured 2026-11-25).
+#[test]
+fn every_yes_row_pins_a_value_a_no_does_not_produce() {
+    let m = manifest();
+    let yes_rows: Vec<&Entry> = m
+        .entries
+        .iter()
+        .filter(|e| !e.expect.outputs.is_empty() && e.answers.values().any(|v| v == "true"))
+        .collect();
+    assert!(
+        yes_rows.len() >= 8,
+        "the eight recipe rows answer yes and pin outputs"
+    );
+    let mut undistinguished = Vec::new();
+    for row in yes_rows {
+        let body = nika_pack::example(&row.slug).expect("a shipped example");
+        if let Some(why) = local_server_failure(body) {
+            panic!("{}: {why}", row.slug);
+        }
+        let declined: BTreeMap<String, String> = row
+            .answers
+            .iter()
+            .map(|(task, value)| {
+                let value = if value == "true" {
+                    "false"
+                } else {
+                    value.as_str()
+                };
+                (task.clone(), value.to_owned())
+            })
+            .collect();
+        let room = Room::enter(&format!("no-{}", row.slug.replace('/', "-")));
+        let cmd = entry_command_answering(row, &room, body, &declined);
+        let outcome = launch(cmd, &room, row.timeout.unwrap_or(MAX_TIMEOUT_SECS), None);
+        let said = format!("{}\n{}", tail(&outcome.out), tail(&outcome.err));
+        assert!(
+            !outcome.timed_out,
+            "{}: timed out answering no\n{said}",
+            row.slug
+        );
+        assert_eq!(
+            outcome.code,
+            Some(0),
+            "{}: a declined gate ends the run normally\n{said}",
+            row.slug
+        );
+        if outputs_failure(row, &outcome).is_none() {
+            undistinguished.push(row.slug.as_str());
+        }
+        let _ = std::fs::remove_dir_all(room.root);
+    }
+    assert!(
+        undistinguished.is_empty(),
+        "answered no, these rows still meet every pinned value, so the pins \
+         prove nothing about the yes: {undistinguished:?}"
+    );
+}
+
+/// The rows whose effect no run reaches: a typed refusal ran no task of its
+/// example, and inbox-triage and receipt-ledger close their late gate on
+/// their fixtures before the send. `nika check` is their offline proof.
+const CHECK_ONLY: [&str; 2] = ["inbox-triage", "receipt-ledger"];
+
+/// Each row proven by `nika check` alone must check clean.
+#[test]
+fn every_row_proven_by_check_alone_checks_clean() {
+    let m = manifest();
+    let refused: Vec<&str> = m
+        .entries
+        .iter()
+        .filter(|e| e.expect.finding.is_some())
+        .map(|e| e.slug.as_str())
+        .collect();
+    assert!(
+        !refused.is_empty(),
+        "the manifest pins at least one refusal"
+    );
+    for slug in refused.into_iter().chain(CHECK_ONLY) {
+        let body = nika_pack::example(slug).expect("a shipped example");
+        let room = Room::enter(&format!("check-{slug}"));
+        let file = room.cwd.join(format!("{}.nika", slug.replace('/', "-")));
+        std::fs::write(&file, body).expect("the example body");
+        let mut cmd = nika();
+        cmd.arg("check").arg(&file);
+        let outcome = launch(cmd, &room, 60, None);
+        assert_eq!(
+            outcome.code,
+            Some(0),
+            "`{slug}`: nika check must pass\n{}\n{}",
+            tail(&outcome.out),
+            tail(&outcome.err)
+        );
+        let _ = std::fs::remove_dir_all(room.root);
+    }
+}
+
+/// The child never sees a key a shipped example reads: the scrub removes
+/// each one whatever this process inherited (read through the command's
+/// own environment table), and the reader finds the keys a hand list once
+/// misnamed or missed.
+#[test]
+fn the_child_sees_no_corpus_secret() {
+    let keys = corpus_secret_keys();
+    for key in [
+        "QRCAI_API",
+        "ALERTS_WEBHOOK_URL",
+        "ONCALL_WEBHOOK_URL",
+        "FOUNDERS_WEBHOOK_URL",
+        "TEAM_WEBHOOK_URL",
+        "MAIL_API_TOKEN",
+    ] {
+        assert!(
+            keys.contains(key),
+            "`{key}` is read by a shipped example: {keys:?}"
+        );
+    }
+    let room = Room::enter("scrub");
+    let mut cmd = nika();
+    hermetic(&mut cmd, &room);
+    let envs: BTreeMap<&std::ffi::OsStr, Option<&std::ffi::OsStr>> = cmd.get_envs().collect();
+    for key in keys {
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new(key.as_str())),
+            Some(&None),
+            "`{key}` must be removed from the child's environment"
+        );
+    }
+    let _ = std::fs::remove_dir_all(room.root);
+}
+
+/// The local-server guard reads the address from the example itself.
+#[test]
+fn the_local_server_guard_reads_the_example_server() {
+    let body = nika_pack::example("comfyui-image-chain").expect("a shipped example");
+    assert_eq!(
+        loopback_server_of(body),
+        Some(std::net::SocketAddr::from(([127, 0, 0, 1], 8188)))
+    );
+    let body = nika_pack::example("01-hello").expect("a shipped example");
+    assert_eq!(loopback_server_of(body), None);
 }

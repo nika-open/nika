@@ -22,6 +22,7 @@
 //! exempt by design.
 
 use nika_catalog::export::{CatalogExport, ProviderExport, catalog_export};
+use nika_catalog::mcp_export::{McpServerExport, McpShelfExport, mcp_shelf_export};
 use nika_providers::ProviderRegistry;
 use nika_providers::probe::ExecutionLocus;
 
@@ -88,6 +89,142 @@ pub fn run(json: bool, theme: Theme) -> VerbOutput {
     let registry = ProviderRegistry::without_http(nika_runtime::compose::config_from_env());
     let truth = MachineTruth::from_registry(&registry);
     VerbOutput::ok(human_listing(&export, theme, &local_loci(&registry), truth))
+}
+
+/// `nika catalog --mcp` — the embedded MCP shelf: the human listing, or the
+/// `--json` machine projection (`catalog_version: 1`, built by
+/// `nika-catalog::mcp_export`).
+#[must_use]
+pub fn run_mcp(json: bool, theme: Theme) -> VerbOutput {
+    let shelf = mcp_shelf_export();
+    if json {
+        return match serde_json::to_string_pretty(&shelf) {
+            Ok(payload) => VerbOutput::ok(payload),
+            Err(e) => VerbOutput::env(format!("MCP shelf projection failed: {e}")),
+        };
+    }
+    VerbOutput::ok(mcp_listing(&shelf, theme))
+}
+
+/// The MCP shelf for a reader: tool hubs first (one server, many
+/// providers' tools), then every other server in shelf order. Each row
+/// names how the server is reached and the env var NAMES it reads; a row
+/// the last refresh could not verify carries its older date.
+fn mcp_listing(shelf: &McpShelfExport, theme: Theme) -> String {
+    let servers = &shelf.mcp_servers;
+    let newest = servers.iter().map(|s| s.last_verified).max().unwrap_or("-");
+    let oldest = servers.iter().map(|s| s.last_verified).min().unwrap_or("-");
+    let (hubs, others): (Vec<&McpServerExport>, Vec<&McpServerExport>) =
+        servers.iter().partition(|s| s.tags.contains(&"tool-hub"));
+    let hosted = servers.iter().filter(|s| !s.remotes.is_empty()).count();
+    let packaged = servers.iter().filter(|s| !s.packages.is_empty()).count();
+    let stale = servers.iter().filter(|s| s.last_verified != newest).count();
+    let deprecated = servers.iter().filter(|s| s.status == "deprecated").count();
+    let restricted = servers.iter().filter(|s| s.status == "restricted").count();
+
+    let mut out = format!(
+        "nika catalog --mcp — {n} MCP servers (embedded · offline) · last verified {newest}\n",
+        n = servers.len(),
+    );
+    let facets = format!(
+        "  {hubs} tool hubs · {hosted} hosted · {packaged} with a local package · \
+         {stale} not verified since {oldest} · {deprecated} deprecated · {restricted} restricted · \
+         env var NAMES only, values never read",
+        hubs = hubs.len(),
+    );
+    out.push_str(&theme.paint(Role::Dim, &facets));
+    out.push_str("\n\n");
+    out.push_str(&chrome::rail_head(
+        theme,
+        "TOOL HUBS (one server, many providers' tools, your own account)",
+    ));
+    out.push('\n');
+    for s in &hubs {
+        out.push_str(&mcp_line(s, theme, newest));
+    }
+    out.push('\n');
+    out.push_str(&chrome::rail_head(theme, "MCP SERVERS"));
+    out.push('\n');
+    for s in &others {
+        out.push_str(&mcp_line(s, theme, newest));
+    }
+    out.push_str(
+        "\nnika catalog --mcp --json → the machine projection (packages · remotes · env var names · last_verified · status and its note)",
+    );
+    out
+}
+
+/// A shelf text as it reaches the terminal: every control character (an
+/// escape sequence, a carriage return) becomes U+FFFD, so an entry can
+/// neither move the cursor nor forge a row. The codegen already refuses
+/// them in the data; this keeps the listing safe on its own.
+fn shown(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        std::borrow::Cow::Owned(
+            text.chars()
+                .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// One server row: id, title, category, pricing, how it is reached, env
+/// var names, its status when not current, and its date when the last
+/// refresh did not verify it.
+fn mcp_line(s: &McpServerExport, theme: Theme, newest: &str) -> String {
+    let mut reach: Vec<String> = s
+        .packages
+        .iter()
+        .map(|p| format!("{} {}", p.registry_type, shown(p.identifier)))
+        .collect();
+    reach.extend(
+        s.remotes
+            .iter()
+            .map(|r| format!("remote {} ({})", shown(r.url), r.auth)),
+    );
+    let env = if s.env_vars.is_empty() {
+        "no env".to_owned()
+    } else {
+        s.env_vars
+            .iter()
+            .map(|v| shown(v.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let status = if s.status == "current" {
+        String::new()
+    } else {
+        format!(" · {}", s.status.to_ascii_uppercase())
+    };
+    let date = if s.last_verified == newest {
+        String::new()
+    } else {
+        format!(" · verified {}", s.last_verified)
+    };
+    format!(
+        "{}\n",
+        chrome::rail_line(
+            theme,
+            &format!(
+                " {}{}{}{}",
+                theme.paint(Role::Strong, &format!("{:<14}", shown(s.id))),
+                theme.paint(
+                    Role::Dim,
+                    &format!(
+                        " {} · {} · {} · {} · {env}",
+                        shown(s.title),
+                        s.category,
+                        s.pricing,
+                        reach.join(" · ")
+                    ),
+                ),
+                theme.paint(Role::Warn, &status),
+                theme.paint(Role::Dim, &date),
+            ),
+        )
+    )
 }
 
 /// The two header lines — the counts, each NAMING its facet.
@@ -553,5 +690,132 @@ mod tests {
             text.contains(&xai.human_model_ids()),
             "the xai row carries the ids:\n{text}"
         );
+    }
+
+    #[test]
+    fn mcp_json_is_the_versioned_shelf() {
+        let out = run_mcp(true, PLAIN);
+        assert_eq!(out.code, exit::OK);
+        let value: serde_json::Value =
+            serde_json::from_str(&out.text).expect("--mcp --json emits parseable JSON");
+        assert_eq!(value["catalog_version"], 1);
+        let servers = value["mcp_servers"].as_array().expect("mcp_servers array");
+        assert_eq!(servers.len(), nika_catalog::all_mcp_servers().len());
+        let firecrawl = servers
+            .iter()
+            .find(|s| s["id"] == "firecrawl")
+            .expect("firecrawl is on the shelf");
+        for key in [
+            "title",
+            "category",
+            "pricing",
+            "packages",
+            "remotes",
+            "env_vars",
+            "last_verified",
+            "status",
+            "status_note",
+        ] {
+            assert!(firecrawl.get(key).is_some(), "firecrawl missing `{key}`");
+        }
+        for s in servers {
+            let status = s["status"].as_str().expect("a status word");
+            assert!(matches!(status, "current" | "deprecated" | "restricted"));
+            assert_eq!(
+                s["status_note"].is_string(),
+                status != "current",
+                "{}",
+                s["id"]
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_current_server_says_so_on_its_row() {
+        let shelf = mcp_shelf_export();
+        let text = mcp_listing(&shelf, PLAIN);
+        for s in &shelf.mcp_servers {
+            let row = text
+                .lines()
+                .find(|l| l.contains(&format!(" {:<14} ", s.id)))
+                .unwrap_or_else(|| panic!("`{}` has a row", s.id));
+            let word = format!(" · {}", s.status.to_ascii_uppercase());
+            assert_eq!(row.contains(&word), s.status != "current", "{row}");
+        }
+    }
+
+    #[test]
+    fn a_control_character_never_reaches_the_terminal() {
+        let shelf = mcp_shelf_export();
+        let mut s = shelf.mcp_servers[0].clone();
+        s.title = "ok\u{1b}[2J\rforged";
+        let row = mcp_line(&s, PLAIN, s.last_verified);
+        assert!(
+            !row.trim_end_matches('\n').chars().any(char::is_control),
+            "{row:?}"
+        );
+        assert!(row.contains("ok\u{fffd}[2J\u{fffd}forged"), "{row:?}");
+    }
+
+    #[test]
+    fn mcp_listing_puts_the_hubs_first_and_names_how_each_server_is_reached() {
+        let shelf = mcp_shelf_export();
+        let text = mcp_listing(&shelf, PLAIN);
+        let n = shelf.mcp_servers.len();
+        assert!(
+            text.starts_with(&format!("nika catalog --mcp — {n} MCP servers")),
+            "{text}"
+        );
+        let hubs = text.find("TOOL HUBS").expect("hub section");
+        let rest = text.find("MCP SERVERS").expect("server section");
+        assert!(hubs < rest);
+        let treg = text.find(" treg ").expect("treg row");
+        assert!(
+            hubs < treg && treg < rest,
+            "treg sits under TOOL HUBS:\n{text}"
+        );
+        let firecrawl = text
+            .lines()
+            .find(|l| l.contains(" firecrawl "))
+            .expect("firecrawl row");
+        for part in [
+            "npm firecrawl-mcp",
+            "remote https://mcp.firecrawl.dev/v2/mcp (bearer)",
+            "FIRECRAWL_API_KEY",
+        ] {
+            assert!(firecrawl.contains(part), "missing `{part}`: {firecrawl}");
+        }
+        // Every server has exactly one row.
+        for s in &shelf.mcp_servers {
+            let id = format!(" {:<14} ", s.id);
+            let rows = text.lines().filter(|l| l.contains(&id)).count();
+            assert_eq!(rows, 1, "`{}` rows:\n{text}", s.id);
+        }
+    }
+
+    #[test]
+    fn an_unverified_server_carries_its_older_date() {
+        let shelf = mcp_shelf_export();
+        let newest = shelf
+            .mcp_servers
+            .iter()
+            .map(|s| s.last_verified)
+            .max()
+            .expect("non-empty shelf");
+        let text = mcp_listing(&shelf, PLAIN);
+        for s in shelf
+            .mcp_servers
+            .iter()
+            .filter(|s| s.last_verified != newest)
+        {
+            let row = text
+                .lines()
+                .find(|l| l.contains(&format!(" {:<14}", s.id)))
+                .unwrap_or_else(|| panic!("`{}` has a row", s.id));
+            assert!(
+                row.ends_with(&format!("verified {}", s.last_verified)),
+                "{row}"
+            );
+        }
     }
 }

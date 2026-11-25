@@ -490,14 +490,16 @@ mod tests {
         let (_root, mistral) = keyed(&[MISTRAL], None);
         let mistral = mistral.intelligence_options();
         let listed = facts_of(&mistral, "2 mistral/mistral-large-latest");
+        // The list row since the 2026-11-24 catalog: the alias names Mistral
+        // Large 4 (model-pricing.toml, `mistral-large-latest`).
         assert_eq!(
             prices(listed),
-            (Some(0.5), Some(1.5)),
+            (Some(0.7), Some(2.1)),
             "the list row: {listed:?}"
         );
         assert_eq!(
             (listed.context_tokens, listed.prices_up_to_tokens),
-            (Some(262_144), None),
+            (Some(1_048_576), None),
             "a curated provider row with no source yields to the list row"
         );
         let retiring = facts_of(&options, "2 anthropic/claude-haiku-4-5-20251001");

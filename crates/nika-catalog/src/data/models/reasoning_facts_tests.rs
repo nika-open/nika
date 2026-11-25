@@ -7,7 +7,7 @@
 #![cfg(feature = "capabilities")]
 
 use super::model_capabilities;
-use crate::types::model::{ReasoningFacts, ThinkingOff};
+use crate::types::model::{ReasoningFacts, RefusedControl, ThinkingOff};
 
 fn facts(provider: &str, model: &str) -> ReasoningFacts {
     model_capabilities(provider, model).reasoning_facts
@@ -36,9 +36,56 @@ fn recorded_routes_carry_their_facts() {
         facts("gemini", "gemini-2.5-pro"),
         thinks(ThinkingOff::Never)
     );
+    // A model of Anthropic's per-model thinking table carries the one refusal it gives it; a
+    // Claude id outside the table carries the same facts and no refusal.
     let claude = ReasoningFacts::new(Some(false), Some(true), Some(ThinkingOff::ByDefault));
-    assert_eq!(facts("anthropic", "claude-sonnet-4-5-20250929"), claude);
+    assert_eq!(
+        facts("anthropic", "claude-sonnet-4-5-20250929"),
+        claude.with_refusals(&[RefusedControl::ThinkingBetweenTools])
+    );
     assert_eq!(facts("claude", "claude-opus-4-20250514"), claude);
+    assert_eq!(facts("anthropic", "claude-next-9"), claude);
+}
+
+#[test]
+fn the_new_rules_carry_only_what_their_pages_state() {
+    for model in [
+        "gemini-4-neon",
+        "gemini-4-hydrogen",
+        "gemini-4-carbon",
+        "gemini-4-argon",
+    ] {
+        let caps = model_capabilities("gemini", model);
+        assert!(caps.reasoning, "{model}");
+        assert_eq!(
+            caps.reasoning_facts,
+            ReasoningFacts::new(Some(true), None, Some(ThinkingOff::Never)),
+            "{model}: the output-cap fact is not stated"
+        );
+        let mut inputs: Vec<&str> = caps.input_modalities.iter().map(|m| m.as_str()).collect();
+        inputs.sort_unstable();
+        assert_eq!(
+            inputs,
+            ["audio", "image", "pdf", "text", "video"],
+            "{model}"
+        );
+    }
+    for model in [
+        "mistral-large-latest",
+        "mistral-large-4",
+        "mistral-large-4-0",
+    ] {
+        assert_eq!(
+            facts("mistral", model),
+            ReasoningFacts::new(Some(true), None, Some(ThinkingOff::Never)),
+            "{model} always reasons"
+        );
+    }
+    assert_eq!(
+        facts("mistral", "mistral-large-2512"),
+        ReasoningFacts::default(),
+        "Large 3 keeps its rule"
+    );
 }
 
 #[test]

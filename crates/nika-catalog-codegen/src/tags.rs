@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! Tag vocabulary — 42 kebab-case variants shared across MCP servers,
+//! Tag vocabulary — 43 kebab-case variants shared across MCP servers,
 //! providers, and embeddings.
 //!
 //! SYNC NOTE: This mapping is intentionally duplicated from
 //! `nika-catalog/src/types/tags.rs::FromStr`. The codegen crate cannot
 //! `use` the runtime `Tag` enum (build-dep cycle). The
-//! [`TAG_VARIANT_COUNT`] constant + `variant_count_is_42` runtime test
+//! [`TAG_VARIANT_COUNT`] constant + `variant_count_is_43` runtime test
 //! in `tags.rs` guard against drift. If you add a new Tag variant, update
 //! `Tag` enum, `as_str()`, `FromStr`, [`tag_variant`], [`ALL_KNOWN_TAGS`],
 //! and bump [`TAG_VARIANT_COUNT`] to match.
 
 /// Number of known tag variants. Must match `Tag` enum in `src/types/tags.rs`.
-pub const TAG_VARIANT_COUNT: usize = 42;
+pub const TAG_VARIANT_COUNT: usize = 43;
 
 /// Map a kebab-case tag string to its Rust variant name. Returns `None`
 /// for unknown strings (used by [`validate_tags`] to fail the build early).
@@ -62,6 +62,7 @@ pub(crate) fn tag_variant(s: &str) -> Option<&'static str> {
         "sandbox" => "Sandbox",
         "official" => "Official",
         "verified" => "Verified",
+        "tool-hub" => "ToolHub",
         _ => return None,
     })
 }
@@ -109,6 +110,7 @@ pub(crate) const ALL_KNOWN_TAGS: &[&str] = &[
     "serverless",
     "streaming",
     "structured-output",
+    "tool-hub",
     "verified",
     "vision",
     "web-search",
@@ -131,12 +133,12 @@ pub(crate) fn validate_tags(tags: &[String], entry_id: &str) -> Result<(), Strin
         if tag_variant(t).is_none() {
             return Err(format!(
                 "entry {entry_id:?}: unknown tag {t:?} — must be a kebab-case variant from the Tag enum \
-                 (42 variants: vision, audio, realtime, multimodal, image-gen, embedding, reranker, \
+                 (43 variants: vision, audio, realtime, multimodal, image-gen, embedding, reranker, \
                  reasoning, extended-thinking, function-calling, parallel-tools, structured-output, \
                  response-schema, streaming, long-context, prompt-caching, web-search, code-execution, \
                  matryoshka, budget, frontier, fast, local, serverless, open-source, enterprise, \
                  european, chinese, japanese, multilingual, code, math, rag, agent, legal, finance, \
-                 medical, read-only, destructive, sandbox, official, verified)"
+                 medical, read-only, destructive, sandbox, official, verified, tool-hub)"
             ));
         }
     }
@@ -201,9 +203,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn variant_count_is_42() {
-        assert_eq!(TAG_VARIANT_COUNT, 42);
-        assert_eq!(ALL_KNOWN_TAGS.len(), 42);
+    fn variant_count_is_43() {
+        assert_eq!(TAG_VARIANT_COUNT, 43);
+        assert_eq!(ALL_KNOWN_TAGS.len(), 43);
     }
 
     #[test]

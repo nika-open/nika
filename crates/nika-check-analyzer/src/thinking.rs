@@ -702,6 +702,7 @@ mod tests {
             "anthropic/sonnet",
             "claude/claude-opus-5-5",
             "anthropic/claude-haiku-5-5",
+            "anthropic/claude-fable-5-2",
             "anthropic/claude-fable-5-1",
         ] {
             let f = temp(model, "0.2");

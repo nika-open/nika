@@ -277,6 +277,72 @@ output_nano_per_token = 500
 cached_nano_per_token = 10
 cache_write_nano_per_token = 125
 
+# GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra read their model pages as
+# fetched on 2026-11-24 (markdown, byte-stable across two fetches that day,
+# whose bytes both hashes name): the Standard input, cached input, 30-minute
+# cache write and output rates, the 128,000-token output cap, and the same
+# 272K long-prompt rule, so each row admits at most 272,000 input tokens at
+# the short-context rates, as the GPT-6 rows above do.
+[[tariffs]]
+provider = "openai"
+billing_provider = "openai"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "gpt-6.2-sol"
+endpoints = ["https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1/responses"]
+source = "https://developers.openai.com/api/docs/models/gpt-6.2-sol.md"
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.2-sol.md"
+route_source = "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create"
+as_of = "2026-11-24"
+source_sha256 = "551d09dbb7e6f64a1af314446b8d5a72ab9bf66daa4407060007d11ce54acf43"
+limits_sha256 = "551d09dbb7e6f64a1af314446b8d5a72ab9bf66daa4407060007d11ce54acf43"
+context_tokens = 272000
+max_output_tokens = 128000
+input_nano_per_token = 2000
+output_nano_per_token = 10000
+cached_nano_per_token = 100
+cache_write_nano_per_token = 2500
+
+[[tariffs]]
+provider = "openai"
+billing_provider = "openai"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "gpt-6.2-astra"
+endpoints = ["https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1/responses"]
+source = "https://developers.openai.com/api/docs/models/gpt-6.2-astra.md"
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.2-astra.md"
+route_source = "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create"
+as_of = "2026-11-24"
+source_sha256 = "b12e61471fed60c843626fdee3dea09c86babae84ea779a5f5eb9193cb62720f"
+limits_sha256 = "b12e61471fed60c843626fdee3dea09c86babae84ea779a5f5eb9193cb62720f"
+context_tokens = 272000
+max_output_tokens = 128000
+input_nano_per_token = 8000
+output_nano_per_token = 40000
+cached_nano_per_token = 400
+cache_write_nano_per_token = 10000
+
+[[tariffs]]
+provider = "openai"
+billing_provider = "openai"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "gpt-6.1-terra"
+endpoints = ["https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1/responses"]
+source = "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md"
+limits_source = "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md"
+route_source = "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create"
+as_of = "2026-11-24"
+source_sha256 = "b7db94c4ba947e82ef8cf72df3e4fec7212f085bce310557085f048b7314bce6"
+limits_sha256 = "b7db94c4ba947e82ef8cf72df3e4fec7212f085bce310557085f048b7314bce6"
+context_tokens = 272000
+max_output_tokens = 128000
+input_nano_per_token = 1000
+output_nano_per_token = 5000
+cached_nano_per_token = 50
+cache_write_nano_per_token = 1250
+
 # Anthropic direct (Claude API), standard tier, global inference: no
 # `inference_geo` is sent, and a US-only reply (billed 1.1x) stays unknown.
 # Each row reads the official pricing page (base input, output, cache hits and
@@ -359,6 +425,76 @@ route_source = "https://platform.claude.com/docs/en/api/messages"
 as_of = "2026-10-15"
 source_sha256 = "a62e85bd0420e44f326f7b6c6c6d9fdb879dbf0e513b93b9f671b72caae5c83b"
 limits_sha256 = "02faed97309963e7c90d18a80ff0f6ba7cf6099d46a7cc1b2ac600ceaebac578"
+context_tokens = 1048576
+max_output_tokens = 128000
+input_nano_per_token = 10000
+output_nano_per_token = 50000
+cached_nano_per_token = 250
+cache_write_nano_per_token = 12500
+
+# Claude Fable 5.2 reads the pricing page as fetched on 2026-11-24 (base input,
+# output, cache hits at 0.025x the input rate, and the 5-minute cache write)
+# and its own model page (1M context, read as 1,048,576; 128K output), both in
+# their markdown form, byte-stable across two fetches that day, whose saved
+# bytes the hashes name. The reply reports the model id itself.
+[[tariffs]]
+provider = "anthropic"
+billing_provider = "anthropic"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "claude-fable-5-2"
+endpoints = ["https://api.anthropic.com/v1/messages"]
+source = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+limits_source = "https://platform.claude.com/docs/en/models/fable-5-2/overview.md"
+route_source = "https://platform.claude.com/docs/en/api/messages"
+as_of = "2026-11-24"
+source_sha256 = "488e03e9cc17c794593348133aa9869d650964d599af58604a9838a0ae47e816"
+limits_sha256 = "c47ef77538f7ac423092c0c360a50169988eda6f408871b976347b355860a82d"
+context_tokens = 1048576
+max_output_tokens = 128000
+input_nano_per_token = 8000
+output_nano_per_token = 40000
+cached_nano_per_token = 200
+cache_write_nano_per_token = 10000
+
+# Claude Mythos 5.2 and 5.1: the pricing page and each model page of
+# 2026-11-24 (Mythos 5.2 $8 input, $40 output, $0.20 cache hit, $10
+# five-minute write; Mythos 5.1 $10, $50, $0.25, $12.50; both 1M context and
+# 128K output). Both are « Active (verification required) »: a call from an
+# organization Anthropic has not verified is refused by Anthropic.
+[[tariffs]]
+provider = "anthropic"
+billing_provider = "anthropic"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "claude-mythos-5-2"
+endpoints = ["https://api.anthropic.com/v1/messages"]
+source = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-2/overview.md"
+route_source = "https://platform.claude.com/docs/en/api/messages"
+as_of = "2026-11-24"
+source_sha256 = "488e03e9cc17c794593348133aa9869d650964d599af58604a9838a0ae47e816"
+limits_sha256 = "c25f05745d70f22179c785366d182932759b49bbda9361ce351942d759b1c611"
+context_tokens = 1048576
+max_output_tokens = 128000
+input_nano_per_token = 8000
+output_nano_per_token = 40000
+cached_nano_per_token = 200
+cache_write_nano_per_token = 10000
+
+[[tariffs]]
+provider = "anthropic"
+billing_provider = "anthropic"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "claude-mythos-5-1"
+endpoints = ["https://api.anthropic.com/v1/messages"]
+source = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+limits_source = "https://platform.claude.com/docs/en/models/mythos-5-1/overview.md"
+route_source = "https://platform.claude.com/docs/en/api/messages"
+as_of = "2026-11-24"
+source_sha256 = "488e03e9cc17c794593348133aa9869d650964d599af58604a9838a0ae47e816"
+limits_sha256 = "f5adad27124089e0e8398d09e11e9c52cd4466f0e8ae8c1855917fe90042a3cd"
 context_tokens = 1048576
 max_output_tokens = 128000
 input_nano_per_token = 10000
@@ -666,6 +802,69 @@ input_nano_per_token = 100
 output_nano_per_token = 400
 cached_nano_per_token = 10
 
+# Gemini 4 Neon, Hydrogen and Carbon, under the same rules as the Gemini
+# rows above, read on 2026-11-24: the pricing page and each model page in
+# markdown, each byte-stable across two fetches that day. Gemini 4 Carbon
+# rises on 2026-12-01 ($2.00 to $4.00 input, $10.00 to $20.00 output, $0.10
+# to $0.20 cache read), so its row prices the higher step, like Argon's.
+# Hydrogen also has a free tier, which this paid row never assumes.
+[[tariffs]]
+provider = "gemini"
+billing_provider = "gemini"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "gemini-4-neon"
+endpoints = ["https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent"]
+source = "https://ai.google.dev/gemini-api/docs/pricing.md.txt"
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon.md.txt"
+route_source = "https://ai.google.dev/api/generate-content.md.txt"
+as_of = "2026-11-24"
+source_sha256 = "3d7b87d69e839c4b969a0d953ff29f4b8f4ce5e5771f37fb95beb01459c2cfcc"
+limits_sha256 = "b841dd32c44500d13b17c4e3760d572dfdabb8da5060ee0a1c49a3d7a12f5460"
+context_tokens = 1048576
+max_output_tokens = 65536
+input_nano_per_token = 3000
+output_nano_per_token = 15000
+cached_nano_per_token = 150
+
+[[tariffs]]
+provider = "gemini"
+billing_provider = "gemini"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "gemini-4-hydrogen"
+endpoints = ["https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent"]
+source = "https://ai.google.dev/gemini-api/docs/pricing.md.txt"
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen.md.txt"
+route_source = "https://ai.google.dev/api/generate-content.md.txt"
+as_of = "2026-11-24"
+source_sha256 = "3d7b87d69e839c4b969a0d953ff29f4b8f4ce5e5771f37fb95beb01459c2cfcc"
+limits_sha256 = "44ab7ca80427eb262674e0495b5cd9f379d852dd9f479c4c70de0237091346f2"
+context_tokens = 1048576
+max_output_tokens = 65536
+input_nano_per_token = 1500
+output_nano_per_token = 7500
+cached_nano_per_token = 75
+
+[[tariffs]]
+provider = "gemini"
+billing_provider = "gemini"
+currency = "USD"
+output_token_param = "max_tokens"
+model = "gemini-4-carbon"
+endpoints = ["https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-carbon:generateContent"]
+source = "https://ai.google.dev/gemini-api/docs/pricing.md.txt"
+limits_source = "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon.md.txt"
+route_source = "https://ai.google.dev/api/generate-content.md.txt"
+as_of = "2026-11-24"
+source_sha256 = "3d7b87d69e839c4b969a0d953ff29f4b8f4ce5e5771f37fb95beb01459c2cfcc"
+limits_sha256 = "c880e69c4d58a592ecc61a01c4ebc074abfec82cc9d67a94c933d45a36f1b3a7"
+context_tokens = 1048576
+max_output_tokens = 65536
+input_nano_per_token = 4000
+output_nano_per_token = 20000
+cached_nano_per_token = 200
+
 # BEGIN generated by scripts/refresh-admission.sh from scripts/admission/sources.toml
 # OpenRouter routes. A paid OpenRouter reply settles at its own reported
 # `usage.cost` (non-BYOK, complete meters); these rows only reserve and admit
@@ -801,3 +1000,52 @@ input_nano_per_token = 0
 output_nano_per_token = 0
 cached_nano_per_token = 0
 # END generated
+
+# Kimi K3.1 Pro and Kimi K3 on Moonshot's own endpoint: the pricing page of
+# 2026-11-24 (https://platform.kimi.ai/docs/pricing/chat; K3.1 Pro $2.00
+# input, $10.00 output, $0.20 cached input, $2.00 five-minute write; K3
+# $3.00, $15.00, $0.30, $3.00; « All K3 series models support a
+# 1,048,576-token context window », no tiering by context length), each
+# quickstart for the limits (max_completion_tokens up to 1,048,576) and the
+# chat API reference for the route. A tariff with no snapshot row is inserted at the head of
+# the pricing table, so Kimi K3.1 Pro comes last here and first there, before the `kimi-k3`
+# pattern it contains.
+[[tariffs]]
+provider = "moonshot"
+billing_provider = "moonshot"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "kimi-k3"
+endpoints = ["https://api.moonshot.ai/v1/chat/completions"]
+source = "https://platform.kimi.ai/docs/pricing/chat"
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart"
+route_source = "https://platform.kimi.ai/docs/api/chat"
+as_of = "2026-11-24"
+source_sha256 = "0c8f833852bee289c8e7d7db48d4140aa1afb9493de435fef5a8431732f868f7"
+limits_sha256 = "4474e3c7f6e33cab5565a3d3976b1a53e3aec626bb1470893d31543510dcaf1d"
+context_tokens = 1048576
+max_output_tokens = 1048576
+input_nano_per_token = 3000
+output_nano_per_token = 15000
+cached_nano_per_token = 300
+cache_write_nano_per_token = 3000
+
+[[tariffs]]
+provider = "moonshot"
+billing_provider = "moonshot"
+currency = "USD"
+output_token_param = "max_completion_tokens"
+model = "kimi-k3.1-pro"
+endpoints = ["https://api.moonshot.ai/v1/chat/completions"]
+source = "https://platform.kimi.ai/docs/pricing/chat"
+limits_source = "https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart"
+route_source = "https://platform.kimi.ai/docs/api/chat"
+as_of = "2026-11-24"
+source_sha256 = "0c8f833852bee289c8e7d7db48d4140aa1afb9493de435fef5a8431732f868f7"
+limits_sha256 = "f32e1417c27db603d01a7f22765b3f164ff222a7c44f704ffd2b64868bcc0763"
+context_tokens = 1048576
+max_output_tokens = 1048576
+input_nano_per_token = 2000
+output_nano_per_token = 10000
+cached_nano_per_token = 200
+cache_write_nano_per_token = 2000

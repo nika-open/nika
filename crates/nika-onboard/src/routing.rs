@@ -87,6 +87,71 @@ mod tests {
         );
     }
 
+    /// A request to read one site and sum it up, and the gallery's
+    /// question for the same shape, route to the lesson that does exactly
+    /// that: « summarize » carries the « summary » its body says, and
+    /// « summarizes » reads as « summarize » and takes its alias
+    /// (2026-11-25, 14.415 and 18.650 over the 12.5 floor).
+    #[test]
+    fn a_website_summary_routes_to_the_fetch_chain() {
+        for words in [
+            "scrape a website and summarize it",
+            "which example fetches a url and summarizes it?",
+        ] {
+            assert_eq!(
+                route_query(words),
+                RoutedEntry::Example("05-fetch-chain".to_owned()),
+                "{words}"
+            );
+        }
+    }
+
+    /// The Session answers its gallery questions from this door, so each
+    /// one gets an exact outcome here, never « route or ask »: the shape
+    /// question routes, and the three short ones ask with the job first,
+    /// because they name a word two jobs share (invoices, digest) or too
+    /// few of the job's own words (fetching a URL). Their Session reply
+    /// is then « closest shapes: … », which still answers the question.
+    #[test]
+    fn the_session_gallery_questions_get_their_exact_outcome() {
+        assert_eq!(
+            route_query("which example fetches a url and summarizes it?"),
+            RoutedEntry::Example("05-fetch-chain".to_owned())
+        );
+        for (words, first, beside) in [
+            (
+                "show me a template for fetching a URL",
+                "05-fetch-chain",
+                None,
+            ),
+            (
+                "is there a template for invoices?",
+                "invoice-chaser",
+                Some("subscription-renewal-radar"),
+            ),
+            (
+                "what's a good template for a digest?",
+                "05-fetch-chain",
+                Some("feed-digest"),
+            ),
+        ] {
+            let RoutedEntry::Clarify(names) = route_query(words) else {
+                panic!("`{words}` asks which job is meant");
+            };
+            assert_eq!(
+                names.first().map(String::as_str),
+                Some(first),
+                "{words}: {names:?}"
+            );
+            if let Some(other) = beside {
+                assert!(
+                    names.iter().any(|n| n == other),
+                    "{words} names {other}: {names:?}"
+                );
+            }
+        }
+    }
+
     /// C09 · a weekend URL summary writes 05-fetch-chain or names it.
     #[test]
     fn a_weekend_summary_of_three_urls_names_fetch_chain() {

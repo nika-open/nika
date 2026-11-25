@@ -6,12 +6,16 @@
 #
 # Row law:
 #   - `expect` is REQUIRED and explicit — `{rc: 0}` for a green run,
-#     `{finding: CODE}` for an expected typed refusal (rc asserted non-zero).
+#     `{finding: CODE}` for an expected typed refusal (rc asserted non-zero),
+#     `{rc: N, finding: CODE}` to pin both. A refusal ran no task of its
+#     example: the family counts it apart from the green rows, and its file
+#     must pass `nika check`.
 #   - `door: try` (default) drives `nika try <slug>` — the shipped showroom
 #     door, mock seat by default (its fetches stay real), fixtures materialized by the door
 #     itself. `door: run` stages a scratch cwd (`kit:`), plants the example,
-#     and drives `nika run` — required when the row needs `--answer`
-#     (a human gate) since `try` carries no answer flag.
+#     and drives `nika run`, for a row that needs a workspace the showroom
+#     does not stage. Both doors take `answers:` (`try` carries `--answer`
+#     since C01).
 #   - `kit:` — what the harness stages into the scratch cwd for `door: run`:
 #     `fixtures` (the pack ingredients the body reads) · `git-repo`
 #     (git init + one commit + a src/ file) · `cargo-project` (a minimal
@@ -22,6 +26,10 @@
 #     `--model`; `try` rows never carry the flag (the mock rehearsal seat is
 #     the default there).
 #   - `answers:` — pre-seeded gate answers (`--answer approve=true`).
+#   - `expect.outputs:` — JSON pointer → value in the run's typed outputs
+#     (`nika run --output json`, so `door: run` only). An answered gate and
+#     a declined one both exit 0: a row that says yes pins a value its yes
+#     branch alone produces.
 #   - `vars:` — workflow inputs (`--var k=v`).
 #   - `timeout` — per-entry seconds, ceiling 120 (worst measured: 31 s).
 #   - `known_fail` — an XFAIL, not a skip: on the listed OSes the row RUNS
@@ -98,8 +106,8 @@ entries:
   - { slug: transcript-shownotes, expect: { rc: 0 } }
 
   # ── Human gates — the prompt carries no `default:` ON PURPOSE (a default
-  #    completes NIKA-SEC-009's lethal trifecta), so the run door answers
-  #    explicitly. `try` has no answer flag: these rows take `door: run` ──
+  #    completes NIKA-SEC-009's lethal trifecta), so these rows answer
+  #    explicitly. They stay on `door: run`, the door they were measured on ──
   - slug: ceo-monday-brief
     door: run
     kit: [fixtures]
@@ -145,6 +153,116 @@ entries:
     model: mock/echo
     answers: { approve: "true" }
     expect: { rc: 0 }
+
+  # ── The recipes of nika-spec 419 and 420, measured 2026-11-25 on the mock
+  #    seat: no task pins a model, and the slowest row takes 19 s
+  #    (qr-art-forge with a local `qrscan`). The rows with no gate on their
+  #    path ride `nika try` and its fixtures ──
+  - { slug: docs-answer-desk, expect: { rc: 0 } }
+  - { slug: programmatic-seo-pages, expect: { rc: 0 } }
+  - { slug: quote-compare-decide, expect: { rc: 0 } }
+  - { slug: source-to-45-locales, expect: { rc: 0 } }
+  - { slug: subscription-renewal-radar, expect: { rc: 0 } }
+  - { slug: workflow-watchdog, expect: { rc: 0 } }
+  # A late confirm gate that defaults to no stands before their send. With
+  # the fixtures, inbox-triage and receipt-ledger close it on their data
+  # (nothing to draft, nothing to book), so neither answer reaches the send:
+  # `nika check` is its only proof (`every_row_proven_by_check_alone_checks_clean`).
+  # ci-failure-triage crosses it on a yes: its POST to a documentation host
+  # recovers to a `posted: false` receipt, which a declined gate never
+  # writes (`posted` is null then).
+  - { slug: inbox-triage, expect: { rc: 0 } }
+  - { slug: receipt-ledger, expect: { rc: 0 } }
+  - slug: ci-failure-triage
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/counts/groups": 4, "/posted/0/posted": false }
+  # A confirm gate with no default stands first in these seven, and every
+  # later task waits on it: fetches, a POST, a render queue, a local scan.
+  # Their rows say yes through `nika run`, so the whole job runs, and each
+  # pins at least one value that only the yes branch produces: answered no,
+  # each row misses one (`every_yes_row_pins_a_value_a_no_does_not_produce`).
+  # lead-enrichment scores its leads on either answer, so it pins the status
+  # of its CSV write. The engine
+  # refuses the reserved documentation hosts the fetches and the POST name
+  # before it dials, and each is recovered. The render queue meets a closed
+  # port: a row whose example names a loopback `const.server` fails before
+  # it launches if a program answers there, so a local ComfyUI is never
+  # reached. qr-art-forge pins `scanned`, 5 with or without a local
+  # `qrscan` (without one, every code is rejected). Unanswered, each one
+  # pauses with no `out/` written, and answered it writes `out/<slug>/`
+  # (`the_root_gated_recipes_pause_unanswered_and_write_nothing`).
+  - slug: comfyui-image-chain
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/report/counts/stood_in": 3, "/report/counts/refused": 3 }
+  - slug: feed-digest
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/report/counts/scored": 6, "/kept": 3 }
+  - slug: lead-enrichment
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      # Scored on either answer: only the yes writes the CSV.
+      outputs:
+        "/run/counts/nurture": 2
+        "/run/counts/disqualified": 6
+        "/posted": null
+        "/run/steps/csv": "success"
+  - slug: listing-link-audit
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/counts/regressed": 3, "/counts/broken": 1, "/counts/unreachable": 1 }
+  - slug: qr-art-forge
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/report/counts/scanned": 5 }
+  - slug: refund-chaser
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/report/counts/due": 4, "/report/counts/sent": 0 }
+  - slug: seo-site-audit
+    door: run
+    kit: [fixtures]
+    model: mock/echo
+    answers: { approve: "true" }
+    expect:
+      rc: 0
+      outputs: { "/report/counts/pages": 6, "/report/counts/proposals_back": 4 }
+  # launch-campaign-forge runs on a Codex seat over ACP and reaches
+  # qrcode-ai.com with a paid key. Its header says it cannot run offline: an
+  # ACP seat refuses the mock backend with a typed finding (exit 3) rather
+  # than substitute it. The row pins that refusal; `every_refused_row_checks_clean`
+  # proves its file passes `nika check`.
+  - { slug: launch-campaign-forge, expect: { rc: 3, finding: NIKA-1801 } }
 
   # ── The honest skips — launched by no hermetic gate, named and counted ──
   # model-bench: per-task `model:` seats escape the envelope override (the

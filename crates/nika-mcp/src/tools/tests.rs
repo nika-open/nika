@@ -185,6 +185,107 @@ fn the_catalog_payload_marks_what_this_binary_can_resolve() {
     }
 }
 
+/// `mcp: true` serves the MCP server shelf: the same payload as
+/// `nika catalog --mcp --json`, tool hubs marked, env vars by name only.
+#[test]
+fn the_catalog_tool_serves_the_mcp_shelf_on_request() {
+    let out = execute("nika_catalog", &json!({ "mcp": true })).expect("nika_catalog runs");
+    let value: Value = serde_json::from_str(&out).expect("the shelf is JSON");
+    assert_eq!(value["catalog_version"], 1);
+    assert!(
+        value.get("providers").is_none(),
+        "the shelf is its own envelope"
+    );
+    let servers = value["mcp_servers"].as_array().expect("mcp_servers");
+    assert_eq!(servers.len(), nika_catalog::all_mcp_servers().len());
+    let expected = serde_json::to_value(nika_catalog::mcp_export::mcp_shelf_export())
+        .expect("the shelf serializes");
+    assert_eq!(value, expected, "one builder for the CLI and the oracle");
+    let hubs: Vec<&str> = servers
+        .iter()
+        .filter(|s| {
+            s["tags"]
+                .as_array()
+                .is_some_and(|t| t.contains(&json!("tool-hub")))
+        })
+        .filter_map(|s| s["id"].as_str())
+        .collect();
+    assert!(hubs.contains(&"treg"), "treg is a marked hub: {hubs:?}");
+
+    let providers = execute("nika_catalog", &json!({ "mcp": false })).expect("runs");
+    let value: Value = serde_json::from_str(&providers).expect("JSON");
+    assert!(
+        value["providers"].is_array(),
+        "`mcp: false` keeps the provider catalog"
+    );
+
+    let err = execute("nika_catalog", &json!({ "mcp": "yes" })).expect_err("a string is refused");
+    assert!(err.contains("`mcp` must be a boolean"), "{err}");
+}
+
+/// The shelf leaves compact, and `query` narrows it to the matching
+/// servers in shelf order; an empty query keeps every server.
+#[test]
+fn the_mcp_shelf_is_compact_and_narrowed_by_a_query() {
+    let full = execute("nika_catalog", &json!({ "mcp": true })).expect("runs");
+    assert!(!full.contains('\n'), "compact JSON, one line");
+    let all: Value = serde_json::from_str(&full).expect("JSON");
+    let every = all["mcp_servers"].as_array().expect("servers").len();
+
+    let out = execute("nika_catalog", &json!({ "mcp": true, "query": "TOOL-HUB" })).expect("runs");
+    let value: Value = serde_json::from_str(&out).expect("JSON");
+    assert_eq!(value["catalog_version"], 1);
+    let hubs = value["mcp_servers"].as_array().expect("servers");
+    assert!(
+        !hubs.is_empty() && hubs.len() < every,
+        "{} of {every}",
+        hubs.len()
+    );
+    for s in hubs {
+        let tagged = s["tags"]
+            .as_array()
+            .is_some_and(|t| t.contains(&json!("tool-hub")));
+        let named = ["id", "title", "category"].iter().any(|k| {
+            s[*k]
+                .as_str()
+                .is_some_and(|v| v.to_ascii_lowercase().contains("tool-hub"))
+        });
+        assert!(tagged || named, "{s}");
+    }
+
+    let none = execute(
+        "nika_catalog",
+        &json!({ "mcp": true, "query": "no-such-server-zz" }),
+    )
+    .expect("runs");
+    let value: Value = serde_json::from_str(&none).expect("JSON");
+    assert_eq!(value["mcp_servers"], json!([]));
+
+    let blank = execute("nika_catalog", &json!({ "mcp": true, "query": "  " })).expect("runs");
+    assert_eq!(blank, full, "a blank query keeps the whole shelf");
+
+    let err = execute("nika_catalog", &json!({ "mcp": true, "query": 3 })).expect_err("refused");
+    assert!(err.contains("`query` must be a string"), "{err}");
+}
+
+/// The advertised schema names the `mcp` switch, so a client can find it.
+#[test]
+fn the_catalog_tool_advertises_its_mcp_switch() {
+    let c = catalog();
+    let entry = c
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|t| t["name"] == "nika_catalog")
+        .expect("nika_catalog is advertised");
+    assert_eq!(entry["inputSchema"]["properties"]["mcp"]["type"], "boolean");
+    let text = entry["description"].as_str().expect("a description");
+    assert!(
+        text.contains("mcp: true") && text.contains("tool-hub"),
+        "{text}"
+    );
+}
+
 #[test]
 fn catalog_and_tools_payloads_are_the_versioned_wire_json() {
     let out = execute("nika_catalog", &json!({})).expect("nika_catalog runs");

@@ -26,12 +26,12 @@
 //! - `Vision`/`Audio`/`Multimodal` — only ONE applies (most-specific wins)
 //! - `Budget`/`Frontier` — mutually exclusive per model
 //! - `ReadOnly`/`Destructive` — every MCP server MUST carry one
-//! - `Official`/`Verified` — apply to MCP servers only
+//! - `Official`/`Verified`/`ToolHub` — apply to MCP servers only
 //! - `Embedding`/`Reranker` — apply to embedding entries only
 
 /// Typed tag vocabulary for catalog entries.
 ///
-/// 42 variants covering model I/O modalities, reasoning/generation behaviour,
+/// 43 variants covering model I/O modalities, reasoning/generation behaviour,
 /// economics, deployment/sovereignty, specialisation, domain, and MCP-server
 /// permissioning.
 ///
@@ -165,6 +165,11 @@ pub enum Tag {
     Official,
     /// Verified by the MCP registry (registry.modelcontextprotocol.io).
     Verified,
+    /// A tool hub: one MCP server, one key, that fronts many third-party
+    /// providers' tools (treg, Composio, Zapier MCP, …) and exposes search
+    /// tools to discover them before a call. Orthogonal to `ReadOnly` /
+    /// `Destructive`, which still classify what the hub's tools can do.
+    ToolHub,
 }
 
 impl Tag {
@@ -217,6 +222,7 @@ impl Tag {
             Self::Sandbox => "sandbox",
             Self::Official => "official",
             Self::Verified => "verified",
+            Self::ToolHub => "tool-hub",
         }
     }
 
@@ -255,7 +261,7 @@ impl core::fmt::Display for ParseTagError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "unknown tag {:?} — not in the 42-variant Tag enum",
+            "unknown tag {:?} — not in the 43-variant Tag enum",
             self.input
         )
     }
@@ -310,6 +316,7 @@ impl core::str::FromStr for Tag {
             "sandbox" => Self::Sandbox,
             "official" => Self::Official,
             "verified" => Self::Verified,
+            "tool-hub" => Self::ToolHub,
             _ => {
                 return Err(ParseTagError {
                     input: s.to_owned(),
@@ -323,7 +330,7 @@ impl core::str::FromStr for Tag {
 mod tests {
     use super::*;
 
-    /// Exhaustive list of all 42 variants. Updated here when a new variant is
+    /// Exhaustive list of all 43 variants. Updated here when a new variant is
     /// added — CI fails if `as_str` / `FromStr` are out of sync.
     const ALL_TAGS: &[Tag] = &[
         // modalities
@@ -375,11 +382,12 @@ mod tests {
         Tag::Sandbox,
         Tag::Official,
         Tag::Verified,
+        Tag::ToolHub,
     ];
 
     #[test]
-    fn variant_count_is_42() {
-        assert_eq!(ALL_TAGS.len(), 42, "Tag enum must have exactly 42 variants");
+    fn variant_count_is_43() {
+        assert_eq!(ALL_TAGS.len(), 43, "Tag enum must have exactly 43 variants");
     }
 
     #[test]
@@ -463,6 +471,7 @@ mod tests {
         assert_eq!(Tag::parse("read-only"), Some(Tag::ReadOnly));
         assert_eq!(Tag::parse("image-gen"), Some(Tag::ImageGen));
         assert_eq!(Tag::parse("code-execution"), Some(Tag::CodeExecution));
+        assert_eq!(Tag::parse("tool-hub"), Some(Tag::ToolHub));
 
         assert_eq!(Tag::PromptCaching.as_str(), "prompt-caching");
         assert_eq!(Tag::OpenSource.as_str(), "open-source");

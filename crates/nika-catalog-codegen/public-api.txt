@@ -340,6 +340,8 @@ pub nika_catalog_codegen::McpServerEntry::last_verified: alloc::string::String
 pub nika_catalog_codegen::McpServerEntry::packages: alloc::vec::Vec<nika_catalog_codegen::PackageEntry>
 pub nika_catalog_codegen::McpServerEntry::pricing: alloc::string::String
 pub nika_catalog_codegen::McpServerEntry::remotes: alloc::vec::Vec<nika_catalog_codegen::RemoteEntry>
+pub nika_catalog_codegen::McpServerEntry::status: core::option::Option<alloc::string::String>
+pub nika_catalog_codegen::McpServerEntry::status_note: core::option::Option<alloc::string::String>
 pub nika_catalog_codegen::McpServerEntry::tags: alloc::vec::Vec<alloc::string::String>
 pub nika_catalog_codegen::McpServerEntry::title: alloc::string::String
 impl core::fmt::Debug for nika_catalog_codegen::McpServerEntry

@@ -17,6 +17,7 @@ dag	NIKA-EXEC	run-fail	conformance/dag/foreach-fail-fast-true.nika
 envelope	(positive)	positive-run	conformance/envelope/minimal-valid-workflow.nika
 envelope	(positive)	positive-run	conformance/envelope/outputs-contract.nika
 envelope	(positive)	positive-run	conformance/envelope/secrets-infer-egress-sanctioned.nika
+envelope	(positive)	positive-run	conformance/envelope/sec-exec-recursive-delete-inside.nika
 envelope	NIKA-PARSE	check-reject	conformance/envelope/parse-bad-task-id.nika
 envelope	NIKA-PARSE	check-reject	conformance/tests/core/envelope/054-nika-retired-version-tag-refused
 envelope	NIKA-PARSE	check-reject	conformance/envelope/parse-duplicate-task-id.nika
@@ -28,6 +29,8 @@ envelope	NIKA-PARSE	check-reject	conformance/envelope/parse-unknown-field.nika
 envelope	NIKA-PARSE	check-reject	conformance/envelope/parse-yaml-syntax-reject.nika
 envelope	NIKA-SEC	run-fail	conformance/envelope/sec-exec-array-form-blocklist.nika
 envelope	NIKA-SEC	run-fail	conformance/envelope/sec-exec-blocklist-rm-rf.nika
+envelope	NIKA-SEC	run-fail	conformance/envelope/sec-exec-recursive-delete-escape.nika
+envelope	NIKA-SEC	run-fail	conformance/envelope/sec-exec-shell-recursive-delete-spelling.nika
 envelope	NIKA-SEC	check-reject	conformance/envelope/sec-ssrf-localhost-blocked.nika
 envelope	NIKA-SEC	check-reject	conformance/envelope/sec-ssrf-metadata-blocked.nika
 envelope	NIKA-SEC	check-reject	conformance/envelope/sec-ssrf-private-range-blocked.nika
@@ -124,6 +127,8 @@ envelope	(secret-identity)	export-masking	DECLARED-UNQUALIFIED (conformance/test
 envelope	(secret-export)	export-delivery	DECLARED-UNQUALIFIED (conformance/tests/runtime/secrets-export/001-derived and 003-direct; secret-export-v1; runtime/secrets/001 still asserts only the task value)
 envelope	NIKA-SEC-009	check-fail	conformance/envelope/trifecta-realized-flow-ungated.nika
 envelope	(positive)	positive-check	conformance/envelope/trifecta-human-gate-dominates.nika
+envelope	NIKA-SEC-009	check-fail	conformance/envelope/trifecta-choice-gate-untested.nika
+envelope	(positive)	positive-check	conformance/envelope/trifecta-choice-gate-tested.nika
 composition	NIKA-COMP-003	check-fail	conformance/composition/self-launch-cycle.nika
 composition	(positive)	positive-run	conformance/composition/parent-child-acyclic.nika
 composition	NIKA-COMP-001	check-reject	conformance/tests/deep/composition/010-missing-child/input.yaml

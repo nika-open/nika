@@ -89,7 +89,7 @@ mod tests {
     fn mcp_servers_count_pinned() {
         // Pinned to detect silent additions/removals. Bump intentionally
         // when the catalog gains or drops an entry.
-        assert_eq!(ALL_MCP_SERVERS.len(), 105);
+        assert_eq!(ALL_MCP_SERVERS.len(), 120);
     }
 
     #[test]
@@ -420,17 +420,19 @@ mod tests {
 
     #[test]
     fn banned_aliases_must_not_ship_an_npm_package() {
-        // These 26 aliases are known to NOT exist on npm (deprecated
+        // These 24 aliases are known to NOT exist on npm (deprecated
         // Anthropic reference servers, fabricated package names, or
         // zero-download abandoned forks). They MAY ship in this catalog
         // if a non-npm distribution exists (pypi, oci, remote), but they
         // MUST NEVER be re-added as an npm package — npm install would
-        // fail or pull deprecated code.
+        // fail or pull deprecated code. `brave-search` and `brave` left
+        // the list on 2026-11-24: Brave now publishes its own server as
+        // `@brave/brave-search-mcp-server` (MCP Registry
+        // `io.github.brave/brave-search-mcp-server`), which the refresh
+        // probe found current and not deprecated.
         use crate::types::RegistryType;
         let banned_on_npm = [
             "puppeteer",
-            "brave-search",
-            "brave",
             "google-maps",
             "github",
             "gitlab",

@@ -237,19 +237,7 @@ fn learn_tools() -> Value {
                             never a remembered number.",
             "inputSchema": { "type": "object", "properties": {} }
         },
-        {
-            "name": "nika_catalog",
-            "description": "The embedded provider/model catalog — providers, models, \
-                            capabilities (vision · reasoning · json_mode), context \
-                            windows, and API-key env-var NAMES (values never read). \
-                            Versioned wire `catalog_version: 1`. Pick REAL model ids \
-                            from here instead of guessing — and pick them ONLY from \
-                            rows where `resolves` is true. A cataloged vendor is not a \
-                            runnable one: `resolves: false` means this binary has no \
-                            adapter for it and `nika check` refuses the model at the \
-                            MODELS rung.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
+        catalog_tool(),
         {
             "name": "nika_tools",
             "description": "The embedded builtin-tool catalog — every `nika:*` tool \
@@ -259,6 +247,43 @@ fn learn_tools() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
+}
+
+/// The `nika_catalog` tool: the provider/model catalog, or the MCP server
+/// shelf with `mcp: true`, narrowed by `query`.
+fn catalog_tool() -> Value {
+    json!({
+        "name": "nika_catalog",
+        "description": "The embedded provider/model catalog — providers, models, \
+                        capabilities (vision · reasoning · json_mode), context \
+                        windows, and API-key env-var NAMES (values never read). \
+                        Versioned wire `catalog_version: 1`. Pick REAL model ids \
+                        from here instead of guessing — and pick them ONLY from \
+                        rows where `resolves` is true. A cataloged vendor is not a \
+                        runnable one: `resolves: false` means this binary has no \
+                        adapter for it and `nika check` refuses the model at the \
+                        MODELS rung. With `mcp: true` it returns the MCP server \
+                        shelf instead (same `catalog_version: 1` envelope, key \
+                        `mcp_servers`): tool hubs (tag `tool-hub`) and vendor \
+                        servers, each with its packages, hosted remotes (transport \
+                        and auth), env-var NAMES, `last_verified` date and `status` \
+                        (`current`, `deprecated` or `restricted`, with a \
+                        `status_note` saying why). Add `query` to keep only the \
+                        servers whose id, alias, title, category or tag contains it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mcp": {
+                    "type": "boolean",
+                    "description": "Return the MCP server shelf instead of the provider/model catalog."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "With mcp: true, keep only the servers whose id, alias, title, category or tag contains this text (case-insensitive)."
+                }
+            }
+        }
+    })
 }
 
 /// Execute a tool by name. `Ok(text)` is the success content; `Err(text)` is a
@@ -272,7 +297,7 @@ pub(crate) fn execute(name: &str, args: &Value) -> Result<String, String> {
         "nika_examples" => crate::learn::examples(args),
         "nika_template" => crate::learn::template(args),
         "nika_canon" => Ok(nika_pack::canon().to_owned()),
-        "nika_catalog" => catalog_payload(),
+        "nika_catalog" => catalog_payload(args),
         "nika_tools" => tools_payload(),
         other => Err(format!(
             "unknown tool `{other}` — nika exposes nika_check · nika_inspect · \
@@ -703,10 +728,43 @@ fn inspect(args: &Value) -> Result<String, String> {
 /// most: the reader is a machine that acts, not a human who shrugs. The
 /// chain over `CANONICAL_IDS` is what makes `resolves` true anywhere —
 /// drop it and every row reads `false`.
-fn catalog_payload() -> Result<String, String> {
-    let export =
-        nika_catalog::export::catalog_export().with_resolvable(&nika_providers::CANONICAL_IDS);
-    serde_json::to_string_pretty(&export).map_err(|e| format!("catalog projection failed: {e}"))
+///
+/// With `mcp: true` it serves the MCP server shelf instead: the SAME
+/// payload `nika catalog --mcp --json` emits (built by
+/// `nika-catalog::mcp_export`), written compact because a model reads it,
+/// and narrowed by `query` when one is given.
+fn catalog_payload(args: &Value) -> Result<String, String> {
+    let query = match args.get("query") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(q)) => Some(q.trim().to_ascii_lowercase()),
+        Some(other) => return Err(format!("`query` must be a string, got {other}")),
+    };
+    match args.get("mcp") {
+        None | Some(Value::Bool(false) | Value::Null) => {
+            let export = nika_catalog::export::catalog_export()
+                .with_resolvable(&nika_providers::CANONICAL_IDS);
+            serde_json::to_string_pretty(&export)
+                .map_err(|e| format!("catalog projection failed: {e}"))
+        }
+        Some(Value::Bool(true)) => {
+            let mut shelf = nika_catalog::mcp_export::mcp_shelf_export();
+            if let Some(q) = query.as_deref().filter(|q| !q.is_empty()) {
+                shelf.mcp_servers.retain(|s| shelf_match(s, q));
+            }
+            serde_json::to_string(&shelf).map_err(|e| format!("MCP shelf projection failed: {e}"))
+        }
+        Some(other) => Err(format!("`mcp` must be a boolean, got {other}")),
+    }
+}
+
+/// Whether one shelf server answers a lowercase `query`: a substring of its
+/// id, an alias, its title, its category or a tag, ignoring ASCII case.
+fn shelf_match(s: &nika_catalog::mcp_export::McpServerExport, query: &str) -> bool {
+    std::iter::once(s.id)
+        .chain(s.aliases.iter().copied())
+        .chain([s.title, s.category])
+        .chain(s.tags.iter().copied())
+        .any(|text| text.to_ascii_lowercase().contains(query))
 }
 
 /// `nika_tools` — the versioned builtin-tool projection: the SAME payload

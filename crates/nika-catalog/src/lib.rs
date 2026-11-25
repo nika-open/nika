@@ -45,10 +45,15 @@ pub mod error;
 #[cfg(all(feature = "serde", feature = "providers", feature = "capabilities"))]
 pub mod export;
 pub mod lookup;
+// The MCP shelf on the wire (`nika catalog --mcp --json` · MCP `nika_catalog` with `mcp: true`):
+// a separate envelope, since the provider projection's two top-level keys are locked.
+#[cfg(all(feature = "serde", feature = "mcp"))]
+pub mod mcp_export;
 // A model's output facts: its recorded limit and what an authoring seat reads of it.
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 mod output;
-// The controls a provider's API refuses on a model (fixed sampling, an adaptive thinking).
+// The controls a provider's API refuses on a model (fixed sampling, an adaptive thinking,
+// a forced tool choice, a thinking type it does not take).
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 mod sampling;
 pub mod suggest;
@@ -93,7 +98,10 @@ pub use output::output_caps;
 #[cfg(all(feature = "providers", feature = "capabilities"))]
 pub use output::{generated_cap, model_output_limit};
 #[cfg(all(feature = "providers", feature = "capabilities"))]
-pub use sampling::{nickname_wire, refuses_sampling, refuses_thinking_budget};
+pub use sampling::{
+    nickname_wire, refuses_forced_tool_choice, refuses_sampling, refuses_thinking_budget,
+    refuses_thinking_type,
+};
 
 // ── Iteration helpers ───────────────────────────────────────────────────
 
@@ -179,7 +187,7 @@ mod tests {
 
     #[test]
     fn all_mcp_servers_non_empty() {
-        assert_eq!(all_mcp_servers().len(), 105);
+        assert_eq!(all_mcp_servers().len(), 120);
     }
 
     #[test]

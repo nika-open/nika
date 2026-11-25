@@ -278,6 +278,11 @@ enum Command {
         /// reaches without MCP — the old `tools` verb, one roof).
         #[arg(long)]
         tools: bool,
+        /// The MCP server shelf instead: tool hubs and vendor servers, how
+        /// each is reached (package or hosted remote), the env var names it
+        /// reads and the date it was last verified.
+        #[arg(long, conflicts_with = "tools")]
+        mcp: bool,
     },
     /// See a canonical workflow WORK — on the mock model by default (zero
     /// keys · no model call · zero flags; a step that fetches still reaches
@@ -928,11 +933,7 @@ fn dispatch_verb(
             schema,
             project,
         } => emit(&verbs::pack_surface::spec_or_schema(canon, schema, project)),
-        Command::Catalog { json, tools } => emit(&if tools {
-            verbs::tools::run(json, plain_theme)
-        } else {
-            verbs::catalog::run(json, plain_theme)
-        }),
+        Command::Catalog { json, tools, mcp } => catalog_arm(json, tools, mcp, plain_theme),
         Command::Try(a) => try_args::listing(&a, plain_theme)
             .map_or_else(|| try_args::rehearse(&a, plain_theme), |o| emit(&o)),
         Command::Compile(mut command) => {
@@ -977,6 +978,18 @@ fn dispatch_verb(
             bind,
         } => verbs::mcp_pins::mcp_verb(action, transport, port, &bind),
     }
+}
+
+/// `nika catalog`: the provider and model catalog, the builtin tools
+/// (`--tools`) or the MCP server shelf (`--mcp`).
+fn catalog_arm(json: bool, tools: bool, mcp: bool, theme: Theme) -> u8 {
+    emit(&if tools {
+        verbs::tools::run(json, theme)
+    } else if mcp {
+        verbs::catalog::run_mcp(json, theme)
+    } else {
+        verbs::catalog::run(json, theme)
+    })
 }
 
 /// The `guard` arm's routing — the hook wire OWNS stdout like lsp/mcp:

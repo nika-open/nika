@@ -184,6 +184,148 @@ tasks:
     );
 }
 
+/// The resolved value the two masking tests below plant in a rendered field.
+const PLANTED: &str = "sk-live-9f2c7e4a1b6d";
+
+/// Every string field of every event, in order: the value must ride none.
+fn assert_no_event_carries(events: &[nika_event::Event], value: &str) {
+    for event in events {
+        for f in &event.fields {
+            if let FieldValue::String(s) = &f.value {
+                assert!(
+                    !s.contains(value),
+                    "the value rides event {:?} field `{}`: {s}",
+                    event.kind,
+                    f.key
+                );
+            }
+        }
+    }
+}
+
+/// A spawn that fails over a `cwd:` rendered from a secret: the failure text
+/// the shell returns names the directory, and the task's error record (what a
+/// later task reads as `tasks.use_it.error`, and what the embedder receives)
+/// carries the marker, never the value. The shell still received the
+/// rendered directory: what the run sends is unchanged.
+#[tokio::test]
+async fn a_failed_spawn_never_names_a_resolved_secret_in_its_record() {
+    let yaml = r#"
+nika: secret-cwd
+permits: { exec: true }
+secrets:
+  token:
+    source: env
+    key: MY_TOKEN
+    egress:
+      - to: "exec"
+tasks:
+  use_it:
+    exec: { command: ["deploy"], cwd: "${{ secrets.token }}" }
+"#;
+    let shell = MockShell::new().enqueue_err(nika_kernel::process::ShellError::Other {
+        reason: format!("cannot enter the working directory `{PLANTED}`"),
+    });
+    let resolver = Arc::new(MapSecrets(BTreeMap::from([(
+        "token".to_owned(),
+        PLANTED.to_owned(),
+    )])));
+    let (outcome, events) = run_with_secrets(yaml, shell.clone(), resolver).await;
+
+    assert!(!outcome.ok);
+    let commands = shell.executed_commands();
+    assert_eq!(commands.len(), 1, "the spawn was attempted once");
+    assert_eq!(
+        commands[0].cwd.as_deref(),
+        Some(std::path::Path::new(PLANTED)),
+        "the shell received the rendered directory"
+    );
+    let err = outcome.records["use_it"]
+        .error
+        .as_ref()
+        .expect("the spawn failure is on record");
+    assert_eq!(err.code, "NIKA-EXEC-002");
+    assert_eq!(
+        err.message,
+        "shell execution failed: shell error: cannot enter the working directory `***`"
+    );
+    assert_no_event_carries(&events, PLANTED);
+}
+
+/// A `model:` rendered from a secret: `nika check` now refuses the file, and
+/// the run refuses a dirty report, so the run below holds the report a check
+/// older than that refusal gave for the same bytes (0.125.1 passed it clean).
+/// Under a cap the seat is refused before any provider request, and the
+/// refusal text names the seat. The record carries the marker in place of
+/// the value, on the code the refusal always had.
+#[tokio::test]
+async fn a_refused_route_never_names_a_resolved_secret_in_its_record() {
+    let yaml = r#"
+nika: secret-route
+permits: {}
+secrets:
+  token: { source: env, key: MY_TOKEN }
+tasks:
+  ask:
+    infer: { prompt: hello, model: "${{ secrets.token }}", max_tokens: 64 }
+"#;
+    let seat = format!("gemini/{PLANTED}");
+    let wf = parse(yaml, FileId::new(0), ParseMode::Strict).expect("fixture parses");
+    let mut report = check(&wf);
+    assert_eq!(
+        report
+            .secret_leaks
+            .iter()
+            .map(|l| (l.task.as_str(), l.sink))
+            .collect::<Vec<_>>(),
+        [("ask", "infer.model")],
+        "check refuses the file: {report:?}"
+    );
+    // The report an older check gave: the route was not judged.
+    report.secret_leaks.clear();
+    assert!(report.is_clean(), "{report:?}");
+    let registry = Arc::new(ProviderRegistry::without_http(ProvidersConfig::default()));
+    let invoke = Arc::new(InvokeVerb::new(Arc::new(MockToolExecutor::new())));
+    let runtime = Runtime::new(
+        ExecVerb::new(Arc::new(MockShell::new())),
+        Arc::clone(&invoke),
+        InferVerb::new(registry, "mock/echo"),
+        AgentVerb::new(
+            Arc::new(MockProvider::new("mock")),
+            invoke,
+            Arc::new(MockToolDefinitionProvider::new()),
+            "mock/echo",
+        ),
+        MockClock::new(),
+        RuntimeConfig::default(),
+    )
+    .with_secret_resolver(Arc::new(MapSecrets(BTreeMap::from([(
+        "token".to_owned(),
+        seat.clone(),
+    )]))))
+    .with_max_cost_usd(Some(1.0));
+    let mut stamper = DeterministicStamper::new();
+    let mut sink = VecSink::new();
+    let outcome = runtime
+        .run(&wf, &report, &mut stamper, &mut sink)
+        .await
+        .expect("the launch cannot judge a seat only the run renders");
+    let events = sink.into_events();
+
+    assert!(!outcome.ok);
+    let err = outcome.records["ask"]
+        .error
+        .as_ref()
+        .expect("the refusal is on record");
+    assert_eq!(err.code, "NIKA-1704");
+    assert_eq!(
+        err.message,
+        "refused before the provider request: cloud model `***` is unpriced, so the cap \
+         cannot bound it"
+    );
+    assert_no_event_carries(&events, PLANTED);
+}
+
 /// With NO resolver injected (the default `NoSecrets`), a `secrets.X`
 /// reference is unbound — fail-closed exactly as before MINOR-B.
 #[tokio::test]

@@ -153,6 +153,10 @@ fn leak_fix(l: &SecretLeak) -> String {
             "fix: `host_from_self` needs the destination to be exactly `${{{{ secrets.{} }}}}` with no other secret in the payload (the non-occlusion guard)",
             l.secret
         ),
+        R::ModelRoute => format!(
+            "fix: a model is a route, not a secret, and no `egress:` rule clears `secrets.{}` in `model:` — name the model there, or read it from `inputs:` or `const:` (`model: \"${{{{ inputs.model }}}}\"`)",
+            l.secret
+        ),
     }
 }
 

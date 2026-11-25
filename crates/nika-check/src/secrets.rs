@@ -11,7 +11,8 @@
 //!
 //! - [`SecretLeak`] — a secret reaches an `exec`/`invoke` EFFECT (directly,
 //!   via a `with:` alias, via a `for_each` item, or transitively through a
-//!   tainted upstream output). The full taint chain is carried.
+//!   tainted upstream output), or the `model:` ROUTE of an `infer`/`agent`
+//!   task, which no `egress:` rule clears. The full taint chain is carried.
 //! - [`SecretEgress`] — a secret reaches the workflow `outputs:` (it leaves
 //!   the run as the return value · the literal exfiltration case).
 //!
@@ -32,7 +33,8 @@ pub struct SecretLeak {
     pub task: String,
     /// The originating secret name (`secrets.<name>`).
     pub secret: String,
-    /// The effect surface (`exec` · `invoke`).
+    /// The effect surface (`exec` · `invoke` · `infer` · `agent`), or the
+    /// route (`infer.model` · `agent.model`).
     pub sink: &'static str,
     /// The EXACT `egress.to:` value that would sanction this sink — the
     /// tool id for an invoke (`nika:jq`), else the surface (`exec` ·
@@ -124,6 +126,22 @@ pub(super) fn scan_leaks(wf: &RawWorkflow, flow: &FlowFacts) -> Vec<SecretLeak> 
                     &task.value.action,
                     permits,
                 ),
+            });
+        }
+        // A secret in an `infer:`/`agent:` `model:` is the route the run
+        // sends: refused whatever its `egress:` (a model is never a secret).
+        for trace in flow.route_taints(idx) {
+            leaks.push(SecretLeak {
+                task: task.value.id.value.clone(),
+                secret: trace.secret.clone(),
+                sink: match &task.value.action {
+                    RawAction::Agent(_) => "agent.model",
+                    // Only an infer or agent task has a route.
+                    _ => "infer.model",
+                },
+                sink_id: sink_id_of(&task.value.action),
+                trace: trace.render(),
+                reason: super::declass::LeakReason::ModelRoute,
             });
         }
     }

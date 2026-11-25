@@ -30,6 +30,7 @@ use crate::errors::RuntimeError;
 
 pub(crate) mod commit;
 mod exec_io;
+mod masked;
 mod permits;
 mod regate;
 mod spend;
@@ -707,7 +708,7 @@ where
         if let Some(refused) = Dispatched::unread_file(action) {
             return refused;
         }
-        match action {
+        let dispatched = match action {
             RawAction::Invoke(inner) => {
                 self.dispatch_invoke(inner, scope, taint, &ctx, contract)
                     .await
@@ -727,7 +728,10 @@ where
                 "unknown verb",
                 format!("verb not wired in the runtime yet: {other:?}"),
             ),
-        }
+        };
+        // A failure's texts can name a field rendered with secrets resolved
+        // (a `model:`, a `cwd:`): its record never carries their values.
+        dispatched.masked(scope.secrets())
     }
 
     /// B9 phase C · a seat only the run decides, refused before any provider

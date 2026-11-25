@@ -416,7 +416,9 @@ impl Runs {
 
 /// The newest trace of each workflow (ANY state) — the standing resume
 /// candidate. Tie-break by name so the pick is deterministic. Shared
-/// with `trace ls` (the ★ marker paints exactly this set).
+/// with `trace ls` (the ★ marker paints exactly this set). The policy's
+/// own exemption picks among roots only: a newest child trace goes with
+/// the run that cites it (NIK-385).
 #[must_use]
 pub fn newest_per_workflow(traces: &[TraceMeta]) -> BTreeSet<usize> {
     newest_where(traces, |_| true)

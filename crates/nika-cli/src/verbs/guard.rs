@@ -863,11 +863,11 @@ fn bare_run(cwd: Option<&Path>) -> Verdict {
 /// findings · priced without the cap = deny (P0-7) · anything else
 /// flows. The guard JUDGES — it never executes the run.
 fn judge_file(path: &Path, display: &str, model: Option<&str>, capped: bool) -> Verdict {
-    let yaml = match std::fs::read_to_string(path) {
+    let yaml = match read_workflow(path) {
         Ok(y) => y,
-        Err(e) => {
+        Err(why) => {
             return Verdict::Unavailable(format!(
-                "cannot read {display}: {e} — the guard never claims a check on bytes it cannot see"
+                "cannot read {display}: {why} — the guard never claims a check on bytes it cannot see"
             ));
         }
     };
@@ -904,6 +904,67 @@ fn judge_file(path: &Path, display: &str, model: Option<&str>, capped: bool) -> 
         )),
         Some(m) => Verdict::Allow(format!("{display}: clean · priced ({m}) · capped")),
         None => Verdict::Allow(format!("{display}: clean · unpriced")),
+    }
+}
+
+/// The workflow's size budget: the guard reads at most this many bytes of
+/// the file a run names (the hook payload's own cap).
+const MAX_WORKFLOW: u64 = MAX_PAYLOAD;
+
+/// Why a workflow over [`MAX_WORKFLOW`] is not judged.
+const OVER_BUDGET: &str = "over 4 MiB, more than the guard reads";
+
+/// Read the workflow a run names, without ever waiting on it: only a
+/// regular file of at most 4 MiB. The kind and size are read before the
+/// open, so a FIFO, a socket or a device is refused unopened; the open
+/// never waits (`O_NONBLOCK`), so a path swapped for a FIFO in between
+/// cannot hold the judge either; the opened handle must still be a regular
+/// file; and the read stops one byte past the budget, so a file that grows
+/// meanwhile is refused rather than read whole. `Err` is the reason, worded
+/// for the refusal.
+fn read_workflow(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let regular = |meta: &std::fs::Metadata| {
+        if !meta.is_file() {
+            Err("not a regular file".to_owned())
+        } else if meta.len() > MAX_WORKFLOW {
+            Err(OVER_BUDGET.to_owned())
+        } else {
+            Ok(())
+        }
+    };
+    regular(&std::fs::metadata(path).map_err(|e| e.to_string())?)?;
+    let file = open_without_waiting(path).map_err(|e| e.to_string())?;
+    regular(&file.metadata().map_err(|e| e.to_string())?)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_WORKFLOW + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_WORKFLOW {
+        return Err(OVER_BUDGET.to_owned());
+    }
+    String::from_utf8(bytes).map_err(|_| "stream did not contain valid UTF-8".to_owned())
+}
+
+/// Open `path` read-only without blocking: on a FIFO with no writer the
+/// open returns at once instead of waiting for one, and a terminal device
+/// swapped in never becomes the guard's controlling terminal.
+fn open_without_waiting(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use nix::fcntl::{OFlag, open};
+        use nix::sys::stat::Mode;
+        open(
+            path,
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NONBLOCK | OFlag::O_NOCTTY,
+            Mode::empty(),
+        )
+        .map(std::fs::File::from)
+        .map_err(std::io::Error::from)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::File::open(path)
     }
 }
 

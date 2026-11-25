@@ -9,9 +9,10 @@
 //! `nika guard --stdin` at the REAL binary — the hook's judge over the
 //! wire the shims actually speak. The judge's matrix (bypasses ·
 //! fail-open cohort · dialect sniffs) lives at the lib seam in
-//! `src/verbs/guard/tests.rs`; this suite pins the four shapes the HOST
-//! meets end to end: a deny in each dialect, the clean allow, and the
-//! ghost-path `guard_unavailable` — exit codes included (0 · 2 · 3).
+//! `src/verbs/guard/tests.rs`; this suite pins the shapes the HOST meets
+//! end to end: a deny in each dialect, the clean allow, and the
+//! `guard_unavailable` of a ghost path and of a FIFO — exit codes included
+//! (0 · 2 · 3).
 
 use std::io::Write as _;
 use std::process::Command;
@@ -117,6 +118,57 @@ fn claude_payload_allows_a_clean_run() {
     let (stdout, rc) = guard_stdin(&payload);
     assert_eq!(rc, 0, "a judged-clean run flows: {stdout}");
     assert_eq!(stdout.trim(), "{}", "the no-opinion pass: {stdout}");
+}
+
+/// A FIFO named as the workflow is refused at once by the real binary,
+/// deny-shaped with the cause named: a judge that opened it would wait for
+/// a writer forever, and a host that times its hook out lets the run go.
+#[cfg(unix)]
+#[test]
+fn a_fifo_named_as_the_workflow_is_refused_at_once() {
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().expect("dir");
+    let fifo = dir.path().join("pipe.nika");
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).expect("mkfifo");
+    let payload = format!(
+        r#"{{"hook_event_name":"PreToolUse","tool_input":{{"command":"nika run {}"}},"cwd":"{}"}}"#,
+        fifo.display(),
+        dir.path().display()
+    );
+    let started = Instant::now();
+    let mut child = bin()
+        .arg("guard")
+        .arg("--stdin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("guard spawns");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(payload.as_bytes())
+        .expect("payload written");
+    while child.try_wait().expect("guard polls").is_none() {
+        if started.elapsed() > Duration::from_secs(10) {
+            child.kill().ok();
+            panic!("the guard was still waiting on the FIFO after 10 s");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().expect("guard completes");
+    let stdout = String::from_utf8(out.stdout).expect("utf8 stdout");
+    assert_eq!(out.status.code(), Some(3), "{stdout}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
+    assert_eq!(
+        v["hookSpecificOutput"]["permissionDecisionReason"],
+        format!(
+            "guard_unavailable: cannot read {}: not a regular file — the guard never claims a check on bytes it cannot see",
+            fifo.display()
+        )
+    );
 }
 
 /// A ghost path is an ENVIRONMENT failure (exit 3) — deny-shaped with

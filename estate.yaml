@@ -152,7 +152,7 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2432
-  aggregate_sha256: 57983252c9648d4df6a44f6c8955832d1343083b5194847f1b980dfc013e5026
+  aggregate_sha256: eb927bd6905c3c357d6a7272c9719156135713fad29e20821cbe922ebd894005
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored

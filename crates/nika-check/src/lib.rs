@@ -760,9 +760,9 @@ pub(crate) fn check_calls(
     // read. The wave order only orders its sweeps: with an empty one (a
     // conformance failure) the pass still runs, in declaration order.
     let flow = flow::analyze_flow(wf, &topo_waves);
-    // The engineering read shares the same gating: a valid order or no
-    // claim (its write-write conflicts ride the dedicated finding class
-    // — F-P15 · the law, never advisory).
+    // Unlike the IFC pass, the engineering read needs a valid order:
+    // without one it makes no claim (its write-write conflicts ride the
+    // dedicated finding class — F-P15 · the law, never advisory).
     let dag_read = if conformance.is_empty() {
         analysis::read_dag(wf, &topo_waves)
     } else {

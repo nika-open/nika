@@ -1005,9 +1005,9 @@ tasks:
         // a length-k trace. With the old `Vec<String>` hops cloned 2-3× per
         // task that was O(N²) time + memory — a 0.89 MiB workflow OOM'd at
         // 5.2 GB. The Arc cons-list makes via()/clone() O(1), so this chain
-        // settles in milliseconds. The assertion is correctness (the secret
-        // propagates the whole way + the trace stays intact); the implicit
-        // guard is completion — a regression to O(N²) makes this test crawl.
+        // settles in milliseconds. The assertions are correctness (the secret
+        // propagates the whole way + the trace stays intact) and the work: a
+        // forward chain settles in one sweep, one evaluation per task.
         use std::fmt::Write as _;
         const N: usize = 3_000;
         let mut y = format!("nika: w\n{S}tasks:\n");
@@ -1020,11 +1020,17 @@ tasks:
             )
             .expect("write to String is infallible");
         }
-        let (wf, f) = facts(&y);
+        let (wf, f, evaluations) = facts_within(&y, sweep_bound);
+        assert_eq!(evaluations, N, "one sweep, each task evaluated once");
         let tail = f
             .effect_taint(idx(&wf, &format!("t{}", N - 1)))
             .expect("the secret must propagate through the whole chain");
         assert_eq!(tail.secret, "api_key");
+        assert_eq!(
+            tail.hops,
+            2 * (N - 1),
+            "one output and one binding hop per link"
+        );
         let rendered = tail.render();
         assert!(
             rendered.starts_with("secrets.api_key"),
@@ -1040,7 +1046,7 @@ tasks:
     /// and only the last one sends the secret, so every sweep settles one more record, from the
     /// back. Re-evaluating only the tasks whose read record moved keeps that linear: the first
     /// sweep evaluates every task, each later one only the reader of the record that moved, so
-    /// fewer than `2N` evaluations (a full re-sweep would take `N²`). The secret still reaches
+    /// `2N - 1` evaluations in all (a full re-sweep would take `N²`). The secret still reaches
     /// the head, through every recover.
     #[test]
     fn a_backward_recover_chain_settles_in_linear_work() {
@@ -1062,10 +1068,11 @@ tasks:
         )
         .expect("write to String is infallible");
         let (wf, f, evaluations) = facts_within(&y, sweep_bound);
-        assert!(
-            (N..=2 * N).contains(&evaluations),
-            "{evaluations} evaluations for a chain of {N}: each task once, then only the reader \
-             of the record that moved"
+        assert_eq!(
+            evaluations,
+            2 * N - 1,
+            "N in the first sweep, then one per later sweep: only the reader of the record that \
+             moved"
         );
         let head = f
             .output_taint
@@ -1092,44 +1099,96 @@ tasks:
         );
     }
 
+    /// Every `outputs:` entry as `(output, secret, trace)`, the rows `NIKA-SEC-007` reads.
+    fn egress_rows(f: &FlowFacts) -> Vec<(String, String, String)> {
+        crate::secrets::scan_egresses(f)
+            .into_iter()
+            .map(|e| (e.output, e.secret, e.trace))
+            .collect()
+    }
+
     /// `t0` recovers to the record of `t1`, declared after it, so the flow needs a second sweep.
     /// Stopped after one, the facts are incomplete: every task is then judged as if every
-    /// declared secret reached it, so the send no `egress:` rule allows refuses with the reason
-    /// in its trace, and the sends the rule allows stay allowed.
+    /// declared secret reached it, so the send and the `outputs:` entry no `egress:` rule allows
+    /// refuse with the reason in their trace, and the sends the rule allows stay allowed.
     #[test]
     fn a_flow_stopped_at_its_bound_fails_closed() {
-        let y = "nika: w\nsecrets:\n  api_key: { source: env, key: K, egress: [{ to: \"nika:fetch\", host: \"crm.example.com\" }] }\npermits:\n  tools: [\"nika:fetch\"]\n  net: { http: [\"crm.example.com\", \"other.example.com\"] }\ntasks:\n  t0:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/a\" } }\n    on_error: { recover: \"${{ tasks.t1.output }}\" }\n  t1:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/b\", headers: { authorization: \"Bearer ${{ secrets.api_key }}\" } } }\n  sink:\n    with: { x: \"${{ tasks.t0.output }}\" }\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://other.example.com/in\", method: POST, body: \"${{ with.x }}\" } }\n";
+        const STOPPED: &str = "secrets.api_key → the secret flow stopped at its sweep bound (1) \
+                               before settling: judged as if every declared secret reached this \
+                               task";
+        let y = "nika: w\nsecrets:\n  api_key: { source: env, key: K, egress: [{ to: \"nika:fetch\", host: \"crm.example.com\" }] }\npermits:\n  tools: [\"nika:fetch\"]\n  net: { http: [\"crm.example.com\", \"other.example.com\"] }\ntasks:\n  t0:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/a\" } }\n    on_error: { recover: \"${{ tasks.t1.output }}\" }\n  t1:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/b\", headers: { authorization: \"Bearer ${{ secrets.api_key }}\" } } }\n  sink:\n    with: { x: \"${{ tasks.t0.output }}\" }\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://other.example.com/in\", method: POST, body: \"${{ with.x }}\" } }\noutputs:\n  r: \"${{ tasks.t0.output }}\"\n";
+        let real = "secrets.api_key → tasks.t1.output → on_error.recover @ t0 → tasks.t0.output";
         let (wf, settled, _) = facts_within(y, |_, _| 2);
         assert_eq!(
             leak_rows(&wf, &settled),
-            [(
-                "sink".to_owned(),
-                "secrets.api_key → tasks.t1.output → on_error.recover @ t0 → tasks.t0.output → \
-                 with.x @ sink"
-                    .to_owned()
-            )],
+            [("sink".to_owned(), format!("{real} → with.x @ sink"))],
             "two sweeps settle it: the real path"
         );
+        let real_egress = [(
+            "r".to_owned(),
+            "api_key".to_owned(),
+            format!("{real} → outputs"),
+        )];
+        assert_eq!(egress_rows(&settled), real_egress);
+        let mut report = crate::check(&wf);
+        let reported: Vec<_> = report
+            .secret_egresses
+            .iter()
+            .map(|e| (e.output.clone(), e.secret.clone(), e.trace.clone()))
+            .collect();
+        assert_eq!(reported, real_egress, "the real bound settles it too");
+
         let (wf, stopped, _) = facts_within(y, |_, _| 1);
         assert_eq!(
             leak_rows(&wf, &stopped),
-            [(
-                "sink".to_owned(),
-                "secrets.api_key → the secret flow stopped at its sweep bound (1) before \
-                 settling: judged as if every declared secret reached this task"
-                    .to_owned()
-            )],
+            [("sink".to_owned(), STOPPED.to_owned())],
             "one sweep leaves work: every task carries every secret, the allowed sends stay allowed"
         );
-        let refused = crate::secrets::scan_leaks(&wf, &stopped);
-        let rows: Vec<(&str, &str, &str)> = refused
-            .iter()
-            .map(|l| (l.task.as_str(), l.secret.as_str(), l.sink))
-            .collect();
         assert_eq!(
-            rows,
-            [("sink", "api_key", "invoke")],
-            "the incomplete facts refuse through the report's NIKA-SEC-006 rows"
+            egress_rows(&stopped),
+            [(
+                "r".to_owned(),
+                "api_key".to_owned(),
+                format!("{STOPPED} → outputs")
+            )]
+        );
+        // The incomplete facts refuse through the report's one voice: the rows the report would
+        // hold under the stopped facts, folded as `check` folds them.
+        report.secret_leaks = crate::secrets::scan_leaks(&wf, &stopped);
+        report.secret_egresses = crate::secrets::scan_egresses(&stopped);
+        let refused: Vec<_> = crate::findings::collect(&report)
+            .into_iter()
+            .filter(|f| matches!(f.kind, "secret_leak" | "secret_egress"))
+            .map(|f| (f.kind, f.code, f.task, f.message))
+            .collect();
+        assert_eq!(refused.len(), 2, "{refused:#?}");
+        assert_eq!(
+            (
+                refused[0].0,
+                refused[0].1.as_deref(),
+                refused[0].2.as_deref()
+            ),
+            ("secret_leak", Some("NIKA-SEC-006"), Some("sink"))
+        );
+        assert!(
+            refused[0]
+                .3
+                .starts_with(&format!("leak into invoke (task `sink`) — {STOPPED} · ")),
+            "{}",
+            refused[0].3
+        );
+        assert_eq!(
+            refused[1],
+            (
+                "secret_egress",
+                Some("NIKA-SEC-007".to_owned()),
+                None,
+                format!(
+                    "EGRESS via outputs.r — {STOPPED} → outputs · fix: remove `outputs.r`; if \
+                     exporting this secret is intended, add `{{ to: \"outputs\" }}` to \
+                     `secrets.api_key.egress` (keep existing rules)"
+                )
+            )
         );
     }
 

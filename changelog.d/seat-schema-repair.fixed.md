@@ -18,4 +18,8 @@
   secrets in it are masked; `on_error:` reads the message whole.
   NIKA-AGENT-001 and NIKA-AGENT-002 keep their
   `partial_output` too, as spec 02 says. `on_codes: [NIKA-INFER-002]` in a
-  `retry:` block replays the task on a new session.
+  `retry:` block replays the task on a new session. `nika explain` no
+  longer closes a code only a run raises (NIKA-INFER-002, the agent budget
+  codes, timeouts, cancellations and the others) with « `nika check`
+  catches this before a run ever starts »: it says the run raises it, and
+  says which part check does catch for NIKA-INFER-004 and NIKA-VAR-006.

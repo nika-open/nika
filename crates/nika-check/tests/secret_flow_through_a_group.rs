@@ -917,3 +917,109 @@ fn an_infer_member_of_a_fold_is_judged_as_its_task_read() {
     );
     assert_eq!(findings(&recovered), [sec_006("relay")]);
 }
+
+/// A `with:` binding that reads `item` renders once per iteration with the item bound (spec 03,
+/// `for_each` semantics), so it carries what the item carries: here a literal list's secret.
+const ITEM_THROUGH_A_BINDING: &str = r#"nika: item-through-a-binding
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  relay:
+    for_each: { items: ["${{ secrets.token }}"] }
+    with: { v: "${{ item }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.v }}" } }
+"#;
+
+#[test]
+fn a_binding_that_reads_the_item_carries_its_secret() {
+    let report = run(ITEM_THROUGH_A_BINDING);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → item @ relay → with.v @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    assert_eq!(flows_to(&report), ["other.example.com"]);
+
+    // The same send where the secret may go stays allowed.
+    let allowed = run(&ITEM_THROUGH_A_BINDING.replace(
+        r#"host: "crm.example.com" }] }"#,
+        r#"host: "other.example.com" }] }"#,
+    ));
+    assert_eq!(leaks(&allowed), Vec::<Leak>::new());
+    assert_eq!(findings(&allowed), Vec::<Finding>::new());
+}
+
+/// The loop runs over a fold, and a binding reads the item: the run renders the binding with
+/// each member's record bound.
+const ITEM_OF_A_FOLD_THROUGH_A_BINDING: &str = r#"nika: item-of-a-fold-through-a-binding
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  relay:
+    with: { legs: "${{ group.calls }}", one: "${{ item }}" }
+    for_each: { items: "${{ with.legs }}", max_items: 10 }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.one }}" } }
+"#;
+
+#[test]
+fn a_binding_that_reads_the_item_of_a_fold_carries_its_secret() {
+    let report = run(ITEM_OF_A_FOLD_THROUGH_A_BINDING);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.legs @ relay → item @ relay → \
+             with.one @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    assert_eq!(flows_to(&report), ["crm.example.com", "other.example.com"]);
+}
+
+/// A recover value reads a binding that reads the item: the recovered record carries it.
+const ITEM_THROUGH_A_RECOVERED_BINDING: &str = r#"nika: item-through-a-recovered-binding
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  backup:
+    with: { legs: "${{ tasks.call_a.output }}", one: "${{ item }}" }
+    for_each: { items: "${{ with.legs }}", max_items: 10 }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "${{ with.one }}" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_recover_value_that_reads_an_item_binding_carries_its_secret() {
+    let report = run(ITEM_THROUGH_A_RECOVERED_BINDING);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.legs @ backup → item @ backup → \
+             with.one @ backup → on_error.recover @ backup → tasks.backup.output → \
+             with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    assert_eq!(flows_to(&report), ["crm.example.com", "other.example.com"]);
+}

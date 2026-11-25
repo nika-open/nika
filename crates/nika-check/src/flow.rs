@@ -9,7 +9,11 @@
 //!
 //! - **sources** — every `${{ secrets.X }}` reference is `Secret`.
 //! - **propagation** — a `with:` binding that references a secret makes
-//!   that `with.K` slot secret WITHIN its task; an `exec`/`invoke` task
+//!   that `with.K` slot secret WITHIN its task; under a `for_each:`, a
+//!   binding that reads `item` (or `index`) renders once per iteration with
+//!   the item bound (spec 03, `for_each` semantics), so it carries what the
+//!   item carries, while the `for_each:` collection, evaluated before the
+//!   fan-out, reads only the other bindings; an `exec`/`invoke` task
 //!   whose effect-carrying fields reference a secret (directly, via a
 //!   `with:` alias, or via a tainted upstream record) makes its OUTPUT
 //!   secret (the captured stdout/tool-result can embed the value);
@@ -376,11 +380,22 @@ enum Read {
     Records(Vec<usize>),
 }
 
+/// One `with:` binding, resolved once.
+struct Binding<'a> {
+    key: &'a str,
+    /// What its value reads.
+    reads: Vec<Read>,
+    /// Whether the run renders it once per iteration: it reads a loop local
+    /// of the task's `for_each:` (spec 03, `for_each` semantics), so it sees the
+    /// item, and the collection, evaluated before the fan-out, does not see it.
+    per_iteration: bool,
+}
+
 /// What each surface of one task reads, resolved once: the sweep repeats,
 /// the template scan does not.
 struct Reads<'a> {
-    /// Each `with:` key and what its value reads.
-    with: Vec<(&'a str, Vec<Read>)>,
+    /// Each `with:` binding, in declaration order.
+    with: Vec<Binding<'a>>,
     /// What the `for_each:` collection reads, expression or literal list.
     item: Option<Vec<Read>>,
     /// What the effect-carrying fields read ([`action_effect_fields`]).
@@ -391,14 +406,23 @@ struct Reads<'a> {
 
 impl<'a> Reads<'a> {
     fn of(task: &'a RawTask, scope: &Scope<'_>) -> Self {
+        let fans_out = task.for_each.is_some();
         let with = task
             .with
             .iter()
             .map(|(key, value)| {
-                (
-                    key.value.as_str(),
-                    scope.resolve(refs_in_json(&value.value)),
-                )
+                let refs = refs_in_json(&value.value);
+                // The run's own test (`references_loop_locals`): `index` makes a
+                // binding per-iteration too, though it carries no secret.
+                let per_iteration = fans_out
+                    && refs
+                        .iter()
+                        .any(|r| matches!(r, NamespaceRef::Item | NamespaceRef::Index));
+                Binding {
+                    key: key.value.as_str(),
+                    reads: scope.resolve(refs),
+                    per_iteration,
+                }
             })
             .collect();
         let item = task.for_each.as_ref().map(|f| {
@@ -434,7 +458,7 @@ impl<'a> Reads<'a> {
     fn producers(&self) -> impl Iterator<Item = usize> + '_ {
         self.with
             .iter()
-            .flat_map(|(_, reads)| reads)
+            .flat_map(|binding| &binding.reads)
             .chain(self.item.iter().flatten())
             .chain(&self.effect)
             .chain(self.recover.iter().flatten())
@@ -516,16 +540,22 @@ fn settle(
 /// known so far.
 fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> (Taints, Taints) {
     let id = task.id.value.as_str();
-    // 1. `with:` slot taints (scoped to this task): a value reading a secret
-    //    or a tainted record taints that key.
+    // A binding's slot (scoped to this task): a value reading a secret, a
+    // tainted record or a tainted `item` taints that key. Bindings never read
+    // each other: the run renders each one in a scope without `with:`.
+    let slot = |binding: &Binding<'_>, item: Option<&Taints>| {
+        let taints = carried(&binding.reads, None, item, records);
+        via_each(taints, &format!("with.{} @ {id}", binding.key))
+    };
+    // 1. The bindings the run renders before any fan-out: every binding of a
+    //    single-lane task, the loop-local-free ones of a `for_each:` task.
     let mut with = WithTaints::new();
-    for (key, value) in &reads.with {
-        let taints = carried(value, None, None, records);
-        with.insert(*key, via_each(taints, &format!("with.{key} @ {id}")));
+    for binding in reads.with.iter().filter(|b| !b.per_iteration) {
+        with.insert(binding.key, slot(binding, None));
     }
     // 2. `for_each` item taint: what the collection reads (an expression or a
-    //    literal list, which may hold `with.*` reads), the loop-local `item`
-    //    carries within the task.
+    //    literal list, which may hold `with.*` reads of the bindings above),
+    //    the loop-local `item` carries within the task.
     let item = match &reads.item {
         Some(value) => via_each(
             carried(value, Some(&with), None, records),
@@ -533,9 +563,14 @@ fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> (Taints, Ta
         ),
         None => Taints::new(),
     };
-    // 3. Effect taint: do this task's effect-carrying fields see a secret?
+    // 3. The bindings the run renders once per iteration, with the item bound
+    //    (spec 03, `for_each` semantics): they carry what the item carries.
+    for binding in reads.with.iter().filter(|b| b.per_iteration) {
+        with.insert(binding.key, slot(binding, Some(&item)));
+    }
+    // 4. Effect taint: do this task's effect-carrying fields see a secret?
     let effect = carried(&reads.effect, Some(&with), Some(&item), records);
-    // 4. The record: an exec/invoke whose effect saw a secret can embed it in
+    // 5. The record: an exec/invoke whose effect saw a secret can embed it in
     //    the captured output (infer/agent are provider-bound: no output
     //    taint), and a recovered value replaces the output whatever the verb.
     //    Written to the record, not sent: no sink here, each later reader is
@@ -675,7 +710,7 @@ fn record_effect_leaks(
 /// reaching one with no `egress:` sanction is a leak (BUG#3 · now CANONICAL ·
 /// spec `01-envelope.md` §egress aligned to this strict behavior · F-03).
 /// The OUTPUT carve-out is SEPARATE and PRESERVED (see `evaluate`
-/// step 4 · the model response is not a verbatim echo, so infer/agent OUTPUT
+/// step 5 · the model response is not a verbatim echo, so infer/agent OUTPUT
 /// is never tainted from a prompt secret · ADR-092). To send a secret to a
 /// provider, the author sanctions it explicitly (`egress: [{ to: "infer" }]`
 /// / `{ to: "agent" }`).
@@ -703,7 +738,7 @@ pub fn action_effect_fields(action: &RawAction) -> Vec<&str> {
             .unwrap_or_default(),
         // The prompt (+ system) is a third-party egress sink — a secret
         // reaching it is a leak unless the author sanctions `to: "infer"`/
-        // `"agent"` (BUG#3). Output taint stays excluded (evaluate §4).
+        // `"agent"` (BUG#3). Output taint stays excluded (evaluate §5).
         // An `infer:`'s `vision:` entries ride the same request (spec 02
         // §Vision inputs): a URL the provider fetches, and a file path that
         // chooses the bytes the provider receives. Both are sink fields, so a

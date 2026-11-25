@@ -31,17 +31,20 @@ use nika_bm25::{BmIndex, BmParams};
 /// the SKELETON corpus (the wizard's world — scores are corpus-relative).
 const TAU: f64 = 3.0;
 
-/// The floor for the WHOLE-catalog corpus (49 docs — BM25 scores are
-/// IDF-relative, so each corpus earns its own floor). Measured
-/// 2026-07-31 with the `calibration_probe` (run it after any corpus
-/// change): the highest vague-utterance top score is 4.949 (« make it
-/// good » → etl-quarantine) once the contract gate has disqualified the
-/// capability mismatches (« please answer my emails » tops at
-/// model-bench 6.201 on raw rank, but the utterance requires Net and
-/// model-bench carries none); the lowest honest route is 6.220
-/// (« chase unpaid invoices every friday » → invoice-chaser). 5.5 sits
-/// between with slack both ways.
-const TAU_CATALOG: f64 = 5.5;
+/// The floor for the WHOLE-catalog corpus (BM25 scores are IDF-relative,
+/// so each corpus earns its own floor). Re-derived 2026-11-25 with the
+/// `calibration_probe` (run it after any corpus change) when the 17
+/// recipes of nika-spec 419 and 420 entered the pack and every score
+/// moved. Read after the contract gate: the highest WRONG top is 10.414
+/// (« Relance les factures impayées… » → refund-chaser, on the one French
+/// word « relance » of a tone string — the P0-1 reproduction again), and
+/// the vague ones sit lower (« fill the lines » → receipt-ledger 7.269,
+/// « please answer my emails » → lead-enrichment 6.935, « make it good »
+/// → etl-quarantine 6.665); the lowest honest top is 14.950 (« translate
+/// my docs folder to spanish » → localization-factory). 12.5 sits between
+/// with about 1.2× slack each way. (2026-07-31, on 49 docs: 4.949 vague,
+/// 6.220 honest, floor 5.5.)
+const TAU_CATALOG: f64 = 12.5;
 
 /// The relative margin: the winner must outscore the runner-up by 1.3×.
 /// Below it the two best skeletons are a coin-flip (« compare three
@@ -55,6 +58,15 @@ const MARGIN: f64 = 1.3;
 /// embeddings (BM25 stays the ranker).
 pub(crate) const ALIASES: &[(&str, &[&str])] = &[
     ("scrape", &["fetch", "read"]),
+    // The words a person says for two jobs whose bodies say otherwise
+    // (2026-11-25): invoice-chaser says « overdue » 12 times and « unpaid »
+    // never, so « chase unpaid invoices » tied with the subscription radar
+    // on « invoices »; only localization-factory says « localization », so
+    // « translate my docs folder » stops losing to docs-answer-desk on
+    // « docs ». « locale » was measured and left out: the 07 lesson says it
+    // most and then routed ahead of the job.
+    ("unpaid", &["overdue"]),
+    ("translate", &["localization"]),
     ("crawl", &["fetch"]),
     ("download", &["fetch"]),
     ("http", &["fetch"]),
@@ -641,6 +653,32 @@ fn best_same_facet_runner(qualified: &[(String, f64)]) -> f64 {
         .map_or(0.0, |(_, s)| *s)
 }
 
+/// The contract gate: the ranked entries whose capabilities (derived from
+/// the entry's body) carry every required capability and no forbidden one,
+/// in rank order. The router and its calibration probe read this one list.
+fn contract_qualified(
+    ranked: &[(u32, f64)],
+    names: &[String],
+    contract: &IntentContract,
+) -> Vec<(String, f64)> {
+    ranked
+        .iter()
+        .filter_map(|(doc, score)| {
+            let name = names.get(*doc as usize)?;
+            let caps = template_capabilities(body_of(name)?);
+            let ok = contract
+                .required_capabilities
+                .iter()
+                .all(|c| caps.contains(c))
+                && contract
+                    .forbidden_capabilities
+                    .iter()
+                    .all(|c| !caps.contains(c));
+            ok.then(|| (name.clone(), *score))
+        })
+        .collect()
+}
+
 /// Exact catalog hit: a typed slug (`hello` · `01-hello` · `chain`) is
 /// not an intent to rank. `hello` is the 01-hello lesson (B01).
 fn exact_catalog_hit(intent: &str) -> Option<String> {
@@ -713,24 +751,7 @@ fn route_impl(intent: &str, names: &[String], tau: f64) -> RoutingOutcome {
     };
 
     let ranked = index.top_k(&query, names.len());
-    // The contract gate: every required capability present, every
-    // forbidden one absent (capabilities derived from the entry's body).
-    let qualified: Vec<(String, f64)> = ranked
-        .iter()
-        .filter_map(|(doc, score)| {
-            let name = names.get(*doc as usize)?;
-            let caps = template_capabilities(body_of(name)?);
-            let ok = contract
-                .required_capabilities
-                .iter()
-                .all(|c| caps.contains(c))
-                && contract
-                    .forbidden_capabilities
-                    .iter()
-                    .all(|c| !caps.contains(c));
-            ok.then(|| (name.clone(), *score))
-        })
-        .collect();
+    let qualified = contract_qualified(&ranked, names, &contract);
     let Some((winner, s1)) = qualified.first() else {
         // The contract emptied the field — clarify with the closest RAW
         // matches so the human still sees what almost fit.
@@ -1024,8 +1045,11 @@ mod tests {
         // A genuine coin-flip: several same-facet entries say nearly the
         // same words, so none wins and all are named. The NAMES moved
         // when the corpus did (`competitor-radar` entered on the word it
-        // is about, `media-asset-pack` left) — what this pins is the
-        // behaviour, never a score from a corpus that has since changed.
+        // is about, `media-asset-pack` left; on 2026-11-25 the recipe
+        // `seo-content-brief`, a brief written from a competitor's pages,
+        // entered on « competitor » and « brief » and moved the
+        // `website-brief` skeleton out of the three) — what this pins is
+        // the behaviour, never a score from a corpus that has since changed.
         let outcome = route("Chaque lundi compare three competitors and write a French brief");
         let candidates = match outcome {
             RoutingOutcome::NeedsClarification { candidates, .. } => Some(candidates),
@@ -1037,7 +1061,7 @@ mod tests {
             "{candidates:?}"
         );
         assert!(
-            candidates.contains(&"website-brief".to_owned()),
+            candidates.contains(&"seo-content-brief".to_owned()),
             "{candidates:?}"
         );
         assert!(
@@ -1113,10 +1137,16 @@ mod calibration_probe {
     fn print_catalog_scores() {
         let names = catalog_names();
         let index = build_template_index(&names);
+        // Every utterance a catalog routing law of this crate or of the
+        // MCP oracle names, plus the vague probes the floor must refuse.
         let cases = [
             "extract action items from meeting notes with owners and deadlines",
             "translate my docs folder to spanish",
             "chase unpaid invoices every friday",
+            "chase unpaid invoices",
+            "write release notes from git commits",
+            "Chaque lundi compare three competitors and write a French brief",
+            "Relance les factures impayées par email après validation humaine",
             "please answer my emails",
             "summarize every item in parallel",
             "an agentic loop that researches until the budget runs out",
@@ -1127,28 +1157,26 @@ mod calibration_probe {
             "do the thing properly",
         ];
         for intent in cases {
-            let tokens: Vec<String> = intent
-                .split(|c: char| !c.is_ascii_alphanumeric())
-                .map(str::to_ascii_lowercase)
-                .filter(|t| !t.is_empty() && !STOPWORDS.contains(&t.as_str()))
-                .collect();
-            let mut query = tokens.join(" ");
-            for token in &tokens {
-                for (word, expansions) in ALIASES {
-                    if token == *word {
-                        for e in *expansions {
-                            query.push(' ');
-                            query.push_str(e);
-                        }
-                    }
-                }
-            }
-            let ranked = index.top_k(&query, 3);
-            let row: Vec<String> = ranked
+            // The router's own path: its query expansion and its contract
+            // gate, so a score printed here is a score `route` compares.
+            let Some(query) = expand_query(intent) else {
+                println!("CAL · {intent} → (no signal-bearing token)");
+                continue;
+            };
+            let ranked = index.top_k(&query, names.len());
+            let qualified = contract_qualified(&ranked, &names, &extract(intent));
+            let row: Vec<String> = qualified
                 .iter()
-                .filter_map(|(d, s)| names.get(*d as usize).map(|n| format!("{n}={s:.3}")))
+                .take(4)
+                .map(|(n, s)| format!("{n}={s:.3}"))
                 .collect();
-            println!("CAL · {intent} → {}", row.join(" · "));
+            let verdict = match route(intent) {
+                RoutingOutcome::Routed { template, .. } => format!("routes {template}"),
+                RoutingOutcome::NeedsClarification { candidates, .. } => {
+                    format!("clarifies {candidates:?}")
+                }
+            };
+            println!("CAL · {intent} → {} · {verdict}", row.join(" · "));
         }
     }
 }
@@ -1305,11 +1333,34 @@ mod adversarial_pass_2026_07_31 {
     /// assertion ».
     #[test]
     fn tau_catalog_bounds_hold_on_the_living_corpus() {
-        for vague in ["make it good", "do the thing properly"] {
+        for vague in [
+            "make it good",
+            "do the thing properly",
+            "please answer my emails",
+            "fill the lines",
+        ] {
             assert!(
                 matches!(route(vague), RoutingOutcome::NeedsClarification { .. }),
                 "`{vague}` is vague and must never route — TAU_CATALOG drifted under the corpus"
             );
+        }
+        // The highest wrong top the floor was derived over (2026-11-25):
+        // a French phrase reaching a refund job on one word of a tone string.
+        assert!(
+            matches!(
+                route("Relance les factures impayées par email après validation humaine"),
+                RoutingOutcome::NeedsClarification { .. }
+            ),
+            "the P0-1 reproduction must stay under the floor — TAU_CATALOG drifted under the corpus"
+        );
+        // The lowest honest top it was derived over: the translation job
+        // routes, or at least leads its clarify list.
+        match route("translate my docs folder to spanish") {
+            RoutingOutcome::Routed { template, .. } => assert_eq!(template, "localization-factory"),
+            RoutingOutcome::NeedsClarification { candidates, .. } => assert_eq!(
+                candidates.first().map(String::as_str),
+                Some("localization-factory")
+            ),
         }
         // The honest end stays reachable: the invoice probe either
         // routes or leads its clarify list (the probe test pins which).

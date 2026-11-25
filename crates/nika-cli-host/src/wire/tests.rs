@@ -1420,7 +1420,9 @@ fn detected_refuses_an_oversized_file() {
 /// left in either folder. Under `detected` and by name, in a JSON config
 /// and in Codex's TOML, through an absolute link and a relative one — a
 /// home config linked into a folder under the home, and a project config
-/// linked into a folder of the project.
+/// linked into a folder of the project. (A project config link that leads
+/// nowhere, out of the project or into its `.git` folder is refused:
+/// `link_tests`.)
 #[test]
 fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -1495,7 +1497,7 @@ fn a_linked_settings_file_stays_a_link_and_its_target_is_updated() {
                 let litter = std::fs::read_dir(place)
                     .expect("list")
                     .map(|entry| entry.expect("entry").file_name())
-                    .filter(|name| name.to_string_lossy().starts_with(".nika-tmp-"))
+                    .filter(|name| name.to_string_lossy().contains("nika-tmp"))
                     .count();
                 assert_eq!(litter, 0, "{door:?}: no temporary file left beside");
             }
@@ -1961,7 +1963,7 @@ fn a_write_failure_names_the_host_and_its_settings_file() {
             path.display()
         );
         assert!(out.text.starts_with(&refused), "{out:?}");
-        assert!(!out.text.contains(".nika-tmp-"), "{out:?}");
+        assert!(!out.text.contains("nika-tmp"), "{out:?}");
         assert_eq!(after, GEMINI_UNWIRED);
     }
     let _ = std::fs::remove_dir_all(home);
@@ -2078,11 +2080,11 @@ fn atomic_write_creates_0600_preserves_mode_and_leaves_no_litter() {
     assert_eq!(mode, 0o640, "an existing mode is preserved, got {mode:o}");
     assert_eq!(std::fs::read_to_string(&path).expect("read"), "{\"a\":2}\n");
 
-    // The temp file is renamed away — no `.nika-tmp-*` litter.
+    // The temp file is renamed away — no `.nika-tmp.*` litter.
     let litter: Vec<_> = std::fs::read_dir(&dir)
         .expect("dir")
         .filter_map(std::result::Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().starts_with(".nika-tmp-"))
+        .filter(|e| e.file_name().to_string_lossy().contains("nika-tmp"))
         .collect();
     assert!(litter.is_empty(), "no temp litter: {litter:?}");
     let _ = std::fs::remove_dir_all(dir);
@@ -2105,18 +2107,12 @@ fn writers_route_through_the_atomic_house() {
 
     // The JSON writer, create path.
     let json = dir.join("mcp.json");
-    write_json(&json, &json!({"mcpServers": {}}), None).expect("json");
+    write_json(&json, &json!({"mcpServers": {}})).expect("json");
     assert_eq!(mode_of(&json), 0o600, "a new JSON config is owner-only");
 
     // The JSON writer over a pre-existing 0640 file preserves the mode.
     std::fs::set_permissions(&json, std::fs::Permissions::from_mode(0o640)).expect("chmod");
-    let before = std::fs::read_to_string(&json).expect("before");
-    write_json(
-        &json,
-        &json!({"mcpServers": {"nika": {"command": "nika"}}}),
-        Some(&before),
-    )
-    .expect("rewrite");
+    write_json(&json, &json!({"mcpServers": {"nika": {"command": "nika"}}})).expect("rewrite");
     assert_eq!(mode_of(&json), 0o640, "an existing mode is preserved");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -2233,39 +2229,5 @@ fn a_named_list_writes_nothing_when_one_client_is_malformed() {
     );
     assert_eq!(out.code, crate::output::exit::OK, "{out:?}");
     assert!(dir.join(".vscode").join("mcp.json").exists());
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// Every write is read back: when the file does not hold what was
-/// written, it is restored as it was (its original text, or no file when
-/// there was none) and the write fails, naming why.
-#[test]
-fn a_write_that_does_not_read_back_is_restored() {
-    let dir = temp_dir("readback");
-    let path = dir.join("mcp.json");
-    let tampering: fn(&Path, &str) -> Result<(), String> =
-        |path, _| write_atomic(path, "{\"tampered\":true}\n");
-
-    std::fs::write(&path, "{\"x\":1}\n").expect("seed");
-    let failed = write_read_back(&path, "{\"nika\":1}\n", Some("{\"x\":1}\n"), tampering)
-        .expect_err("a mismatch fails");
-    assert!(failed.contains("restored as it was"), "{failed}");
-    assert_eq!(std::fs::read_to_string(&path).expect("read"), "{\"x\":1}\n");
-
-    let fresh = dir.join("fresh.json");
-    let failed =
-        write_read_back(&fresh, "{\"nika\":1}\n", None, tampering).expect_err("a mismatch fails");
-    assert!(failed.contains("restored as it was"), "{failed}");
-    assert!(
-        !fresh.exists(),
-        "a file this write created is removed again"
-    );
-
-    write_read_back(&path, "{\"nika\":2}\n", Some("{\"x\":1}\n"), write_atomic)
-        .expect("a faithful write reads back");
-    assert_eq!(
-        std::fs::read_to_string(&path).expect("read"),
-        "{\"nika\":2}\n"
-    );
     let _ = std::fs::remove_dir_all(dir);
 }

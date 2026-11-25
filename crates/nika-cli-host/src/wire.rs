@@ -20,6 +20,9 @@ use serde_json::{Map, Value};
 
 use crate::output::VerbOutput;
 
+mod settled;
+use settled::{Settled, landing};
+
 const NIKA_MCP_ARGS: [&str; 1] = ["mcp"];
 
 /// One variant per client `nika wire` knows how to write — the clap
@@ -325,7 +328,7 @@ fn plan_detected(targets: &[WireTarget], home: Option<&Path>, dir: &str) -> Vec<
         .iter()
         .map(|one| {
             settled_path(*one, home, Path::new(dir))
-                .and_then(|path| judged(*one, &path))
+                .and_then(|(path, _)| judged(*one, &path))
                 .unwrap_or_else(WireAction::Skipped)
         })
         .collect()
@@ -368,7 +371,15 @@ pub(crate) fn config_path(
     home: Option<&Path>,
     dir: &Path,
 ) -> Result<PathBuf, String> {
-    config_place(target, home, dir).map(|(_, path)| path)
+    config_place(target, home, dir).map(|(_, _, path)| path)
+}
+
+/// Who owns a config's folder: the project, for a file the writer places
+/// in the repository, or the user's home, for every other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owner {
+    Project,
+    Home,
 }
 
 /// [`config_path`] with the folder that OWNS the config: the project for
@@ -379,12 +390,12 @@ fn config_place<'a>(
     target: WireTarget,
     home: Option<&'a Path>,
     dir: &'a Path,
-) -> Result<(&'a Path, PathBuf), String> {
-    let join = |base: &'a Path, parts: &[&str]| {
-        let path = parts.iter().fold(base.to_path_buf(), |p, s| p.join(s));
-        (base, path)
-    };
+) -> Result<(Owner, &'a Path, PathBuf), String> {
+    let file =
+        |base: &'a Path, parts: &[&str]| parts.iter().fold(base.to_path_buf(), |p, s| p.join(s));
     let user = || home.ok_or_else(no_home);
+    let join = |base: &'a Path, parts: &[&str]| (Owner::Home, base, file(base, parts));
+    let in_project = |parts: &[&str]| (Owner::Project, dir, file(dir, parts));
     Ok(match target {
         // The user-home `mcpServers` family — one shape, per-client paths
         // (gemini: shared settings.json, server names must not contain `_`
@@ -401,14 +412,14 @@ fn config_place<'a>(
         WireTarget::Antigravity => join(user()?, &[".gemini", "config", "mcp_config.json"]),
         WireTarget::Kimi => join(user()?, &[".kimi-code", "mcp.json"]),
         WireTarget::Kiro => join(user()?, &[".kiro", "settings", "mcp.json"]),
-        WireTarget::Vscode => join(dir, &[".vscode", "mcp.json"]),
+        WireTarget::Vscode => in_project(&[".vscode", "mcp.json"]),
         // Claude DESKTOP is a different app with a different config file
         // than Claude Code's ~/.claude.json — the wave-3 double gap (#449).
-        WireTarget::ClaudeDesktop => (user()?, claude_desktop_config_path(home)?),
+        WireTarget::ClaudeDesktop => (Owner::Home, user()?, claude_desktop_config_path(home)?),
         // Cline: the resolver below picks the live globalStorage file when
         // a host IDE has it, else the stable `~/.cline/data/settings/` home
         // (#449 wave-3b).
-        WireTarget::Cline => (user()?, cline_settings_path(home)?),
+        WireTarget::Cline => (Owner::Home, user()?, cline_settings_path(home)?),
         // Codex CLI, and Grok Build on the same TOML shape.
         WireTarget::Codex => join(user()?, &[".codex", "config.toml"]),
         WireTarget::Grok => join(user()?, &[".grok", "config.toml"]),
@@ -425,14 +436,14 @@ fn config_place<'a>(
         // OpenCode merges the PROJECT-local opencode.json over the global
         // one (opencode.ai/docs/mcp-servers) — the project file is the
         // least-privilege home (the repo the oracle serves).
-        WireTarget::Opencode => join(dir, &["opencode.json"]),
+        WireTarget::Opencode => in_project(&["opencode.json"]),
         WireTarget::Hermes => join(user()?, &[".hermes", "config.yaml"]),
-        WireTarget::Lmstudio => (user()?, lmstudio_mcp_path(home)?),
+        WireTarget::Lmstudio => (Owner::Home, user()?, lmstudio_mcp_path(home)?),
         // Junie reads project-scope `.junie/mcp/mcp.json` (`mcpServers`
         // root · junie-cli-mcp-configuration.html); the global
         // `~/.junie/mcp/mcp.json` exists but the project file is the
         // least-privilege home, same reasoning as OpenCode above.
-        WireTarget::Junie => join(dir, &[".junie", "mcp", "mcp.json"]),
+        WireTarget::Junie => in_project(&[".junie", "mcp", "mcp.json"]),
         WireTarget::Copilot => join(user()?, &[".copilot", "mcp-config.json"]),
         WireTarget::Amp => join(user()?, &[".config", "amp", "settings.json"]),
         WireTarget::All | WireTarget::Detected => return Err(DOOR.to_owned()),
@@ -454,10 +465,161 @@ fn no_home() -> String {
 /// repository can ship `opencode.json` as a link to any file of the
 /// account's: followed, `wire` would write there. Refused instead, by
 /// the plan and by the run, before the writer reads or writes anything.
-fn settled_path(target: WireTarget, home: Option<&Path>, dir: &Path) -> Result<PathBuf, String> {
-    let (owner, path) = config_place(target, home, dir)?;
-    stays_inside(owner, &path).map_err(|why| format!("{}: {why}", target.id()))?;
-    Ok(path)
+/// A project config is held tighter still ([`project_way`]): a link on the
+/// way, at a folder or at the config's own name, is read one step at a time
+/// and followed only while every place it leads through is inside the
+/// project (or above it, on the way down), to something that is there and
+/// outside its `.git` folder, and the config's own link only to a regular
+/// file. What comes back is the path and where a write to it lands, real
+/// ([`settled::landing`]); the writer looks again, refuses a write that
+/// would land anywhere else by then ([`settled::Settled`]), and writes to
+/// the real place it compared ([`destination`]), so no link is followed
+/// again. The looks are by path: a process that swaps a real folder on that
+/// place for a link between the last look and the rename could still
+/// redirect the write (`nika init` documents the same gap; closing it needs
+/// every step held by descriptor).
+fn settled_path(
+    target: WireTarget,
+    home: Option<&Path>,
+    dir: &Path,
+) -> Result<(PathBuf, PathBuf), String> {
+    let (owner, base, path) = config_place(target, home, dir)?;
+    stays_inside(base, &path)
+        .and_then(|()| match owner {
+            Owner::Project => project_way(base, &path).map_err(|why| why.to_string()),
+            Owner::Home => Ok(()),
+        })
+        .and_then(|()| landing(&path).map_err(|e| format!("{}: {e}", path.display())))
+        .map_err(|why| format!("{}: {why}", target.id()))
+        .map(|lands| (path, lands))
+}
+
+/// Why `wire` leaves a project config as it is: a link on the way to it
+/// that it does not follow. A repository decides every name in it, so a
+/// link there is followed only to a place the project owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProjectLink {
+    /// A link on the way (a folder, or the config's own name) leads to
+    /// nothing: following it would create a file where it points.
+    Dangling(PathBuf),
+    /// A link on the way leads outside the project.
+    Outside(PathBuf),
+    /// A link on the way leads into the project's `.git` folder.
+    IntoGit(PathBuf),
+    /// The config's own name links to something that is not a regular
+    /// file (a folder, a FIFO, a device).
+    NotAFile(PathBuf),
+    /// An entry on the way could not be read.
+    Unreadable(PathBuf, String),
+}
+
+impl std::fmt::Display for ProjectLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dangling(at) => write!(
+                f,
+                "{} is a link that leads nowhere; nika wire never creates what a link points \
+                 at: point it at a file inside the project, or remove it",
+                at.display()
+            ),
+            Self::Outside(at) => write!(
+                f,
+                "{} is a link that leads outside the project; nika wire writes a project \
+                 config only inside the project: point it inside the project, or remove it",
+                at.display()
+            ),
+            Self::IntoGit(at) => write!(
+                f,
+                "{} is a link into the project's .git folder; nika wire never writes there: \
+                 point it at a file outside .git, or remove it",
+                at.display()
+            ),
+            Self::NotAFile(at) => write!(
+                f,
+                "{} is a link to something that is not a regular file; nika wire writes a \
+                 project config only into a file: point it at one, or remove it",
+                at.display()
+            ),
+            Self::Unreadable(at, why) => write!(f, "{}: cannot read: {why}", at.display()),
+        }
+    }
+}
+
+/// The way from `project` to `path`, one name at a time. A link, at a
+/// folder or at the config's own name, is followed only to what is there,
+/// inside the project and outside its `.git` folder ([`followed`]), and
+/// the config's own link only to a regular file, which the writer then
+/// replaces where it really is ([`destination`]): the link stays. The
+/// first name that is not there ends the walk: nothing below it exists to
+/// be a link, and the writer creates it.
+fn project_way(project: &Path, path: &Path) -> Result<(), ProjectLink> {
+    let Ok(rest) = path.strip_prefix(project) else {
+        return Ok(()); // config_place joins every project config under it
+    };
+    let unreadable =
+        |at: &Path, e: std::io::Error| ProjectLink::Unreadable(at.into(), e.to_string());
+    let inside = nearest_real(project).map_err(|e| unreadable(project, e))?;
+    let names: Vec<_> = rest.components().collect();
+    let mut at = project.to_path_buf();
+    for (index, name) in names.iter().enumerate() {
+        at.push(name);
+        let meta = match std::fs::symlink_metadata(&at) {
+            Ok(meta) => meta,
+            // Nothing there, or a file where a folder should be: the
+            // writer creates the rest, or says why it cannot.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(e) => return Err(unreadable(&at, e)),
+        };
+        if !meta.file_type().is_symlink() {
+            continue;
+        }
+        let real = followed(project, &inside, &at)?;
+        if index + 1 == names.len() && !std::fs::metadata(&real).is_ok_and(|m| m.is_file()) {
+            return Err(ProjectLink::NotAFile(at));
+        }
+    }
+    Ok(())
+}
+
+/// Where the link at `at` (below `project`) really leads, found one step at
+/// a time ([`nika_fs::resolve_beneath`]): every link on the way is read and
+/// followed only while each place it leads through is inside the project
+/// (`inside`, real) or one of the folders above it, so a way out and back
+/// in is refused where it leaves, since a link outside is its owner's to
+/// turn elsewhere between the look and the write. What it reaches must be
+/// there and outside the project's `.git` folder. Names are compared as
+/// components, `.git` without regard to ASCII case (a case-insensitive
+/// volume reaches the same folder by either spelling).
+fn followed(project: &Path, inside: &Path, at: &Path) -> Result<PathBuf, ProjectLink> {
+    let rest = at.strip_prefix(project).unwrap_or(at);
+    let real = match nika_fs::resolve_beneath(project, rest) {
+        Ok(nika_fs::Beneath::There(real)) => real,
+        Err(nika_fs::Escape::Io(_, e)) => {
+            return Err(ProjectLink::Unreadable(at.into(), e.to_string()));
+        }
+        Err(nika_fs::Escape::Dangling(_)) | Ok(nika_fs::Beneath::Missing { .. }) => {
+            return Err(ProjectLink::Dangling(at.into()));
+        }
+        // A way out (and back), or a loop.
+        Ok(_) | Err(_) => return Err(ProjectLink::Outside(at.into())),
+    };
+    let Ok(within) = real.strip_prefix(inside) else {
+        return Err(ProjectLink::Outside(at.into()));
+    };
+    if within
+        .components()
+        .any(|name| name.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err(ProjectLink::IntoGit(at.into()));
+    }
+    Ok(real)
 }
 
 /// Does a write to `path` land inside `owner`? The file's real location
@@ -506,11 +668,9 @@ fn wire_one(
     dir: &str,
     dry_run: bool,
 ) -> Result<WireAction, String> {
-    wire_at(
-        target,
-        &settled_path(target, home, Path::new(dir))?,
-        dry_run,
-    )
+    let (path, lands) = settled_path(target, home, Path::new(dir))?;
+    let _held = Settled::hold(&path, lands);
+    wire_at(target, &path, dry_run)
 }
 
 /// The writer half of a wiring: patch the config at `path` the way
@@ -763,17 +923,17 @@ fn lmstudio_mcp_path_from(home: &Path) -> PathBuf {
 fn patch_zed(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
     let label_path = format!("zed: {}", path.display());
-    let (mut root, original) = if existed {
-        let Some((value, text)) = read_plain_json(path)? else {
+    let mut root = if existed {
+        let Some(value) = read_plain_json(path)? else {
             return Ok(WireAction::Manual(format!(
                 "{label_path} {NOT_PLAIN_JSON} — add this to \
                  \"context_servers\" yourself:\n  \"nika\": {{ \
                  \"command\": \"nika\", \"args\": [\"mcp\"], \"env\": {{}} }}"
             )));
         };
-        (value, Some(text))
+        value
     } else {
-        (Value::Object(Map::new()), None)
+        Value::Object(Map::new())
     };
 
     let object = root
@@ -792,7 +952,7 @@ fn patch_zed(path: &Path, dry_run: bool) -> Result<WireAction, String> {
 
     servers.insert("nika".to_owned(), desired);
     if !dry_run {
-        write_json(path, &root, original.as_deref())?;
+        write_json(path, &root)?;
     }
 
     if migrated {
@@ -844,7 +1004,7 @@ fn patch_config(
     dry_run: bool,
 ) -> Result<WireAction, String> {
     let existed = path.exists();
-    let (mut root, original) = read_existing(path, existed)?;
+    let mut root = read_existing(path, existed)?;
 
     let object = root
         .as_object_mut()
@@ -864,7 +1024,7 @@ fn patch_config(
 
     servers.insert("nika".to_owned(), desired);
     if !dry_run {
-        write_json(path, &root, original.as_deref())?;
+        write_json(path, &root)?;
     }
 
     let label_path = format!("{label}: {}", path.display());
@@ -923,8 +1083,7 @@ fn patch_toml_mcp(path: &Path, label: &str, dry_run: bool) -> Result<WireAction,
     servers.insert("nika", toml_edit::Item::Table(entry));
 
     if !dry_run {
-        let original = existed.then_some(body.as_str());
-        write_read_back(path, &doc.to_string(), original, write_atomic)?;
+        write_atomic(path, &doc.to_string())?;
     }
 
     if migrated {
@@ -962,7 +1121,7 @@ fn toml_entry_is_stale(item: &toml_edit::Item) -> bool {
 /// reusing the same read/merge/write mechanics (#330).
 fn patch_opencode(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
-    let (mut root, original) = read_existing(path, existed)?;
+    let mut root = read_existing(path, existed)?;
     let object = root
         .as_object_mut()
         .ok_or_else(|| format!("opencode: {} is not a JSON object", path.display()))?;
@@ -979,7 +1138,7 @@ fn patch_opencode(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     }
     servers.insert("nika".to_owned(), desired);
     if !dry_run {
-        write_json(path, &root, original.as_deref())?;
+        write_json(path, &root)?;
     }
     let label_path = format!("opencode: {}", path.display());
     if existed {
@@ -1003,7 +1162,7 @@ const HERMES_SNIPPET: &str =
 fn patch_hermes(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     if !path.exists() {
         if !dry_run {
-            write_read_back(path, HERMES_SNIPPET, None, write_atomic)?;
+            write_atomic(path, HERMES_SNIPPET)?;
         }
         return Ok(WireAction::Created(format!("hermes: {}", path.display())));
     }
@@ -1048,7 +1207,7 @@ fn copilot_server() -> Value {
 
 fn patch_copilot(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
-    let (mut root, original) = read_existing(path, existed)?;
+    let mut root = read_existing(path, existed)?;
     let object = root
         .as_object_mut()
         .ok_or_else(|| format!("copilot: {} is not a JSON object", path.display()))?;
@@ -1064,7 +1223,7 @@ fn patch_copilot(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     }
     servers.insert("nika".to_owned(), desired);
     if !dry_run {
-        write_json(path, &root, original.as_deref())?;
+        write_json(path, &root)?;
     }
     let label_path = format!("copilot: {}", path.display());
     if migrated {
@@ -1081,8 +1240,8 @@ fn patch_copilot(path: &Path, dry_run: bool) -> Result<WireAction, String> {
 /// snippet, byte-identical otherwise.
 fn patch_amp(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     let existed = path.exists();
-    let (mut root, original) = if existed {
-        let Some((value, text)) = read_plain_json(path)? else {
+    let mut root = if existed {
+        let Some(value) = read_plain_json(path)? else {
             return Ok(WireAction::Manual(format!(
                 "amp: {} {NOT_PLAIN_JSON} — add this under \
                  \"amp.mcpServers\" yourself:\n  \"nika\": {{ \
@@ -1090,9 +1249,9 @@ fn patch_amp(path: &Path, dry_run: bool) -> Result<WireAction, String> {
                 path.display()
             )));
         };
-        (value, Some(text))
+        value
     } else {
-        (Value::Object(Map::new()), None)
+        Value::Object(Map::new())
     };
     let object = root
         .as_object_mut()
@@ -1109,7 +1268,7 @@ fn patch_amp(path: &Path, dry_run: bool) -> Result<WireAction, String> {
     }
     servers.insert("nika".to_owned(), desired);
     if !dry_run {
-        write_json(path, &root, original.as_deref())?;
+        write_json(path, &root)?;
     }
     let label_path = format!("amp: {}", path.display());
     if migrated {
@@ -1139,18 +1298,10 @@ fn nika_server(include_type: bool) -> Value {
     Value::Object(server)
 }
 
-#[cfg(test)]
+/// A JSON config as it is.
 fn read_json(path: &Path) -> Result<Value, String> {
-    read_json_text(path).map(|(value, _)| value)
-}
-
-/// A JSON config and its exact text, kept to restore it when a write does
-/// not read back.
-fn read_json_text(path: &Path) -> Result<(Value, String), String> {
     let body = crate::detect::read_config(path)?;
-    let value = serde_json::from_str(&body)
-        .map_err(|e| format!("{}: malformed JSON: {e}", path.display()))?;
-    Ok((value, body))
+    serde_json::from_str(&body).map_err(|e| format!("{}: malformed JSON: {e}", path.display()))
 }
 
 /// What a manual line says of a settings file that reads but is not
@@ -1158,22 +1309,21 @@ fn read_json_text(path: &Path) -> Result<(Value, String), String> {
 /// and a damaged file reads the same, so neither is asserted.
 const NOT_PLAIN_JSON: &str = "is not plain JSON (it may hold comments, or be damaged)";
 
-/// A settings file whose host reads JSONC (Zed, Amp), with its exact
-/// text: `None` when it reads but is not plain JSON, which nika cannot
-/// rewrite without losing what it could not parse. A file that cannot be
-/// read at all is an error with its reason, never a `None`.
-fn read_plain_json(path: &Path) -> Result<Option<(Value, String)>, String> {
+/// A settings file whose host reads JSONC (Zed, Amp): `None` when it
+/// reads but is not plain JSON, which nika cannot rewrite without losing
+/// what it could not parse. A file that cannot be read at all is an error
+/// with its reason, never a `None`.
+fn read_plain_json(path: &Path) -> Result<Option<Value>, String> {
     let text = crate::detect::read_config(path)?;
-    Ok(serde_json::from_str(&text).ok().map(|value| (value, text)))
+    Ok(serde_json::from_str(&text).ok())
 }
 
-/// The config as it is (with its text) when it exists, else an empty object.
-fn read_existing(path: &Path, existed: bool) -> Result<(Value, Option<String>), String> {
+/// The config as it is when it exists, else an empty object.
+fn read_existing(path: &Path, existed: bool) -> Result<Value, String> {
     if existed {
-        let (value, text) = read_json_text(path)?;
-        Ok((value, Some(text)))
+        read_json(path)
     } else {
-        Ok((Value::Object(Map::new()), None))
+        Ok(Value::Object(Map::new()))
     }
 }
 
@@ -1207,93 +1357,65 @@ fn server_table<'a>(
 ///
 /// A settings file that is a LINK (into a dotfiles folder under the
 /// home, say) stays one: the temp file and the rename go beside the file
-/// the link leads to ([`write_target`]), so the link survives and what it
+/// the link leads to ([`destination`]), so the link survives and what it
 /// points at is what changes. Renaming over the link itself left a
-/// regular file in its place, and the dotfiles copy stale.
+/// regular file in its place, and the dotfiles copy stale. (A project
+/// config's link is followed only to a regular file inside the project:
+/// [`settled_path`].)
+///
+/// The temporary is a new file, created exclusively (it never opens an
+/// entry already there, a link included), owner-only for a new config,
+/// with an existing config's mode set through the open file; it is synced
+/// (`sync_all`, as before) before the rename gives it the config's name
+/// (`nika_fs::replace_file`), and removed on any failure.
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     // The failure is the settings file's: the temporary file beside it is
     // nika's own business, and a name the person has never seen.
     let refuse = |e: std::io::Error| format!("{}: cannot write: {e}", path.display());
-    let target = write_target(path).map_err(refuse)?;
-    if let Some(parent) = target.parent()
-        && !parent.as_os_str().is_empty()
+    let target = destination(path)?;
+    if let Some(folder) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(folder).map_err(refuse)?;
+    }
+    nika_fs::replace_file(
+        &target,
+        body.as_bytes(),
+        nika_fs::ReplaceMode::KeepOr(0o600),
+        nika_fs::Durability::All,
+    )
+    .map_err(refuse)
+}
+
+/// Where the write to `path` goes: where a write to it lands now
+/// ([`landing`], a real place: the file itself, or the one it links to,
+/// however many links away; for a name not there yet, or a link whose
+/// target is gone, that name in the real folder, so the write replaces the
+/// dead link and never creates a file where it pointed). When a check holds
+/// the config ([`Settled`]), that place must be the one the check found,
+/// or nothing is written. The write goes to the place compared, never
+/// resolved again. Whether a link may be followed at all is settled before
+/// any writer runs ([`settled_path`]): only inside the folder that owns the
+/// config, and at a project config's own name only to a regular file of the
+/// project.
+fn destination(path: &Path) -> Result<PathBuf, String> {
+    let now = landing(path).map_err(|e| format!("{}: cannot write: {e}", path.display()))?;
+    if let Some(then) = Settled::lands(path)
+        && now != then
     {
-        std::fs::create_dir_all(parent).map_err(refuse)?;
+        return Err(format!(
+            "{}: changed since nika wire checked it: a write would now land at {}, not {}; \
+             nothing written · run nika wire again",
+            path.display(),
+            now.display(),
+            then.display()
+        ));
     }
-    let tmp = target.with_file_name(format!(".nika-tmp-{}", std::process::id()));
-    let result = write_atomic_via(&tmp, &target, body).map_err(refuse);
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp); // never litter the user's dir
-    }
-    result
+    Ok(now)
 }
 
-/// Where a write to `path` lands: the file itself, or the one it links
-/// to, however many links away. A path that names nothing yet is its own
-/// target, and so is a link whose target is gone: that write replaces
-/// the dead link, and never creates a file where it pointed. Whether a
-/// link may be followed at all is settled before any writer runs
-/// ([`settled_path`]): only inside the folder that owns the config.
-fn write_target(path: &Path) -> std::io::Result<PathBuf> {
-    match std::fs::canonicalize(path) {
-        Ok(real) => Ok(real),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
-        Err(e) => Err(e),
-    }
-}
-
-/// The tmp-file half of [`write_atomic`], split so every error path
-/// funnels through the litter sweep (the 100-line fn ratchet).
-fn write_atomic_via(tmp: &Path, path: &Path, body: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-    use std::os::unix::fs::PermissionsExt as _;
-    let mut file = std::fs::File::create(tmp)?;
-    file.write_all(body.as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    // An existing file keeps its mode; a new one is owner-only (0600).
-    let mode = match std::fs::metadata(path) {
-        Ok(meta) => meta.permissions().mode() & 0o777,
-        Err(_) => 0o600,
-    };
-    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))?;
-    std::fs::rename(tmp, path)
-}
-
-fn write_json(path: &Path, value: &Value, original: Option<&str>) -> Result<(), String> {
+fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     let body = serde_json::to_string_pretty(value)
         .map_err(|e| format!("{}: cannot encode JSON: {e}", path.display()))?;
-    write_read_back(path, &format!("{body}\n"), original, write_atomic)
-}
-
-/// Write `body` through `write`, then read the file back. When it
-/// does not hold exactly `body`, the config is put back as it was: its
-/// `original` text, or no file when there was none, and the write fails.
-fn write_read_back(
-    path: &Path,
-    body: &str,
-    original: Option<&str>,
-    write: fn(&Path, &str) -> Result<(), String>,
-) -> Result<(), String> {
-    write(path, body)?;
-    if crate::detect::read_config(path).is_ok_and(|read| read == body) {
-        return Ok(());
-    }
-    let restored = match original {
-        Some(text) => write_atomic(path, text),
-        // seam-bypass-ok: removing the file this write created
-        None => std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display())),
-    };
-    Err(match restored {
-        Ok(()) => format!(
-            "{}: the file read back is not what nika wire wrote; it is restored as it was",
-            path.display()
-        ),
-        Err(why) => format!(
-            "{}: the file read back is not what nika wire wrote, and restoring it failed: {why}",
-            path.display()
-        ),
-    })
+    write_atomic(path, &format!("{body}\n"))
 }
 
 fn render(actions: &[WireAction]) -> String {
@@ -1351,3 +1473,7 @@ fn plan_lines(actions: &[WireAction]) -> impl Iterator<Item = String> + '_ {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[cfg(unix)]
+mod link_tests;

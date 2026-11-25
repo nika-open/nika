@@ -7,7 +7,9 @@
   the project, with one report row and exit 3, `--force` included, even
   when the way comes back into the project: each link is read one step
   at a time, and a step outside ends it. It writes into the real folder
-  it checked, without resolving the path again. Where
+  it checked, without resolving the path again. That write still reaches
+  the checked folder by its path, so a process already running inside the
+  project could race it within a very short window. Where
   it would only leave an existing file as it is, a link there is kept and
   never followed, with a row and exit 0. A link to a file inside the
   project is kept under `--force` too, as with `CLAUDE.md` pointing at

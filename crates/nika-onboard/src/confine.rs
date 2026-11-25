@@ -50,6 +50,10 @@ pub(crate) enum Refusal {
     Link,
     /// A folder on the way resolves outside the project.
     Outside,
+    /// A link on the way, at a folder or at the name, never ends: it leads
+    /// back to itself, or through more links than a walk follows
+    /// ([`nika_fs::MAX_LINKS`]).
+    Loop,
     /// Something other than a regular file stands at the name.
     NotRegular,
 }
@@ -62,6 +66,9 @@ impl fmt::Display for Refusal {
             }
             Self::Outside => {
                 "its folder leads outside the project through a link — init writes only inside the project, --force included · make that folder a real one inside the project, then run nika init again"
+            }
+            Self::Loop => {
+                "a link loop on its way — following it never ends, and init writes only through links that end, --force included · remove the loop, then run nika init again"
             }
             Self::NotRegular => {
                 "not a regular file — init writes only regular files, --force included · remove it, then run nika init again"
@@ -80,6 +87,7 @@ impl Refusal {
         match self {
             Self::Link => "a link leading out of the project or to nothing · kept, never followed",
             Self::Outside => "its folder leads out of the project · kept, never followed",
+            Self::Loop => "a link loop on its way · kept, never followed",
             Self::NotRegular => "not a regular file · kept as it is",
         }
     }
@@ -124,14 +132,15 @@ fn below<'a>(root: &Path, path: &'a Path) -> io::Result<&'a Path> {
 
 /// Where the link at `at` (a real place inside `home`, the project as it
 /// is) leads, found one step at a time: a real place inside the project,
-/// reached only through places inside it or above it. A way that leaves,
-/// a link to nothing and a loop are all `why`.
+/// reached only through places inside it or above it. A way that leaves
+/// and a link to nothing are both `why`; a loop is [`Refusal::Loop`].
 fn followed(root: &Path, home: &Path, at: &Path, why: Refusal) -> io::Result<PathBuf> {
     let rest = at.strip_prefix(home).map_err(|_| refused(why))?;
     match nika_fs::resolve_beneath(base(root), rest) {
         Ok(nika_fs::Beneath::There(real)) => Ok(real),
         Err(nika_fs::Escape::Io(_, e)) => Err(e),
-        // A way out (and back), a link to nothing, a loop.
+        Err(nika_fs::Escape::Loop(_)) => Err(refused(Refusal::Loop)),
+        // A way out (and back), a link to nothing.
         Ok(_) | Err(_) => Err(refused(why)),
     }
 }
@@ -580,9 +589,66 @@ mod tests {
         assert_eq!(fs::read(&target).expect("read"), b"x");
     }
 
+    /// A link loop that stays inside the project, at a folder (`.claude ->
+    /// loop -> .claude`) or at a file's own name (`CLAUDE.md -> a.md ->
+    /// CLAUDE.md`), is refused as a loop, never as a way out of the
+    /// project, wherever it is followed (the probe, the read, a write
+    /// through the folder), and nothing is made.
+    #[test]
+    fn a_link_loop_inside_the_project_is_refused_as_one() {
+        let (project, outside) = rooms("loop");
+        symlink("loop", project.join(".claude")).expect("to loop");
+        symlink(".claude", project.join("loop")).expect("back to .claude");
+        let target = project.join(".claude/settings.json");
+        assert_eq!(why(occupied(&project, &target)), Some(Refusal::Loop));
+        assert_eq!(
+            why(read_text(&project, &target, READ_CAP)),
+            Some(Refusal::Loop)
+        );
+        assert_eq!(why(write(&project, &target, b"{}")), Some(Refusal::Loop));
+        let deeper = project.join(".claude/hooks-nika/guard-run.sh");
+        assert_eq!(why(write(&project, &deeper, b"x")), Some(Refusal::Loop));
+
+        let name = project.join("CLAUDE.md");
+        symlink("a.md", &name).expect("to a.md");
+        symlink("CLAUDE.md", project.join("a.md")).expect("back to CLAUDE.md");
+        assert_eq!(why(occupied(&project, &name)), Some(Refusal::Loop));
+        assert!(
+            !link_inside(&project, &name),
+            "never kept as an inside link"
+        );
+        // The write refuses a link at the name before following it at all.
+        assert_eq!(why(write(&project, &name, b"ours")), Some(Refusal::Link));
+
+        let mut left: Vec<_> = fs::read_dir(&project)
+            .expect("list")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [".claude", "CLAUDE.md", "a.md", "loop"],
+            "nothing made"
+        );
+        assert_eq!(fs::read_dir(&outside).expect("list").count(), 0);
+        let text = Refusal::Loop.to_string();
+        assert!(text.starts_with("a link loop"), "{text}");
+        assert!(!text.contains("outside"), "{text}");
+        assert_eq!(
+            Refusal::Loop.kept(),
+            "a link loop on its way · kept, never followed"
+        );
+    }
+
     #[test]
     fn the_refusals_never_advise_force() {
-        for why in [Refusal::Link, Refusal::Outside, Refusal::NotRegular] {
+        for why in [
+            Refusal::Link,
+            Refusal::Outside,
+            Refusal::Loop,
+            Refusal::NotRegular,
+        ] {
             let text = why.to_string();
             assert!(text.contains("--force included"), "{text}");
             assert!(!text.contains("rerun with --force"), "{text}");

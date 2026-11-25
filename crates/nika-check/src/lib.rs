@@ -756,9 +756,9 @@ pub(crate) fn check_calls(
     mcp_tool_roles: mcp_roles::McpRoleMap,
 ) -> CheckReport {
     let (conformance, topo_waves, edges) = dag_facts(wf);
-    // One IFC pass over the DAG — the taint fact base both leak reports
-    // read. An empty wave order (conformance failure) taints nothing:
-    // the analysis is simply skipped, never wrong.
+    // One IFC pass over every task — the taint fact base both leak reports
+    // read. The wave order only orders its sweeps: with an empty one (a
+    // conformance failure) the pass still runs, in declaration order.
     let flow = flow::analyze_flow(wf, &topo_waves);
     // The engineering read shares the same gating: a valid order or no
     // claim (its write-write conflicts ride the dedicated finding class

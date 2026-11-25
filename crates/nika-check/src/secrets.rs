@@ -89,9 +89,9 @@ pub struct SecretEgress {
     pub trace: String,
 }
 
-/// Report every effect-leak from the precomputed flow facts — main verbs
-/// AND `on_finally` cleanup verbs (the trace's `on_finally @ <task>` hop
-/// distinguishes the cleanup case).
+/// Report every effect-leak from the precomputed flow facts, one row per
+/// (task, secret): every task's verb, an `unwind` cleanup task's included
+/// (cleanup is a task, spec 03 §unwind).
 #[must_use]
 pub(super) fn scan_leaks(wf: &RawWorkflow, flow: &FlowFacts) -> Vec<SecretLeak> {
     let mut leaks = Vec::new();

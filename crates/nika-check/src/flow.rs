@@ -43,7 +43,10 @@
 //! `tasks × secrets` sweeps (a most direct trace crosses each (task, secret)
 //! pair at most once, and each sweep settles one more pair of it); the loop is
 //! bounded by that count plus one. Findings are read once, from the settled
-//! facts.
+//! facts. Should the loop ever stop at the bound with work left, the facts
+//! fail closed: every task is judged as if every declared secret reached its
+//! effect and its record, so only a send each secret's `egress:` allows can
+//! stay clean.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -203,14 +206,28 @@ impl FlowFacts {
     }
 }
 
-/// Run the IFC analysis over a workflow, in the given topological wave
-/// order (reuse the analyzer's `topo_waves` — same order the engine runs).
+/// Run the IFC analysis over every task of a workflow. The analyzer's
+/// `topo_waves` only order the sweeps (a task absent from them, an unwind
+/// task or every task of a workflow whose order was refused, follows in
+/// declaration order): the pass repeats until the records settle, so the
+/// order decides how fast, never what is found.
 #[must_use]
 pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts {
+    analyze_flow_within(wf, waves, sweep_bound).0
+}
+
+/// [`analyze_flow`] with the sweep bound as a parameter, and how many task
+/// evaluations the sweeps took: the tests reach the fail-closed path through
+/// a bound smaller than the proof's, and measure the work.
+fn analyze_flow_within(
+    wf: &RawWorkflow,
+    waves: &[Vec<usize>],
+    bound: fn(usize, usize) -> u128,
+) -> (FlowFacts, usize) {
     let scope = Scope::of(wf);
     let mut facts = FlowFacts::default();
     if scope.declared.is_empty() {
-        return facts; // no secrets declared → nothing can be tainted
+        return (facts, 0); // no secrets declared → nothing can be tainted
     }
     // The per-secret egress policy (declass · ADR-092) — looked up by name
     // at every leak edge. Empty list / absent = default-deny.
@@ -239,7 +256,13 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
         .copied()
         .chain((0..wf.tasks.len()).filter(|idx| !seen.contains(idx)))
         .collect();
-    let (records, effects) = settle(&wf.tasks, &order, &reads, scope.declared.len());
+    let bound = bound(wf.tasks.len(), scope.declared.len());
+    let settled = settle(&wf.tasks, &order, &reads, bound);
+    let (records, effects) = if settled.unsettled {
+        worst_case(wf.tasks.len(), &scope.declared, bound)
+    } else {
+        (settled.records, settled.effects)
+    };
 
     // The findings read the settled facts, once.
     for (idx, effect) in effects {
@@ -255,7 +278,30 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
     }
     facts.output_taint = records;
     judge_outputs(wf, &scope, &egress_of, &mut facts);
-    facts
+    (facts, settled.evaluations)
+}
+
+/// The facts when the sweeps stop at `bound` with work left (unreachable by
+/// the bound's argument, so a bug if it ever happens): every task's effect and
+/// record carry every declared secret, each traced to this hop. The usual
+/// judges then read them, so every send and `outputs:` entry a secret's
+/// `egress:` does not allow refuses, and the trace says why.
+fn worst_case(tasks: usize, declared: &BTreeSet<&str>, bound: u128) -> (Records, Records) {
+    let hop = format!(
+        "the secret flow stopped at its sweep bound ({bound}) before settling: judged as if \
+         every declared secret reached this task"
+    );
+    let every: Taints = declared
+        .iter()
+        .map(|&secret| {
+            (
+                secret.to_owned(),
+                TaintTrace::source(secret).via(hop.clone()),
+            )
+        })
+        .collect();
+    let all: Records = (0..tasks).map(|idx| (idx, every.clone())).collect();
+    (all.clone(), all)
 }
 
 /// Egress: every secret a workflow `outputs:` entry carries —
@@ -480,8 +526,21 @@ fn sweep_bound(tasks: usize, secrets: usize) -> u128 {
     (tasks as u128) * (secrets as u128) + 1
 }
 
-/// Evaluate the tasks until every record settles; returns the settled
-/// records and what each effect sees, read from them.
+/// What [`settle`] leaves.
+struct Settled {
+    /// Task index → every secret its record carries.
+    records: Records,
+    /// Task index → every secret its effect sees (absent = none).
+    effects: Records,
+    /// How many task evaluations the sweeps took.
+    evaluations: usize,
+    /// Whether the sweeps stopped at the bound with work left: the facts are
+    /// then incomplete, and the caller fails closed ([`worst_case`]).
+    unsettled: bool,
+}
+
+/// Evaluate the tasks until every record settles, within `bound` sweeps;
+/// returns the settled records and what each effect sees, read from them.
 ///
 /// A sweep evaluates the tasks in `order`, and the sweeps repeat while one
 /// moves a record (a recover read is no scheduling edge, so a record can be
@@ -494,8 +553,8 @@ fn settle(
     tasks: &[Spanned<RawTask>],
     order: &[usize],
     reads: &[Reads<'_>],
-    secrets: usize,
-) -> (Records, Records) {
+    bound: u128,
+) -> Settled {
     let mut at_of = vec![0; tasks.len()];
     for (at, &idx) in order.iter().enumerate() {
         at_of[idx] = at;
@@ -508,12 +567,13 @@ fn settle(
     }
     let (mut records, mut effects) = (Records::new(), Records::new());
     let mut due: BTreeSet<usize> = (0..order.len()).collect();
-    let (bound, mut sweeps) = (sweep_bound(tasks.len(), secrets), 0_u128);
+    let (mut sweeps, mut evaluations) = (0_u128, 0_usize);
     while !due.is_empty() && sweeps < bound {
         sweeps += 1;
         let mut next = BTreeSet::new();
         while let Some(at) = due.pop_first() {
             let idx = order[at];
+            evaluations += 1;
             let (effect, record) = evaluate(&tasks[idx].value, &reads[idx], &records);
             if !effect.is_empty() {
                 effects.insert(idx, effect);
@@ -532,8 +592,12 @@ fn settle(
         }
         due = next;
     }
-    debug_assert!(due.is_empty(), "the records settle within the sweep bound");
-    (records, effects)
+    Settled {
+        records,
+        effects,
+        evaluations,
+        unsettled: !due.is_empty(),
+    }
 }
 
 /// What `task`'s effect sees and what its record carries, from the records
@@ -697,10 +761,9 @@ fn record_effect_leaks(
     }
 }
 
-/// Record the FIRST UNSANCTIONED `on_finally` cleanup leak of a task. A
-/// cleanup `exec`/`invoke` that sees a secret re-emits it exactly like a
-/// The text fields of an action's EFFECT (the sink surface) — works for a
-/// task's main verb AND an `on_finally` cleanup verb.
+/// The text fields of an action's EFFECT (the sink surface): one table for
+/// every task's verb, an `unwind` cleanup task's included (cleanup is a task,
+/// spec 03 §unwind).
 ///
 /// The `infer:`/`agent:` `prompt:` + `system:` ARE sinks: a secret in a
 /// prompt LEAVES the run to a third-party provider (the same third-party-
@@ -846,6 +909,27 @@ mod tests {
         (wf, facts)
     }
 
+    /// [`facts`] through a chosen sweep bound, with the evaluations the sweeps took.
+    fn facts_within(
+        yaml: &str,
+        bound: fn(usize, usize) -> u128,
+    ) -> (RawWorkflow, FlowFacts, usize) {
+        let wf = parse(yaml, FileId::new(0), ParseMode::Strict).expect("parse");
+        let analyzed = analyze(&wf).expect("analyze");
+        let (facts, evaluations) = analyze_flow_within(&wf, &analyzed.topo_waves, bound);
+        (wf, facts, evaluations)
+    }
+
+    /// Every unsanctioned effect edge as `(task, trace)`, in task order.
+    fn leak_rows(wf: &RawWorkflow, f: &FlowFacts) -> Vec<(String, String)> {
+        (0..wf.tasks.len())
+            .flat_map(|i| {
+                f.effect_leaks(i)
+                    .map(move |trace| (wf.tasks[i].value.id.value.clone(), trace.render()))
+            })
+            .collect()
+    }
+
     const S: &str = "secrets:\n  api_key:\n    source: vault\n    key: x\n";
 
     fn idx(wf: &RawWorkflow, id: &str) -> usize {
@@ -954,9 +1038,10 @@ tasks:
 
     /// The worst sweep order: each task recovers to the record of the task declared after it
     /// and only the last one sends the secret, so every sweep settles one more record, from the
-    /// back. Re-evaluating only the tasks whose read record moved keeps that linear (a full
-    /// re-sweep would be quadratic in the chain); the secret still reaches the head, through
-    /// every recover.
+    /// back. Re-evaluating only the tasks whose read record moved keeps that linear: the first
+    /// sweep evaluates every task, each later one only the reader of the record that moved, so
+    /// fewer than `2N` evaluations (a full re-sweep would take `N²`). The secret still reaches
+    /// the head, through every recover.
     #[test]
     fn a_backward_recover_chain_settles_in_linear_work() {
         use std::fmt::Write as _;
@@ -976,7 +1061,12 @@ tasks:
             N - 1
         )
         .expect("write to String is infallible");
-        let (wf, f) = facts(&y);
+        let (wf, f, evaluations) = facts_within(&y, sweep_bound);
+        assert!(
+            (N..=2 * N).contains(&evaluations),
+            "{evaluations} evaluations for a chain of {N}: each task once, then only the reader \
+             of the record that moved"
+        );
         let head = f
             .output_taint
             .get(&idx(&wf, "t0"))
@@ -999,6 +1089,47 @@ tasks:
         assert!(
             rendered.ends_with("on_error.recover @ t0 → tasks.t0.output"),
             "the trace ends at the head of the chain"
+        );
+    }
+
+    /// `t0` recovers to the record of `t1`, declared after it, so the flow needs a second sweep.
+    /// Stopped after one, the facts are incomplete: every task is then judged as if every
+    /// declared secret reached it, so the send no `egress:` rule allows refuses with the reason
+    /// in its trace, and the sends the rule allows stay allowed.
+    #[test]
+    fn a_flow_stopped_at_its_bound_fails_closed() {
+        let y = "nika: w\nsecrets:\n  api_key: { source: env, key: K, egress: [{ to: \"nika:fetch\", host: \"crm.example.com\" }] }\npermits:\n  tools: [\"nika:fetch\"]\n  net: { http: [\"crm.example.com\", \"other.example.com\"] }\ntasks:\n  t0:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/a\" } }\n    on_error: { recover: \"${{ tasks.t1.output }}\" }\n  t1:\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://crm.example.com/b\", headers: { authorization: \"Bearer ${{ secrets.api_key }}\" } } }\n  sink:\n    with: { x: \"${{ tasks.t0.output }}\" }\n    invoke: { tool: \"nika:fetch\", args: { url: \"https://other.example.com/in\", method: POST, body: \"${{ with.x }}\" } }\n";
+        let (wf, settled, _) = facts_within(y, |_, _| 2);
+        assert_eq!(
+            leak_rows(&wf, &settled),
+            [(
+                "sink".to_owned(),
+                "secrets.api_key → tasks.t1.output → on_error.recover @ t0 → tasks.t0.output → \
+                 with.x @ sink"
+                    .to_owned()
+            )],
+            "two sweeps settle it: the real path"
+        );
+        let (wf, stopped, _) = facts_within(y, |_, _| 1);
+        assert_eq!(
+            leak_rows(&wf, &stopped),
+            [(
+                "sink".to_owned(),
+                "secrets.api_key → the secret flow stopped at its sweep bound (1) before \
+                 settling: judged as if every declared secret reached this task"
+                    .to_owned()
+            )],
+            "one sweep leaves work: every task carries every secret, the allowed sends stay allowed"
+        );
+        let refused = crate::secrets::scan_leaks(&wf, &stopped);
+        let rows: Vec<(&str, &str, &str)> = refused
+            .iter()
+            .map(|l| (l.task.as_str(), l.secret.as_str(), l.sink))
+            .collect();
+        assert_eq!(
+            rows,
+            [("sink", "api_key", "invoke")],
+            "the incomplete facts refuse through the report's NIKA-SEC-006 rows"
         );
     }
 

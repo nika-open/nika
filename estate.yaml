@@ -18,15 +18,15 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8214
+  classified_files: 8219
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 4958
+    authored: 4961
     authored-pin: 2
     generated: 283
     pinned-copy: 266
-    testimonial: 2705
+    testimonial: 2707
     foreign: 0
   unverified-default: 8
 files:
@@ -124,8 +124,8 @@ patterns:
   note: "pack/examples/manifest.yaml is itself GENERATED upstream (spec scripts/showcase-projector.py) — vendored here as part of the copy"
 - glob: "crates/nika-runtime/fixtures/adversarial/**"
   class: testimonial
-  match_count: 32
-  aggregate_sha256: abc7fc35b877269a006969b281a4eaa0117f34229050356d39ad2eafdeb45fa0
+  match_count: 34
+  aggregate_sha256: 94839d75bbb564af3193611a885b873fbba0b6fc159fe6965699054e151ba370
   evidence: "attack.nika + expected.json pairs consumed by crates/nika-runtime/src/adversarial/tests.rs — the injection red-team battery owned by the runtime"
 - glob: "fuzz/corpus/**"
   class: testimonial
@@ -140,7 +140,7 @@ patterns:
 - glob: "crates/*/public-api.txt"
   class: generated
   match_count: 90
-  aggregate_sha256: a25d8323884c54b310f56b5faa4a89835f0682bb7d493224fcee3985b8b9214f
+  aggregate_sha256: 6b042d23f8dbfc0ad3a8238ed44baa6e24f65bd279230a62e3ecaf96645b8336
   evidence: ".github/workflows/public-api.yml 'diff each covered lib crate' byte-compares each snapshot against cargo public-api output; macOS renders differently, so snapshots regenerate FROM THE UBUNTU ARTIFACT (workflow comment)"
   derivation:
     tool: "cargo public-api -p <crate> --omit auto-trait-impls > crates/<crate>/public-api.txt (DEFAULT features · the CI job shape — all-features drags platform deps into the render · cargo-public-api 0.51.0 pinned · the public-api-actual CI artifact stays the judge)"
@@ -152,12 +152,12 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2434
-  aggregate_sha256: dbd17bf23ebc4373a032f4b43b29767b1ca52b280dbe055032e2ad917efa58e2
+  aggregate_sha256: dd49714bc2914b846613e416df125c36a686b5a297b26a2a4371df42946ee61d
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
-  match_count: 873
-  aggregate_sha256: 9f6afa6461fe05ab545643e0850d22c9a375c312173e76fc033acf75068983e5
+  match_count: 874
+  aggregate_sha256: c8f4fb84f0070474f5b7258ae8286f9ea7930f44b0c362ed8c16ea8d0a07eeb4
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 10
-  aggregate_sha256: d6faad6ca979c33b70fd61309c2ec295d064a70c4ffef99b6d1a871dc424469d
+  match_count: 12
+  aggregate_sha256: 425f9c6c1903955a99d0e48d6285b4469b901da595312cb4204471160a31547c
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

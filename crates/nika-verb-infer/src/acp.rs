@@ -22,10 +22,11 @@
 //! and each repair is a new one-shot turn under the same profile — a fresh
 //! session that receives the earlier answer and the errors as text.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use nika_harness::StructuredOutputGrade;
-use nika_kernel::ai::harness::{DynAgentBackend, HarnessOutcome, HarnessRequest};
+use nika_harness::{AcpOneShot, SpawnedHarness, StructuredOutputGrade};
+use nika_kernel::ai::harness::{DynAgentBackend, HarnessError, HarnessOutcome, HarnessRequest};
 
 use crate::{HarnessInferOutput, InferInput, InferVerb, VerbInferError, selection, structured};
 
@@ -38,6 +39,40 @@ pub(crate) struct AcpTransport(pub(crate) Arc<dyn DynAgentBackend>);
 impl std::fmt::Debug for AcpTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("AcpTransport")
+    }
+}
+
+/// The route adapters a verb spawned, one per route, shared by the verb's clones. A verb is
+/// composed per run, so each adapter keeps its first good proof for every later turn of the
+/// run (repairs included) instead of probing again on a loaded machine (NIK-385).
+#[derive(Clone, Default)]
+pub(crate) struct AcpSeats(Arc<std::sync::Mutex<BTreeMap<&'static str, Arc<SpawnedHarness>>>>);
+
+impl AcpSeats {
+    /// The run's adapter for `one_shot`'s route, spawned under its completion profile the
+    /// first time it is asked for.
+    pub(crate) fn seat(&self, one_shot: AcpOneShot) -> Result<Arc<SpawnedHarness>, HarnessError> {
+        if let Some(seat) = self
+            .0
+            .lock()
+            .ok()
+            .and_then(|seats| seats.get(one_shot.seat).cloned())
+        {
+            return Ok(seat);
+        }
+        let seat = Arc::new(one_shot.transport()?);
+        if let Ok(mut seats) = self.0.lock() {
+            seats
+                .entry(one_shot.seat)
+                .or_insert_with(|| Arc::clone(&seat));
+        }
+        Ok(seat)
+    }
+}
+
+impl std::fmt::Debug for AcpSeats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AcpSeats")
     }
 }
 
@@ -89,10 +124,14 @@ impl<H> InferVerb<H> {
                 .with_images(images.clone());
             request.system.clone_from(&system);
             let transport = self.acp_transport.clone();
+            let seats = self.acp_seats.clone();
             async move {
                 match transport {
                     Some(lent) => one_shot.run_over(lent.0.as_ref(), request, timeout).await,
-                    None => one_shot.run(request, timeout).await,
+                    None => match seats.seat(one_shot) {
+                        Ok(seat) => one_shot.run_over(&*seat, request, timeout).await,
+                        Err(refused) => Err(refused),
+                    },
                 }
                 .map_err(|source| VerbInferError::Harness { source })
             }

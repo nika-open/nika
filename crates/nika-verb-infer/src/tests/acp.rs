@@ -655,3 +655,21 @@ async fn an_absent_adapter_fails_typed_with_no_substitute() {
     assert_eq!(err.nika_code().to_string(), "NIKA-1803");
     assert!(!err.is_transient());
 }
+
+/// NIK-385 · a run keeps one adapter per route, shared by the verb's clones: every later turn
+/// of the run (a schema repair included) reuses its proof instead of probing again. Building
+/// the seat starts nothing; only a session does.
+#[test]
+fn a_run_keeps_one_adapter_per_route() {
+    let seats = crate::acp::AcpSeats::default();
+    let codex = nika_harness::meet_acp_one_shot("codex").expect("codex");
+    let claude = nika_harness::meet_acp_one_shot("claude-code").expect("claude-code");
+    let first = seats.seat(codex).expect("built");
+    assert!(Arc::ptr_eq(
+        &first,
+        &seats.clone().seat(codex).expect("kept")
+    ));
+    let other = seats.seat(claude).expect("built");
+    assert!(!Arc::ptr_eq(&first, &other), "one adapter per route");
+    assert!(Arc::ptr_eq(&other, &seats.seat(claude).expect("kept")));
+}

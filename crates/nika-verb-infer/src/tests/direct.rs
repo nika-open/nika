@@ -226,3 +226,25 @@ async fn without_vision_the_direct_seat_meets_its_other_gates() {
         "{err:?}"
     );
 }
+
+/// NIK-385 · a direct seat's attestation that did not answer in time is the transient session
+/// class a plain `retry:` replays; a refused attestation stays the final access miss.
+#[test]
+fn an_unanswered_attestation_is_transient_and_a_refusal_is_not() {
+    let unanswered = direct_failure(nika_harness::InferGradeError::Unanswered {
+        seat: "claude-code",
+        detail: "spawn-time attestation of `claude`: `--version` did not answer in 30s".to_owned(),
+    });
+    assert_eq!(unanswered.spec_code(), "NIKA-1804");
+    assert!(unanswered.is_transient());
+    assert_eq!(
+        unanswered.to_string(),
+        "infer harness: harness session failed: infer-grade seat `claude-code`: spawn-time \
+         attestation of `claude`: `--version` did not answer in 30s"
+    );
+    let refused = direct_failure(nika_harness::InferGradeError::Refused {
+        witness: "seat `claude-code` is not infer-grade for json_schema".to_owned(),
+    });
+    assert_eq!(refused.spec_code(), "NIKA-INFER-001");
+    assert!(!refused.is_transient());
+}

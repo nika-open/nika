@@ -75,7 +75,7 @@ impl<'a> SchemaRepair<'a> {
             // A backend that ended the repair turn open again: it is the terminal turn.
             return self.completed(output).map(Some);
         }
-        let rejection = match crate::shape::validate_text(text, validator) {
+        let rejection = match crate::shape::validate_text(text, validator, schema) {
             Ok(value) => return Ok(Some(structured(output, value))),
             Err(rejection) => rejection,
         };
@@ -98,10 +98,11 @@ impl<'a> SchemaRepair<'a> {
     /// prompt: the failure is the session's own.
     pub(crate) fn repair_failed(&self, cause: &dyn std::fmt::Display) -> Option<VerbAgentError> {
         let (first, validator) = (self.first.as_ref()?, self.validator?);
+        let schema = self.input.schema.as_ref()?;
         let AgentValue::Text(text) = &first.output else {
             return None;
         };
-        let rejection = crate::shape::validate_text(text, validator).err()?;
+        let rejection = crate::shape::validate_text(text, validator, schema).err()?;
         let detail = format!("{} (the repair turn failed: {cause})", rejection.detail());
         Some(rejection.into_error(detail, text.clone()))
     }
@@ -110,7 +111,7 @@ impl<'a> SchemaRepair<'a> {
     /// repair turn. Its final message is validated; a miss is `NIKA-INFER-002` with the
     /// message and every violation it holds.
     pub(crate) fn completed(&self, mut output: AgentOutput) -> Result<AgentOutput, VerbAgentError> {
-        let Some(validator) = self.validator else {
+        let (Some(validator), Some(schema)) = (self.validator, self.input.schema.as_ref()) else {
             return Ok(output);
         };
         if let Some(first) = &self.first {
@@ -121,7 +122,7 @@ impl<'a> SchemaRepair<'a> {
         let AgentValue::Text(text) = &output.output else {
             return Ok(output);
         };
-        match crate::shape::validate_text(text, validator) {
+        match crate::shape::validate_text(text, validator, schema) {
             Ok(value) => Ok(structured(output, value)),
             Err(rejection) => {
                 let why = if self.first.is_some() {

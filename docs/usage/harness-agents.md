@@ -164,7 +164,10 @@ with its final message, or a repair turn that never answers (the
 application exits, answers with an error or goes silent), fails
 `NIKA-INFER-002`; the failure's `details` keep
 the rejected message (`partial_output`) and its violations, each worded
-without the value it judged. An `on_error:` recovery reads the whole message;
+without the value it judged or a key the message holds (an unexpected key
+is counted against the names the schema allows, a path segment the schema
+does not declare reads `*`) and at most 256 bytes long. An `on_error:`
+recovery reads the whole message;
 the trace keeps its first 64 KiB, cut after the run's secrets in it are
 masked. A
 new session never replays the work: `on_codes: [NIKA-INFER-002]` in a

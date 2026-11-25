@@ -21,6 +21,8 @@
 
 use crate::{AgentValue, VerbAgentError};
 
+mod wording;
+
 /// Cap on the schema text re-injected into prompts (the instruction
 /// fallback) — an attacker-influenced schema must not be a token-cost
 /// amplifier across re-asks (nika-verb-infer review lens 3 · P1 parity).
@@ -36,8 +38,11 @@ pub(crate) const VIOLATIONS_LISTED: usize = 32;
 ///
 /// A violation is worded without the value it judged (`/tags: value is not of type "array"`):
 /// the validator's plain wording renders the whole offending value (the entire message, for a
-/// type miss at the root). The message is kept once, at `partial_output`, where the trace masks
-/// the run's secrets before it cuts the text; a violation is never cut.
+/// type miss at the root). Nor does it quote a key the message holds: an unexpected key or a bad
+/// property name is counted against the schema's own names and patterns, and a path segment the
+/// schema does not declare reads `*` (see [`wording`]). Each violation keeps at most 256 bytes.
+/// The message is kept once, at `partial_output`, where the trace masks the run's secrets before
+/// it cuts the text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Rejection {
     /// The named violations, never empty for a rejected candidate.
@@ -47,23 +52,31 @@ pub(crate) struct Rejection {
 }
 
 impl Rejection {
-    /// `candidate`'s violations, or `None` when it conforms.
-    fn of(validator: &jsonschema::Validator, candidate: &serde_json::Value) -> Option<Self> {
-        let mut rejection = Self::default();
+    /// `candidate`'s violations under `schema` (compiled as `validator`), or `None` when it
+    /// conforms.
+    fn of(
+        validator: &jsonschema::Validator,
+        schema: &serde_json::Value,
+        candidate: &serde_json::Value,
+    ) -> Option<Self> {
+        let mut words: Vec<wording::Word> = Vec::new();
+        let mut unlisted = 0usize;
         for error in validator.iter_errors(candidate) {
-            if rejection.violations.len() < VIOLATIONS_LISTED {
-                let path = error.instance_path().as_str();
-                let rule = error.masked();
-                (rejection.violations).push(if path.is_empty() {
-                    rule.to_string()
-                } else {
-                    format!("{path}: {rule}")
-                });
+            let word = wording::word(&error, schema);
+            if words.iter_mut().any(|listed| listed.absorb(&word)) {
+                continue;
+            }
+            if words.len() < VIOLATIONS_LISTED {
+                words.push(word);
             } else {
-                rejection.unlisted += 1;
+                unlisted = unlisted.saturating_add(1);
             }
         }
-        (!rejection.violations.is_empty()).then_some(rejection)
+        let violations: Vec<String> = words.iter().map(wording::Word::render).collect();
+        (!violations.is_empty()).then_some(Self {
+            violations,
+            unlisted,
+        })
     }
 
     /// A text with no JSON value in it.
@@ -119,11 +132,12 @@ pub(crate) fn compile(schema: &serde_json::Value) -> Result<jsonschema::Validato
 pub(crate) fn validate_text(
     text: &str,
     validator: &jsonschema::Validator,
+    schema: &serde_json::Value,
 ) -> Result<serde_json::Value, Rejection> {
     let Some(candidate) = extract_json(text) else {
         return Err(Rejection::no_json());
     };
-    match Rejection::of(validator, &candidate) {
+    match Rejection::of(validator, schema, &candidate) {
         None => Ok(candidate),
         Some(rejection) => Err(rejection),
     }
@@ -170,7 +184,7 @@ pub(crate) fn shape_output(
     };
     let validator = compile(schema)?;
     let candidate = candidate_of(value)?;
-    if let Some(rejection) = Rejection::of(&validator, &candidate) {
+    if let Some(rejection) = Rejection::of(&validator, schema, &candidate) {
         let detail = rejection.detail();
         return Err(rejection.into_error(detail, candidate.to_string()));
     }
@@ -413,5 +427,66 @@ mod tests {
     #[test]
     fn unterminated_span_is_not_extracted() {
         assert_eq!(extract_json("start { \"a\": 1 and never closes"), None);
+    }
+
+    /// The violations `candidate` gets under `schema`, through the direct path.
+    fn violations(schema: &serde_json::Value, candidate: serde_json::Value) -> Vec<String> {
+        match shape_output(AgentValue::Structured(candidate), Some(schema)) {
+            Err(VerbAgentError::SchemaValidation { violations, .. }) => violations,
+            other => panic!("a schema miss, got {other:?}"),
+        }
+    }
+
+    /// NIK-402 review · an object's own keys are the model's content: an unexpected key, a
+    /// bad property name or an undeclared path segment is counted or starred, and the
+    /// violation names the schema's own words (its declared names, its pattern), never a key
+    /// the message holds.
+    #[test]
+    fn a_violation_never_quotes_a_key_the_message_holds() {
+        let closed = serde_json::json!({"type": "object",
+            "properties": {"title": {"type": "string"}}, "additionalProperties": false});
+        assert_eq!(
+            violations(
+                &closed,
+                serde_json::json!({"title": "a", "sk-live-1": 1, "sk-live-2": 2})
+            ),
+            ["2 additional properties not allowed (the schema allows: \"title\")"]
+        );
+        let unevaluated = serde_json::json!({"type": "object",
+            "allOf": [{"properties": {"a": {}}}], "unevaluatedProperties": false});
+        assert_eq!(
+            violations(&unevaluated, serde_json::json!({"a": 1, "sk-live-3": 2})),
+            ["1 unevaluated property not allowed (the schema allows: \"a\")"]
+        );
+        let names = serde_json::json!({"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}});
+        assert_eq!(
+            violations(
+                &names,
+                serde_json::json!({"sk-Live-4": 1, "Sk-Live-5": 2, "fine": 3})
+            ),
+            ["2 property names fail propertyNames: the name does not match \"^[a-z]+$\""]
+        );
+        let nested = serde_json::json!({"type": "object", "properties": {"rows": {
+            "type": "array", "items": {"type": "object", "additionalProperties": {"type": "string"}}}}});
+        assert_eq!(
+            violations(&nested, serde_json::json!({"rows": [{"sk-live-6": 5}]})),
+            ["/rows/0/*: value is not of type \"string\""]
+        );
+    }
+
+    /// Each violation keeps at most 256 bytes, the same text in the repair prompt, the record
+    /// and the trace frame.
+    #[test]
+    fn a_violation_is_cut_at_256_bytes() {
+        let long = "x".repeat(400);
+        let found = violations(&serde_json::json!({"enum": [long]}), serde_json::json!(1));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].len(), 256);
+        assert!(
+            found[0].starts_with("value is not one of \"xxx"),
+            "{}",
+            found[0]
+        );
+        assert!(found[0].ends_with('…'), "{}", found[0]);
     }
 }

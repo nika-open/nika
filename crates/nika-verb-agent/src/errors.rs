@@ -180,8 +180,9 @@ pub enum VerbAgentError {
         partial_output: String,
         /// Every way the message missed the schema, in the validator's order
         /// (`error.details.violations`): the first 32, each led by its JSON pointer below the
-        /// root and worded without the value it judged (that value is in `partial_output`).
-        /// Empty when no message was received.
+        /// root (a segment the schema does not declare reads `*`), worded without the value it
+        /// judged or a key the message holds (both are in `partial_output`), and at most 256
+        /// bytes. Empty when no message was received.
         violations: Vec<String>,
         /// How many more violations the validator found past `violations`
         /// (`error.details.violations_unlisted` when not zero).

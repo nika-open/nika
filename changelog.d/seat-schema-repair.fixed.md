@@ -16,6 +16,11 @@
   value it judged, which for a type miss at the root was the whole message:
   it names the place and the rule (`/tags: value is not of type "array"`),
   in the repair prompt, the error message and the API agent's re-ask alike.
+  Nor does it quote the message's own keys: unexpected keys and bad
+  property names are counted against the names and patterns the schema
+  declares (`2 additional properties not allowed (the schema allows:
+  "title")`), a path segment the schema does not declare reads `*`, and
+  each violation keeps at most 256 bytes.
   The trace keeps the first 64 KiB of the message, cut only after the run's
   secrets in it are masked; `on_error:` reads the message whole.
   NIKA-AGENT-001 and NIKA-AGENT-002 keep their

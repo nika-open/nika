@@ -788,7 +788,7 @@ where
         // Try the answer as-is first — no wasted round-trip on a model that
         // already replied with a conforming object (the common path · keeps
         // structured agent tasks single-round-trip when the model complies).
-        let mut rejection = match shape::validate_text(&answer, &validator) {
+        let mut rejection = match shape::validate_text(&answer, &validator, schema) {
             Ok(value) => {
                 return Ok(shaped(value, stop_reason, st.turns, st.total_tokens));
             }
@@ -839,7 +839,7 @@ where
                 )
                 .await?;
             let text = joined_text(&response.content);
-            match shape::validate_text(&text, &validator) {
+            match shape::validate_text(&text, &validator, schema) {
                 Ok(value) => {
                     return Ok(shaped(value, stop_reason, st.turns, st.total_tokens));
                 }

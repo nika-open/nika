@@ -136,6 +136,16 @@ pub enum LeakReason {
     /// not exactly the lone secret, or another secret co-occurs in the
     /// payload (the non-occlusion guard).
     SelfShapeBroken,
+    /// The secret reaches an `infer:`/`agent:` `model:`, the route the run
+    /// sends as the provider and model it calls. A model name is never a
+    /// secret, so no `egress:` rule clears it: the model belongs in the file,
+    /// in `inputs:` or in `const:`.
+    ModelRoute,
+    /// The secret reaches an `exec:`'s `cwd:`, the directory the run spawns
+    /// the program in. A directory is never a secret, so no `egress:` rule
+    /// clears it: the directory belongs in the file, in `inputs:` or in
+    /// `const:`.
+    WorkingDirectory,
 }
 
 /// Compute the refusal reason for one refused edge — the caller asks

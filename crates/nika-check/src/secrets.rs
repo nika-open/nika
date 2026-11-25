@@ -11,7 +11,9 @@
 //!
 //! - [`SecretLeak`] — a secret reaches an `exec`/`invoke` EFFECT (directly,
 //!   via a `with:` alias, via a `for_each` item, or transitively through a
-//!   tainted upstream output). The full taint chain is carried.
+//!   tainted upstream output), or a ROUTE: the `model:` of an `infer`/`agent`
+//!   task or the `cwd:` of an `exec` task, which no `egress:` rule clears.
+//!   The full taint chain is carried.
 //! - [`SecretEgress`] — a secret reaches the workflow `outputs:` (it leaves
 //!   the run as the return value · the literal exfiltration case).
 //!
@@ -22,7 +24,7 @@
 //! ADR-092 · flow.rs §4).
 
 use super::flow::FlowFacts;
-use nika_schema::raw::{RawAction, RawWorkflow};
+use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
 
 /// A secret that escapes the masking boundary into an effect.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -32,7 +34,8 @@ pub struct SecretLeak {
     pub task: String,
     /// The originating secret name (`secrets.<name>`).
     pub secret: String,
-    /// The effect surface (`exec` · `invoke`).
+    /// The effect surface (`exec` · `invoke` · `infer` · `agent`), or the
+    /// route (`infer.model` · `agent.model` · `exec.cwd`).
     pub sink: &'static str,
     /// The EXACT `egress.to:` value that would sanction this sink — the
     /// tool id for an invoke (`nika:jq`), else the surface (`exec` ·
@@ -126,8 +129,64 @@ pub(super) fn scan_leaks(wf: &RawWorkflow, flow: &FlowFacts) -> Vec<SecretLeak> 
                 ),
             });
         }
+        leaks.extend(route_leaks(&task.value, idx, flow));
     }
     leaks
+}
+
+/// The route leaks of one task: a secret in an `infer:`/`agent:` `model:` (the
+/// provider and model the run calls) or in an `exec:` `cwd:` (the directory it
+/// spawns the program in) is refused whatever its `egress:`, since neither a
+/// model nor a directory is ever a secret.
+fn route_leaks<'f>(
+    task: &'f RawTask,
+    idx: usize,
+    flow: &'f FlowFacts,
+) -> impl Iterator<Item = SecretLeak> + 'f {
+    use super::declass::LeakReason;
+    let (sink, reason) = match &task.action {
+        RawAction::Agent(_) => ("agent.model", LeakReason::ModelRoute),
+        RawAction::Exec(_) => ("exec.cwd", LeakReason::WorkingDirectory),
+        // Only an infer, agent or exec task has a route.
+        _ => ("infer.model", LeakReason::ModelRoute),
+    };
+    flow.route_taints(idx).map(move |trace| SecretLeak {
+        task: task.id.value.clone(),
+        secret: trace.secret.clone(),
+        sink,
+        sink_id: sink_id_of(&task.action),
+        trace: trace.render(),
+        reason: reason.clone(),
+    })
+}
+
+/// The leaks of the two fields the run never renders a secret into, a task's
+/// `model:` and an `exec:`'s `cwd:` ([`LeakReason::ModelRoute`] ·
+/// [`LeakReason::WorkingDirectory`]), as [`crate::check`] reports them: the
+/// same secret flow, every way a secret travels (a direct reference, a `with:`
+/// alias, a task output or `group.*` fold, a `for_each` item, an
+/// `on_error.recover` value, inside any template). The run reads them before it
+/// starts a task, so a report that did not judge these fields cannot run one.
+/// Names and paths only, never a value.
+///
+/// Its limit is the check's: it follows the static flow of the file, and an
+/// `infer:` or `agent:` output carries no secret taint, so a model that echoes
+/// a secret it was given into a later task's `model:` is not caught here.
+///
+/// [`LeakReason::ModelRoute`]: crate::LeakReason::ModelRoute
+/// [`LeakReason::WorkingDirectory`]: crate::LeakReason::WorkingDirectory
+#[must_use]
+pub fn secret_route_leaks(wf: &RawWorkflow) -> Vec<SecretLeak> {
+    // The check's own wave order: the sweeps find the same leaks in any order,
+    // but on a tie between two paths of one length the flow keeps the first it
+    // meets, so this order names the path the check finding names.
+    let (_, waves, _) = crate::dag_facts(wf);
+    let flow = super::flow::analyze_flow(wf, &waves);
+    wf.tasks
+        .iter()
+        .enumerate()
+        .flat_map(|(idx, task)| route_leaks(&task.value, idx, &flow).collect::<Vec<_>>())
+        .collect()
 }
 
 /// Report every workflow-output egress from the precomputed flow facts.

@@ -22,7 +22,7 @@ pub(crate) fn declared_egress_summary(report: &CheckReport) -> String {
         .data_journey
         .secrets_used
         .iter()
-        .map(|secret| secret.flows_to.len())
+        .map(|secret| secret.flows_to.len() + secret.routes.len())
         .sum::<usize>();
     if declared_flows == 0 {
         if report.data_journey.secrets_used.is_empty() {
@@ -134,22 +134,24 @@ pub(crate) fn secrets_rung(out: &mut String, report: &CheckReport, t: Theme) {
         .map(|d| d.target.as_str())
         .collect();
     for (name, dest, pinned) in &flows {
-        let clauses: Vec<String> = report
+        // Each sink once, in the file's order: a sink pinned to one host
+        // and left open beside it is one sink.
+        let mut clauses: Vec<&str> = Vec::new();
+        for c in report
             .data_journey
             .consents
             .iter()
             .filter(|c| &c.secret == name)
-            .map(|c| c.to.clone())
-            .collect();
+        {
+            if !clauses.contains(&c.to.as_str()) {
+                clauses.push(&c.to);
+            }
+        }
         let via = clauses.join(" · ");
-        let tail = if !hosts.contains(dest.as_str()) {
-            format!("egress.to {via}")
-        } else if *pinned {
-            format!("egress.to {via} · host pinned")
+        let tail = if hosts.contains(dest.as_str()) {
+            host_clause(&report.data_journey.consents, name, dest, &via, *pinned)
         } else {
-            format!(
-                "egress.to {via} pins no host (any host the tool reaches) · exact form: egress: [{{ to: \"{via}\", host: \"{dest}\" }}]"
-            )
+            format!("egress.to {via}")
         };
         let _ = writeln!(
             out,
@@ -158,24 +160,84 @@ pub(crate) fn secrets_rung(out: &mut String, report: &CheckReport, t: Theme) {
     }
 }
 
+/// What the `egress:` rules of `name` say about `dest`, a host of the net
+/// grant. They pin it; or they pin no host, which clears any host the tool
+/// reaches, and the row prints the pinned form; or they pin other hosts,
+/// which the row names (« pins no host » would contradict the file), each
+/// under the sink of its rule when the rules name more than one, and says
+/// when a rule beside them pins none. A rule whose sink addresses no host
+/// is no pin.
+fn host_clause(
+    consents: &[nika_check::JourneyConsent],
+    name: &str,
+    dest: &str,
+    via: &str,
+    pinned: bool,
+) -> String {
+    if pinned {
+        return format!("egress.to {via} · host pinned");
+    }
+    let exact = format!("exact form: egress: [{{ to: \"{via}\", host: \"{dest}\" }}]");
+    // Only a rule whose sink can address a host says anything about one.
+    let rules = || {
+        consents
+            .iter()
+            .filter(|c| c.secret == name && reaches_hosts(&c.to))
+    };
+    // Each pinned host under the sink of its rule: a pin on one sink says
+    // nothing about a send through another.
+    let mut pinned_by: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        std::collections::BTreeMap::new();
+    for c in rules() {
+        if let Some(host) = c.host.as_deref() {
+            pinned_by.entry(c.to.as_str()).or_default().insert(host);
+        }
+    }
+    let hosts =
+        |set: &std::collections::BTreeSet<&str>| set.iter().copied().collect::<Vec<_>>().join(", ");
+    let pins = match pinned_by.first_key_value() {
+        None => {
+            return format!("egress.to {via} pins no host (any host the tool reaches) · {exact}");
+        }
+        Some((to, set)) if pinned_by.len() == 1 && *to == via => hosts(set),
+        Some(_) => pinned_by
+            .iter()
+            .map(|(to, set)| format!("{} on {to}", hosts(set)))
+            .collect::<Vec<_>>()
+            .join("; "),
+    };
+    if rules().any(|c| c.host.is_none()) {
+        format!(
+            "egress.to {via} pins {pins}, not {dest}, and a rule with no host clears any host the tool reaches · {exact}"
+        )
+    } else {
+        format!("egress.to {via} pins {pins}, not {dest}")
+    }
+}
+
+/// Whether a rule's sink can address a host: a network builtin, or an
+/// agent (its tools reach the net grant). `exec`, `outputs` and the other
+/// sinks carry no host, so a rule naming one pins nothing about a host.
+fn reaches_hosts(to: &str) -> bool {
+    to == "agent"
+        || matches!(
+            nika_cap::builtin_effect(to, None),
+            Some(nika_cap::BuiltinEffect::Net { .. })
+        )
+}
+
 /// JOURNEY rung (P0-18 · audit UX 2026-07-30) — the data voyage made
 /// visible BEFORE the run: the derived class and the counts, then one ⚠
 /// row per secret reaching an external destination, NAMED. Advisory by
 /// design — the blocking refusal of an UNSANCTIONED flow lives in the
 /// SECRETS lane (the IFC leak finding); a sanctioned flow still has to
 /// be SEEN, so the row asks the operator to review consent before the
-/// run. Names and classes only — never a value (law 13).
+/// run. A secret in a task's model route ([`nika_check::SecretUse::routes`])
+/// is refused whatever its consent, so its row names the remedy instead.
+/// Names and classes only — never a value (law 13).
 pub(crate) fn journey_rung(out: &mut String, report: &CheckReport, t: Theme) {
     let j = &report.data_journey;
-    let flows: Vec<(&str, &str)> = j
-        .secrets_used
-        .iter()
-        .flat_map(|s| {
-            s.flows_to
-                .iter()
-                .map(move |d| (s.name.as_str(), d.as_str()))
-        })
-        .collect();
+    let flows = named_flows(j);
     let summary = format!(
         "{} · {} · {} · {}",
         j.classification.as_str(),
@@ -235,10 +297,17 @@ pub(crate) fn journey_rung(out: &mut String, report: &CheckReport, t: Theme) {
         t.paint(Role::Strong, "JOURNEY"),
         t.paint(Role::Dim, &summary)
     );
-    for (name, dest) in flows {
+    for (name, dest, route) in flows {
+        // No consent clears a secret in a route (the SECRETS refusal says
+        // so): the row names the remedy, never a consent to review.
+        let next = if route {
+            "no egress rule clears a route: name the model, or read it from `inputs:` or `const:`"
+        } else {
+            "review consent before the run"
+        };
         let _ = writeln!(
             out,
-            " {} {} secret `{name}` flows to {dest} · review consent before the run",
+            " {} {} secret `{name}` flows to {dest} · {next}",
             t.paint(Role::Warn, if t.ascii { "!" } else { "⚠" }),
             t.paint(Role::Strong, "JOURNEY"),
         );
@@ -253,3 +322,27 @@ pub(crate) fn journey_rung(out: &mut String, report: &CheckReport, t: Theme) {
         );
     }
 }
+
+/// Every `(secret, destination, route)` the JOURNEY rung names: each
+/// external destination of a secret, and the model route of each task whose
+/// `model:` it reaches, in name order within the secret.
+fn named_flows(j: &nika_check::DataJourney) -> Vec<(&str, String, bool)> {
+    let mut flows = Vec::new();
+    for s in &j.secrets_used {
+        let mut rows: Vec<(String, bool)> = s.flows_to.iter().map(|d| (d.clone(), false)).collect();
+        rows.extend(
+            s.routes
+                .iter()
+                .map(|task| (format!("the model route of `{task}`"), true)),
+        );
+        rows.sort();
+        flows.extend(
+            rows.into_iter()
+                .map(|(d, route)| (s.name.as_str(), d, route)),
+        );
+    }
+    flows
+}
+
+#[cfg(test)]
+mod tests;

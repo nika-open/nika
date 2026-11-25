@@ -69,9 +69,11 @@ mod declassify;
 mod failed;
 mod finally;
 mod finish;
+mod secret_route;
 
 pub(crate) use finally::unwind_tasks_of;
 use finish::assemble_ran_finish;
+pub(crate) use secret_route::SecretRoutes;
 
 pub(crate) use declassify::{DeclassifyEvidence, declassify_evidence};
 pub(crate) use failed::FailedOutcome;
@@ -355,6 +357,10 @@ where
         // ── GATE-v2 (spec 03 §gate algebra) — structural per-edge
         //    admission over the derived edges · cannot error ──────────
         if let Some(finish) = gate_finish(task, id.clone(), records) {
+            return finish;
+        }
+        // NIKA-SEC-006 · a secret in `model:`/`cwd:` refuses it before any render.
+        if let Some(finish) = secret_route::refused_finish(&id, task, resume_ctx.secret_routes()) {
             return finish;
         }
 

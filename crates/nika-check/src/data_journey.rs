@@ -125,11 +125,19 @@ pub struct ModelEndpoint {
 pub struct SecretUse {
     /// The `secrets.<name>` — never the value, never the lookup key.
     pub name: String,
-    /// The effect tasks referencing it (directly or through the taint).
+    /// The tasks whose effect or `model:` route it reaches, as the settled
+    /// secret flow found it (directly or through the taint): none for a
+    /// secret the body names but never sends.
     pub tasks: Vec<String>,
-    /// The external destinations the secret reaches (a provider id · a
-    /// public host · an MCP tool id) — the rows the JOURNEY rung warns on.
+    /// Where it goes: the external destinations of the tasks whose effect
+    /// it reaches (a provider id · a public host · an MCP tool id) — the
+    /// rows the JOURNEY rung warns on.
     pub flows_to: Vec<String>,
+    /// The `infer:`/`agent:` tasks whose `model:` it reaches (each in `tasks`
+    /// too): the provider receives the route a secret chooses, so each is an
+    /// external flow of its own, and no `egress:` rule clears it
+    /// (`NIKA-SEC-006`), so a reader names the remedy, not a consent.
+    pub routes: Vec<String>,
     /// The author's declared clearances (`egress.to:` tokens).
     pub consents: Vec<String>,
 }
@@ -195,19 +203,21 @@ const PII_PATH_TOKENS: &[&str] = &[
 /// Project the journey from the parsed workflow + the IFC facts (the
 /// taint the flow engine already computed — the projection never
 /// re-derives propagation). Total: a half-broken workflow still states
-/// its declared journey (the direct-reference half needs no DAG order).
+/// its declared journey (without a valid order the secret flow still runs,
+/// sweeping the tasks in declaration order).
 pub(crate) fn collect(wf: &RawWorkflow, flow: &FlowFacts) -> DataJourney {
     let consts = ConstStrings::of(wf);
     let envelope = wf.model.as_ref().map(|m| m.value.clone());
-    let declared: BTreeSet<&str> = wf.secrets.iter().map(|(n, _)| n.value.as_str()).collect();
     // (kind, target) → tasks — the endpoint tables, BTree-ordered.
     let mut endpoints: BTreeMap<(&'static str, String), BTreeSet<String>> = BTreeMap::new();
     let mut model_endpoints = Vec::new();
     // task → the external destinations it reaches (provider ids · public
     // hosts · MCP tool ids).
     let mut task_external: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    // secret name → the tasks using it.
-    let mut secret_tasks: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    // secret name → where the flow found it, task by task (nowhere for a
+    // secret the body names but never sends).
+    let mut secret_reach: BTreeMap<String, Reach> = BTreeMap::new();
+    let declared: BTreeSet<&str> = wf.secrets.iter().map(|(n, _)| n.value.as_str()).collect();
 
     let permits = wf.permits.as_ref().map(|p| &p.value);
     for (idx, task) in wf.tasks.iter().enumerate() {
@@ -231,8 +241,16 @@ pub(crate) fn collect(wf: &RawWorkflow, flow: &FlowFacts) -> DataJourney {
         if !external.is_empty() {
             task_external.insert(id.clone(), external);
         }
-        for name in secret_names_of_task(idx, t, flow, &declared) {
-            secret_tasks.entry(name).or_default().insert(id.clone());
+        for name in secrets_named_by(t, &declared) {
+            secret_reach.entry(name).or_default();
+        }
+        for (name, via) in secrets_reaching(idx, t, flow) {
+            let reach = secret_reach.entry(name).or_default();
+            let tasks = match via {
+                Via::Effect => &mut reach.effects,
+                Via::Route => &mut reach.routes,
+            };
+            tasks.insert(id.clone());
         }
     }
 
@@ -246,7 +264,7 @@ pub(crate) fn collect(wf: &RawWorkflow, flow: &FlowFacts) -> DataJourney {
         .filter(|d| d.kind == "fs.write")
         .map(|d| d.target.clone())
         .collect();
-    let secrets_used = secret_uses(wf, secret_tasks, &task_external);
+    let secrets_used = secret_uses(wf, secret_reach, &task_external);
     let consents = consents_of(wf);
     let trace_retention = retention_facts(&model_endpoints);
     let classification = classify(&sources, &writes, &secrets_used);
@@ -496,16 +514,11 @@ fn locus_of(p: &nika_catalog::Provider) -> EndpointLocus {
     }
 }
 
-/// Every DECLARED secret name one task touches — the direct references
-/// across its effect surface (the verb · `with:` · `for_each`), plus every
-/// secret the IFC pass found reaching its effect (a with-alias, an item, a
-/// tainted upstream record). NAMES only — law 13.
-fn secret_names_of_task(
-    idx: usize,
-    task: &RawTask,
-    flow: &FlowFacts,
-    declared: &BTreeSet<&str>,
-) -> BTreeSet<String> {
+/// Every DECLARED secret one task names in its request, its `with:` or its
+/// `for_each:`: the secrets the run resolves for it, whether it sends them
+/// or not. They make a secret USED; where it goes is `secrets_reaching`'s
+/// to say. NAMES only — law 13.
+fn secrets_named_by(task: &RawTask, declared: &BTreeSet<&str>) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut scan = |text: &str| {
         for r in refs_in_str(text) {
@@ -539,12 +552,55 @@ fn secret_names_of_task(
             other => unreachable!("unknown for_each form: {other:?}"),
         }
     }
-    // The propagation facts, which the pass computes over every task: every
-    // secret reaching the effect, not only the first.
-    for trace in flow.effect_taints(idx) {
-        out.insert(trace.secret.clone());
-    }
     out
+}
+
+/// Where the settled secret flow found one secret, task by task.
+#[derive(Default)]
+struct Reach {
+    /// The tasks whose effect it reaches.
+    effects: BTreeSet<String>,
+    /// The `infer:`/`agent:` tasks whose `model:` route it reaches.
+    routes: BTreeSet<String>,
+}
+
+/// What of a task a secret reaches.
+enum Via {
+    /// Its effect: what the run sends to a program, a tool or a model, and
+    /// the directory it spawns a program in.
+    Effect,
+    /// Its `model:`: the route the run sends as the provider and model.
+    Route,
+}
+
+/// Every DECLARED secret reaching one task, as the settled secret flow
+/// found it: its effect (a direct reference, a `with:` alias, an item, a
+/// tainted upstream record or group fold, whether or not an `egress:` rule
+/// sanctions the send) or its route. An exec's `cwd:` is the directory the
+/// program runs in, which goes to that program like its command, so the
+/// journey counts it with the effect; an `infer:`/`agent:` `model:` goes to
+/// the provider. These are the facts the SECRETS verdict reads, so the
+/// destinations the journey names and the verdict cannot disagree: a secret
+/// a task binds or iterates over but never sends reaches nothing. NAMES only
+/// — law 13.
+fn secrets_reaching<'f>(
+    idx: usize,
+    task: &RawTask,
+    flow: &'f FlowFacts,
+) -> impl Iterator<Item = (String, Via)> + 'f {
+    let runs_a_program = matches!(task.action, RawAction::Exec(_));
+    let effects = flow
+        .effect_taints(idx)
+        .map(|trace| (trace.secret.clone(), Via::Effect));
+    let routes = flow.route_taints(idx).map(move |trace| {
+        let via = if runs_a_program {
+            Via::Effect
+        } else {
+            Via::Route
+        };
+        (trace.secret.clone(), via)
+    });
+    effects.chain(routes)
 }
 
 /// The endpoints of one family, folded out of the shared table.
@@ -564,21 +620,28 @@ fn endpoints_of(
 }
 
 /// The used secrets with their external flows — a secret's `flows_to` is
-/// the union of the external destinations of every task touching it.
+/// the union of the external destinations of every task whose effect it
+/// reaches, and its `routes` every task whose `model:` it reaches. A
+/// provider receives the route, and check cannot prove that a route
+/// rendered from a secret stays on this machine, so each route is an
+/// external flow (fail closed). The route goes to the provider, not to the
+/// task's other destinations: the run sends it to no agent tool.
 fn secret_uses(
     wf: &RawWorkflow,
-    secret_tasks: BTreeMap<String, BTreeSet<String>>,
+    secret_reach: BTreeMap<String, Reach>,
     task_external: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<SecretUse> {
-    secret_tasks
+    secret_reach
         .into_iter()
-        .map(|(name, tasks)| {
-            let flows_to: BTreeSet<String> = tasks
+        .map(|(name, reach)| {
+            let flows_to: BTreeSet<String> = reach
+                .effects
                 .iter()
                 .filter_map(|t| task_external.get(t))
                 .flatten()
                 .cloned()
                 .collect();
+            let tasks: BTreeSet<String> = reach.effects.union(&reach.routes).cloned().collect();
             let consents = wf
                 .secrets
                 .iter()
@@ -589,6 +652,7 @@ fn secret_uses(
                 name,
                 tasks: tasks.into_iter().collect(),
                 flows_to: flows_to.into_iter().collect(),
+                routes: reach.routes.into_iter().collect(),
                 consents,
             }
         })
@@ -639,7 +703,10 @@ fn classify(
     writes: &[String],
     secrets_used: &[SecretUse],
 ) -> DataClassification {
-    if secrets_used.iter().any(|s| !s.flows_to.is_empty()) {
+    if secrets_used
+        .iter()
+        .any(|s| !s.flows_to.is_empty() || !s.routes.is_empty())
+    {
         return DataClassification::Regulated;
     }
     if !secrets_used.is_empty()

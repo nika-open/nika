@@ -398,10 +398,12 @@ pub nika_check::LeakReason::DerivedDestination
 pub nika_check::LeakReason::HostMismatch
 pub nika_check::LeakReason::HostMismatch::actual: alloc::string::String
 pub nika_check::LeakReason::HostMismatch::declared: alloc::string::String
+pub nika_check::LeakReason::ModelRoute
 pub nika_check::LeakReason::NoEgress
 pub nika_check::LeakReason::SelfShapeBroken
 pub nika_check::LeakReason::SinkNotCleared
 pub nika_check::LeakReason::SinkNotCleared::sink: alloc::string::String
+pub nika_check::LeakReason::WorkingDirectory
 impl core::clone::Clone for nika_check::LeakReason
 pub fn nika_check::LeakReason::clone(&self) -> nika_check::LeakReason
 impl core::cmp::Eq for nika_check::LeakReason
@@ -2778,6 +2780,7 @@ pub fn nika_check::SecretRequirement::as_any(&self) -> &(dyn core::any::Any + 's
 pub nika_check::SecretUse::consents: alloc::vec::Vec<alloc::string::String>
 pub nika_check::SecretUse::flows_to: alloc::vec::Vec<alloc::string::String>
 pub nika_check::SecretUse::name: alloc::string::String
+pub nika_check::SecretUse::routes: alloc::vec::Vec<alloc::string::String>
 pub nika_check::SecretUse::tasks: alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for nika_check::SecretUse
 pub fn nika_check::SecretUse::clone(&self) -> nika_check::SecretUse
@@ -3286,6 +3289,7 @@ pub fn nika_check::infer_permits(wf: &nika_schema::raw::workflow::RawWorkflow) -
 pub fn nika_check::paid_blockers(hints: &[nika_check::Hint]) -> alloc::vec::Vec<&nika_check::Hint>
 pub fn nika_check::paid_ready(hints: &[nika_check::Hint]) -> bool
 pub fn nika_check::risk_grade(report: &nika_check::CheckReport) -> nika_check::RiskGrade
+pub fn nika_check::secret_route_leaks(wf: &nika_schema::raw::workflow::RawWorkflow) -> alloc::vec::Vec<nika_check::SecretLeak>
 pub fn nika_check::stamp_paid_ready(obj: &mut serde_json::map::Map<alloc::string::String, serde_json::value::Value>, hints: &[nika_check::Hint])
 pub fn nika_check::task_permits(task: &nika_schema::raw::task::RawTask) -> alloc::vec::Vec<alloc::string::String>
 pub fn nika_check::typed_renames(report: &nika_check::CheckReport) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String, &'static str)>

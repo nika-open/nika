@@ -3,7 +3,8 @@
 
 //! The SECRETS and JOURNEY rungs say only what the secret flow found (NIK-387): a secret a
 //! task iterates over but never sends reaches no destination, and a row never says a rule
-//! « pins no host » when the rule pins one.
+//! « pins no host » when the rule pins one. A secret in a task's `model:` goes to the model
+//! route of that task, which the JOURNEY rung names (NIK-386).
 
 use nika_check::CheckReport;
 use nika_schema::parser::{ParseMode, parse};
@@ -183,6 +184,77 @@ fn a_row_names_the_pinned_host_and_the_open_rule_beside_it() {
              pins crm.example.com, not other.example.com, and a rule with no host clears any \
              host the tool reaches · exact form: egress: [{ to: \"nika:fetch\", host: \
              \"other.example.com\" }]"
+        ],
+        "{out}"
+    );
+}
+
+/// The witnesses q1 (`infer:`) and q2 (`agent:`) of NIK-386, the token in the task's `model:`.
+fn routed(verb: &str) -> String {
+    let budget = if verb == "agent" {
+        "max_tokens_total"
+    } else {
+        "max_tokens"
+    };
+    format!(
+        r#"nika: q-{verb}-model
+secrets:
+  token: {{ source: env, key: T, egress: [{{ to: "nika:fetch", host: "crm.example.com" }}] }}
+tasks:
+  ask:
+    {verb}: {{ model: "${{{{ secrets.token }}}}", prompt: hi, {budget}: 10 }}
+"#
+    )
+}
+
+/// The token in a task's `model:` is refused on the SECRETS rung, and the JOURNEY rung says where
+/// it goes, the route of `ask`, in place of « no secret reaches an external destination ».
+#[test]
+fn a_secret_in_a_task_model_flows_to_its_model_route() {
+    for verb in ["infer", "agent"] {
+        let yaml = routed(verb);
+        let wf = parsed(&yaml);
+        let report = nika_check::check(&wf);
+        let leaks: Vec<String> = report
+            .findings
+            .iter()
+            .filter(|f| f.kind == "secret_leak")
+            .map(|f| format!(" ✖ SECRETS  [NIKA-SEC-006] {}", f.message))
+            .collect();
+        assert_eq!(leaks.len(), 1, "{verb}: {:?}", report.findings);
+        let out = console_of(&report, &wf, &yaml);
+        assert_eq!(rung(&out, "SECRETS"), leaks, "{out}");
+        assert_eq!(
+            rung(&out, "JOURNEY"),
+            [
+                " ⚠ JOURNEY regulated · 0 sources · 0 destinations · 0 model endpoints",
+                " ⚠ JOURNEY secret `token` flows to the model route of `ask` · review consent \
+                 before the run",
+            ],
+            "{out}"
+        );
+    }
+}
+
+/// The witness q3: the run never renders the workflow `model:`, so a secret there goes nowhere
+/// and the JOURNEY rung is as it was.
+#[test]
+fn a_secret_in_the_envelope_model_leaves_the_journey_as_it_was() {
+    let out = console(
+        r#"nika: q-envelope-model
+model: "${{ secrets.token }}"
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+tasks:
+  ask:
+    infer: { prompt: hi, max_tokens: 10 }
+"#,
+    );
+    assert_eq!(
+        rung(&out, "JOURNEY"),
+        [
+            " ✔ JOURNEY internal · 0 sources · 0 destinations · 0 model endpoints · no secret \
+             reaches an external destination"
         ],
         "{out}"
     );

@@ -17,6 +17,11 @@
     `inputs:` or `const:` for a model the file does not name. Both follow a
     direct reference, a `with:` alias, a task output that carries the
     secret and a `group:` fold. The workflow `model:` is unchanged.
+  - **In the journey.** A secret reaching a task's `model:` goes to "the
+    model route of" that task, which the JOURNEY rung and the `--json`
+    journey name as an external destination, so the class is `regulated`:
+    the provider receives the route, and `check` cannot prove that a route
+    rendered from a secret stays on this machine.
   - **At run.** The error a failed task records (the text later tasks read
     as `tasks.<id>.error`) no longer carries a resolved secret value, as the
     event stream already did not. What the run sends is unchanged.

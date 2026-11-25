@@ -10,6 +10,10 @@
 //! destinations now come from the settled flow only, the facts the SECRETS verdict reads, so the
 //! two cannot disagree. A secret the body names but never sends stays a used secret (the run
 //! resolves it) that goes nowhere.
+//!
+//! A secret in a task's `model:` reaches the route the run sends to the provider (NIK-386): the
+//! journey names that route as an external destination, since check cannot prove the provider
+//! a secret chooses is local, and gives the route none of the task's other destinations.
 
 use nika_check::{CheckReport, DataClassification, check};
 use nika_schema::{FileId, ParseMode, parse};
@@ -152,5 +156,102 @@ tasks:
             vec!["pick".to_owned(), "send".to_owned()],
             vec![CRM.to_owned()],
         )]
+    );
+}
+
+/// The secret reaching `ask`'s route, alone.
+fn token_to_the_route_of_ask() -> Use {
+    token_to("ask", "the model route of `ask`")
+}
+
+/// The witnesses q1 and q2 of NIK-386, and the same route through a `with:` alias: the journey
+/// names the route of `ask` as where `token` goes, and the class is `regulated`.
+#[test]
+fn a_secret_in_a_task_model_flows_to_its_model_route() {
+    for (sink, task) in [
+        (
+            "infer.model",
+            r#"    infer: { model: "${{ secrets.token }}", prompt: hi, max_tokens: 10 }"#,
+        ),
+        (
+            "agent.model",
+            r#"    agent: { model: "${{ secrets.token }}", prompt: hi, max_tokens_total: 10 }"#,
+        ),
+        (
+            "infer.model",
+            "    with: { m: \"${{ secrets.token }}\" }\n    infer: { model: \"${{ with.m }}\", \
+             prompt: hi, max_tokens: 10 }",
+        ),
+    ] {
+        let report = run(&format!(
+            r#"nika: route
+secrets:
+  token: {{ source: env, key: T, egress: [{{ to: "nika:fetch", host: "crm.example.com" }}] }}
+tasks:
+  ask:
+{task}
+"#
+        ));
+        assert_eq!(
+            report
+                .secret_leaks
+                .iter()
+                .map(|l| (l.task.as_str(), l.sink))
+                .collect::<Vec<_>>(),
+            [("ask", sink)],
+            "{task}"
+        );
+        assert_eq!(uses(&report), [token_to_the_route_of_ask()], "{task}");
+        assert_eq!(
+            report.data_journey.classification,
+            DataClassification::Regulated,
+            "{task}"
+        );
+    }
+}
+
+/// An agent holding `nika:fetch` under a net grant reaches that grant, but a secret in its
+/// `model:` goes to the provider only: the route, not the agent's hosts, is where it goes.
+#[test]
+fn a_secret_in_an_agent_model_does_not_go_to_its_tools() {
+    let report = run(r#"nika: agent-route
+secrets:
+  token: { source: env, key: T, egress: [{ to: agent }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com"] }
+tasks:
+  ask:
+    agent: { model: "${{ secrets.token }}", prompt: hi, max_tokens_total: 10, tools: ["nika:fetch"] }
+"#);
+    assert_eq!(
+        report
+            .data_journey
+            .destinations
+            .iter()
+            .map(|d| (d.kind, d.target.as_str(), d.tasks.clone()))
+            .collect::<Vec<_>>(),
+        [("net.http", CRM, vec!["ask".to_owned()])]
+    );
+    assert_eq!(uses(&report), [token_to_the_route_of_ask()]);
+}
+
+/// The workflow `model:` is not rendered by the run (NIK-386 left it as it was): a secret named
+/// there is in no task, so the journey uses none (witness q3).
+#[test]
+fn a_secret_in_the_envelope_model_stays_off_the_journey() {
+    let report = run(r#"nika: envelope-route
+model: "${{ secrets.token }}"
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+tasks:
+  ask:
+    infer: { prompt: hi, max_tokens: 10 }
+"#);
+    assert_eq!(report.secret_leaks.len(), 0, "{:?}", report.secret_leaks);
+    assert_eq!(uses(&report), Vec::<Use>::new());
+    assert_eq!(
+        report.data_journey.classification,
+        DataClassification::Internal
     );
 }

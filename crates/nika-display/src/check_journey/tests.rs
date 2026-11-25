@@ -207,8 +207,34 @@ tasks:
     )
 }
 
+/// One rule pins crm.example.com on `nika:notify`, one pins no host on `nika:fetch` and clears
+/// the send to other.example.com: the row names the pin under its own sink, never as a pin of the
+/// fetch. The exact form is not this test's subject.
+#[test]
+fn a_pin_on_another_sink_is_named_under_that_sink() {
+    let yaml = relay("crm.example.com", true).replace(
+        r#"egress: [{ to: "nika:fetch", host: "crm.example.com" }]"#,
+        r#"egress: [{ to: "nika:notify", host: "crm.example.com" }, { to: "nika:fetch" }]"#,
+    );
+    let out = console(&yaml);
+    let rows: Vec<&str> = rung(&out, "SECRETS")[1..]
+        .iter()
+        .map(|row| row.split(" · exact form: ").next().unwrap_or(row))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            " ⚠ SECRETS  sanctioned · secret `token` → other.example.com · egress.to nika:notify \
+             · nika:fetch pins crm.example.com on nika:notify, not other.example.com, and a rule \
+             with no host clears any host the tool reaches"
+        ],
+        "{out}"
+    );
+}
+
 /// The token in a task's `model:` is refused on the SECRETS rung, and the JOURNEY rung says where
-/// it goes, the route of `ask`, in place of « no secret reaches an external destination ».
+/// it goes, the route of `ask`, in place of « no secret reaches an external destination », with
+/// the remedy in place of a consent no rule can give.
 #[test]
 fn a_secret_in_a_task_model_flows_to_its_model_route() {
     for verb in ["infer", "agent"] {
@@ -228,8 +254,8 @@ fn a_secret_in_a_task_model_flows_to_its_model_route() {
             rung(&out, "JOURNEY"),
             [
                 " ⚠ JOURNEY regulated · 0 sources · 0 destinations · 0 model endpoints",
-                " ⚠ JOURNEY secret `token` flows to the model route of `ask` · review consent \
-                 before the run",
+                " ⚠ JOURNEY secret `token` flows to the model route of `ask` · no egress rule \
+                 clears a route: name the model, or read it from `inputs:` or `const:`",
             ],
             "{out}"
         );

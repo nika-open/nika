@@ -33,6 +33,7 @@ mod unit {
             access_pin: None,
             lane_access: BTreeMap::new(),
             groups: BTreeMap::new(),
+            secret_routes: crate::task::SecretRoutes::default(),
         }
     }
 

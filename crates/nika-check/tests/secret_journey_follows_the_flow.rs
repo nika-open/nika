@@ -12,8 +12,10 @@
 //! resolves it) that goes nowhere.
 //!
 //! A secret in a task's `model:` reaches the route the run sends to the provider (NIK-386): the
-//! journey names that route as an external destination, since check cannot prove the provider
-//! a secret chooses is local, and gives the route none of the task's other destinations.
+//! journey names that task in the secret's `routes`, an external flow of its own, since check
+//! cannot prove the provider a secret chooses is local, and gives the route none of the task's
+//! other destinations. A secret in an `exec:`'s `cwd:` goes to the program the task runs, like its
+//! command.
 
 use nika_check::{CheckReport, DataClassification, check};
 use nika_schema::{FileId, ParseMode, parse};
@@ -22,21 +24,28 @@ fn run(yaml: &str) -> CheckReport {
     check(&parse(yaml, FileId::new(0), ParseMode::Strict).expect("the fixture parses"))
 }
 
-/// Every used secret as `(name, tasks, destinations)`.
-type Use = (String, Vec<String>, Vec<String>);
+/// Every used secret as `(name, tasks, destinations, routes)`.
+type Use = (String, Vec<String>, Vec<String>, Vec<String>);
 
 fn uses(report: &CheckReport) -> Vec<Use> {
     report
         .data_journey
         .secrets_used
         .iter()
-        .map(|s| (s.name.clone(), s.tasks.clone(), s.flows_to.clone()))
+        .map(|s| {
+            (
+                s.name.clone(),
+                s.tasks.clone(),
+                s.flows_to.clone(),
+                s.routes.clone(),
+            )
+        })
         .collect()
 }
 
 /// `token`, used and sent nowhere.
 fn token_unsent() -> Use {
-    ("token".to_owned(), Vec::new(), Vec::new())
+    ("token".to_owned(), Vec::new(), Vec::new(), Vec::new())
 }
 
 fn token_to(task: &str, dest: &str) -> Use {
@@ -44,6 +53,7 @@ fn token_to(task: &str, dest: &str) -> Use {
         "token".to_owned(),
         vec![task.to_owned()],
         vec![dest.to_owned()],
+        Vec::new(),
     )
 }
 
@@ -155,17 +165,23 @@ tasks:
             "token".to_owned(),
             vec!["pick".to_owned(), "send".to_owned()],
             vec![CRM.to_owned()],
+            Vec::new(),
         )]
     );
 }
 
-/// The secret reaching `ask`'s route, alone.
+/// The secret reaching `ask`'s route, alone: no destination, the route of `ask`.
 fn token_to_the_route_of_ask() -> Use {
-    token_to("ask", "the model route of `ask`")
+    (
+        "token".to_owned(),
+        vec!["ask".to_owned()],
+        Vec::new(),
+        vec!["ask".to_owned()],
+    )
 }
 
 /// The witnesses q1 and q2 of NIK-386, and the same route through a `with:` alias: the journey
-/// names the route of `ask` as where `token` goes, and the class is `regulated`.
+/// names `ask` in the routes of `token`, and the class is `regulated`.
 #[test]
 fn a_secret_in_a_task_model_flows_to_its_model_route() {
     for (sink, task) in [
@@ -253,5 +269,42 @@ tasks:
     assert_eq!(
         report.data_journey.classification,
         DataClassification::Internal
+    );
+}
+
+/// A secret in an `exec:`'s `cwd:` goes to the program `run` spawns, on this machine: `run` is
+/// one of its tasks, with no external destination and no model route, and the class is
+/// `sensitive`. The SECRETS verdict refuses it.
+#[test]
+fn a_secret_in_a_cwd_goes_to_the_program_it_runs() {
+    let report = run(r#"nika: cwd-route
+secrets:
+  token: { source: env, key: T, egress: [{ to: exec }] }
+permits:
+  exec: ["true"]
+tasks:
+  run:
+    exec: { command: ["true"], cwd: "${{ secrets.token }}" }
+"#);
+    assert_eq!(
+        report
+            .secret_leaks
+            .iter()
+            .map(|l| (l.task.as_str(), l.sink))
+            .collect::<Vec<_>>(),
+        [("run", "exec.cwd")]
+    );
+    assert_eq!(
+        uses(&report),
+        [(
+            "token".to_owned(),
+            vec!["run".to_owned()],
+            Vec::new(),
+            Vec::new()
+        )]
+    );
+    assert_eq!(
+        report.data_journey.classification,
+        DataClassification::Sensitive
     );
 }

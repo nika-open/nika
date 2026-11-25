@@ -204,7 +204,7 @@ pub use risk::{RiskGrade, risk_grade, wildcard_grants};
 pub use run_decl::RunDeclFinding;
 pub use schema_lint::SchemaLintFinding;
 pub use schema_typing::{SchemaTypeFinding, UnverifiableOutputRef};
-pub use secrets::{SecretEgress, SecretLeak};
+pub use secrets::{SecretEgress, SecretLeak, secret_route_leaks};
 pub use slots::{MARKER_OPEN, SlotFinding};
 pub use tools::{MissingArg, UnknownArg, UnknownTool};
 

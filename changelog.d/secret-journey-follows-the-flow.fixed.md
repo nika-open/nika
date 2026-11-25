@@ -14,5 +14,7 @@
     a host said `pins no host` whenever the secret's `egress:` rules did not
     pin that host, even when they pinned another one. The row now names the
     hosts the rules pin (`pins crm.example.com, not other.example.com`),
+    each under the sink of its rule when the rules name more than one,
     says when a rule beside them pins none, and names each sink once. It
-    keeps `pins no host` for rules that pin none.
+    keeps `pins no host` for rules that pin none, and a rule whose sink
+    reaches no host pins nothing.

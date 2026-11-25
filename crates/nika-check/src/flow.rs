@@ -23,14 +23,16 @@
 //!   `on_error.recover:` value replaces its output whatever the verb, so the
 //!   record also carries what that value reads; a `group.<name>` fold
 //!   carries what each member record carries.
-//! - **sinks** — a secret reaching an `exec`/`invoke` effect is a LEAK (an
-//!   `exec:`'s `cwd:` included: the run renders it with secrets resolved and
-//!   hands it to the spawn); a secret reaching the workflow `outputs:` is an
-//!   EGRESS (the value leaves the run as the return). A secret reaching an
-//!   `infer:`/`agent:` `model:` is a ROUTE: the run renders it with secrets
-//!   resolved and sends it as the provider and model it calls, and a model
-//!   name is never a secret, so no `egress:` rule clears it. The route
-//!   carries nothing into the record (the output carve-out above).
+//! - **sinks** — a secret reaching an `exec`/`invoke` effect is a LEAK; a
+//!   secret reaching the workflow `outputs:` is an EGRESS (the value leaves
+//!   the run as the return). A secret reaching an `infer:`/`agent:` `model:`
+//!   or an `exec:`'s `cwd:` is a ROUTE: the run renders either with secrets
+//!   resolved, as the provider and model it calls or as the directory it
+//!   spawns the program in, and neither a model name nor a directory is ever
+//!   a secret, so no `egress:` rule clears it (the run refuses such a task
+//!   before the field renders). A model route carries nothing into the
+//!   record (the output carve-out above); a program can print its working
+//!   directory, so an exec's record carries what its `cwd:` reads.
 //!
 //! Every slot holds one trace PER SECRET, the most direct one found (fewest
 //! hops; a tie keeps the trace read first), so a record that carries two
@@ -158,14 +160,16 @@ pub struct FlowFacts {
     effect_taint: BTreeMap<usize, Taints>,
     /// Task index → every UNSANCTIONED secret edge reaching that effect.
     effect_leaks: BTreeMap<usize, Taints>,
-    /// Task index → every secret its `infer:`/`agent:` `model:` reads, one
-    /// most direct trace each, ending on the `model @ <task>` hop. Every one
-    /// is reportable: no `egress:` rule clears a route.
+    /// Task index → every secret its route reads (an `infer:`/`agent:`
+    /// `model:`, an `exec:` `cwd:`), one most direct trace each, ending on the
+    /// `model @ <task>` or `cwd @ <task>` hop. Every one is reportable: no
+    /// `egress:` rule clears a route.
     route_taint: BTreeMap<usize, Taints>,
     /// Task index → every secret its RECORD carries (`tasks.<id>.output`, and
-    /// each `group.<name>` fold it joins): what an exec/invoke effect saw, and
-    /// what its `on_error.recover:` value reads (the recovered value replaces
-    /// the output whatever the verb · spec 05 §recovery).
+    /// each `group.<name>` fold it joins): what an exec/invoke effect saw and
+    /// an exec's `cwd:` reads, and what its `on_error.recover:` value reads
+    /// (the recovered value replaces the output whatever the verb · spec 05
+    /// §recovery).
     output_taint: Records,
     /// Workflow `outputs:` entry name → every secret reaching it unsanctioned
     /// (egress).
@@ -204,8 +208,8 @@ impl FlowFacts {
             .flat_map(BTreeMap::values)
     }
 
-    /// Every secret reaching `task`'s `model:` route, one most direct trace
-    /// each, by secret name.
+    /// Every secret reaching `task`'s route (its `model:`, an exec's `cwd:`),
+    /// one most direct trace each, by secret name.
     pub(crate) fn route_taints(&self, task: usize) -> impl Iterator<Item = &TaintTrace> {
         self.route_taint
             .get(&task)
@@ -304,10 +308,10 @@ fn analyze_flow_within(
 /// The facts when the sweeps stop at `bound` with work left (unreachable by
 /// the bound's argument, so a bug if it ever happens): every task's effect and
 /// record carry every declared secret, each traced to this hop, and so does
-/// every `model:` that reads anything a secret could ride (a `with.*` slot, the
-/// `item`, a record or a secret). The usual judges then read them, so every
-/// send and `outputs:` entry a secret's `egress:` does not allow refuses, every
-/// such route refuses, and the trace says why.
+/// every route (a `model:`, a `cwd:`) that reads anything a secret could ride
+/// (a `with.*` slot, the `item`, a record or a secret). The usual judges then
+/// read them, so every send and `outputs:` entry a secret's `egress:` does not
+/// allow refuses, every such route refuses, and the trace says why.
 fn worst_case(
     tasks: &[Spanned<RawTask>],
     reads: &[Reads<'_>],
@@ -332,10 +336,7 @@ fn worst_case(
         .iter()
         .enumerate()
         .filter(|(_, task_reads)| !task_reads.route.is_empty())
-        .map(|(idx, _)| {
-            let model = format!("model @ {}", tasks[idx].value.id.value);
-            (idx, via_each(every.clone(), &model))
-        })
+        .map(|(idx, _)| (idx, via_each(every.clone(), &route_hop(&tasks[idx].value))))
         .collect();
     Reached {
         records: all.clone(),
@@ -484,9 +485,10 @@ struct Reads<'a> {
     with: Vec<Binding<'a>>,
     /// What the `for_each:` collection reads, expression or literal list.
     item: Option<Vec<Read>>,
-    /// What the effect-carrying fields read ([`secret_effect_fields`]).
+    /// What the effect-carrying fields read ([`action_effect_fields`]).
     effect: Vec<Read>,
-    /// What an `infer:`/`agent:` `model:` reads ([`route_field`]).
+    /// What the route reads ([`route_field`]): an `infer:`/`agent:` `model:`,
+    /// an `exec:` `cwd:`.
     route: Vec<Read>,
     /// What the `on_error.recover:` value reads.
     recover: Option<Vec<Read>>,
@@ -525,7 +527,7 @@ impl<'a> Reads<'a> {
             })
         });
         let effect = scope.resolve(
-            secret_effect_fields(&task.action)
+            action_effect_fields(&task.action)
                 .into_iter()
                 .flat_map(refs_in_str)
                 .collect(),
@@ -668,13 +670,13 @@ fn settle(
 struct Evaluation {
     /// Every secret its effect sees.
     effect: Taints,
-    /// Every secret its `model:` reads, each trace ending on `model @ <task>`.
+    /// Every secret its route reads, each trace ending on [`route_hop`].
     route: Taints,
     /// Every secret its record carries.
     record: Taints,
 }
 
-/// What `task`'s effect sees, what its `model:` reads and what its record
+/// What `task`'s effect sees, what its route reads and what its record
 /// carries, from the records known so far.
 fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> Evaluation {
     let id = task.id.value.as_str();
@@ -708,24 +710,22 @@ fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> Evaluation 
     }
     // 4. Effect taint: do this task's effect-carrying fields see a secret?
     let effect = carried(&reads.effect, Some(&with), Some(&item), records);
-    //    And the route: does its `model:` read one? It is rendered in the
-    //    same scope as the prompt, so it reads the same slots and item.
-    let route = via_each(
-        carried(&reads.route, Some(&with), Some(&item), records),
-        &format!("model @ {id}"),
-    );
+    //    And the route: does its `model:` or `cwd:` read one? It is rendered in
+    //    the same scope as the effect, so it reads the same slots and item.
+    let routed = carried(&reads.route, Some(&with), Some(&item), records);
     // 5. The record: an exec/invoke whose effect saw a secret can embed it in
-    //    the captured output (infer/agent are provider-bound: no output
-    //    taint), and a recovered value replaces the output whatever the verb.
-    //    Written to the record, not sent: no sink here, each later reader is
-    //    judged as usual.
+    //    the captured output, and so can an exec run in a directory a secret
+    //    names (infer/agent are provider-bound: no output taint); a recovered
+    //    value replaces the output whatever the verb. Written to the record,
+    //    not sent: no sink here, each later reader is judged as usual.
     let output = format!("tasks.{id}.output");
     let mut record = Taints::new();
     if matches!(task.action, RawAction::Exec(_) | RawAction::Invoke(_)) {
-        for trace in effect.values() {
+        for trace in effect.values().chain(routed.values()) {
             keep_most_direct(&mut record, trace.via(output.clone()));
         }
     }
+    let route = via_each(routed, &route_hop(task));
     if let Some(value) = &reads.recover {
         let recover = format!("on_error.recover @ {id}");
         for trace in carried(value, Some(&with), Some(&item), records).into_values() {
@@ -845,34 +845,32 @@ fn record_effect_leaks(
     }
 }
 
-/// The effect fields the secret flow reads: [`action_effect_fields`], plus an
-/// `exec:`'s `cwd:`. The run renders `cwd:` with secrets resolved and hands it
-/// to the spawn (the program's working directory, and a literal of the
-/// sandbox profile), so a secret there reaches the exec effect like one in
-/// argv or env: the same `{ to: "exec" }` rule clears it, and the output it
-/// can then print carries it. The shared table stays as it is for its other
-/// readers (the integrity labels of the run's re-gate among them): this widens
-/// the secret judgment only.
-fn secret_effect_fields(action: &RawAction) -> Vec<&str> {
-    let mut fields = action_effect_fields(action);
-    if let RawAction::Exec(exec) = action
-        && let Some(cwd) = &exec.cwd
-    {
-        fields.push(cwd.value.as_str());
-    }
-    fields
-}
-
-/// The text of an `infer:`/`agent:` `model:` (spec 02), the ROUTE: the run
-/// renders it in the task's scope with secrets resolved and sends it as the
-/// provider and model it calls. `None` for every other verb, and for a task
-/// that names no model (the envelope `model:` is never rendered at run).
+/// The text of a task's ROUTE, the field the run renders with secrets resolved
+/// to decide where the effect goes: an `infer:`/`agent:` `model:` (spec 02),
+/// sent as the provider and model it calls, or an `exec:` `cwd:`, the
+/// directory it spawns the program in (and a literal of the sandbox profile).
+/// `None` for every other verb, and for a task that names neither (the
+/// envelope `model:` is never rendered at run). The shared effect table
+/// ([`action_effect_fields`]) leaves `cwd:` out for its other readers (the
+/// integrity labels of the run's re-gate among them).
 fn route_field(action: &RawAction) -> Option<&str> {
     match action {
         RawAction::Infer(a) => a.model.as_ref().map(|m| m.value.as_str()),
         RawAction::Agent(a) => a.model.as_ref().map(|m| m.value.as_str()),
+        RawAction::Exec(a) => a.cwd.as_ref().map(|d| d.value.as_str()),
         _ => None,
     }
+}
+
+/// The last hop of a route trace: `cwd @ <task>` for an exec, `model @ <task>`
+/// otherwise.
+fn route_hop(task: &RawTask) -> String {
+    let field = if matches!(task.action, RawAction::Exec(_)) {
+        "cwd"
+    } else {
+        "model"
+    };
+    format!("{field} @ {}", task.id.value)
 }
 
 /// The text fields of an action's EFFECT (the sink surface): one table for

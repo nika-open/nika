@@ -141,6 +141,11 @@ pub enum LeakReason {
     /// secret, so no `egress:` rule clears it: the model belongs in the file,
     /// in `inputs:` or in `const:`.
     ModelRoute,
+    /// The secret reaches an `exec:`'s `cwd:`, the directory the run spawns
+    /// the program in. A directory is never a secret, so no `egress:` rule
+    /// clears it: the directory belongs in the file, in `inputs:` or in
+    /// `const:`.
+    WorkingDirectory,
 }
 
 /// Compute the refusal reason for one refused edge — the caller asks

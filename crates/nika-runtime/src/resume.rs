@@ -419,6 +419,9 @@ pub(crate) struct ResumeContext {
     /// order: a `with:` fold `${{ group.<name> }}` renders into the input
     /// identity over the same membership the runtime binds, never a miss.
     groups: BTreeMap<String, Vec<String>>,
+    /// The tasks a secret reaches through a `model:` or a `cwd:`, refused
+    /// before they start (`NIKA-SEC-006` · the check's own secret flow).
+    secret_routes: crate::task::SecretRoutes,
 }
 
 impl ResumeContext {
@@ -468,6 +471,7 @@ impl ResumeContext {
             lane_access: lane_access.clone(),
             run: None,
             groups: declared_groups(wf),
+            secret_routes: crate::task::SecretRoutes::of(wf),
         }
     }
 
@@ -504,6 +508,11 @@ impl ResumeContext {
     /// Every declared group → its member ids, in declaration order.
     pub(crate) fn groups(&self) -> &BTreeMap<String, Vec<String>> {
         &self.groups
+    }
+
+    /// The tasks refused for a secret in their route.
+    pub(crate) const fn secret_routes(&self) -> &crate::task::SecretRoutes {
+        &self.secret_routes
     }
 }
 

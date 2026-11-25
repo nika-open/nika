@@ -3,11 +3,12 @@
 
 //! A failed dispatch's texts with every resolved secret value masked.
 //!
-//! The run renders a task's fields with secrets resolved: an `exec:`'s
-//! `cwd:` and argv, an `infer:`/`agent:`'s `model:`. When the dispatch fails
-//! (the route refused before any request by the launch gates' own laws, a lane
-//! that cannot serve the rendered model, a spawn that fails) its note and its
-//! error record can name what was rendered. The event lane masks them through
+//! The run renders with secrets resolved the fields an `egress:` rule lets a
+//! secret reach: an `exec:`'s argv and env, a prompt, a tool's arguments. (A
+//! `model:` and a `cwd:` never carry one: the run refuses such a task before it
+//! starts, `task::secret_route`.) When the dispatch fails (a spawn that fails,
+//! a provider or a tool that echoes what it received) its note and its error
+//! record can name what was rendered. The event lane masks them through
 //! the run's `RedactingSink`, but the error record is also data the sink never
 //! sees: a later task reads it as `tasks.<id>.error`, and the embedder receives
 //! it in `RunOutcome.records`. So the record is masked here, at the one seam

@@ -184,7 +184,7 @@ tasks:
     );
 }
 
-/// The resolved value the two masking tests below plant in a rendered field.
+/// The resolved value the two tests below plant in a rendered field.
 const PLANTED: &str = "sk-live-9f2c7e4a1b6d";
 
 /// Every string field of every event, in order: the value must ride none.
@@ -203,15 +203,15 @@ fn assert_no_event_carries(events: &[nika_event::Event], value: &str) {
     }
 }
 
-/// A spawn that fails over a `cwd:` rendered from a secret: the failure text
-/// the shell returns names the directory, and the task's error record (what a
-/// later task reads as `tasks.use_it.error`, and what the embedder receives)
-/// carries the marker, never the value. The shell still received the
-/// rendered directory: what the run sends is unchanged.
+/// A spawn that fails over an argv rendered from a secret its `egress:` rule
+/// sends to `exec`: the failure text the shell returns names the argument, and
+/// the task's error record (what a later task reads as `tasks.use_it.error`,
+/// and what the embedder receives) carries the marker, never the value. The
+/// shell still received the rendered argument: what the run sends is unchanged.
 #[tokio::test]
 async fn a_failed_spawn_never_names_a_resolved_secret_in_its_record() {
     let yaml = r#"
-nika: secret-cwd
+nika: secret-argv
 permits: { exec: true }
 secrets:
   token:
@@ -221,10 +221,10 @@ secrets:
       - to: "exec"
 tasks:
   use_it:
-    exec: { command: ["deploy"], cwd: "${{ secrets.token }}" }
+    exec: { command: ["deploy", "${{ secrets.token }}"] }
 "#;
     let shell = MockShell::new().enqueue_err(nika_kernel::process::ShellError::Other {
-        reason: format!("cannot enter the working directory `{PLANTED}`"),
+        reason: format!("deploy refused the key `{PLANTED}`"),
     });
     let resolver = Arc::new(MapSecrets(BTreeMap::from([(
         "token".to_owned(),
@@ -236,9 +236,9 @@ tasks:
     let commands = shell.executed_commands();
     assert_eq!(commands.len(), 1, "the spawn was attempted once");
     assert_eq!(
-        commands[0].cwd.as_deref(),
-        Some(std::path::Path::new(PLANTED)),
-        "the shell received the rendered directory"
+        (commands[0].program.as_str(), commands[0].args.as_slice()),
+        ("deploy", [PLANTED.to_owned()].as_slice()),
+        "the shell received the rendered argument"
     );
     let err = outcome.records["use_it"]
         .error
@@ -247,7 +247,7 @@ tasks:
     assert_eq!(err.code, "NIKA-EXEC-002");
     assert_eq!(
         err.message,
-        "shell execution failed: shell error: cannot enter the working directory `***`"
+        "shell execution failed: shell error: deploy refused the key `***`"
     );
     assert_no_event_carries(&events, PLANTED);
 }
@@ -255,9 +255,9 @@ tasks:
 /// A `model:` rendered from a secret: `nika check` now refuses the file, and
 /// the run refuses a dirty report, so the run below holds the report a check
 /// older than that refusal gave for the same bytes (0.125.1 passed it clean).
-/// Under a cap the seat is refused before any provider request, and the
-/// refusal text names the seat. The record carries the marker in place of
-/// the value, on the code the refusal always had.
+/// The run refuses the task for its route before it renders the model, so
+/// before the cap's own refusal of an unpriced seat (`NIKA-1704`), which used
+/// to name the rendered seat: the record names the task and the field.
 #[tokio::test]
 async fn a_refused_route_never_names_a_resolved_secret_in_its_record() {
     let yaml = r#"
@@ -317,11 +317,12 @@ tasks:
         .error
         .as_ref()
         .expect("the refusal is on record");
-    assert_eq!(err.code, "NIKA-1704");
+    assert_eq!(err.code, "NIKA-SEC-006");
     assert_eq!(
         err.message,
-        "refused before the provider request: cloud model `***` is unpriced, so the cap \
-         cannot bound it"
+        "refused before the task ran: a secret reaches the `model:` of task `ask` \
+         (secrets.token → model @ ask), and the run renders no secret there · name the model \
+         there, or read it from `inputs:` or `const:`"
     );
     assert_no_event_carries(&events, PLANTED);
 }

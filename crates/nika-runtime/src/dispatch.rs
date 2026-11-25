@@ -729,8 +729,8 @@ where
                 format!("verb not wired in the runtime yet: {other:?}"),
             ),
         };
-        // A failure's texts can name a field rendered with secrets resolved
-        // (a `model:`, a `cwd:`): its record never carries their values.
+        // A failure's texts can name a secret an `egress:` rule let a field
+        // render (an argv): its record never carries the value.
         dispatched.masked(scope.secrets())
     }
 

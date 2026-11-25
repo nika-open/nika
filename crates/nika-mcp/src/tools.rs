@@ -237,38 +237,7 @@ fn learn_tools() -> Value {
                             never a remembered number.",
             "inputSchema": { "type": "object", "properties": {} }
         },
-        {
-            "name": "nika_catalog",
-            "description": "The embedded provider/model catalog — providers, models, \
-                            capabilities (vision · reasoning · json_mode), context \
-                            windows, and API-key env-var NAMES (values never read). \
-                            Versioned wire `catalog_version: 1`. Pick REAL model ids \
-                            from here instead of guessing — and pick them ONLY from \
-                            rows where `resolves` is true. A cataloged vendor is not a \
-                            runnable one: `resolves: false` means this binary has no \
-                            adapter for it and `nika check` refuses the model at the \
-                            MODELS rung. With `mcp: true` it returns the MCP server \
-                            shelf instead (same `catalog_version: 1` envelope, key \
-                            `mcp_servers`): tool hubs (tag `tool-hub`) and vendor \
-                            servers, each with its packages, hosted remotes (transport \
-                            and auth), env-var NAMES, `last_verified` date and `status` \
-                            (`current`, `deprecated` or `restricted`, with a \
-                            `status_note` saying why). Add `query` to keep only the \
-                            servers whose id, alias, title, category or tag contains it.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "mcp": {
-                        "type": "boolean",
-                        "description": "Return the MCP server shelf instead of the provider/model catalog."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "With mcp: true, keep only the servers whose id, alias, title, category or tag contains this text (case-insensitive)."
-                    }
-                }
-            }
-        },
+        catalog_tool(),
         {
             "name": "nika_tools",
             "description": "The embedded builtin-tool catalog — every `nika:*` tool \
@@ -278,6 +247,43 @@ fn learn_tools() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
+}
+
+/// The `nika_catalog` tool: the provider/model catalog, or the MCP server
+/// shelf with `mcp: true`, narrowed by `query`.
+fn catalog_tool() -> Value {
+    json!({
+        "name": "nika_catalog",
+        "description": "The embedded provider/model catalog — providers, models, \
+                        capabilities (vision · reasoning · json_mode), context \
+                        windows, and API-key env-var NAMES (values never read). \
+                        Versioned wire `catalog_version: 1`. Pick REAL model ids \
+                        from here instead of guessing — and pick them ONLY from \
+                        rows where `resolves` is true. A cataloged vendor is not a \
+                        runnable one: `resolves: false` means this binary has no \
+                        adapter for it and `nika check` refuses the model at the \
+                        MODELS rung. With `mcp: true` it returns the MCP server \
+                        shelf instead (same `catalog_version: 1` envelope, key \
+                        `mcp_servers`): tool hubs (tag `tool-hub`) and vendor \
+                        servers, each with its packages, hosted remotes (transport \
+                        and auth), env-var NAMES, `last_verified` date and `status` \
+                        (`current`, `deprecated` or `restricted`, with a \
+                        `status_note` saying why). Add `query` to keep only the \
+                        servers whose id, alias, title, category or tag contains it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mcp": {
+                    "type": "boolean",
+                    "description": "Return the MCP server shelf instead of the provider/model catalog."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "With mcp: true, keep only the servers whose id, alias, title, category or tag contains this text (case-insensitive)."
+                }
+            }
+        }
+    })
 }
 
 /// Execute a tool by name. `Ok(text)` is the success content; `Err(text)` is a

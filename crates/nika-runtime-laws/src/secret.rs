@@ -20,6 +20,8 @@ pub use nika_secret::{REDACTED, resolve_secrets};
 
 use crate::stamp::EventSink;
 
+mod received;
+
 /// Below this length a needle scrubs ONLY the payload fields: a
 /// handful of characters rides inside hashes · ids · ordinary words
 /// and a frame-wide scrub would mangle the journal.
@@ -49,11 +51,16 @@ const PAYLOAD_FIELDS: [&str; 7] = [
 /// sink seam is wrapped and every event's string fields are scrubbed
 /// (needles under `WIDE_SCRUB_MIN` · the `PAYLOAD_FIELDS` only)
 /// before any lane (journal · `--json` · the live fold) sees them.
+///
+/// The same seat cuts the received text a failure keeps (NIK-402 · the
+/// `received` module) to its first 64 KiB, on every run and only AFTER
+/// the scrub: a cut that split a secret first would leave a prefix the
+/// scrub no longer matches.
 pub struct RedactingSink<'a> {
     /// The lane this scrub rides (the run verb's whole tee in production).
     inner: &'a mut dyn EventSink,
     /// (raw · json-escaped) needle pairs, deduped — empty on the common
-    /// no-secrets run, where emit is a zero-cost forward. The escaped
+    /// no-secrets run, where emit scrubs nothing. The escaped
     /// form catches the value INSIDE a payload that carries serialized
     /// JSON text (the `outcome`/`output` fields), where it appears
     /// escaped.
@@ -292,6 +299,16 @@ impl EventSink for RedactingSink<'_> {
                         *text = scrubbed;
                     }
                 }
+            }
+        }
+        // After the scrub, on every run (NIK-402): a received text is cut
+        // only once each secret in it is masked whole.
+        for kv in &mut event.fields {
+            if kv.key == "outcome"
+                && let FieldValue::String(text) = &mut kv.value
+                && let Some(bounded) = received::bounded_outcome(text)
+            {
+                *text = bounded;
             }
         }
         self.inner.emit(event);

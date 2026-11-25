@@ -1,3 +1,11 @@
 [alias]
 # Lands when the xtask crate is created (Phase 2). Harmless until then.
 xtask = "run --package xtask --release --"
+
+[env]
+# No test starts a real host program (codex, claude, gemini, copilot, ...): every process Cargo
+# starts here (`cargo test`, `cargo nextest run`, `cargo run`) sees each host as absent.
+# `[env]` never replaces a variable already set, so `NIKA_HARNESS_HOSTS=on cargo run ...` starts
+# hosts again. It is read at run time only: a release build or an installed `nika` never sees
+# this file. See `crates/nika-harness/src/hosts.rs`.
+NIKA_HARNESS_HOSTS = "off"

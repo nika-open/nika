@@ -1095,6 +1095,45 @@ mod cascade_oracle {
     }
 }
 
+/// Every file under `dir`, sorted.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read_dir") {
+        let path = entry.expect("entry").path();
+        if path.is_dir() {
+            files.extend(files_under(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files
+}
+
+/// NIK-406 · a lib test rewrote the person's real `~/.nika/inference-choice.json`:
+/// `collect` kept the choice under the process home. It keeps it under the home its caller
+/// names, as that one file holding the choice it returned, and with no home it keeps nothing:
+/// the process home, where the choice used to land, is left as it was.
+#[test]
+fn the_seat_choice_is_kept_under_the_named_home_and_nowhere_else() {
+    let home = tempfile::tempdir().expect("tmp");
+    let choice = collect(Some(home.path()));
+    let kept = home.path().join(".nika").join("inference-choice.json");
+    assert_eq!(files_under(home.path()), vec![kept.clone()]);
+    let body: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&kept).expect("read")).expect("JSON");
+    assert_eq!(body, serde_json::to_value(&choice).expect("value"));
+
+    let fallback = crate::probe::home_dir().map(|h| h.join(".nika").join("inference-choice.json"));
+    let stamp = || {
+        let meta = std::fs::metadata(fallback.as_ref()?).ok()?;
+        Some((meta.len(), meta.modified().ok()))
+    };
+    let before = stamp();
+    let _ = collect(None);
+    assert_eq!(stamp(), before, "no home, nothing kept: {fallback:?}");
+}
+
 /// #1619 · nothing on this path dials the vendor, so the key rung says the
 /// variable is set and stops there: « ready now » promised a key no one had
 /// checked, and a revoked key answered 401 on the first paid call.

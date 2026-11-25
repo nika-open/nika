@@ -1013,7 +1013,8 @@ fn with_cascade(raw: String) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return raw;
     };
-    v["cascade"] = crate::choice::doctor_cascade_json(&crate::choice::collect());
+    let home = crate::probe::home_dir();
+    v["cascade"] = crate::choice::doctor_cascade_json(&crate::choice::collect(home.as_deref()));
     format!("{v:#}")
 }
 

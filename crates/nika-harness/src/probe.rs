@@ -21,6 +21,7 @@
 
 use nika_kernel::ai::harness::HarnessError;
 
+use crate::hosts::Hosts;
 use crate::registry::{AdapterRow, AuthProbe, DirectoryAuthProbe};
 use crate::spawn::{SpawnedHarness, compose_env};
 
@@ -344,8 +345,15 @@ async fn probe_one(row: AdapterRow) -> AdapterProbeRow {
 
 fn binary_on_path(name: &str) -> bool {
     #[allow(clippy::disallowed_methods)] // PATH walk · presence only
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
+    let path = std::env::var_os("PATH");
+    binary_in(path.as_deref(), name, Hosts::from_env())
+}
+
+/// Whether `name` is a file in a directory of `path`. A host program is never found while the
+/// host switch is off ([`crate::hosts`]): the seat reads as not installed.
+fn binary_in(path: Option<&std::ffi::OsStr>, name: &str, hosts: Hosts) -> bool {
+    hosts.admit(std::path::Path::new(name)).is_ok()
+        && path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(name).is_file()))
 }
 
 /// The auth surface probe — an exit code or a presence bit, bounded
@@ -404,20 +412,34 @@ async fn probe_auth_with(
 /// The login command's answer under this process's environment, composed as the ACP spawn's.
 async fn login_of(command: &str, args: &[&str], passthrough: &[String]) -> LoginCheck {
     let parent: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-    login_check(command, args, &parent, passthrough, LOGIN_CHECK_DEADLINE).await
+    let hosts = Hosts::from_env();
+    login_check(
+        command,
+        args,
+        &parent,
+        passthrough,
+        LOGIN_CHECK_DEADLINE,
+        hosts,
+    )
+    .await
 }
 
 /// One login command run within `deadline`, its exit code the whole verdict: a check that
 /// does not answer in time is killed and stays unknown, never signed out. The command uses the
 /// same declared account roots and credential filter as the ACP spawn; the injected parent keeps
-/// process tests isolated.
+/// process tests isolated. A host's login command does not start while the host switch is off
+/// ([`crate::hosts`]): it reads as a command that could not run, never as signed out.
 async fn login_check(
     command: &str,
     args: &[&str],
     parent: &std::collections::BTreeMap<String, String>,
     passthrough: &[String],
     deadline: std::time::Duration,
+    hosts: Hosts,
 ) -> LoginCheck {
+    if hosts.admit(std::path::Path::new(command)).is_err() {
+        return LoginCheck::Unreadable;
+    }
     let env = compose_env(parent, passthrough);
     let child = tokio::process::Command::new(command)
         .args(args)
@@ -779,7 +801,15 @@ mod tests {
             let passthrough = &row.adapter.passthrough_env;
             let args = ["-c", script];
             assert_eq!(
-                login_check("/bin/sh", &args, &parent, passthrough, LOGIN_CHECK_DEADLINE).await,
+                login_check(
+                    "/bin/sh",
+                    &args,
+                    &parent,
+                    passthrough,
+                    LOGIN_CHECK_DEADLINE,
+                    Hosts::Off
+                )
+                .await,
                 LoginCheck::SignedIn,
                 "{id} must select its own account, without keys or the other seat root"
             );
@@ -817,7 +847,17 @@ mod tests {
         let parent = std::collections::BTreeMap::new();
         let check = |script: &'static str, deadline: std::time::Duration| {
             let parent = &parent;
-            async move { login_check("/bin/sh", &["-c", script], parent, &[], deadline).await }
+            async move {
+                login_check(
+                    "/bin/sh",
+                    &["-c", script],
+                    parent,
+                    &[],
+                    deadline,
+                    Hosts::Off,
+                )
+                .await
+            }
         };
         let second = std::time::Duration::from_secs(5);
         let slow = check("sleep 0.3; exit 0", second).await;
@@ -837,7 +877,15 @@ mod tests {
             "cut at its deadline, not awaited"
         );
         assert_eq!(hung.signed_in(), None, "unknown, never signed out");
-        let absent = login_check("/nonexistent/nika-login", &[], &parent, &[], second).await;
+        let absent = login_check(
+            "/nonexistent/nika-login",
+            &[],
+            &parent,
+            &[],
+            second,
+            Hosts::Off,
+        )
+        .await;
         assert_eq!(absent, LoginCheck::Unreadable);
         assert_eq!(LOGIN_CHECK_DEADLINE, std::time::Duration::from_secs(30));
         let production = LoginCheck::Unanswered {
@@ -849,6 +897,37 @@ mod tests {
             Some("the login check did not answer within 30 s")
         );
         assert_eq!(LoginCheck::SignedOut.unknown_words(), None);
+    }
+
+    /// A fake `codex` on a temporary PATH, which writes a marker when it runs: with hosts off,
+    /// presence does not find it and its login check reads as a command that could not run,
+    /// never as signed out, and the marker is never written. With hosts started, the same PATH
+    /// finds it and the same check runs it: the witness that it would have started.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fake_codex_on_the_path_never_starts_while_hosts_are_off() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex = dir.path().join("codex");
+        std::fs::write(&codex, "#!/bin/sh\n: > \"$0.started\"\nexit 0\n").expect("fake codex");
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let marker = codex.with_extension("started");
+        let path = dir.path().as_os_str();
+        let parent = std::collections::BTreeMap::from([(
+            "PATH".to_owned(),
+            dir.path().to_string_lossy().into_owned(),
+        )]);
+        let deadline = std::time::Duration::from_secs(5);
+        let args = ["login", "status"];
+        assert!(!binary_in(Some(path), "codex", Hosts::Off), "absent");
+        let off = login_check("codex", &args, &parent, &[], deadline, Hosts::Off).await;
+        assert_eq!(off, LoginCheck::Unreadable);
+        assert_eq!(off.signed_in(), None, "unknown, never signed out");
+        assert!(!marker.exists(), "no host started under the switch");
+        assert!(binary_in(Some(path), "codex", Hosts::Start), "found");
+        let on = login_check("codex", &args, &parent, &[], deadline, Hosts::Start).await;
+        assert_eq!(on, LoginCheck::SignedIn);
+        assert!(marker.exists(), "the same fake runs when hosts start");
     }
 
     #[test]

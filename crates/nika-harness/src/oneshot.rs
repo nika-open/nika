@@ -135,6 +135,8 @@ impl Cli {
 pub(crate) struct OneShotExec {
     cli: Cli,
     command: PathBuf,
+    /// Whether the host program may start (`NIKA_HARNESS_HOSTS`, read at construction).
+    hosts: crate::hosts::Hosts,
 }
 
 impl OneShotExec {
@@ -142,16 +144,27 @@ impl OneShotExec {
         Self {
             cli,
             command: PathBuf::from(cli.command()),
+            hosts: crate::hosts::Hosts::from_env(),
         }
     }
 
-    /// Against an explicit binary path for the hermetic proof.
+    /// Against an explicit binary path for the hermetic proof: the test starts its own stub,
+    /// named like the CLI, whatever the host switch says.
     #[cfg(test)]
     pub(crate) fn with_command(cli: Cli, command: impl Into<PathBuf>) -> Self {
         Self {
             cli,
             command: command.into(),
+            hosts: crate::hosts::Hosts::Start,
         }
+    }
+
+    /// The host switch before the CLI starts: with hosts off it is absent, refused as a
+    /// binary that cannot be spawned is, and nothing starts.
+    fn admit(&self, what: &str) -> Result<(), InferGradeError> {
+        self.hosts
+            .admit(&self.command)
+            .map_err(|refusal| self.execution(format!("cannot spawn `{what}`: {refusal}")))
     }
 
     pub(crate) const fn cli(&self) -> Cli {
@@ -173,6 +186,7 @@ impl OneShotExec {
     /// Re-attest the binary at spawn: `<command> --version` under the composed env, a null
     /// stdin, a bounded answer and a deadline, judged by version pin AND product token.
     async fn probe_identity(&self) -> Result<(u32, u32), InferGradeError> {
+        self.admit(&format!("{} --version", self.command.display()))?;
         let child = tokio::process::Command::new(&self.command)
             .arg("--version")
             .env_clear()
@@ -323,6 +337,7 @@ impl OneShotExec {
         let scratch =
             tempfile::tempdir().map_err(|e| self.execution(format!("scratch dir: {e}")))?;
         let (args, stdin_text) = self.argv(&request);
+        self.admit(&self.command.display().to_string())?;
         let mut command = tokio::process::Command::new(&self.command);
         command
             .args(&args)
@@ -952,5 +967,46 @@ mod tests {
             .collect();
         assert!(joined.iter().any(|a| a == "--available-tools"));
         assert!(joined.iter().any(|a| a == "--no-ask-user"));
+    }
+
+    /// Each one-shot CLI is a host program: with hosts off, a stub under its name that would
+    /// write a marker for any call is refused at the identity probe as a binary that cannot be
+    /// spawned, and never starts. The same stub with hosts started runs.
+    #[tokio::test]
+    async fn a_one_shot_cli_never_starts_while_hosts_are_off() {
+        use nika_error::traits::NikaErrorCode as _;
+        for cli in [Cli::Claude, Cli::Grok, Cli::Copilot] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let bin = dir.path().join(cli.command());
+            std::fs::write(&bin, "#!/bin/sh\n: > \"$0.started\"\n").expect("stub");
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
+            let marker = bin.with_extension("started");
+            let off = OneShotExec {
+                cli,
+                command: bin.clone(),
+                hosts: crate::hosts::Hosts::Off,
+            };
+            let request = || HarnessInferRequest::new("q", "claude-code/default");
+            let error = off.run(request()).await.expect_err("an absent host");
+            let shown = bin.display();
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "infer-grade seat `{}` failed: cannot spawn `{shown} --version`: `{shown}` is \
+                     not started: NIKA_HARNESS_HOSTS=off keeps every host program absent (set \
+                     NIKA_HARNESS_HOSTS=on to start it)",
+                    cli.seat()
+                ),
+                "{cli:?}"
+            );
+            assert_eq!(error.nika_code().to_string(), "NIKA-430");
+            assert!(!marker.exists(), "{cli:?} started under the switch");
+            let started = OneShotExec::with_command(cli, &bin).run(request()).await;
+            assert!(started.is_err(), "the stub prints no version: {started:?}");
+            assert!(
+                marker.exists(),
+                "{cli:?}: the same stub runs when hosts start"
+            );
+        }
     }
 }

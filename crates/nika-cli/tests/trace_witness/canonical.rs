@@ -19,6 +19,10 @@ fn command(spec: &Path, home: &Path) -> Command {
         .arg(TRACE_SCOPE)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        // The cleared environment drops the Cargo switch while the real PATH
+        // comes back: a future fixture that starts a run must not start a
+        // real host found on it.
+        .env("NIKA_HARNESS_HOSTS", "off")
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("NIKA_BIN", env!("CARGO_BIN_EXE_nika"))

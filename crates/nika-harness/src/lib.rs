@@ -27,6 +27,7 @@ pub mod client;
 pub mod compile_seat;
 pub mod conversation;
 pub mod declaration;
+mod hosts;
 pub mod infer;
 mod media;
 pub mod offer;

@@ -392,9 +392,22 @@ pub struct SpawnedHarness {
     /// The audited one-shot completion profile this seat serves, if any:
     /// isolated scratch cwd, admitted identity, strict options, judged beats.
     completion: Option<crate::authoring::acp::OneShot>,
+    /// Whether a host program may start (`NIKA_HARNESS_HOSTS`, read at construction).
+    hosts: crate::hosts::Hosts,
 }
 
 impl SpawnedHarness {
+    /// The host switch where a program of this adapter would start: with hosts off, a host
+    /// program is absent, refused as a missing binary is, and nothing starts.
+    fn admit(&self, program: &str) -> Result<(), HarnessError> {
+        let refused = |refusal: String| HarnessError::Unavailable {
+            reason: format!("adapter `{}`: {refusal}", self.adapter.id),
+        };
+        self.hosts
+            .admit(std::path::Path::new(program))
+            .map_err(refused)
+    }
+
     async fn run_bounded_probe(
         &self,
         args: &[String],
@@ -412,6 +425,7 @@ impl SpawnedHarness {
         args: &[String],
         purpose: &str,
     ) -> Result<ProbeOutput, HarnessError> {
+        self.admit(command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let command_line = format!("{command} {}", args.join(" "));
@@ -500,13 +514,24 @@ impl SpawnedHarness {
         })
     }
 
-    /// Construct (INV-019).
+    /// Construct (INV-019). `NIKA_HARNESS_HOSTS=off` read here keeps every host program of
+    /// this seat absent: its probes and sessions refuse as for a missing binary.
     #[must_use]
     pub fn new(adapter: HarnessAdapter) -> Self {
         Self {
             adapter,
             completion: None,
+            hosts: crate::hosts::Hosts::from_env(),
         }
+    }
+
+    /// The same seat under an explicit host switch: a test that starts its own stub under a
+    /// host's name, or that proves the switch starts nothing, says so here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_hosts(mut self, hosts: crate::hosts::Hosts) -> Self {
+        self.hosts = hosts;
+        self
     }
 
     /// Serve one audited one-shot `role` under this adapter's completion profile.
@@ -540,6 +565,7 @@ impl SpawnedHarness {
         group: bool,
         profile_env: &[(String, String)],
     ) -> Result<tokio::process::Child, HarnessError> {
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let mut cmd = tokio::process::Command::new(&self.adapter.command);
@@ -618,6 +644,8 @@ impl SpawnedHarness {
         nika: Option<(&str, serde_json::Value)>,
     ) -> Result<Vec<(String, String)>, HarnessError> {
         use crate::authoring::acp::codex;
+        // The bundled codex is found from the adapter's own name: an absent host has none.
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let binary = codex::bundled_codex(&self.adapter.command, &env)
@@ -737,6 +765,7 @@ impl SpawnedHarness {
     /// before any `session/new` — an initialize answer is free of side
     /// effects by construction.
     async fn probe_handshake(&self) -> Result<Option<(u32, u32)>, HarnessError> {
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let mut cmd = tokio::process::Command::new(&self.adapter.command);
@@ -1489,3 +1518,7 @@ mod offer_tests;
 #[cfg(test)]
 #[cfg(unix)]
 mod codex_profile_tests;
+
+#[cfg(test)]
+#[cfg(unix)]
+mod hosts_tests;

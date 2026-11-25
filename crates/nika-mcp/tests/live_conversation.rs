@@ -6,7 +6,8 @@
 //! an operator who accepts spending their own subscription.
 //!
 //! ```text
-//! NIKA_LIVE_CONVERSATION=claude-code [NIKA_LIVE_MODEL=<offered>] [NIKA_LIVE_EFFORT=<offered>] \
+//! NIKA_HARNESS_HOSTS=on \
+//!   NIKA_LIVE_CONVERSATION=claude-code [NIKA_LIVE_MODEL=<offered>] [NIKA_LIVE_EFFORT=<offered>] \
 //!   cargo test -p nika-mcp --locked --test live_conversation -- --ignored --nocapture
 //! ```
 //!

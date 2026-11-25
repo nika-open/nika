@@ -173,7 +173,8 @@ fn the_one_next_lets_a_verdict_overrule_the_listing() {
 #[test]
 fn the_first_contact_screen_promises_exactly_one_first_command() {
     let dir = tempfile::tempdir().expect("scratch");
-    let text = screen(Some(dir.path()), plain());
+    let home = own_home();
+    let text = screen(Some(dir.path()), Some(home.path()), plain());
     let offers: Vec<&str> = text.lines().filter(|l| offers_a_command(l)).collect();
     assert_eq!(
         offers.len(),
@@ -213,17 +214,18 @@ fn offers_a_command(line: &str) -> bool {
 #[test]
 fn the_json_front_door_answers_the_same_next_as_the_screen() {
     let dir = tempfile::tempdir().expect("scratch");
+    let home = own_home();
     let read_next = |raw: &str| -> serde_json::Value {
         serde_json::from_str::<serde_json::Value>(raw).expect("json")
     };
     for expected in ["nika compile hello hello.nika", "nika run hello.nika"] {
-        let text = screen(Some(dir.path()), plain());
+        let text = screen(Some(dir.path()), Some(home.path()), plain());
         let block = text.split("Next:").nth(1).expect("a Next: block");
         assert!(
             block.lines().any(|l| l.trim() == expected),
             "the human block says `{expected}`:\n{text}"
         );
-        let v = read_next(&front_door_json(Some(dir.path())));
+        let v = read_next(&front_door_json(Some(dir.path()), Some(home.path())));
         assert_eq!(v["next"], expected, "{v}");
         assert_eq!(v["start"][0], expected, "{v}");
         assert_eq!(v["start"].as_array().map(Vec::len), Some(1), "{v}");
@@ -247,6 +249,12 @@ fn scratch(files: &[(&str, &str)]) -> tempfile::TempDir {
         std::fs::write(dir.path().join(name), body).expect("write");
     }
     dir
+}
+
+/// A home of the test's own: the seat choice the screen keeps lands there, never in the
+/// developer's `~/.nika`.
+fn own_home() -> tempfile::TempDir {
+    tempfile::tempdir().expect("home")
 }
 
 /// The context.rs red fixture: `when:` as a bare string is a
@@ -273,7 +281,8 @@ fn one_red_workflow_gets_check_never_run() {
         !gate.as_ref().expect("a gate for the sole file").proposable,
         "the `when: maybe` fixture is RED for real"
     );
-    let text = screen(Some(dir.path()), plain());
+    let home = own_home();
+    let text = screen(Some(dir.path()), Some(home.path()), plain());
     assert!(
         text.contains("nika check bad.nika"),
         "a red file is audited, never run:\n{text}"
@@ -282,7 +291,7 @@ fn one_red_workflow_gets_check_never_run() {
         !text.contains("nika run"),
         "no run CTA while the exact file is red:\n{text}"
     );
-    let raw = front_door_json(Some(dir.path()));
+    let raw = front_door_json(Some(dir.path()), Some(home.path()));
     let v: serde_json::Value = serde_json::from_str(&raw).expect("json");
     assert_eq!(v["next"], "nika check bad.nika", "{raw}");
     assert_eq!(v["start"][0], "nika check bad.nika", "{raw}");
@@ -307,7 +316,8 @@ fn one_clean_mock_workflow_keeps_the_run_cta_uncapped() {
         gate.proposable && !gate.priced,
         "mock/echo: clean, unpriced"
     );
-    let text = screen(Some(dir.path()), plain());
+    let home = own_home();
+    let text = screen(Some(dir.path()), Some(home.path()), plain());
     assert!(
         text.contains("nika run good.nika"),
         "clean + unpriced → the file runs:\n{text}"
@@ -340,7 +350,8 @@ fn one_clean_priced_workflow_carries_the_loi3_cap() {
     let gate = sole.as_deref().map(|rel| run_gate(dir.path(), rel));
     let gate = gate.expect("a gate for the sole file");
     assert!(gate.proposable && gate.priced, "openai/*: clean, priced");
-    let raw = front_door_json(Some(dir.path()));
+    let home = own_home();
+    let raw = front_door_json(Some(dir.path()), Some(home.path()));
     let v: serde_json::Value = serde_json::from_str(&raw).expect("json");
     let next = v["next"].as_str().unwrap_or_default();
     assert!(
@@ -1047,14 +1058,46 @@ fn workspace_names_the_root_and_traces_the_subdir_expansion() {
 fn welcome_is_always_a_success() {
     // A greeting is never a failure — even on a bare machine the verb
     // routes (doctor owns the gate semantics, welcome never gates).
-    let out = run(false, plain());
+    let home = own_home();
+    let out = run_in(false, plain(), Some(home.path()));
     assert_eq!(out.code, exit::OK, "{}", out.text);
     assert!(out.text.contains("Next:"), "{}", out.text);
     assert!(out.text.contains("Keep it as a file"), "{}", out.text);
-    let json = run(true, plain());
+    let json = run_in(true, plain(), Some(home.path()));
     assert_eq!(json.code, exit::OK);
     assert!(json.text.contains("\"welcome_version\":1"), "{}", json.text);
     assert!(json.text.contains("inference_choice"), "{}", json.text);
+}
+
+/// The seat choice the front door shows is the one it keeps, in the home it is given; with no
+/// home, the door still answers. Under Cargo the host switch is off (`.cargo/config.toml`), so
+/// no ACP seat is detected and no host started.
+#[test]
+fn the_seat_choice_is_kept_in_the_home_it_is_given() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let home = own_home();
+    let shown: serde_json::Value =
+        serde_json::from_str(&front_door_json(Some(dir.path()), Some(home.path()))).expect("json");
+    let kept = home.path().join(".nika").join("inference-choice.json");
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&kept).expect("kept in the given home"))
+            .expect("json");
+    let shown = &shown["inference_choice"];
+    for field in ["arrow", "chosen_model", "chosen_access", "slogan"] {
+        assert_eq!(kept[field], shown[field], "{field}: {kept}");
+    }
+    let runtimes = kept["acp_runtimes"].as_array().expect("acp_runtimes");
+    #[allow(clippy::disallowed_methods)] // the host switch Cargo hands this test
+    let hosts_off =
+        std::env::var("NIKA_HARNESS_HOSTS").is_ok_and(|v| v.eq_ignore_ascii_case("off"));
+    if hosts_off {
+        assert!(
+            runtimes.iter().all(|seat| seat["detected"] == false),
+            "no host is found while hosts are off: {kept}"
+        );
+    }
+    let answered = front_door_json(Some(dir.path()), None);
+    assert!(answered.contains("inference_choice"), "{answered}");
 }
 
 #[test]

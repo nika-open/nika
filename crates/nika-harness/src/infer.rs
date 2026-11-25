@@ -245,12 +245,15 @@ pub struct HarnessInferOutcome {
 #[derive(Debug, Clone)]
 struct CodexExec {
     command: PathBuf,
+    /// Whether the host program may start (`NIKA_HARNESS_HOSTS`, read at construction).
+    hosts: crate::hosts::Hosts,
 }
 
 impl Default for CodexExec {
     fn default() -> Self {
         Self {
             command: PathBuf::from("codex"),
+            hosts: crate::hosts::Hosts::from_env(),
         }
     }
 }
@@ -263,13 +266,23 @@ impl CodexExec {
     }
 
     /// Construct against an explicit binary path for the hermetic proof; the
-    /// script itself is still named `codex` in that fixture.
+    /// script itself is still named `codex` in that fixture, so the test
+    /// starts its own stub whatever the host switch says.
     #[cfg(test)]
     #[must_use]
     fn with_command(command: impl Into<PathBuf>) -> Self {
         Self {
             command: command.into(),
+            hosts: crate::hosts::Hosts::Start,
         }
+    }
+
+    /// The host switch before `codex` starts: with hosts off it is absent, refused as a
+    /// binary that cannot be spawned is, and nothing starts.
+    fn admit(&self, what: &str) -> Result<(), InferGradeError> {
+        self.hosts
+            .admit(&self.command)
+            .map_err(|refusal| execution(format!("cannot spawn `{what}`: {refusal}")))
     }
 
     fn attestation(&self) -> InferGradeAttestation {
@@ -305,6 +318,7 @@ impl CodexExec {
     /// One bounded, prompt-free probe of the binary: exit success and the
     /// combined stdout + stderr.
     async fn answer(&self, args: &[String], what: &str) -> Result<(bool, String), InferGradeError> {
+        self.admit(&format!("{} {what}", self.command.display()))?;
         let child = tokio::process::Command::new(&self.command)
             .args(args)
             .env_clear()
@@ -353,6 +367,7 @@ impl CodexExec {
         let attested_version = self.probe_identity().await?;
         let scratch = tempfile::tempdir().map_err(|e| execution(format!("scratch dir: {e}")))?;
         let schema_path = write_schema(scratch.path(), request.schema.as_ref())?;
+        self.admit(&self.command.display().to_string())?;
         let mut command = tokio::process::Command::new(&self.command);
         command
             .arg("exec")
@@ -1477,6 +1492,43 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":999,"output_toke
         assert!(!receipt_input.contains("999"));
         assert!(!receipt_input.contains("888"));
         assert!(out.usage_observed);
+    }
+
+    /// `codex` is a host program: with hosts off, a stub under its name that would write a
+    /// marker for any call is refused at the identity probe as a binary that cannot be spawned,
+    /// and never starts. The same stub with hosts started runs.
+    #[tokio::test]
+    async fn codex_never_starts_while_hosts_are_off() {
+        use nika_error::traits::NikaErrorCode as _;
+        let (_dir, bin) = scripted_codex_with(": > \"$0.started\"", "exit 0");
+        let marker = bin.with_extension("started");
+        let off = CodexExec {
+            command: bin.clone(),
+            hosts: crate::hosts::Hosts::Off,
+        };
+        let seat = meet_with_adapter("codex", StructuredOutputGrade::Text, Adapter::Codex(off))
+            .expect("meet");
+        let error = seat
+            .run(HarnessInferRequest::new("hi", "openai/gpt-5.5"))
+            .await
+            .expect_err("an absent host");
+        let bin = bin.display();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "infer-grade seat `codex` failed: cannot spawn `{bin} --version`: `{bin}` is not \
+                 started: NIKA_HARNESS_HOSTS=off keeps every host program absent (set \
+                 NIKA_HARNESS_HOSTS=on to start it)"
+            )
+        );
+        assert_eq!(error.nika_code().to_string(), "NIKA-430");
+        assert!(!marker.exists(), "no host started under the switch");
+        let (exited_zero, _) = (CodexExec::with_command(bin.to_string()))
+            .answer(&["--version".to_owned()], "--version")
+            .await
+            .expect("the stub answers");
+        assert!(exited_zero, "the stub exits 0");
+        assert!(marker.exists(), "the same stub runs when hosts start");
     }
 }
 

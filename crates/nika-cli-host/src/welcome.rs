@@ -141,13 +141,18 @@ fn under_home(path: &str) -> String {
 /// semantic never decorative — the same law every other surface obeys).
 #[must_use]
 pub fn run(json: bool, theme: Theme) -> VerbOutput {
+    run_in(json, theme, probe::home_dir().as_deref())
+}
+
+/// [`run`] keeping the seat choice under `home`, the one it is given.
+fn run_in(json: bool, theme: Theme, home: Option<&Path>) -> VerbOutput {
     let candidate = std::env::current_dir().ok();
     if json {
-        return VerbOutput::ok(front_door_json(candidate.as_deref()));
+        return VerbOutput::ok(front_door_json(candidate.as_deref(), home));
     }
     VerbOutput::ok(crate::display::vocab::sober(
         theme,
-        &screen(candidate.as_deref(), theme),
+        &screen(candidate.as_deref(), home, theme),
     ))
 }
 
@@ -156,9 +161,10 @@ pub fn run(json: bool, theme: Theme) -> VerbOutput {
 /// this binary · the sample). Rendering the cascade alone made
 /// `render_with_context` unreachable and silently dropped the sample
 /// block (#1195); rendering the body's old `start here` menu after it
-/// put the fork back (#1196). The head promises; the body informs.
-fn screen(candidate: Option<&Path>, theme: Theme) -> String {
-    let choice = crate::choice::collect();
+/// put the fork back (#1196). The head promises; the body informs. The seat choice is kept
+/// under `home`.
+fn screen(candidate: Option<&Path>, home: Option<&Path>, theme: Theme) -> String {
+    let choice = crate::choice::collect(home);
     let mirror = Mirror::collect(candidate);
     let next = mirror.next(candidate);
     mirror.record_session();
@@ -171,8 +177,8 @@ fn screen(candidate: Option<&Path>, theme: Theme) -> String {
 }
 
 /// The machine front door — the same screen, the same ONE next step.
-fn front_door_json(candidate: Option<&Path>) -> String {
-    let choice = crate::choice::collect();
+fn front_door_json(candidate: Option<&Path>, home: Option<&Path>) -> String {
+    let choice = crate::choice::collect(home);
     let mirror = Mirror::collect(candidate);
     let next = mirror.next(candidate);
     let mut v = mirror.render_json(&next);

@@ -4,7 +4,8 @@
   listing-link-audit, programmatic-seo-pages, qr-art-forge,
   quote-compare-decide, receipt-ledger, refund-chaser, seo-site-audit,
   source-to-45-locales, subscription-renewal-radar and workflow-watchdog,
-  each with the fixtures it reads. A job with a confirm gate before its
-  effect pauses there unanswered and lets nothing leave on
-  `--answer approve=false`; launch-campaign-forge runs on a Codex seat over
+  each with the fixtures it reads. Seven of them put a confirm gate with no
+  default before their first fetch, post, render or scan: unanswered, the
+  rehearsal pauses there with no output written, and on `--answer approve=true`
+  the whole job rehearses. launch-campaign-forge runs on a Codex seat over
   ACP and refuses the mock backend with NIKA-1801 rather than substitute it.

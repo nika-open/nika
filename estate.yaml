@@ -157,7 +157,7 @@ patterns:
 - glob: "crates/**/tests/**"
   class: authored
   match_count: 872
-  aggregate_sha256: 7ab532745f6190c3113a63d98a61ecb6142e66513acfc1639cebb99b96751474
+  aggregate_sha256: bbea280ef35395720c6cbe44e779babbcc9292595c66138dbb2781a99c0f0c24
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
@@ -242,7 +242,7 @@ patterns:
 - glob: "changelog.d/**"
   class: authored
   match_count: 9
-  aggregate_sha256: cafb443439990c7d4fde31ac463bf065f1dd5b0653901e4166dba7cc3ed4e17d
+  aggregate_sha256: 45aadd5d2e9030a9b5f3c63f1f82f6e4d0bf4d1f8ced6927a79f03b9c745d35e
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

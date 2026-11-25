@@ -164,8 +164,13 @@ fn validate(m: &Manifest) {
     assert!(!m.entries.is_empty(), "the manifest names examples");
     for e in &m.entries {
         assert!(
-            e.expect.rc.is_some() ^ e.expect.finding.is_some(),
-            "`{}`: expect is exactly one of rc / finding",
+            e.expect.rc.is_some() || e.expect.finding.is_some(),
+            "`{}`: expect names an rc, a finding, or both",
+            e.slug
+        );
+        assert!(
+            e.expect.finding.is_none() || e.expect.rc != Some(0),
+            "`{}`: a finding is a refusal, never rc 0",
             e.slug
         );
         if let Some(model) = &e.model {
@@ -239,20 +244,39 @@ impl Room {
     }
 }
 
+/// Every `secrets.*.key` a shipped example reads, from its parsed
+/// `secrets:` block. A child that inherited a live one could make real
+/// egress or spend (a QR Code AI key buys art codes), so the scrub reads
+/// the corpus instead of a list kept by hand, which missed seven keys when
+/// the recipes landed. Provider keys also ride the `*_API_KEY` sweep.
+fn corpus_secret_keys() -> &'static BTreeSet<String> {
+    static KEYS: std::sync::LazyLock<BTreeSet<String>> = std::sync::LazyLock::new(|| {
+        let mut keys = BTreeSet::new();
+        for slug in nika_pack::example_slugs() {
+            let body = nika_pack::example(&slug).expect("a listed example has a body");
+            let wf = nika_schema::parse(
+                body,
+                nika_schema::FileId::new(0),
+                nika_schema::ParseMode::Lenient,
+            )
+            .unwrap_or_else(|e| panic!("`{slug}` must parse to name its secrets: {e}"));
+            keys.extend(wf.secrets.iter().map(|(_, s)| s.value.key.clone()));
+        }
+        keys
+    });
+    &KEYS
+}
+
 /// The child environment law: the operator's exports never leak into a
 /// corpus run — `NIKA_*`, provider keys, and the secret vars the corpus
 /// references are all scrubbed; HOME and TMPDIR are the entry's own;
 /// PATH survives (an `exec` example must find the same programs the
 /// operator does).
 fn hermetic(cmd: &mut Command, room: &Room) {
-    /// The secret vars corpus workflows reference — a child that
-    /// inherited a live one could make real egress behind a per-task
-    /// `model:` pin the envelope override cannot reach. Provider keys
-    /// ride the `*_API_KEY` sweep below.
-    const SCRUB_EXACT: [&str; 2] = ["ALERTS_WEBHOOK_URL", "ONCALL_WEBHOOK"];
+    let secrets = corpus_secret_keys();
     for (key, _) in std::env::vars_os() {
         let k = key.to_string_lossy();
-        if k.starts_with("NIKA_") || k.ends_with("_API_KEY") || SCRUB_EXACT.contains(&k.as_ref()) {
+        if k.starts_with("NIKA_") || k.ends_with("_API_KEY") || secrets.contains(k.as_ref()) {
             cmd.env_remove(&key);
         }
     }
@@ -437,7 +461,25 @@ fn entry_command(entry: &Entry, room: &Room, body: &str) -> Command {
     cmd
 }
 
+/// Refuses to launch a row that says yes to a local server while a program
+/// answers on its port: comfyui-image-chain queues renders on
+/// 127.0.0.1:8188, a constant of the file, and a running `ComfyUI` would
+/// take them. With nothing listening, the queue meets a closed port and
+/// the recipe recovers. A connect, not a bind: a server bound to every
+/// address still answers on the loopback.
+fn refuse_if_a_local_server_answers(port: u16) {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    assert!(
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_err(),
+        "a program answers on 127.0.0.1:{port}: the yes row would reach it. \
+         Stop that server and run the family again."
+    );
+}
+
 fn launch_entry(entry: &Entry, room: &Room, body: &str) -> (Outcome, Option<String>) {
+    if entry.slug == "comfyui-image-chain" {
+        refuse_if_a_local_server_answers(8188);
+    }
     let mut feed = (entry.slug == "snippets/weekly-radar").then(radar_http::RadarHttp::new);
     let staged = feed.as_ref().map(|feed| {
         feed.staged_body(body)
@@ -490,16 +532,22 @@ fn judge(entry: &Entry, o: &Outcome) -> Option<String> {
                 Some(format!("rc {:?} ≠ expected {rc}", o.code))
             }
         }
-        (None, Some(code)) => {
+        (rc, Some(code)) => {
             if o.code == Some(0) {
                 Some(format!("rc 0 but the row expects the finding {code}"))
+            } else if rc.is_some_and(|rc| o.code != Some(rc)) {
+                Some(format!(
+                    "rc {:?} ≠ expected {} for the finding {code}",
+                    o.code,
+                    rc.unwrap_or_default()
+                ))
             } else if o.out.contains(code.as_str()) || o.err.contains(code.as_str()) {
                 None
             } else {
                 Some(format!("rc {:?} without the expected {code}", o.code))
             }
         }
-        _ => Some("expect carries neither rc nor finding".to_owned()),
+        (None, None) => Some("expect carries neither rc nor finding".to_owned()),
     }
 }
 
@@ -591,13 +639,14 @@ fn every_shipped_example_runs_per_its_manifest_row() {
         "macos" => "darwin",
         other => other,
     };
-    let mut tally = (0usize, 0usize, 0usize, 0usize); // ran · green · known-fail · skipped
+    // ran · green · typed refusal · known-fail · skipped
+    let mut tally = (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut failures: Vec<String> = Vec::new();
 
     for entry in &m.entries {
         let row = &entry.slug;
         if let Some(need) = &entry.needs {
-            tally.3 += 1;
+            tally.4 += 1;
             println!("SKIP       {row} (needs: {})", need_name(*need));
             continue;
         }
@@ -633,7 +682,7 @@ fn every_shipped_example_runs_per_its_manifest_row() {
                         tail(&outcome.err)
                     ));
                 } else {
-                    tally.2 += 1;
+                    tally.3 += 1;
                     println!(
                         "KNOWN-FAIL {row} ({} · {} · {} · {:.0?})",
                         kf.class, kf.issue, os, outcome.elapsed
@@ -645,16 +694,12 @@ fn every_shipped_example_runs_per_its_manifest_row() {
                 .or_else(|| reach_failure(entry, body, &outcome))
             {
                 None => {
-                    tally.1 += 1;
-                    let door = match entry.door {
-                        Door::Try => "try",
-                        Door::Run => "run",
-                    };
-                    println!(
-                        "GREEN      {row} ({door} · rc={} · {:.0?})",
-                        outcome.code.unwrap_or(-1),
-                        outcome.elapsed
-                    );
+                    if entry.expect.finding.is_some() {
+                        tally.2 += 1;
+                    } else {
+                        tally.1 += 1;
+                    }
+                    println!("{}", verdict_line(entry, &outcome));
                 }
                 Some(why) => failures.push(format!(
                     "{row}: {why}\n--- stdout tail ---\n{}\n--- stderr tail ---\n{}",
@@ -666,15 +711,16 @@ fn every_shipped_example_runs_per_its_manifest_row() {
     }
 
     println!(
-        "pack examples family · {} entries: {} ran · {} green · {} known-fail · {} skipped",
+        "pack examples family · {} entries: {} ran · {} green · {} typed refusal · {} known-fail · {} skipped",
         m.entries.len(),
         tally.0,
         tally.1,
         tally.2,
-        tally.3
+        tally.3,
+        tally.4
     );
     assert_eq!(
-        tally.0 + tally.3,
+        tally.0 + tally.4,
         m.entries.len(),
         "every row is either launched or counted as skipped — no silent third state"
     );
@@ -684,6 +730,28 @@ fn every_shipped_example_runs_per_its_manifest_row() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// The printed line of a row that met its expectation. A typed refusal ran
+/// no task of its example: it is named and counted apart, never as green.
+fn verdict_line(entry: &Entry, outcome: &Outcome) -> String {
+    let door = match entry.door {
+        Door::Try => "try",
+        Door::Run => "run",
+    };
+    let rc = outcome.code.unwrap_or(-1);
+    let elapsed = outcome.elapsed;
+    if let Some(code) = &entry.expect.finding {
+        format!(
+            "REFUSED    {} ({door} · rc={rc} · {code} · {elapsed:.0?})",
+            entry.slug
+        )
+    } else {
+        format!(
+            "GREEN      {} ({door} · rc={rc} · {elapsed:.0?})",
+            entry.slug
+        )
+    }
 }
 
 fn need_name(need: Need) -> &'static str {
@@ -751,4 +819,128 @@ fn release_train_try_rehearses_with_isolated_inputs() {
     assert!(!room.cwd.join("schemas").exists());
     assert!(!room.cwd.join(".nika").exists());
     let _ = std::fs::remove_dir_all(room.root);
+}
+
+/// The recipes whose first task is a confirm gate with no default: every
+/// later task waits on its answer. Their manifest rows answer yes; this law
+/// pins the other side, so a bare `try` pauses before any effect.
+const ROOT_GATED: [&str; 7] = [
+    "comfyui-image-chain",
+    "feed-digest",
+    "lead-enrichment",
+    "listing-link-audit",
+    "qr-art-forge",
+    "refund-chaser",
+    "seo-site-audit",
+];
+
+/// Unanswered, each root-gated recipe pauses at its gate (exit 4) and the
+/// rehearsal leaves nothing behind: no output in the cwd, no `.nika`
+/// journal, no temporary root.
+#[test]
+fn the_root_gated_recipes_pause_unanswered_and_write_nothing() {
+    let m = manifest();
+    for slug in ROOT_GATED {
+        let row = m
+            .entries
+            .iter()
+            .find(|e| e.slug == slug)
+            .unwrap_or_else(|| panic!("`{slug}` has a manifest row"));
+        assert_eq!(
+            row.answers.get("approve").map(String::as_str),
+            Some("true"),
+            "`{slug}`: its row runs the answered side"
+        );
+        let room = Room::enter(&format!("unanswered-{slug}"));
+        let mut cmd = nika();
+        cmd.args(["try", slug, "--no-progress", "--max-cost-usd", "0.01"]);
+        let outcome = launch(cmd, &room, 60, None);
+        assert!(!outcome.timed_out, "{slug} timed out");
+        assert_eq!(
+            outcome.code,
+            Some(4),
+            "{slug}: an unanswered gate pauses\n{}\n{}",
+            tail(&outcome.out),
+            tail(&outcome.err)
+        );
+        assert!(
+            outcome.out.contains("awaiting an answer for `approve`")
+                || outcome.err.contains("awaiting an answer for `approve`"),
+            "{slug}: the pause names its gate\n{}",
+            tail(&outcome.out)
+        );
+        let left: Vec<String> = std::fs::read_dir(&room.cwd)
+            .expect("the room cwd")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "home")
+            .collect();
+        assert!(
+            left.is_empty(),
+            "{slug}: the paused rehearsal wrote {left:?}"
+        );
+        let roots = std::fs::read_dir(room.path("tmp"))
+            .expect("try roots")
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            roots, 0,
+            "{slug}: the paused rehearsal kept its temporary root"
+        );
+        let _ = std::fs::remove_dir_all(room.root);
+    }
+}
+
+/// A row that expects a typed refusal ran no task of its example, so the
+/// file's offline proof is `nika check`: it must come back clean.
+#[test]
+fn every_refused_row_checks_clean() {
+    let m = manifest();
+    let refused: Vec<&Entry> = m
+        .entries
+        .iter()
+        .filter(|e| e.expect.finding.is_some())
+        .collect();
+    assert!(
+        !refused.is_empty(),
+        "the manifest pins at least one refusal"
+    );
+    for entry in refused {
+        let body = nika_pack::example(&entry.slug).expect("a shipped example");
+        let room = Room::enter(&format!("check-{}", entry.slug));
+        let file = room
+            .cwd
+            .join(format!("{}.nika", entry.slug.replace('/', "-")));
+        std::fs::write(&file, body).expect("the example body");
+        let mut cmd = nika();
+        cmd.arg("check").arg(&file);
+        let outcome = launch(cmd, &room, 60, None);
+        assert_eq!(
+            outcome.code,
+            Some(0),
+            "`{}`: nika check must pass\n{}\n{}",
+            entry.slug,
+            tail(&outcome.out),
+            tail(&outcome.err)
+        );
+        let _ = std::fs::remove_dir_all(room.root);
+    }
+}
+
+/// The scrub list is read from the corpus, so it can never come back empty
+/// or lose a key a recipe reads.
+#[test]
+fn the_scrub_list_names_every_corpus_secret() {
+    let keys = corpus_secret_keys();
+    for key in [
+        "QRCAI_API",
+        "ALERTS_WEBHOOK_URL",
+        "ONCALL_WEBHOOK_URL",
+        "MAIL_API_TOKEN",
+    ] {
+        assert!(
+            keys.contains(key),
+            "`{key}` is read by a shipped example: {keys:?}"
+        );
+    }
 }

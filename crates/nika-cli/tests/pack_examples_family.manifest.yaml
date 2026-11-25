@@ -146,6 +146,36 @@ entries:
     answers: { approve: "true" }
     expect: { rc: 0 }
 
+  # ── The recipes of nika-spec 419 and 420 (measured 2026-11-25 through
+  #    `nika try` on the mock seat: every row under 4 s, no task pins a
+  #    model). Their fixtures ride the door; the hosts they may reach are
+  #    reserved example names or 127.0.0.1 ──
+  - { slug: ci-failure-triage, expect: { rc: 0 } }
+  - { slug: docs-answer-desk, expect: { rc: 0 } }
+  - { slug: inbox-triage, expect: { rc: 0 } }
+  - { slug: programmatic-seo-pages, expect: { rc: 0 } }
+  - { slug: quote-compare-decide, expect: { rc: 0 } }
+  - { slug: receipt-ledger, expect: { rc: 0 } }
+  - { slug: source-to-45-locales, expect: { rc: 0 } }
+  - { slug: subscription-renewal-radar, expect: { rc: 0 } }
+  - { slug: workflow-watchdog, expect: { rc: 0 } }
+  # Their confirm gate stands before the effect (a send, a post, a render
+  # queue, a scan) and carries no default, so an unanswered `try` pauses
+  # (rc 4). The declining answer runs the whole file and lets nothing
+  # leave: the hermetic plane never says yes to an effect.
+  - { slug: comfyui-image-chain, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: feed-digest, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: lead-enrichment, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: listing-link-audit, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: qr-art-forge, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: refund-chaser, answers: { approve: "false" }, expect: { rc: 0 } }
+  - { slug: seo-site-audit, answers: { approve: "false" }, expect: { rc: 0 } }
+  # launch-campaign-forge runs on a Codex seat over ACP, and its header says
+  # it cannot run offline: an ACP seat refuses the mock backend with a typed
+  # finding rather than substitute it, and its QR step spends real credits.
+  # The row pins that refusal; `nika check` is the file's offline proof.
+  - { slug: launch-campaign-forge, expect: { finding: NIKA-1801 } }
+
   # ── The honest skips — launched by no hermetic gate, named and counted ──
   # model-bench: per-task `model:` seats escape the envelope override (the
   # bench IS the seats) — it needs the real ollama models it names.

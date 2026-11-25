@@ -1,6 +1,6 @@
 {
-  "sdk": "@supernovae-st/nika@0.124.0",
-  "read_from": "the published dist/index.js (npm integrity sha512-9es/CUCNRqoZ1K6yq01ahJnPcMFH8OCscqrtSj15IQy1BjZHcEWN3Tmrp4JYrTBZZ4PVDWmWZOeScsylz5+9gQ==, read 28 Oct 2026): the keys and values each closed parser accepts",
+  "sdk": "@nika-open/nika@0.125.0",
+  "read_from": "the published dist/index.js (npm integrity sha512-NSFShkRocsX6Zvx0oUdrponH5MMBVTIq/0MFSXjMGgiayDjK5cs3hex3Jrlaun8TaaAYuJoPVy0T4mUeQpWnFw==, read 24 Nov 2026): the keys and values each closed parser accepts",
   "enforced_clocks": { "machineProtocolVersion": 2 },
   "closed": [
     {
@@ -30,7 +30,30 @@
     { "schema": "Error", "keys": ["error"] },
     { "schema": "Error", "member": "error", "keys": ["code", "message"] },
     { "schema": "WorkflowList", "keys": ["workflows"] },
-    { "schema": "WorkflowMetadata", "keys": ["workflow"] }
+    { "schema": "WorkflowMetadata", "keys": ["workflow"] },
+    {
+      "schema": "AccessOffer",
+      "keys": ["schema", "workflow", "status", "reason", "declared", "prompts_sent", "routes", "routes_omitted"]
+    },
+    {
+      "schema": "AccessOffer",
+      "member": "declared",
+      "keys": ["via", "protocol", "fallback", "effort", "service_tier"]
+    },
+    {
+      "schema": "AccessOfferRoute",
+      "keys": [
+        "via", "protocol", "profile", "tasks", "status", "observed_at", "fresh_until", "code", "reason",
+        "adapter", "model", "effort", "service_tier"
+      ]
+    },
+    { "schema": "AccessOfferRoute", "member": "adapter", "keys": ["name", "version"] },
+    {
+      "schema": "AccessOfferRoute",
+      "member": "model",
+      "keys": ["requested", "status", "current", "offered", "omitted"]
+    },
+    { "schema": "AccessOfferListing", "keys": ["status", "option", "offered", "omitted", "current", "reason"] }
   ],
   "enums": [
     {
@@ -39,6 +62,7 @@
     },
     { "schema": "JournalEvidence", "member": "status", "values": ["mirror_lost"] },
     { "schema": "JournalEvidence", "member": "reason", "values": ["write_failed", "record_refused"] },
+    { "schema": "SnapshotValidationAck", "member": "status", "values": ["accepted"] },
     { "schema": "JobOrigin", "variant": "schedule", "member": "decision", "values": ["scheduled", "catch_up"] },
     { "schema": "JobOrigin", "variant": "schedule", "member": "schedule_origin", "values": ["project", "api"] },
     { "schema": "CompileOutcome", "member": "status", "values": ["ready", "incomplete", "refused"] },
@@ -59,6 +83,17 @@
       "member": "provenance.cognition",
       "values": ["deterministicOnly", "explicitProvider", "explicitDecision"]
     },
-    { "schema": "ArtifactManifest", "member": "verdict", "values": ["sealed", "anchored"] }
+    { "schema": "ArtifactManifest", "member": "verdict", "values": ["sealed", "anchored"] },
+    { "schema": "AccessOffer", "member": "schema", "values": ["nika/access-offer@1"] },
+    { "schema": "AccessOffer", "member": "status", "values": ["read", "not_applicable"] },
+    { "schema": "AccessOfferRoute", "member": "protocol", "values": ["acp"] },
+    { "schema": "AccessOfferRoute", "member": "profile", "values": ["completion", "agent"] },
+    { "schema": "AccessOfferRoute", "member": "status", "values": ["observed", "unavailable"] },
+    {
+      "schema": "AccessOfferRoute",
+      "member": "model.status",
+      "values": ["confirmed", "session_default", "legacy_list", "not_offered", "not_confirmed"]
+    },
+    { "schema": "AccessOfferListing", "member": "status", "values": ["offered", "not_offered", "unobserved"] }
   ]
 }

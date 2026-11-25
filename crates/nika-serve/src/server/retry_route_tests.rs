@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::retry_tests::{
     TWO_TASKS, dropping, field, journal_lines, journal_of, kinds_and_statuses, named, names_task,
-    pair, running_job, stored_jobs,
+    pair, running_job, stored_jobs, until_first_completes,
 };
 use super::tests::{
     TestBackend, TestServer, TestWorld, auth_header, events_request, get_request, limits,
@@ -359,18 +359,7 @@ async fn interrupted_after_its_first_task(world: &TestWorld, journals: &Path) ->
     let server = world.start(backend, dropping(OnInterrupted::Off)).await;
     let body = json!({"workflow": "two.nika"}).to_string();
     let (id, first) = running_job(&server, &body, "interrupted-1").await;
-    let mut seen = Vec::new();
-    for _ in 0..500 {
-        seen = journal_of(journals, &first).map_or_else(Vec::new, |path| journal_lines(&path));
-        if names_task(&seen, "task_completed", "first") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        names_task(&seen, "task_completed", "first"),
-        "the first task completed before the stop: {first} {seen:?}"
-    );
+    until_first_completes(journals, &first).await;
     let _stopped = server.stop().await;
     let stored = stored_jobs(world);
     assert_eq!(stored[0]["record"]["status"], "interrupted", "{stored:?}");

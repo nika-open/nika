@@ -435,20 +435,34 @@ pub fn collect(ping: bool) -> Probe {
 /// The probe LIST derives from the vendored client registry (H6): a
 /// client is probed only while the matrix claims its wire target — the
 /// hard-coded set is gone, and the per-target MECHANISM (which file,
-/// which key) rides the shared [`crate::detect`] table `wire` derives
+/// read how) rides the shared [`crate::detect`] rows `wire` derives
 /// from too (one truth). Row order is the historical one
 /// ([`clients_registry::PROBE_MECHANISMS`] mirrors it): findings and
 /// receipts ride probe order.
 fn client_probes() -> Vec<ClientProbe> {
-    crate::detect::sights(home_dir().as_deref(), Path::new("."))
+    client_probes_in(home_dir().as_deref(), Path::new("."))
+}
+
+/// [`client_probes`] on a named home and workspace. A standing row is
+/// reported whether or not its host is there (the six historical rows,
+/// as before); every other client `wire` can write is reported once this
+/// machine shows its config — the hosts `nika wire detected` sees, and
+/// no « not wired » line for a host that is not installed.
+fn client_probes_in(home: Option<&Path>, work: &Path) -> Vec<ClientProbe> {
+    crate::detect::sights(home, work)
         .iter()
-        .filter_map(|sight| match sight.kind {
-            crate::detect::ConfigKind::Json => {
-                Some(client_probe_any(sight.id, &sight.paths, &sight.server_path))
-            }
-            // Hermes is YAML — the JSON probe cannot see it (H2): the
-            // substring predicate carries recognition.
-            crate::detect::ConfigKind::Yaml => sight.paths.first().map(|path| hermes_probe(path)),
+        .filter_map(|sight| {
+            let path = sight.paths.first()?;
+            let probe = match sight.reading {
+                crate::detect::Reading::Json(server_path) => {
+                    client_probe_any(&sight.id, &sight.paths, &server_path)
+                }
+                // Hermes is YAML — the JSON probe cannot see it (H2): the
+                // substring predicate carries recognition.
+                crate::detect::Reading::Yaml => hermes_probe(path),
+                crate::detect::Reading::Writer => writer_probe(sight, path),
+            };
+            (sight.standing || probe.present).then_some(probe)
         })
         .collect()
 }
@@ -585,6 +599,29 @@ fn version_key(v: &str) -> Option<(u64, u64, u64)> {
     Some((maj, min, patch))
 }
 
+/// A client read through its own writer (Codex TOML, Amp's dotted key,
+/// the `opencode.json` shape …): `current` is a `nika` entry that runs a
+/// command with the args `wire` writes, whatever that command's path and
+/// the entry's extra keys, and `stale` « a wire would migrate the old
+/// argv ». (The standing rows read args alone, [`is_current_mcp_server`]:
+/// their reading is the one `doctor` has always given.) Nothing is
+/// written; an absent config is never opened.
+fn writer_probe(sight: &crate::detect::ClientSight, path: &Path) -> ClientProbe {
+    let present = path.exists();
+    let (current, stale) = if present {
+        crate::wire::reads(sight.target, path)
+    } else {
+        (false, false)
+    };
+    ClientProbe {
+        id: sight.id.clone(),
+        path: path.display().to_string(),
+        present,
+        current,
+        stale,
+    }
+}
+
 /// Probe one client at every path its config may live (home · workspace):
 /// the most-wired sighting wins (current > stale > present > first).
 #[must_use]
@@ -637,7 +674,8 @@ fn client_probe(id: &str, path: &Path, server_path: &[&str; 2]) -> ClientProbe {
 fn hermes_probe(path: &Path) -> ClientProbe {
     let present = path.exists();
     let current = present
-        && std::fs::read_to_string(path).is_ok_and(|body| crate::detect::hermes_recognized(&body));
+        && crate::detect::read_config(path)
+            .is_ok_and(|body| crate::detect::hermes_recognized(&body));
     ClientProbe {
         id: "hermes".to_owned(),
         path: path.display().to_string(),
@@ -659,7 +697,7 @@ fn is_current_mcp_server(value: &Value) -> bool {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
-    let body = std::fs::read_to_string(path).ok()?;
+    let body = crate::detect::read_config(path).ok()?;
     serde_json::from_str(&body).ok()
 }
 
@@ -1130,8 +1168,12 @@ fn first_nonempty_env(names: &[String]) -> Option<String> {
 /// machine has a signed-in harness seat (NIKA-1800 at admission ·
 /// NIKA-INFER-001 at the call). Census-derived: printed only when it
 /// is TRUE, naming the live pin token — never the retired ACP wrapper
-/// id. The collector is presence-only (no ping, no spawn), cheap enough
-/// for a refusal path.
+/// id. The census is not free: it reads the provider keys of the
+/// environment and launches the login command of every agentic CLI
+/// found on `PATH` (`claude auth status` · `codex login status`),
+/// together, each bounded, and waits for the slowest. No handshake, no
+/// model call. Call it once the line is known to print: a refusal that
+/// earned it, or a page that carries it.
 #[must_use]
 pub fn seat_escape_tail() -> Option<String> {
     AccessCensus::collect(nika_runtime::compose::config_from_env()).seat_escape()
@@ -1197,13 +1239,34 @@ pub fn print_seat_escape<'a, W: std::io::Write>(
 /// the L4 renderer can).
 #[must_use]
 pub fn with_seat_tail(code: &str, tail: Option<&str>, text: String) -> String {
-    if !matches!(code, "NIKA-INFER-001" | "NIKA-1800") {
+    if !carries_seat_tail(code) {
         return text;
     }
     match tail {
         Some(tail) => format!("{text}\n  {tail}\n"),
         None => text,
     }
+}
+
+/// The codes whose page carries the seat escape line.
+fn carries_seat_tail(code: &str) -> bool {
+    matches!(code, "NIKA-INFER-001" | "NIKA-1800")
+}
+
+/// [`with_seat_tail`] over a tail computed on demand: `tail` is called
+/// for a code whose page carries the line, and for no other. Passing
+/// [`seat_escape_tail`] keeps its census (the programs it launches, the
+/// keys it reads) off every other page.
+#[must_use]
+pub(crate) fn with_seat_tail_from(
+    code: &str,
+    tail: impl FnOnce() -> Option<String>,
+    text: String,
+) -> String {
+    if !carries_seat_tail(code) {
+        return text;
+    }
+    with_seat_tail(code, tail().as_deref(), text)
 }
 
 /// `~/.nika/config.toml` when it exists (presence only · never read). `HOME` is

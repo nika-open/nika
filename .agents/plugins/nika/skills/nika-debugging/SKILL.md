@@ -10,6 +10,13 @@ before execution, disabled recording or lost ownership can leave no complete
 journal. Start from the available runtime evidence, not a memory of terminal
 scroll; a receipt alone does not prove a sealed journal exists.
 
+**What needs the person, and what never does.** Their yes is needed to run
+or resume a run again (it repeats or continues effects), to answer a gate,
+and for a repair that changes what the workflow touches or gives a gate a
+default. A request to recover the run covers that recovery, once. Reading a
+trace, verifying it, explaining a code, checking a file and showing a plan
+with `nika run <file> --dry-run` never wait for them.
+
 ## The forensic loop (evidence first)
 
 0. **A failed run already names its trace**: the card's `autopsy:`

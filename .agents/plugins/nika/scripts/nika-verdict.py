@@ -12,9 +12,12 @@ Usage:
   nika-verdict.py <file.nika> [--model <provider/model>] [--json]
 
 Exit code: the one `nika check` returned (0 ready · 2 findings · other =
-the check itself could not run).
+the check itself could not run; 124 = it did not answer within 60 s).
+
+NIKA_KIT_TIMEOUT_SECONDS replaces the 60 s given to the binary (tests).
 """
 import json
+import os
 import subprocess
 import sys
 
@@ -26,15 +29,38 @@ KNOWN_KINDS = {
 }
 
 
+def nika_bin(location):
+    """The binary the kit resolved (bin/nika-kit), else NIKA_BIN, else PATH."""
+    kit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "nika-kit")
+    if os.access(kit, os.X_OK):
+        try:
+            out = subprocess.run([kit, "--path", location], capture_output=True, text=True, check=False, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return os.environ.get("NIKA_BIN") or "nika"
+
+
+def seconds():
+    try:
+        return float(os.environ.get("NIKA_KIT_TIMEOUT_SECONDS") or 60)
+    except ValueError:
+        return 60.0
+
+
 def run_check(path, model):
-    cmd = ["nika", "check", path, "--json"]
+    cmd = [nika_bin(os.path.dirname(os.path.abspath(path))), "check", path, "--json"]
     if model:
         cmd += ["--model", model]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=seconds())
     except FileNotFoundError:
         print("nika is not installed: curl -LsSf https://nika.sh/install.sh | sh")
         sys.exit(127)
+    except subprocess.TimeoutExpired:
+        print(f"The check did not answer within {seconds():g} s, so there is no verdict on this file.")
+        sys.exit(124)
     try:
         return proc.returncode, json.loads(proc.stdout)
     except json.JSONDecodeError:

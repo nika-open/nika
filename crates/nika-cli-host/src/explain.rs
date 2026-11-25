@@ -18,7 +18,7 @@ use nika_error::codes::{code_help, lookup};
 
 use crate::display::theme::Theme;
 use crate::output::VerbOutput;
-use crate::probe::{seat_escape_tail, with_seat_tail};
+use crate::probe::{seat_escape_tail, with_seat_tail_from};
 
 /// The doc-site home for the error-code registry — the ONE https target the
 /// explain surface names. Printed scheme-less (the established prose form);
@@ -58,9 +58,26 @@ pub fn run(wire: &str, theme: Theme) -> VerbOutput {
 }
 
 /// The four-rung ladder — a hint kind · the registry · the spec rows ·
-/// the namespaces — worded for `door`.
+/// the namespaces — worded for `door`. Every rung answers from the
+/// tables embedded in this binary; the two auth-class pages alone also
+/// ask this machine for a ready seat ([`seat_escape_tail`]).
 #[must_use]
 pub fn run_for(wire: &str, theme: Theme, door: Door) -> VerbOutput {
+    run_with_seat_tail(wire, theme, door, seat_escape_tail)
+}
+
+/// [`run_for`] over an injected source of the seat escape line. The real
+/// source is the access census, which launches the login command of each
+/// installed agentic CLI: it is asked at most once, and only by a code
+/// whose page prints the line (`with_seat_tail_from` owns that gate).
+/// Explaining any other code launches nothing and reads no key. Tests
+/// inject a counting source.
+fn run_with_seat_tail(
+    wire: &str,
+    theme: Theme,
+    door: Door,
+    seat_tail: impl FnOnce() -> Option<String>,
+) -> VerbOutput {
     // The seam (`Theme::link` → `format::osc8`): text unchanged, escapes
     // only when the links capability resolved on.
     let docs = theme.link(DOCS_ERRORS_URL, DOCS_ERRORS_TEXT);
@@ -85,11 +102,7 @@ pub fn run_for(wire: &str, theme: Theme, door: Door) -> VerbOutput {
         // (NIKA-DAG-002 …) live in the embedded canon's error_codes
         // table. Same binary, same single source of truth.
         if let Some(text) = canon_row(&normalized, door) {
-            return VerbOutput::ok(with_seat_tail(
-                &normalized,
-                seat_escape_tail().as_deref(),
-                text,
-            ));
+            return VerbOutput::ok(with_seat_tail_from(&normalized, seat_tail, text));
         }
         // Retired conformance codes are ANSWERED, not 404'd: the hole in
         // the registry is deliberate (spec 05 · never reuse) and the
@@ -137,11 +150,7 @@ pub fn run_for(wire: &str, theme: Theme, door: Door) -> VerbOutput {
         slug = code.slug,
         help = code_help(code),
     );
-    VerbOutput::ok(with_seat_tail(
-        &normalized,
-        seat_escape_tail().as_deref(),
-        text,
-    ))
+    VerbOutput::ok(with_seat_tail_from(&normalized, seat_tail, text))
 }
 
 /// Teach a spec conformance code from the embedded canon's registry —
@@ -549,9 +558,120 @@ mod tests {
     use crate::output::exit;
 
     /// The sober register (links off) — the byte-frozen baseline every
-    /// machine surface reads.
+    /// machine surface reads, on a machine with no seat: the pages are
+    /// read without the census, which would launch the agentic CLIs
+    /// installed on the machine running the tests.
     fn run(wire: &str) -> VerbOutput {
-        super::run(wire, Theme::new(false, false, false))
+        run_with_seat_tail(wire, Theme::new(false, false, false), Door::Cli, || None)
+    }
+
+    /// One explain over a counting source of the seat line: the answer,
+    /// and how many times the source was asked.
+    fn run_counting(wire: &str, door: Door, seat_line: Option<&str>) -> (VerbOutput, usize) {
+        let asked = std::cell::Cell::new(0_usize);
+        let out = run_with_seat_tail(wire, Theme::new(false, false, false), door, || {
+            asked.set(asked.get() + 1);
+            seat_line.map(str::to_owned)
+        });
+        (out, asked.get())
+    }
+
+    /// The seat line comes from the access census, which launches the
+    /// login command of each installed agentic CLI. Only a page that
+    /// prints the line may ask for it. Derived over both registries
+    /// (never a hand-kept list): the codes that ask are the two
+    /// auth-class ones, once each, and no other page shows the line.
+    #[test]
+    fn only_the_two_auth_class_codes_ask_for_the_seat_line() {
+        const SEAT: &str = "SEAT-LINE";
+        let canon = nika_pack::error_codes();
+        let numeric: Vec<String> = nika_error::codes::ALL
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            canon.len() >= 30 && numeric.len() >= 30,
+            "a registry read broke ({} canon rows · {} numeric codes)",
+            canon.len(),
+            numeric.len()
+        );
+        let wires = canon
+            .iter()
+            .map(|row| row.code)
+            .chain(numeric.iter().map(String::as_str));
+        let mut asking = Vec::new();
+        for wire in wires {
+            for door in [Door::Cli, Door::Oracle] {
+                let (out, asked) = run_counting(wire, door, Some(SEAT));
+                assert_eq!(out.code, exit::OK, "{wire}:\n{}", out.text);
+                if asked == 0 {
+                    assert!(
+                        !out.text.contains(SEAT),
+                        "{wire} shows a line it never asked for:\n{}",
+                        out.text
+                    );
+                } else {
+                    asking.push((wire, door, asked));
+                }
+            }
+        }
+        assert_eq!(
+            asking,
+            [
+                ("NIKA-INFER-001", Door::Cli, 1),
+                ("NIKA-INFER-001", Door::Oracle, 1),
+                ("NIKA-1800", Door::Cli, 1),
+                ("NIKA-1800", Door::Oracle, 1),
+            ]
+        );
+    }
+
+    /// The rungs outside the two registries (a hint kind · a resident
+    /// code · a retired code · a namespace · the pin family · the 404)
+    /// and the bare forms of an ordinary code never ask either.
+    #[test]
+    fn the_other_rungs_never_ask_for_the_seat_line() {
+        for wire in [
+            "jq-as-map",
+            "native-first/006",
+            "snapshot_tampered",
+            "NIKA-DAG-003",
+            "NIKA-PROVIDER-001",
+            "NIKA-BUILTIN-WRITE-001",
+            "NIKA-MCP-006",
+            "NIKA-ZZZ-999",
+            "DAG-002",
+            "440",
+        ] {
+            let (out, asked) = run_counting(wire, Door::Cli, Some("SEAT-LINE"));
+            assert_eq!(asked, 0, "{wire} asked for the seat line:\n{}", out.text);
+            assert!(!out.text.contains("SEAT-LINE"), "{wire}:\n{}", out.text);
+            assert_eq!(out.text, run(wire).text, "{wire} reads the same either way");
+        }
+    }
+
+    /// The two pages that print the seat line keep their bytes: the page
+    /// a machine with no seat reads, then the line on its own indented
+    /// row. The bare forms ride the same gate, through both doors.
+    #[test]
+    fn the_seat_line_pages_keep_their_bytes() {
+        const SEAT: &str = "or use a seat present on this machine: `--access codex` (its login is \
+                            judged at run)";
+        for wire in ["NIKA-INFER-001", "INFER-001", "NIKA-1800", "1800"] {
+            for door in [Door::Cli, Door::Oracle] {
+                let (bare, asked_bare) = run_counting(wire, door, None);
+                let (seated, asked_seated) = run_counting(wire, door, Some(SEAT));
+                assert_eq!((asked_bare, asked_seated), (1, 1), "{wire}");
+                assert_eq!(bare.code, exit::OK, "{wire}:\n{}", bare.text);
+                assert_eq!(seated.code, exit::OK, "{wire}:\n{}", seated.text);
+                assert!(!bare.text.contains("--access codex"), "{}", bare.text);
+                assert_eq!(
+                    seated.text,
+                    format!("{}\n  {SEAT}\n", bare.text),
+                    "{wire}: the seat line is the last row, nothing else moves"
+                );
+            }
+        }
     }
 
     #[test]

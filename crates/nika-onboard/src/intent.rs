@@ -35,15 +35,26 @@ const TAU: f64 = 3.0;
 /// so each corpus earns its own floor). Re-derived 2026-11-25 with the
 /// `calibration_probe` (run it after any corpus change) when the 17
 /// recipes of nika-spec 419 and 420 entered the pack and every score
-/// moved. Read after the contract gate: the highest WRONG top is 10.414
-/// (« Relance les factures impayées… » → refund-chaser, on the one French
-/// word « relance » of a tone string — the P0-1 reproduction again), and
-/// the vague ones sit lower (« fill the lines » → receipt-ledger 7.269,
-/// « please answer my emails » → lead-enrichment 6.935, « make it good »
-/// → etl-quarantine 6.665); the lowest honest top is 14.950 (« translate
-/// my docs folder to spanish » → localization-factory). 12.5 sits between
-/// with about 1.2× slack each way. (2026-07-31, on 49 docs: 4.949 vague,
-/// 6.220 honest, floor 5.5.)
+/// moved: at the earlier 5.5, four wrong phrases routed on that corpus.
+/// Read after the contract gate. The highest wrong top the margin alone
+/// would route is 10.414 (« Relance les factures impayées… » →
+/// refund-chaser, on the one French word « relance » of a tone string,
+/// the P0-1 reproduction); the vague ones sit lower (« fill the lines »
+/// 7.269, « please answer my emails » 6.935, « make it good » 6.665), and
+/// « Chaque lundi compare three competitors… » leads a brief at 11.058 but
+/// is a same-facet coin-flip either way. The lowest honest tops that
+/// route are 14.415 (« scrape a website and summarize it » →
+/// 05-fetch-chain), 14.950 (« translate my docs folder to spanish » →
+/// localization-factory) and 15.071 (« which example fetches a url and
+/// summarizes it? » → 05-fetch-chain). 12.5 sits between them. Three
+/// honest but weak tops stay under it and ask, naming the job first:
+/// « what's a good template for a digest? » (05-fetch-chain 11.990, with
+/// feed-digest beside it), « is there a template for invoices? »
+/// (invoice-chaser 11.483, a same-facet coin-flip anyway) and « show me a
+/// template for fetching a URL » (05-fetch-chain 4.560, under the old
+/// floor too).
+/// (2026-07-31, on 49 docs:
+/// 4.949 vague, 6.220 honest, floor 5.5.)
 const TAU_CATALOG: f64 = 12.5;
 
 /// The relative margin: the winner must outscore the runner-up by 1.3×.
@@ -81,7 +92,9 @@ pub(crate) const ALIASES: &[(&str, &[&str])] = &[
     ("ai", &["infer"]),
     ("model", &["infer"]),
     ("prompt", &["infer"]),
-    ("summarize", &["infer", "think"]),
+    // « summary » is the word 05-fetch-chain says; « summary » already
+    // carries « summarize » the other way (2026-11-25).
+    ("summarize", &["infer", "think", "summary"]),
     ("classify", &["infer"]),
     ("generate", &["infer"]),
     ("save", &["write", "persist", "state"]),
@@ -585,10 +598,17 @@ fn body_of(name: &str) -> Option<&'static str> {
 /// The naive singular of a plural token — `invoices` → `invoice`.
 /// Query-side only, like every other expansion here: documents are never
 /// rewritten, so a wrong guess costs one term that matches nothing.
+///
+/// `-es` goes whole only where English adds it, after `ss`, `x`, `zz`,
+/// `ch` and `sh` (`processes` → `process`, `fetches` → `fetch`);
+/// anywhere else the `e` is the stem's own (`summarizes` →
+/// `summarize`, `releases` → `release`), so only the `s` goes.
 fn singular_of(token: &str) -> Option<&str> {
     if let Some(stem) = token.strip_suffix("es")
         && stem.len() >= 3
-        && stem.ends_with(['s', 'x', 'z', 'h'])
+        && ["ss", "x", "zz", "ch", "sh"]
+            .iter()
+            .any(|end| stem.ends_with(end))
     {
         return Some(stem);
     }
@@ -651,6 +671,17 @@ fn best_same_facet_runner(qualified: &[(String, f64)]) -> f64 {
         .iter()
         .find(|(n, _)| facet_of(n) == facet_of(winner))
         .map_or(0.0, |(_, s)| *s)
+}
+
+/// Whether the top of the gated, ranked list routes: it clears the floor
+/// and outscores its best same-facet rival by [`MARGIN`]. A rival of
+/// another facet never blocks it (see `route_impl`).
+fn clears(qualified: &[(String, f64)], tau: f64) -> bool {
+    let Some((_, s1)) = qualified.first() else {
+        return false;
+    };
+    let runner = best_same_facet_runner(qualified);
+    *s1 >= tau && (runner <= 0.0 || *s1 >= MARGIN * runner)
 }
 
 /// The contract gate: the ranked entries whose capabilities (derived from
@@ -775,8 +806,7 @@ fn route_impl(intent: &str, names: &[String], tau: f64) -> RoutingOutcome {
     // neighbours surface (entry-doors redesign R1 · G-16). On the
     // skeleton-only corpus every pair is same-facet, so the wizard's
     // shipped behavior is byte-identical.
-    let same_facet_runner = best_same_facet_runner(&qualified);
-    if *s1 >= tau && (same_facet_runner <= 0.0 || *s1 >= MARGIN * same_facet_runner) {
+    if clears(&qualified, tau) {
         RoutingOutcome::Routed {
             template: winner.clone(),
             score: *s1,
@@ -1151,6 +1181,13 @@ mod calibration_probe {
             "summarize every item in parallel",
             "an agentic loop that researches until the budget runs out",
             "scrape a website and summarize it",
+            "a weekend summary of three URLs",
+            // The Session gallery's routing phrases (nika-session facts.rs).
+            "show me a template for fetching a URL",
+            "which example fetches a url and summarizes it?",
+            "is there a template for invoices?",
+            "what's a good template for a digest?",
+            "do stuff with things",
             "fill the lines",
             "the workflow template",
             "make it good",
@@ -1170,13 +1207,20 @@ mod calibration_probe {
                 .take(4)
                 .map(|(n, s)| format!("{n}={s:.3}"))
                 .collect();
-            let verdict = match route(intent) {
+            let said = |outcome: RoutingOutcome| match outcome {
                 RoutingOutcome::Routed { template, .. } => format!("routes {template}"),
                 RoutingOutcome::NeedsClarification { candidates, .. } => {
                     format!("clarifies {candidates:?}")
                 }
             };
-            println!("CAL · {intent} → {} · {verdict}", row.join(" · "));
+            let verdict = said(route(intent));
+            // The same corpus under the floor before 2026-11-25: a flip
+            // between the two columns is a phrase the new floor moved.
+            let before = said(route_impl(intent, &names, 5.5));
+            println!(
+                "CAL · {intent} → {} · {verdict} · at 5.5: {before}",
+                row.join(" · ")
+            );
         }
     }
 }
@@ -1184,6 +1228,65 @@ mod calibration_probe {
 #[cfg(test)]
 mod catalog_routing_laws {
     use super::*;
+
+    /// The singular rule drops `-es` only where English adds it, so a verb
+    /// such as « summarizes » keeps the `e` of its stem (2026-11-25: it
+    /// read `summariz`, and the gallery question lost 05-fetch-chain).
+    #[test]
+    fn the_singular_drops_es_only_where_english_adds_it() {
+        for (plural, singular) in [
+            ("processes", "process"),
+            ("boxes", "box"),
+            ("buzzes", "buzz"),
+            ("fetches", "fetch"),
+            ("wishes", "wish"),
+            ("summarizes", "summarize"),
+            ("releases", "release"),
+            ("cases", "case"),
+            ("invoices", "invoice"),
+            ("urls", "url"),
+        ] {
+            assert_eq!(singular_of(plural), Some(singular), "{plural}");
+        }
+        for word in ["class", "its", "bus"] {
+            assert_eq!(singular_of(word), None, "{word}");
+        }
+    }
+
+    /// The margin clause on synthetic scores: a rival of the SAME facet
+    /// inside 1.3× makes a coin-flip, one of another facet never does,
+    /// and a same-facet rival hiding behind a cross-facet runner-up still
+    /// counts. Without the clause the first and fourth cases would route.
+    #[test]
+    fn the_margin_judges_only_a_same_facet_rival() {
+        let q = |rows: &[(&str, f64)]| -> Vec<(String, f64)> {
+            rows.iter().map(|(n, s)| ((*n).to_owned(), *s)).collect()
+        };
+        assert_eq!(facet_of("invoice-chaser"), facet_of("refund-chaser"));
+        assert_ne!(facet_of("05-fetch-chain"), facet_of("website-brief"));
+        assert!(!clears(
+            &q(&[("invoice-chaser", 20.0), ("refund-chaser", 16.0)]),
+            12.5
+        ));
+        assert!(clears(
+            &q(&[("invoice-chaser", 20.0), ("refund-chaser", 15.0)]),
+            12.5
+        ));
+        assert!(clears(
+            &q(&[("05-fetch-chain", 14.0), ("website-brief", 13.0)]),
+            12.5
+        ));
+        assert!(!clears(
+            &q(&[
+                ("invoice-chaser", 20.0),
+                ("website-brief", 19.0),
+                ("refund-chaser", 16.0),
+            ]),
+            12.5
+        ));
+        assert!(!clears(&q(&[("invoice-chaser", 12.0)]), 12.5));
+        assert!(!clears(&[], 12.5));
+    }
 
     #[test]
     fn release_notes_intent_leads_the_named_job() {
@@ -1210,20 +1313,15 @@ mod catalog_routing_laws {
             matches!(p1, RoutingOutcome::Routed { ref template, .. } if template == "meeting-actions"),
             "probe 1 must route to the job: {p1:?}"
         );
-        // Probe 2 carries the same honest arm as probe 3: its runner-up
-        // (`07-for-each-locales`) is the LESSON that teaches the very
-        // shape the job uses, so the two say almost the same words and
-        // the margin does not clear. The job must LEAD either way.
-        match route("translate my docs folder to spanish") {
-            RoutingOutcome::Routed { template, .. } => {
-                assert_eq!(template, "localization-factory");
-            }
-            RoutingOutcome::NeedsClarification { candidates, .. } => assert_eq!(
-                candidates.first().map(String::as_str),
-                Some("localization-factory"),
-                "the job leads the clarify list: {candidates:?}"
-            ),
-        }
+        // Probe 2 routes outright: its runner-up `07-for-each-locales` is
+        // a LESSON, another facet, so the margin does not judge the pair,
+        // and the `translate` alias carries the job's own word
+        // « localization » (14.950 on 2026-11-25).
+        let p2 = route("translate my docs folder to spanish");
+        assert!(
+            matches!(p2, RoutingOutcome::Routed { ref template, .. } if template == "localization-factory"),
+            "probe 2 must route to the job: {p2:?}"
+        );
         match route("chase unpaid invoices every friday") {
             RoutingOutcome::Routed { template, .. } => assert_eq!(template, "invoice-chaser"),
             RoutingOutcome::NeedsClarification { candidates, .. } => assert_eq!(
@@ -1325,9 +1423,9 @@ mod adversarial_pass_2026_07_31 {
 
     /// The LIVING bounds of [`TAU_CATALOG`] (Q2 of the socratic pass):
     /// the floor was measured against TODAY's corpus, and nothing used
-    /// to force a re-measure when the corpus moves. These two probes
-    /// ARE the bounds — a corpus change that lets a vague utterance
-    /// route (or starves the honest one below the floor plus the
+    /// to force a re-measure when the corpus moves. These probes ARE
+    /// the bounds — a corpus change that lets a vague or wrong top
+    /// route (or starves an honest one below the floor plus the
     /// contract gate) turns this red, and red here means « re-run
     /// `calibration_probe`, re-derive `TAU_CATALOG` », never « bump the
     /// assertion ».
@@ -1344,23 +1442,31 @@ mod adversarial_pass_2026_07_31 {
                 "`{vague}` is vague and must never route — TAU_CATALOG drifted under the corpus"
             );
         }
-        // The highest wrong top the floor was derived over (2026-11-25):
-        // a French phrase reaching a refund job on one word of a tone string.
+        // The highest WRONG top the margin alone would route (2026-11-25):
+        // a French phrase reaching a refund job on one word of a tone
+        // string, the P0-1 reproduction. It must stay under the floor.
+        let wrong = "Relance les factures impayées par email après validation humaine";
         assert!(
-            matches!(
-                route("Relance les factures impayées par email après validation humaine"),
-                RoutingOutcome::NeedsClarification { .. }
-            ),
-            "the P0-1 reproduction must stay under the floor — TAU_CATALOG drifted under the corpus"
+            matches!(route(wrong), RoutingOutcome::NeedsClarification { .. }),
+            "`{wrong}` must stay under the floor — TAU_CATALOG drifted under the corpus"
         );
-        // The lowest honest top it was derived over: the translation job
-        // routes, or at least leads its clarify list.
-        match route("translate my docs folder to spanish") {
-            RoutingOutcome::Routed { template, .. } => assert_eq!(template, "localization-factory"),
-            RoutingOutcome::NeedsClarification { candidates, .. } => assert_eq!(
-                candidates.first().map(String::as_str),
-                Some("localization-factory")
+        // The lowest honest tops it was derived over: each must ROUTE.
+        for (honest, job) in [
+            ("scrape a website and summarize it", "05-fetch-chain"),
+            (
+                "translate my docs folder to spanish",
+                "localization-factory",
             ),
+            (
+                "which example fetches a url and summarizes it?",
+                "05-fetch-chain",
+            ),
+        ] {
+            let outcome = route(honest);
+            assert!(
+                matches!(outcome, RoutingOutcome::Routed { ref template, .. } if template == job),
+                "`{honest}` must route to {job} — TAU_CATALOG drifted under the corpus: {outcome:?}"
+            );
         }
         // The honest end stays reachable: the invoice probe either
         // routes or leads its clarify list (the probe test pins which).

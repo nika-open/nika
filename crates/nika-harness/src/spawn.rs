@@ -407,47 +407,35 @@ type ProvenEnv = Vec<(String, String)>;
 /// home or a configuration file changed since proves again, so an MCP server defined during
 /// the run is disabled like the others.
 ///
+/// One proof runs at a time per seat: sessions that start together wait for the one in
+/// flight and reuse what it kept, or prove in turn when it failed or was cancelled (the
+/// lock is released with the proving future).
+///
 /// [`ConfigStamp`]: crate::authoring::acp::codex::ConfigStamp
 #[derive(Clone, Default)]
-struct Proven(std::sync::Arc<std::sync::Mutex<Option<Kept>>>);
+struct Proven(std::sync::Arc<std::panic::AssertUnwindSafe<tokio::sync::Mutex<Option<Kept>>>>);
+// Unwind safety holds: the kept proof's one write is a whole assignment after the probes, so
+// a panic while proving leaves the earlier value (or none), never a half-kept proof.
 
 /// One kept proof and what it was proven against (`None` outside the Codex profile).
-#[derive(Clone)]
 struct Kept {
     against: Option<crate::authoring::acp::codex::ConfigStamp>,
     env: ProvenEnv,
 }
 
-impl Proven {
-    /// The kept environment, when a proof succeeded against the configuration `now` reads.
-    fn get(&self, now: Option<&crate::authoring::acp::codex::ConfigStamp>) -> Option<ProvenEnv> {
-        let kept = self.0.lock().ok()?;
-        let kept = kept.as_ref()?;
-        (kept.against.as_ref() == now).then(|| kept.env.clone())
-    }
-
-    fn keep(
-        &self,
-        against: Option<crate::authoring::acp::codex::ConfigStamp>,
-        env: &[(String, String)],
-    ) {
-        if let Ok(mut kept) = self.0.lock() {
-            *kept = Some(Kept {
-                against,
-                env: env.to_vec(),
-            });
-        }
-    }
-
-    fn is_kept(&self) -> bool {
-        self.0.lock().is_ok_and(|kept| kept.is_some())
+impl Kept {
+    /// The kept environment, when it was proven against the configuration `now` reads.
+    fn serves(&self, now: Option<&crate::authoring::acp::codex::ConfigStamp>) -> Option<ProvenEnv> {
+        (self.against.as_ref() == now).then(|| self.env.clone())
     }
 }
 
 impl std::fmt::Debug for Proven {
-    // The kept environment carries the profile's configuration: only whether one is kept.
+    // The kept environment carries the profile's configuration: only whether one is kept
+    // (`None` while a proof is in flight).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Proven").field(&self.is_kept()).finish()
+        let kept = self.0.try_lock().ok().map(|kept| kept.is_some());
+        f.debug_tuple("Proven").field(&kept).finish()
     }
 }
 
@@ -927,13 +915,15 @@ impl SpawnedHarness {
     }
 
     /// [`Self::prove`] against the configuration stamp `now`, read before any probe: a
-    /// configuration written while the proof runs is proven again by the next session.
+    /// configuration written while the proof runs is proven again by the next session. The
+    /// seat's proof is held for the whole proof ([`Proven`]): one proof at a time.
     async fn prove_against(
         &self,
         now: Option<crate::authoring::acp::codex::ConfigStamp>,
     ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
         let start = (self.adapter.probe_via_handshake).then(|| self.start_judge());
-        if let Some(profile_env) = self.proven.get(now.as_ref()) {
+        let mut kept = self.proven.0.lock().await;
+        if let Some(profile_env) = kept.as_ref().and_then(|kept| kept.serves(now.as_ref())) {
             return Ok((start, profile_env));
         }
         if self.adapter.probe_via_handshake {
@@ -947,7 +937,10 @@ impl SpawnedHarness {
             }
             _ => Vec::new(),
         };
-        self.proven.keep(now, &profile_env);
+        *kept = Some(Kept {
+            against: now,
+            env: profile_env.clone(),
+        });
         Ok((start, profile_env))
     }
 

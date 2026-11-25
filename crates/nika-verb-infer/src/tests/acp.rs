@@ -673,3 +673,31 @@ fn a_run_keeps_one_adapter_per_route() {
     assert!(!Arc::ptr_eq(&first, &other), "one adapter per route");
     assert!(Arc::ptr_eq(&other, &seats.seat(claude).expect("kept")));
 }
+
+/// NIK-385 review · turns that ask for a route's adapter at the same time get the one adapter
+/// the run keeps for it, so they share its proof: a turn that built its own adapter beside the
+/// kept one proved it again.
+#[test]
+fn turns_that_ask_together_share_the_kept_adapter() {
+    const TURNS: usize = 8;
+    let seats = crate::acp::AcpSeats::default();
+    let ready = std::sync::Barrier::new(TURNS);
+    let codex = nika_harness::meet_acp_one_shot("codex").expect("codex");
+    let got: Vec<_> = std::thread::scope(|scope| {
+        let turns: Vec<_> = (0..TURNS)
+            .map(|_| {
+                scope.spawn(|| {
+                    ready.wait();
+                    seats.seat(codex).expect("built")
+                })
+            })
+            .collect();
+        turns
+            .into_iter()
+            .map(|turn| turn.join().expect("joined"))
+            .collect()
+    });
+    let kept = seats.seat(codex).expect("kept");
+    let shared = got.iter().filter(|seat| Arc::ptr_eq(seat, &kept)).count();
+    assert_eq!(shared, TURNS, "every turn got the kept adapter");
+}

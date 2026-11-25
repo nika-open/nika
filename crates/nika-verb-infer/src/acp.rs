@@ -44,28 +44,26 @@ impl std::fmt::Debug for AcpTransport {
 
 /// The route adapters a verb spawned, one per route, shared by the verb's clones. A verb is
 /// composed per run, so each adapter keeps its first good proof for every later turn of the
-/// run (repairs included) instead of probing again on a loaded machine (NIK-385).
+/// run (repairs included) instead of probing again on a loaded machine (NIK-385). Turns that
+/// ask at the same time get the same adapter, whose sessions run one proof between them.
 #[derive(Clone, Default)]
 pub(crate) struct AcpSeats(Arc<std::sync::Mutex<BTreeMap<&'static str, Arc<SpawnedHarness>>>>);
 
 impl AcpSeats {
-    /// The run's adapter for `one_shot`'s route, spawned under its completion profile the
-    /// first time it is asked for.
+    /// The run's adapter for `one_shot`'s route, built under its completion profile the first
+    /// time it is asked for, while the map is held (building starts nothing): every caller
+    /// gets the map's entry.
     pub(crate) fn seat(&self, one_shot: AcpOneShot) -> Result<Arc<SpawnedHarness>, HarnessError> {
-        if let Some(seat) = self
+        // A panic elsewhere cannot leave a half-written entry: an insert is the only write.
+        let mut seats = self
             .0
             .lock()
-            .ok()
-            .and_then(|seats| seats.get(one_shot.seat).cloned())
-        {
-            return Ok(seat);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(seat) = seats.get(one_shot.seat) {
+            return Ok(Arc::clone(seat));
         }
         let seat = Arc::new(one_shot.transport()?);
-        if let Ok(mut seats) = self.0.lock() {
-            seats
-                .entry(one_shot.seat)
-                .or_insert_with(|| Arc::clone(&seat));
-        }
+        seats.insert(one_shot.seat, Arc::clone(&seat));
         Ok(seat)
     }
 }

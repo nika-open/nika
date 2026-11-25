@@ -1,0 +1,13 @@
+{
+  "family": "F5",
+  "slug": "f5-04-fan-out-fan-in-group",
+  "title": "Fan-out branches declared as one group rejoin into one egress message through the fold",
+  "rationale": "the group twin of f5-02: both branches carry the page's taint and the egress task reads them through `group.branches`; the fold holds each member's record, so the realized-flow judge flags the fan-in egress exactly as it does for the per-task reads",
+  "verdict": "static-deny",
+  "containment": "trifecta-static",
+  "static": {
+    "gate": "TRIFECTA",
+    "code": "NIKA-SEC-009",
+    "task": "broadcast"
+  }
+}

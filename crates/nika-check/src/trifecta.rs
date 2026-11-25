@@ -125,7 +125,7 @@ pub fn scan_trifecta_declared(
     let Some(permits) = wf.permits.as_ref() else {
         return nika_cap::TrifectaVerdict::default();
     };
-    let flow = born_flow(wf, topo_waves, calls);
+    let flow = born_flow(wf, edges, topo_waves, calls);
     let mut subjects: Vec<TrifectaSubject> = wf
         .tasks
         .iter()
@@ -157,9 +157,11 @@ pub fn scan_trifecta_declared(
             s.parents.push(e.from);
         }
     }
-    let topo_flat: Vec<usize> = topo_waves.iter().flatten().copied().collect();
+    // Every subject once, the unwind cleanup tasks included (they never enter
+    // a wave): a task the order leaves out would have no dominators.
+    let order = super::content_flow::judge_order(wf.tasks.len(), topo_waves, edges);
     let mut verdict =
-        nika_cap::trifecta_verdict(&permits.value, &subjects, &flow.witnesses, &topo_flat);
+        nika_cap::trifecta_verdict(&permits.value, &subjects, &flow.witnesses, &order);
     name_composed_sources(&mut verdict, wf, calls);
     verdict
 }
@@ -207,6 +209,7 @@ fn mcp_trusted(_server: &str) -> bool {
 /// taint.
 fn born_flow(
     wf: &RawWorkflow,
+    edges: &[Edge],
     topo_waves: &[Vec<usize>],
     calls: &[ComposedCall],
 ) -> super::content_flow::ContentFlow {
@@ -216,7 +219,7 @@ fn born_flow(
         entry: super::content_flow::Entry::Born,
         exec_reads_files: None,
     };
-    super::content_flow::analyze_content_flow(wf, topo_waves, &sources)
+    super::content_flow::analyze_content_flow(wf, topo_waves, edges, &sources)
 }
 
 /// The listed call a task stands for (a workflow call `calls` names).

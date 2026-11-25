@@ -272,3 +272,165 @@ async fn the_saved_image_is_this_sessions_bytes_bound_downstream_and_journaled()
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A seat that counts the turns it is asked for, then plays [`Seat`].
+struct CountingSeat {
+    seat: Seat,
+    turns: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl DynAgentBackend for CountingSeat {
+    fn run_agent_boxed(
+        &self,
+        request: HarnessRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<HarnessEventStream, HarnessError>> + Send + '_>> {
+        self.turns.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.seat.run_agent_boxed(request)
+    }
+}
+
+/// Answers every secret with one value.
+struct OneSecret(&'static str);
+
+impl crate::WorkflowSecretResolver for OneSecret {
+    fn resolve(
+        &self,
+        _name: &str,
+        _reference: &nika_schema::types::SecretRef,
+    ) -> Result<String, crate::SecretResolveError> {
+        Ok(self.0.to_owned())
+    }
+}
+
+/// The value of `secrets.k`: rendered, it would name the file the run writes.
+const SAVE_CANARY: &str = "canary-7Qx2";
+
+/// A secret in `images.save:`, on the report an older check gave (one that passed the field
+/// clean), on a seat that would deliver an image: the run refuses the task before it renders the
+/// path. The seat never starts a turn, no `nika:write` is asked for, the record holds no image,
+/// and nothing the run wrote carries the value.
+#[tokio::test]
+async fn a_secret_in_the_save_path_is_refused_before_the_seat_starts() {
+    let base = std::env::temp_dir().join(format!("nika-image-save-secret-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("project");
+    std::fs::create_dir_all(&project).expect("project");
+
+    let tools =
+        Arc::new(MockToolExecutor::new().enqueue_ok(ToolResult::success("w", "./out/never.png")));
+    let invoke = Arc::new(InvokeVerb::new(Arc::clone(&tools)));
+    let turns = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let runtime = Runtime::new(
+        ExecVerb::new(Arc::new(MockShell::new())),
+        Arc::clone(&invoke),
+        InferVerb::new(
+            Arc::new(nika_providers::ProviderRegistry::without_http(
+                nika_providers::ProvidersConfig::new(),
+            )),
+            "mock/echo",
+        ),
+        AgentVerb::new(
+            Arc::new(MockProvider::new("mock")),
+            invoke,
+            Arc::new(MockToolDefinitionProvider::new()),
+            "mock/echo",
+        ),
+        MockClock::new(),
+        RuntimeConfig::default().with_sandbox_root(project.clone()),
+    )
+    .with_harness_backend(
+        Arc::new(CountingSeat {
+            seat: Seat {
+                ours: png("ours"),
+                foreign: png("theirs"),
+                shared: project.join("none.png").to_string_lossy().into_owned(),
+            },
+            turns: Arc::clone(&turns),
+        }),
+        "scripted-seat".into(),
+    )
+    .expect("seated")
+    .with_secret_resolver(Arc::new(OneSecret(SAVE_CANARY)));
+
+    let yaml = "nika: image-save-secret\nmodel: mock/echo\nsecrets:\n  k: { source: env, key: \
+        NIKA_IMAGE_SAVE_K }\npermits:\n  fs:\n    write: [\"./out/**\"]\ntasks:\n  draw:\n    \
+        agent:\n      prompt: \"draw a paper boat\"\n      images:\n        save: \
+        \"./out/${{ secrets.k }}.png\"\n";
+    let wf = nika_schema::parse(
+        yaml,
+        nika_schema::FileId::new(0),
+        nika_schema::ParseMode::Strict,
+    )
+    .expect("fixture parses");
+    // Today's check refuses the file on `draw`; the older report passed it clean.
+    let mut report = nika_check::check(&wf);
+    assert_eq!(
+        report
+            .secret_leaks
+            .iter()
+            .map(|l| (l.task.as_str(), l.sink, l.trace.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            "draw",
+            "agent.images.save",
+            "secrets.k → images.save @ draw"
+        )]
+    );
+    report.secret_leaks.clear();
+    assert!(report.is_clean(), "{report:?}");
+
+    let mut sink = VecSink::new();
+    let outcome = runtime
+        .run(&wf, &report, &mut DeterministicStamper::new(), &mut sink)
+        .await
+        .expect("the launch cannot judge a field only the run renders");
+    let events = sink.into_events();
+
+    assert!(!outcome.ok, "{events:?}");
+    let record = &outcome.records["draw"];
+    let error = record.error.as_ref().expect("the refusal is on record");
+    assert_eq!(
+        (error.code.as_str(), error.message.as_str()),
+        (
+            "NIKA-SEC-006",
+            "refused before the task ran: a secret reaches the `images.save:` of task `draw` \
+             (secrets.k → images.save @ draw), and the run renders no secret there · name the \
+             path there, or read it from `inputs:` or `const:`"
+        )
+    );
+    assert_eq!(
+        turns.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the seat never starts a turn"
+    );
+    assert_eq!(
+        tools.captured_calls().len(),
+        0,
+        "no `nika:write` is asked for"
+    );
+    assert!(record.output["images"].is_null(), "{:?}", record.output);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.str_field("task") == Some("draw"))
+            .map(|e| e.kind)
+            .collect::<Vec<_>>(),
+        [EventKind::TaskScheduled, EventKind::TaskFailed]
+    );
+    let carrying: Vec<String> = events
+        .iter()
+        .filter(|e| {
+            serde_json::to_string(e)
+                .expect("an event serializes")
+                .contains(SAVE_CANARY)
+        })
+        .map(|e| format!("{:?}", e.kind))
+        .collect();
+    assert_eq!(carrying, Vec::<String>::new(), "no event carries the value");
+    assert!(
+        !format!("{:?}", outcome.records).contains(SAVE_CANARY),
+        "no record carries the value"
+    );
+    assert!(!project.join("out").exists(), "nothing is written");
+    let _ = std::fs::remove_dir_all(&base);
+}

@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! The run never renders a secret into a task's `model:` or an `exec:`'s
-//! `cwd:` (spec 10 · `NIKA-SEC-006`, the run-time twin of the check).
+//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:`
+//! or an `agent:`'s `images.save:` (spec 10 · `NIKA-SEC-006`, the run-time
+//! twin of the check).
 //!
-//! Both fields decide where the effect goes: the provider and model the run
-//! calls, the directory it spawns the program in. Rendered with secrets
-//! resolved, either would carry the value into every place that names a route
-//! (the call's frame, the ledger, the settlement, the access lane) or into the
-//! spawn and the sandbox profile. The check refuses such a file, and the run
+//! Each field decides where the effect goes: the provider and model the run
+//! calls, the directory it spawns the program in, the file it writes an image
+//! to. Rendered with secrets resolved, one would carry the value into every
+//! place that names a route (the call's frame, the ledger, the settlement, the
+//! access lane), into the spawn and the sandbox profile, or into a file name
+//! and the output that names it. The check refuses such a file, and the run
 //! refuses a dirty report, but a report can be older than the file: so the run
 //! asks the check's own secret flow ([`nika_check::secret_route_leaks`]) which
 //! tasks those fields would carry a secret into, every way a secret travels,
 //! and refuses each such task before it starts. Nothing is rendered, sent,
-//! journaled or debited for it: the record and the event name the task, the
-//! field and the path from the secret, never a value.
+//! written or debited for it, and the journal holds only the refusal: the
+//! record and the event name the task, the field and the path from the secret,
+//! never a value.
 
 use std::collections::BTreeMap;
 
@@ -66,6 +69,10 @@ fn refusal(leak: &SecretLeak) -> TaskErrorRecord {
         LeakReason::ModelRoute => (
             "model",
             "name the model there, or read it from `inputs:` or `const:`",
+        ),
+        LeakReason::ImageSavePath => (
+            "images.save",
+            "name the path there, or read it from `inputs:` or `const:`",
         ),
         // A route the run does not know yet is refused under its sink.
         _ => (leak.sink, "keep the secret out of it"),
@@ -145,6 +152,36 @@ tasks:
                 ("ask".to_owned(), refusal("ask", "model", "model")),
                 ("run".to_owned(), refusal("run", "cwd", "directory")),
             ])
+        );
+    }
+
+    #[test]
+    fn a_secret_in_an_image_save_path_is_refused_by_its_field() {
+        let refused = routes(
+            r#"nika: image-save
+secrets:
+  k: { source: env, key: K, egress: [{ to: agent }] }
+permits:
+  fs: { write: ["./out/**"] }
+tasks:
+  draw:
+    agent: { prompt: hi, images: { save: "./out/${{ secrets.k }}.png" } }
+  plain:
+    agent: { prompt: hi, images: { save: "./out/plain.png" } }
+"#,
+        );
+        assert_eq!(
+            refused.0,
+            BTreeMap::from([(
+                "draw".to_owned(),
+                TaskErrorRecord::new(
+                    "NIKA-SEC-006",
+                    "refused before the task ran: a secret reaches the `images.save:` of task \
+                     `draw` (secrets.k → images.save @ draw), and the run renders no secret \
+                     there · name the path there, or read it from `inputs:` or `const:`",
+                    false,
+                ),
+            )])
         );
     }
 

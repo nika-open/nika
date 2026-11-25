@@ -286,6 +286,54 @@ async fn an_error_answer_to_session_new_is_classified_like_one_to_the_prompt() {
     }
 }
 
+/// Each ACP error code answered to `session/new` is read by its own meaning, and a code the
+/// schema does not define fails closed: `-32000` (authentication required) is a lost sign-in,
+/// final, like the typed kind; `-32002` (resource not found) and an undefined code are final
+/// refusals, never a retried session.
+#[tokio::test]
+async fn an_auth_required_or_undefined_code_at_session_new_is_final() {
+    let cases = [
+        (
+            json!({"code":-32000,"message":"Authentication required"}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            json!({"code":-32002,"message":"Resource not found"}),
+            "NIKA-1805",
+            "harness refused: Resource not found (jsonrpc -32002)",
+        ),
+        (
+            json!({"code":-32042,"message":"Quota spent"}),
+            "NIKA-1805",
+            "harness refused: Quota spent (jsonrpc -32042)",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            let line = json!({"jsonrpc":"2.0","id":new["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+            assert!(read(&mut r).await.is_none(), "no prompt after it");
+        })
+        .await
+        .expect_err("session/new answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code,
+            "{error:?}"
+        );
+        assert!(!error.is_transient(), "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
 /// An internal error answered to `initialize` is the same session that did not open.
 #[tokio::test]
 async fn an_internal_error_answer_to_initialize_is_transient() {

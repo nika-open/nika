@@ -958,23 +958,32 @@ fn answered_error(message: String, kind: Option<&str>) -> HarnessError {
     }
 }
 
-/// The JSON-RPC 2.0 codes that refuse the request itself (§5.1: parse error, invalid request,
-/// method not found, invalid params): the same request, sent again, is refused again.
-const REQUEST_REFUSALS: [i64; 4] = [-32700, -32600, wire::METHOD_NOT_FOUND, -32602];
+/// ACP's `auth_required` error code: authentication is required before the operation (ACP v1
+/// schema, `ErrorCode`, <https://agentclientprotocol.com/protocol/v1/schema>).
+const AUTH_REQUIRED: i64 = -32000;
+
+/// JSON-RPC 2.0's internal error (§5.1), which the ACP v1 schema keeps as `-32603`.
+const INTERNAL_ERROR: i64 = -32603;
 
 /// The failure an error answer to a request before the prompt is (`initialize`, `session/new`,
-/// a model, effort, tier or mode selection), read like an error answer to the prompt
-/// ([`answered_error`]): a lost sign-in by the adapter's typed kind, else a session that did
-/// not open, which a retry may open. One typed exception: a refusal the adapter types with a
-/// JSON-RPC request code ([`REQUEST_REFUSALS`] — a method it does not offer, a value it
-/// rejects) stays the final refusal it is. An internal error is no such refusal: codex-acp
-/// answered `session/new` on a loaded machine with `-32603` « workspace routing discovery
-/// timed out ».
+/// a model, effort, tier or mode selection), by the code the ACP v1 schema defines for it
+/// (`ErrorCode`, <https://agentclientprotocol.com/protocol/v1/schema>):
+///
+/// - the adapter's typed `authentication_failed` kind, or `-32000` (authentication required):
+///   a lost sign-in, final until the human signs in again;
+/// - `-32603` (internal error): a session that did not open, which a retry may open (codex-acp
+///   answered `session/new` on a loaded machine with it, « workspace routing discovery timed
+///   out »);
+/// - every other code, the request refusals `-32700`, `-32600`, `-32601` and `-32602`,
+///   `-32002` (resource not found) and any code the schema leaves undefined: the final refusal
+///   it is. An unknown code fails closed: it is never retried.
 fn request_error(code: i64, message: String, kind: Option<&str>) -> HarnessError {
-    match kind {
-        Some(SIGN_IN_KIND) => signed_out(),
-        _ if REQUEST_REFUSALS.contains(&code) => HarnessError::Refused { reason: message },
-        _ => HarnessError::Session { reason: message },
+    if kind == Some(SIGN_IN_KIND) || code == AUTH_REQUIRED {
+        return signed_out();
+    }
+    match code {
+        INTERNAL_ERROR => HarnessError::Session { reason: message },
+        _ => HarnessError::Refused { reason: message },
     }
 }
 

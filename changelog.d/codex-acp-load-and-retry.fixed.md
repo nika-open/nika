@@ -20,10 +20,11 @@
   selection is now read like an error answer to the prompt: Codex answering
   `session/new` with an internal error (`-32603`, "workspace routing
   discovery timed out") is NIKA-1804 and retried, where it was NIKA-1805 and
-  final (since 0.109.0). A lost sign-in (`authentication_failed`) stays
-  NIKA-1803 and final, and a request the adapter refuses with a JSON-RPC
-  request code (parse error, invalid request, unknown method, invalid
-  params) stays NIKA-1805. Trace retention no longer rotates the evidence of
+  final (since 0.109.0). A lost sign-in (`authentication_failed`, or ACP's
+  authentication-required code `-32000`) stays NIKA-1803 and final, and
+  every other error code (parse error, invalid request, unknown method,
+  invalid params, resource not found, or a code ACP does not define) stays
+  NIKA-1805 and final. Trace retention no longer rotates the evidence of
   a failure away: the newest failed trace of each workflow is never rotated
   or removed for the size budget, failed traces fill a workflow's kept count
   before successful ones, and the budget removes every successful trace it

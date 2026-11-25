@@ -447,13 +447,23 @@ fn stage_git_repo(dir: &Path) {
 /// `--model`: the mock rehearsal IS the default seat), `run`
 /// carries the trio plus the row's model/answers/vars.
 fn entry_command(entry: &Entry, room: &Room, body: &str) -> Command {
+    entry_command_answering(entry, room, body, &entry.answers)
+}
+
+/// The row's command with these gate answers in place of its own.
+fn entry_command_answering(
+    entry: &Entry,
+    room: &Room,
+    body: &str,
+    answers: &BTreeMap<String, String>,
+) -> Command {
     let mut cmd = nika();
     match entry.door {
         Door::Try => {
             cmd.arg("try")
                 .arg(&entry.slug)
                 .args(["--no-progress", "--max-cost-usd", "0.01"]);
-            for (task, value) in &entry.answers {
+            for (task, value) in answers {
                 cmd.args(["--answer", &format!("{task}={value}")]);
             }
         }
@@ -470,7 +480,7 @@ fn entry_command(entry: &Entry, room: &Room, body: &str) -> Command {
             if let Some(model) = &entry.model {
                 cmd.args(["--model", model]);
             }
-            for (task, value) in &entry.answers {
+            for (task, value) in answers {
                 cmd.args(["--answer", &format!("{task}={value}")]);
             }
         }
@@ -976,6 +986,68 @@ fn the_root_gated_recipes_pause_unanswered_and_write_nothing() {
             let _ = std::fs::remove_dir_all(room.root);
         }
     }
+}
+
+/// A row that answers yes pins values its yes branch alone produces, so the
+/// same row answered no must miss at least one of them. An exit code cannot
+/// tell the two apart, and a count can be the same on both sides:
+/// lead-enrichment scores its leads on either answer, so only the status of
+/// its writes differs (measured 2026-11-25).
+#[test]
+fn every_yes_row_pins_a_value_a_no_does_not_produce() {
+    let m = manifest();
+    let yes_rows: Vec<&Entry> = m
+        .entries
+        .iter()
+        .filter(|e| !e.expect.outputs.is_empty() && e.answers.values().any(|v| v == "true"))
+        .collect();
+    assert!(
+        yes_rows.len() >= 8,
+        "the eight recipe rows answer yes and pin outputs"
+    );
+    let mut undistinguished = Vec::new();
+    for row in yes_rows {
+        let body = nika_pack::example(&row.slug).expect("a shipped example");
+        if let Some(why) = local_server_failure(body) {
+            panic!("{}: {why}", row.slug);
+        }
+        let declined: BTreeMap<String, String> = row
+            .answers
+            .iter()
+            .map(|(task, value)| {
+                let value = if value == "true" {
+                    "false"
+                } else {
+                    value.as_str()
+                };
+                (task.clone(), value.to_owned())
+            })
+            .collect();
+        let room = Room::enter(&format!("no-{}", row.slug.replace('/', "-")));
+        let cmd = entry_command_answering(row, &room, body, &declined);
+        let outcome = launch(cmd, &room, row.timeout.unwrap_or(MAX_TIMEOUT_SECS), None);
+        let said = format!("{}\n{}", tail(&outcome.out), tail(&outcome.err));
+        assert!(
+            !outcome.timed_out,
+            "{}: timed out answering no\n{said}",
+            row.slug
+        );
+        assert_eq!(
+            outcome.code,
+            Some(0),
+            "{}: a declined gate ends the run normally\n{said}",
+            row.slug
+        );
+        if outputs_failure(row, &outcome).is_none() {
+            undistinguished.push(row.slug.as_str());
+        }
+        let _ = std::fs::remove_dir_all(room.root);
+    }
+    assert!(
+        undistinguished.is_empty(),
+        "answered no, these rows still meet every pinned value, so the pins \
+         prove nothing about the yes: {undistinguished:?}"
+    );
 }
 
 /// The rows whose effect no run reaches: a typed refusal ran no task of its

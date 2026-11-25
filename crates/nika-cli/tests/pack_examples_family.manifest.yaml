@@ -184,7 +184,10 @@ entries:
   # A confirm gate with no default stands first in these seven, and every
   # later task waits on it: fetches, a POST, a render queue, a local scan.
   # Their rows say yes through `nika run`, so the whole job runs, and each
-  # pins counts of its header that only the yes branch produces. The engine
+  # pins at least one value that only the yes branch produces: answered no,
+  # each row misses one (`every_yes_row_pins_a_value_a_no_does_not_produce`).
+  # lead-enrichment scores its leads on either answer, so it pins the status
+  # of its CSV write. The engine
   # refuses the reserved documentation hosts the fetches and the POST name
   # before it dials, and each is recovered. The render queue meets a closed
   # port: a row whose example names a loopback `const.server` fails before
@@ -216,7 +219,12 @@ entries:
     answers: { approve: "true" }
     expect:
       rc: 0
-      outputs: { "/run/counts/nurture": 2, "/run/counts/disqualified": 6, "/posted": null }
+      # Scored on either answer: only the yes writes the CSV.
+      outputs:
+        "/run/counts/nurture": 2
+        "/run/counts/disqualified": 6
+        "/posted": null
+        "/run/steps/csv": "success"
   - slug: listing-link-audit
     door: run
     kit: [fixtures]

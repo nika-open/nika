@@ -26,30 +26,106 @@ use crate::{AgentValue, VerbAgentError};
 /// amplifier across re-asks (nika-verb-infer review lens 3 · P1 parity).
 const SCHEMA_RENDER_CAP: usize = 4096;
 
+/// The most violations one rejection names (NIK-402 · a schema of 26 required keys named only
+/// its first missing one, twice, after minutes of research); the rest are counted.
+pub(crate) const VIOLATIONS_LISTED: usize = 32;
+
+/// Why a candidate was rejected: every violation the validator finds, in its order. The first
+/// [`VIOLATIONS_LISTED`] are named, each led by its JSON pointer below the root; the rest are
+/// counted. The repair prompt and the failure record carry the same list.
+///
+/// A violation is worded without the value it judged (`/tags: value is not of type "array"`):
+/// the validator's plain wording renders the whole offending value (the entire message, for a
+/// type miss at the root). The message is kept once, at `partial_output`, where the trace masks
+/// the run's secrets before it cuts the text; a violation is never cut.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Rejection {
+    /// The named violations, never empty for a rejected candidate.
+    pub(crate) violations: Vec<String>,
+    /// How many more the validator found.
+    pub(crate) unlisted: usize,
+}
+
+impl Rejection {
+    /// `candidate`'s violations, or `None` when it conforms.
+    fn of(validator: &jsonschema::Validator, candidate: &serde_json::Value) -> Option<Self> {
+        let mut rejection = Self::default();
+        for error in validator.iter_errors(candidate) {
+            if rejection.violations.len() < VIOLATIONS_LISTED {
+                let path = error.instance_path().as_str();
+                let rule = error.masked();
+                (rejection.violations).push(if path.is_empty() {
+                    rule.to_string()
+                } else {
+                    format!("{path}: {rule}")
+                });
+            } else {
+                rejection.unlisted += 1;
+            }
+        }
+        (!rejection.violations.is_empty()).then_some(rejection)
+    }
+
+    /// A text with no JSON value in it.
+    fn no_json() -> Self {
+        Self {
+            violations: vec!["final message contains no extractable JSON".to_owned()],
+            unlisted: 0,
+        }
+    }
+
+    /// The violations worded once, for the repair prompt and the failure message: the one
+    /// violation as the validator words it, or `<n> violations: <a>; <b>` followed by
+    /// `; and <k> more` past the list.
+    pub(crate) fn detail(&self) -> String {
+        let total = self.violations.len() + self.unlisted;
+        if total == 1 {
+            return self.violations.join("");
+        }
+        let more = if self.unlisted > 0 {
+            format!("; and {} more", self.unlisted)
+        } else {
+            String::new()
+        };
+        format!("{total} violations: {}{more}", self.violations.join("; "))
+    }
+
+    /// The NIKA-464 verdict on `partial_output`, worded with `detail` (the rendered list, or
+    /// that list after the repairs it took).
+    pub(crate) fn into_error(self, detail: String, partial_output: String) -> VerbAgentError {
+        VerbAgentError::SchemaValidation {
+            detail,
+            partial_output,
+            violations: self.violations,
+            unlisted: self.unlisted,
+            spend: Box::default(),
+        }
+    }
+}
+
 /// Compile the task `schema:` once (a schema that does not compile is a
 /// task-authoring error mapped to NIKA-464 BEFORE any provider call).
 pub(crate) fn compile(schema: &serde_json::Value) -> Result<jsonschema::Validator, VerbAgentError> {
-    jsonschema::validator_for(schema).map_err(|e| VerbAgentError::SchemaValidation {
-        spend: Box::default(),
-        detail: format!("schema does not compile: {e}"),
+    jsonschema::validator_for(schema).map_err(|e| {
+        Rejection::default().into_error(format!("schema does not compile: {e}"), String::new())
     })
 }
 
 /// Extract a JSON candidate from a free-text final answer and validate it
 /// against a compiled schema in ONE step (the agent re-ask's unit · BUG#11).
-/// Returns the validated value, or the human-readable failure detail — the
-/// caller decides between a re-ask and the NIKA-464 verdict, so a missing
-/// candidate and a schema miss collapse to the same `Err(detail)` shape.
+/// Returns the validated value, or the rejection — the caller decides between
+/// a re-ask and the NIKA-464 verdict, so a missing candidate and a schema
+/// miss collapse to the same `Err(rejection)` shape.
 pub(crate) fn validate_text(
     text: &str,
     validator: &jsonschema::Validator,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Rejection> {
     let Some(candidate) = extract_json(text) else {
-        return Err("final message contains no extractable JSON".to_owned());
+        return Err(Rejection::no_json());
     };
-    match validator.validate(&candidate) {
-        Ok(()) => Ok(candidate),
-        Err(error) => Err(error.to_string()),
+    match Rejection::of(validator, &candidate) {
+        None => Ok(candidate),
+        Some(rejection) => Err(rejection),
     }
 }
 
@@ -94,11 +170,9 @@ pub(crate) fn shape_output(
     };
     let validator = compile(schema)?;
     let candidate = candidate_of(value)?;
-    if let Err(error) = validator.validate(&candidate) {
-        return Err(VerbAgentError::SchemaValidation {
-            detail: error.to_string(),
-            spend: Box::default(),
-        });
+    if let Some(rejection) = Rejection::of(&validator, &candidate) {
+        let detail = rejection.detail();
+        return Err(rejection.into_error(detail, candidate.to_string()));
     }
     Ok(AgentValue::Structured(candidate))
 }
@@ -111,10 +185,13 @@ pub(crate) fn candidate_of(value: AgentValue) -> Result<serde_json::Value, VerbA
     match value {
         AgentValue::Structured(json) => Ok(json),
         AgentValue::Text(text) => {
-            extract_json(&text).ok_or_else(|| VerbAgentError::SchemaValidation {
-                detail: "final message contains no extractable JSON".to_owned(),
-                spend: Box::default(),
-            })
+            if let Some(json) = extract_json(&text) {
+                Ok(json)
+            } else {
+                let rejection = Rejection::no_json();
+                let detail = rejection.detail();
+                Err(rejection.into_error(detail, text))
+            }
         }
     }
 }

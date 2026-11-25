@@ -98,6 +98,9 @@ pub enum NudgeReason {
     RepeatedActions,
     /// Every tool call failed for `error_streak_nudge` consecutive turns.
     ErrorStreak,
+    /// A seat's final message missed the task `schema:`: its one repair prompt went out on
+    /// the same session (NIK-402 · `period` 0).
+    SchemaRepair,
 }
 
 /// One observable loop decision. Payloads are owned; image observations contain

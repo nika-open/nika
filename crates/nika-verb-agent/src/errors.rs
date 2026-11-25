@@ -171,8 +171,21 @@ pub enum VerbAgentError {
     #[error("agent final message failed schema validation: {detail}")]
     #[diagnostic(code(nika::verb::agent_schema_validation))]
     SchemaValidation {
-        /// Why validation failed (parse or schema detail).
+        /// Why validation failed (parse or schema detail): the violations below, worded once.
         detail: String,
+        /// The rejected final message (`error.details.partial_output`), whole: what the model
+        /// or the seat answered, kept so the work it holds is not lost with the task. The trace
+        /// keeps its first 64 KiB, cut once the run's secrets in it are masked. Empty when no
+        /// message was received (a schema that does not compile).
+        partial_output: String,
+        /// Every way the message missed the schema, in the validator's order
+        /// (`error.details.violations`): the first 32, each led by its JSON pointer below the
+        /// root and worded without the value it judged (that value is in `partial_output`).
+        /// Empty when no message was received.
+        violations: Vec<String>,
+        /// How many more violations the validator found past `violations`
+        /// (`error.details.violations_unlisted` when not zero).
+        unlisted: usize,
         /// The spend of the billed turns + re-ask round-trips.
         spend: Box<SpendOnFailure>,
     },
@@ -367,11 +380,36 @@ impl VerbAgentError {
         }
     }
 
-    /// The record's `details` (spec 05) of a cut final message: the text received and the
-    /// provider's stop reason. Every other failure, and any other error, carries none.
+    /// The record's `details` (spec 05) of a failure that holds a received text, at
+    /// `partial_output`: a cut final message beside the provider's stop reason; a final
+    /// message the `schema:` rejected beside every violation it holds; the last assistant
+    /// text of an exhausted budget (spec 02 §agent, termination outcomes). Each text is kept
+    /// whole here: the run's redacting sink cuts it to its first 64 KiB in the trace, after the
+    /// secrets in it are masked (a cut first could split one). Every other failure, and any
+    /// other error, carries none.
     #[must_use]
     pub fn details_of(err: &dyn NikaErrorCode) -> Option<serde_json::Value> {
         match err.as_any().downcast_ref::<Self>()? {
+            Self::SchemaValidation {
+                partial_output,
+                violations,
+                unlisted,
+                ..
+            } if !violations.is_empty() => {
+                let mut details = serde_json::json!({
+                    "partial_output": partial_output,
+                    "violations": violations,
+                });
+                if *unlisted > 0 {
+                    details["violations_unlisted"] = serde_json::json!(unlisted);
+                }
+                Some(details)
+            }
+            Self::MaxTurns { partial_output, .. } | Self::MaxTokens { partial_output, .. }
+                if !partial_output.is_empty() =>
+            {
+                Some(serde_json::json!({ "partial_output": partial_output }))
+            }
             Self::OperatorStopped {
                 call: Some(call), ..
             } => Some(serde_json::json!({
@@ -522,6 +560,9 @@ mod tests {
             (
                 VerbAgentError::SchemaValidation {
                     detail: "x".to_owned(),
+                    partial_output: String::new(),
+                    violations: Vec::new(),
+                    unlisted: 0,
                     spend: Box::default(),
                 },
                 464,
@@ -647,6 +688,9 @@ mod tests {
         assert_eq!(inference.spec_code(), "NIKA-INFER-001");
         let schema = VerbAgentError::SchemaValidation {
             detail: "missing field".to_owned(),
+            partial_output: String::new(),
+            violations: Vec::new(),
+            unlisted: 0,
             spend: Box::default(),
         };
         assert_eq!(schema.spec_code(), "NIKA-INFER-002");

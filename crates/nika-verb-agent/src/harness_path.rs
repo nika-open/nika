@@ -13,8 +13,10 @@
 //!
 //! - a task `schema:` is the ENGINE's to enforce: the prompt carries it and
 //!   the final message is validated here (`NIKA-464` · wire
-//!   `NIKA-INFER-002` on a miss). There is no repair turn: a new session
-//!   would replay the agent's work, so a miss fails the task;
+//!   `NIKA-INFER-002` on a miss). A miss gets ONE repair prompt on the
+//!   same session, which still holds the agent's work (`harness_repair`,
+//!   NIK-402); a new session would replay that work, so a retry never
+//!   carries the repair;
 //! - a `tools:` whitelist refuses — the harness runs its OWN tools;
 //!   the enforceable boundary is the permission bridge (B5), and a
 //!   declared whitelist the engine cannot enforce would be a lie;
@@ -34,6 +36,7 @@ use nika_kernel::ai::harness::{
 };
 use nika_kernel::runtime::agent::AgentStopReason;
 
+use crate::harness_images::HarnessRun;
 use crate::{AgentEvent, AgentInput, AgentObserver, AgentOutput, AgentValue, VerbAgentError};
 
 /// The configured harness seat — the backend plus the session facts
@@ -103,7 +106,7 @@ pub(crate) async fn run_on_harness(
     input: AgentInput,
     observer: &dyn AgentObserver,
     images: Option<&Arc<dyn crate::spill::SpillStoreDyn>>,
-) -> Result<crate::harness_images::HarnessRun, VerbAgentError> {
+) -> Result<HarnessRun, VerbAgentError> {
     refuse_unenforceable(&input)?;
     let validator = input
         .schema
@@ -114,7 +117,8 @@ pub(crate) async fn run_on_harness(
     let mut reported_only = 0_usize;
 
     let typed = input.requirement.is_some();
-    let request = session_request(seat, &input);
+    let mut repair = crate::harness_repair::SchemaRepair::new(&input, validator.as_ref());
+    let request = repair.request(session_request(seat, &input));
     // B5 · the operator's bound verdict is CONSUMED by the first
     // out-of-grants ask it decides: the human answered ONE question, so
     // a second ask (or a different one on a nondeterministic replay)
@@ -165,21 +169,15 @@ pub(crate) async fn run_on_harness(
                     None => reported_only += 1,
                 }
             }
+            Some(Ok(HarnessEvent::TurnEnded { outcome, follow_up })) => {
+                let ended = turn_output(*outcome, &input, typed)?;
+                if let Some(output) = repair.ended(ended, follow_up, observer)? {
+                    return Ok(HarnessRun::new(output, received, reported_only));
+                }
+            }
             Some(Ok(HarnessEvent::Completed { outcome })) => {
-                // Under a declaration the selection is exact: a model or an
-                // effort the agent moved after it was applied refuses.
-                if typed && let Some(refusal) = outcome.selection.moved_refusal() {
-                    return Err(harness_err(refusal, typed));
-                }
-                let mut output = completed_output(*outcome, &input);
-                if let Some(validator) = &validator {
-                    output.output = crate::harness_images::validated(&output.output, validator)?;
-                }
-                return Ok(crate::harness_images::HarnessRun {
-                    output,
-                    received,
-                    reported_only,
-                });
+                let output = repair.completed(turn_output(*outcome, &input, typed)?)?;
+                return Ok(HarnessRun::new(output, received, reported_only));
             }
             Some(Ok(_)) => {
                 // Chunks (the outcome carries the accumulated text ·
@@ -399,6 +397,19 @@ fn gate_label(facts: &HarnessAskFacts) -> String {
         },
         other => other.to_owned(),
     }
+}
+
+/// A turn's outcome → its output. Under a declaration the selection is exact: a model or an
+/// effort the agent moved after it was applied refuses.
+fn turn_output(
+    outcome: nika_kernel::ai::harness::HarnessOutcome,
+    input: &AgentInput,
+    typed: bool,
+) -> Result<AgentOutput, VerbAgentError> {
+    if typed && let Some(refusal) = outcome.selection.moved_refusal() {
+        return Err(harness_err(refusal, typed));
+    }
+    Ok(completed_output(outcome, input))
 }
 
 /// The terminal beat → the pre-shaped honest `AgentOutput` (extracted

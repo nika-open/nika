@@ -266,6 +266,13 @@ extend-exclude = [
   "docs/crate-specs/nika-tui-core.md",
   "docs/crate-specs/nika-tui.md",
   "docs/crate-specs/nika-cadence.md",
+  # Two recipe jobs of the vendored pack, byte-identical to nika-spec at SPEC_PIN (the pack
+  # test refuses an edit here): a customer's mail signed « Ines », and a translation memory
+  # in 45 locales whose German rows say « Sie », « ein », « Tage ». Excluded rather than
+  # allowlisted: `Sie` and `ein` are plausible English typos everywhere else.
+  "crates/nika-pack/pack/examples/fixtures/inbox-triage/inbox.json",
+  "crates/nika-pack/pack/examples/fixtures/source-to-45-locales/",
+  "crates/nika-pack/pack/examples/source-to-45-locales.nika",
   # Session-law test fixtures — recorded engine output (journals, graph
   # projections), not prose. The `journal-casse.ndjson` one is a
   # deliberately TORN journal: its bytes are the test. Same class as

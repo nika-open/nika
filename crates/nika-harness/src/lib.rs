@@ -45,6 +45,7 @@ pub use conversation::{
 pub use declaration::{
     declared_adapter_id, seat_from_env, seat_from_id, seat_from_lookup, seat_http_err,
 };
+pub use hosts::{HOSTS_ENV, hosts_switched_off};
 pub use infer::{
     HarnessInferOutcome, HarnessInferRequest, InferGradeAttestation, InferGradeError,
     InferGradeSeat, StructuredOutputGrade, meet_infer_grade,

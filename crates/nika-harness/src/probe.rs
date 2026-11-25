@@ -52,6 +52,9 @@ pub struct AdapterProbeRow {
     /// check that did not answer in time is unknown, never signed out
     /// ([`LoginCheck`]). `None` for a home-file row.
     pub login: Option<LoginCheck>,
+    /// The host switch was off ([`crate::HOSTS_ENV`]): the adapter was not looked for, so an
+    /// absent version or product says nothing about this machine.
+    pub hosts_off: bool,
 }
 
 /// How long a seat's own login command may take before its answer is unknown.
@@ -354,6 +357,7 @@ pub fn probe_adapters_sync(rows: Vec<AdapterRow>) -> Vec<AdapterProbeRow> {
                 note: "could not start the probe runtime".to_owned(),
                 product_present: false,
                 login: None,
+                hosts_off: crate::hosts_switched_off(),
             })
             .collect();
     };
@@ -385,6 +389,7 @@ async fn probe_one(row: AdapterRow) -> AdapterProbeRow {
         note,
         product_present: binary_on_path(detect),
         login,
+        hosts_off: crate::hosts_switched_off(),
     }
 }
 
@@ -395,7 +400,7 @@ fn binary_on_path(name: &str) -> bool {
 }
 
 /// Whether `name` is a file in a directory of `path`. A host program is never found while the
-/// host switch is off ([`crate::hosts`]): the seat reads as not installed.
+/// host switch is off ([`crate::hosts`]); the row says so ([`AdapterProbeRow::hosts_off`]).
 fn binary_in(path: Option<&std::ffi::OsStr>, name: &str, hosts: Hosts) -> bool {
     hosts.admit(std::path::Path::new(name)).is_ok()
         && path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(name).is_file()))
@@ -1044,6 +1049,7 @@ mod tests {
             note: String::new(),
             product_present: false,
             login: None,
+            hosts_off: false,
         };
         assert!(row(Some((1, 0))).usable());
         assert!(

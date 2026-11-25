@@ -101,9 +101,22 @@ pub(crate) fn collect(home: Option<&Path>) -> InferenceChoice {
         pulled: featured_is_installed(&pull),
         keys,
         harness_in_binary: cfg!(feature = "access-harness"),
+        hosts_off: hosts_switch(),
     });
     let _ = persist(&choice, home);
     choice
+}
+
+/// The variable that keeps every host program absent, when it does in this process.
+fn hosts_switch() -> Option<&'static str> {
+    #[cfg(feature = "access-harness")]
+    {
+        nika_harness::hosts_switched_off().then_some(nika_harness::HOSTS_ENV)
+    }
+    #[cfg(not(feature = "access-harness"))]
+    {
+        None
+    }
 }
 
 struct Machine {
@@ -112,6 +125,8 @@ struct Machine {
     pulled: bool,
     keys: Vec<String>,
     harness_in_binary: bool,
+    /// The host switch, when it keeps every host program absent: no seat was looked for.
+    hosts_off: Option<&'static str>,
 }
 
 fn collect_from(machine: &Machine) -> InferenceChoice {
@@ -141,7 +156,12 @@ fn collect_from(machine: &Machine) -> InferenceChoice {
     let ready_seat = seats
         .iter()
         .find(|s| s.detected && s.authenticated && s.adapter_present);
-    let harness = harness_rung(seats, ready_seat, machine.harness_in_binary);
+    let harness = harness_rung(
+        seats,
+        ready_seat,
+        machine.harness_in_binary,
+        machine.hosts_off,
+    );
     let keys_present = machine.keys.clone();
     let key_row = table
         .keys
@@ -185,7 +205,12 @@ fn collect_from(machine: &Machine) -> InferenceChoice {
     }
 }
 
-fn harness_rung(seats: &[Seat], ready_seat: Option<&Seat>, in_binary: bool) -> Rung {
+fn harness_rung(
+    seats: &[Seat],
+    ready_seat: Option<&Seat>,
+    in_binary: bool,
+    hosts_off: Option<&'static str>,
+) -> Rung {
     let any_detected = seats.iter().any(|s| s.detected);
     // When no seat is ready, name the one the person is CLOSEST to using:
     // the app they are signed into beats one they merely have installed.
@@ -202,6 +227,12 @@ fn harness_rung(seats: &[Seat], ready_seat: Option<&Seat>, in_binary: bool) -> R
         available: any_detected,
         ready: ready_seat.is_some() && in_binary,
         reason: match (ready_seat, in_binary) {
+            // The switch hid every host program: nothing was looked for, so nothing here says
+            // what this computer holds.
+            (None, _) if hosts_off.is_some() => format!(
+                "not looked for · {}=off keeps every host program absent",
+                hosts_off.unwrap_or_default()
+            ),
             (Some(_), true) => {
                 "here · runs on the plan you already pay for · no API key".to_owned()
             }

@@ -28,7 +28,14 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 /// The variable that keeps every host program absent when it reads `off`.
-pub(crate) const HOSTS_ENV: &str = "NIKA_HARNESS_HOSTS";
+pub const HOSTS_ENV: &str = "NIKA_HARNESS_HOSTS";
+
+/// Whether [`HOSTS_ENV`] keeps every host program absent in this process: a surface that
+/// lists the seats says they were not looked for, never that they are not installed.
+#[must_use]
+pub fn hosts_switched_off() -> bool {
+    Hosts::from_env() == Hosts::Off
+}
 
 /// Whether host programs may start in this process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

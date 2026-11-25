@@ -178,3 +178,32 @@ fn timed_out_login_is_unknown_not_warn() {
     assert_eq!(json["summary"]["fail"], 0);
     assert_eq!(json["findings"][0]["level"], "unknown");
 }
+
+/// NIK-385 review · with the host switch off (Cargo sets it for every process it starts), no
+/// runtime reads « not installed »: each says it was not looked for and names the switch.
+/// With the switch on, none names it.
+#[cfg(feature = "access-harness")]
+#[test]
+fn a_runtime_the_host_switch_hides_says_it_was_not_looked_for() {
+    #[allow(clippy::disallowed_methods)] // the switch's own variable, read as the harness reads it
+    let off = std::env::var_os("NIKA_HARNESS_HOSTS").is_some_and(|v| v.eq_ignore_ascii_case("off"));
+    let findings = super::harness_findings();
+    assert_eq!(findings.len(), 8, "{findings:?}");
+    for finding in findings {
+        let named = finding
+            .detail
+            .contains("not looked for: NIKA_HARNESS_HOSTS=off keeps every host program absent");
+        assert_eq!(named, off, "{}", finding.detail);
+        if off {
+            assert!(
+                !finding.detail.contains("not installed"),
+                "{}",
+                finding.detail
+            );
+            assert!(
+                matches!(finding.level, super::Level::Unknown),
+                "{finding:?}"
+            );
+        }
+    }
+}

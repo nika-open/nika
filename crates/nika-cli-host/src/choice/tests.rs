@@ -19,6 +19,7 @@ fn machine(
         pulled,
         keys: keys.iter().map(|s| (*s).to_owned()).collect(),
         harness_in_binary: harness,
+        hosts_off: None,
     }
 }
 
@@ -1149,4 +1150,30 @@ fn a_key_rung_never_claims_a_checked_key() {
     assert!(rung.reason.contains("OPENAI_API_KEY"), "{}", rung.reason);
     assert!(rung.reason.contains("billed per run"), "{}", rung.reason);
     assert!(rung.reason.contains("not checked"), "{}", rung.reason);
+}
+
+/// NIK-385 review · with the host switch off, welcome's agent rung says no seat was looked for
+/// and names the switch, instead of reading as if none were on this computer. With the switch
+/// on, it never names it.
+#[test]
+fn the_agent_rung_names_the_host_switch_when_it_is_off() {
+    #[allow(clippy::disallowed_methods)] // the switch's own variable, read as the harness reads it
+    let off = std::env::var_os("NIKA_HARNESS_HOSTS").is_some_and(|v| v.eq_ignore_ascii_case("off"));
+    let home = tempfile::tempdir().expect("tmp");
+    let choice = collect(Some(home.path()));
+    let rung = (choice.rungs.iter())
+        .find(|rung| rung.id == "harness")
+        .expect("the agent rung");
+    if off && cfg!(feature = "access-harness") {
+        assert_eq!(
+            rung.reason,
+            "not looked for · NIKA_HARNESS_HOSTS=off keeps every host program absent"
+        );
+    } else {
+        assert!(
+            !rung.reason.contains("NIKA_HARNESS_HOSTS"),
+            "{}",
+            rung.reason
+        );
+    }
 }

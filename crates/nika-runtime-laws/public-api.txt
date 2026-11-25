@@ -232,7 +232,7 @@ pub struct nika_runtime_laws::integrity::ValueTaint<'a>
 impl<'a> nika_runtime_laws::integrity::ValueTaint<'a>
 pub fn nika_runtime_laws::integrity::ValueTaint<'a>::bare() -> nika_runtime_laws::integrity::ValueTaint<'static>
 pub fn nika_runtime_laws::integrity::ValueTaint<'a>::label(&self, template: &str, records: &alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dataflow::record::TaskRecord>) -> nika_cap::integrity::Integrity
-pub fn nika_runtime_laws::integrity::ValueTaint<'a>::of_task(task: &'a nika_schema::raw::task::RawTask, records: &alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dataflow::record::TaskRecord>) -> Self
+pub fn nika_runtime_laws::integrity::ValueTaint<'a>::of_task(task: &'a nika_schema::raw::task::RawTask, records: &alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dataflow::record::TaskRecord>, groups: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>) -> Self
 impl<D> owo_colors::OwoColorize for nika_runtime_laws::integrity::ValueTaint<'a>
 impl<T, U> core::convert::Into<U> for nika_runtime_laws::integrity::ValueTaint<'a> where U: core::convert::From<T>
 pub fn nika_runtime_laws::integrity::ValueTaint<'a>::into(self) -> U
@@ -254,7 +254,7 @@ impl<T> nika_error::traits::AsAny for nika_runtime_laws::integrity::ValueTaint<'
 pub fn nika_runtime_laws::integrity::ValueTaint<'a>::as_any(&self) -> &(dyn core::any::Any + 'static)
 impl<T> typenum::type_operators::Same for nika_runtime_laws::integrity::ValueTaint<'a>
 pub type nika_runtime_laws::integrity::ValueTaint<'a>::Output = T
-pub fn nika_runtime_laws::integrity::task_integrity(task: &nika_schema::raw::task::RawTask, records: &alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dataflow::record::TaskRecord>) -> nika_cap::integrity::Integrity
+pub fn nika_runtime_laws::integrity::task_integrity(task: &nika_schema::raw::task::RawTask, records: &alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_dataflow::record::TaskRecord>, groups: &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>) -> nika_cap::integrity::Integrity
 pub mod nika_runtime_laws::origins
 pub use nika_runtime_laws::origins::InputOrigin
 pub fn nika_runtime_laws::origins::input_origins(wf: &nika_schema::raw::workflow::RawWorkflow, overrides: &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>, env_sourced: &alloc::collections::btree::set::BTreeSet<alloc::string::String>, ci: bool) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, nika_types::origins::InputOrigin>

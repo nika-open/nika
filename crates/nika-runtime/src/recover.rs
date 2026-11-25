@@ -546,7 +546,8 @@ fn parked_integrity(
         .tasks
         .get(task_index)
         .map_or_else(nika_cap::Integrity::trusted, |task| {
-            crate::integrity::task_integrity(&task.value, view)
+            let groups = crate::task::folded_groups(&task.value, &scope.wf.tasks);
+            crate::integrity::task_integrity(&task.value, view, &groups)
         })
 }
 

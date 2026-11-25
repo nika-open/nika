@@ -248,7 +248,8 @@ where
         // Mini-tasks carry no `returns:` (closed shape) — no contract.
         // The cleanup's bindings retain their provenance through the same
         // re-gate oracle as the main lane (F-O1 PR-2).
-        let value_taint = crate::integrity::ValueTaint::of_task(cleanup, scope.records());
+        let groups = super::folded_groups(cleanup, &wf.tasks);
+        let value_taint = crate::integrity::ValueTaint::of_task(cleanup, scope.records(), &groups);
         // Resolve the receipt at the same boundary as the lift, including
         // the parent's fresh value. A closed gate or failed binding above
         // never exercises the door and therefore produces no receipt.

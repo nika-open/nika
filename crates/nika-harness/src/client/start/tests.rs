@@ -228,6 +228,86 @@ async fn an_adapter_that_closes_its_pipe_is_unavailable() {
     );
 }
 
+/// An error answer to `session/new` is read like one to the prompt: an internal error
+/// (codex-acp's `-32603` on a loaded machine) is a session that did not open, transient; the
+/// adapter's `authentication_failed` kind is a lost sign-in, final; a refusal it types with a
+/// JSON-RPC request code (`-32602`, a value it rejects) stays the final refusal it is. No
+/// prompt follows any of them.
+#[tokio::test]
+async fn an_error_answer_to_session_new_is_classified_like_one_to_the_prompt() {
+    let busy = json!({"code":-32603,"message":"Internal error",
+        "data":{"details":"workspace routing discovery timed out"}});
+    let expired = json!({"code":-32603,"message":"Internal error",
+        "data":{"errorKind":"authentication_failed"}});
+    let rejected = json!({"code":-32602,"message":"Invalid params"});
+    let cases = [
+        (
+            busy,
+            "NIKA-1804",
+            "harness session failed: Internal error — workspace routing discovery timed out \
+             (jsonrpc -32603)",
+        ),
+        (
+            expired,
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            rejected,
+            "NIKA-1805",
+            "harness refused: Invalid params (jsonrpc -32602)",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            assert_eq!(new["method"], "session/new");
+            let line = json!({"jsonrpc":"2.0","id":new["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+            assert!(
+                read(&mut r).await.is_none(),
+                "no prompt after a failed session/new"
+            );
+        })
+        .await
+        .expect_err("session/new answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code
+        );
+        assert_eq!(error.is_transient(), code == "NIKA-1804", "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
+/// An internal error answered to `initialize` is the same session that did not open.
+#[tokio::test]
+async fn an_internal_error_answer_to_initialize_is_transient() {
+    let error = judged(IDLE, |mut r, mut w| async move {
+        let init = read(&mut r).await.expect("initialize");
+        let line = json!({"jsonrpc":"2.0","id":init["id"],
+            "error":{"code":-32603,"message":"Internal error"}});
+        let mut bytes = serde_json::to_vec(&line).expect("JSON");
+        bytes.push(b'\n');
+        w.write_all(&bytes).await.expect("write peer");
+        w.flush().await.expect("flush peer");
+        assert!(read(&mut r).await.is_none(), "no session/new after it");
+    })
+    .await
+    .expect_err("initialize answered an error");
+    assert!(error.is_transient(), "{error:?}");
+    let HarnessError::Session { reason } = error else {
+        panic!("a session that did not open, got {error:?}")
+    };
+    assert_eq!(reason, "Internal error (jsonrpc -32603)");
+}
+
 /// A call whose own frame deadline is shorter than the start bound keeps
 /// its class: the silence is the session death it always was.
 #[tokio::test(start_paused = true)]

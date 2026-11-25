@@ -681,13 +681,11 @@ where
                 }
                 Incoming::ErrorResponse {
                     id: got,
+                    code,
                     message,
                     kind,
                 } if got == id => {
-                    return Err(match kind.as_deref() {
-                        Some(SIGN_IN_KIND) => signed_out(),
-                        _ => HarnessError::Refused { reason: message },
-                    });
+                    return Err(request_error(code, message, kind.as_deref()));
                 }
                 Incoming::Notification { method, params }
                     if method == wire::METHOD_SESSION_UPDATE =>
@@ -911,6 +909,26 @@ pub(crate) fn signed_out() -> HarnessError {
 fn answered_error(message: String, kind: Option<&str>) -> HarnessError {
     match kind {
         Some(SIGN_IN_KIND) => signed_out(),
+        _ => HarnessError::Session { reason: message },
+    }
+}
+
+/// The JSON-RPC 2.0 codes that refuse the request itself (§5.1: parse error, invalid request,
+/// method not found, invalid params): the same request, sent again, is refused again.
+const REQUEST_REFUSALS: [i64; 4] = [-32700, -32600, wire::METHOD_NOT_FOUND, -32602];
+
+/// The failure an error answer to a request before the prompt is (`initialize`, `session/new`,
+/// a model, effort, tier or mode selection), read like an error answer to the prompt
+/// ([`answered_error`]): a lost sign-in by the adapter's typed kind, else a session that did
+/// not open, which a retry may open. One typed exception: a refusal the adapter types with a
+/// JSON-RPC request code ([`REQUEST_REFUSALS`] — a method it does not offer, a value it
+/// rejects) stays the final refusal it is. An internal error is no such refusal: codex-acp
+/// answered `session/new` on a loaded machine with `-32603` « workspace routing discovery
+/// timed out ».
+fn request_error(code: i64, message: String, kind: Option<&str>) -> HarnessError {
+    match kind {
+        Some(SIGN_IN_KIND) => signed_out(),
+        _ if REQUEST_REFUSALS.contains(&code) => HarnessError::Refused { reason: message },
         _ => HarnessError::Session { reason: message },
     }
 }

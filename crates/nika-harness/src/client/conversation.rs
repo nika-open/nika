@@ -361,7 +361,9 @@ where
                     done.end(&result).await;
                 }
             }
-            Incoming::ErrorResponse { id, message, kind } if current == Some(id) => {
+            Incoming::ErrorResponse {
+                id, message, kind, ..
+            } if current == Some(id) => {
                 if let Some(failed) = turn.take() {
                     failed.fail(answered_error(message, kind.as_deref())).await;
                 }

@@ -128,6 +128,9 @@ pub enum Incoming {
     ErrorResponse {
         /// The correlated request id.
         id: u64,
+        /// The JSON-RPC `error.code` (`0` when the answer names none): the typed half of the
+        /// answer a failure is classified on, beside the words.
+        code: i64,
         /// The error's `message` (code folded in for the teaching line).
         message: String,
         /// The adapter's own typed kind of the error (`error.data.errorKind`, for example
@@ -203,7 +206,12 @@ pub fn parse_line(line: &str) -> Result<Incoming, WireError> {
                 let kind = (err.get("data").and_then(|d| d.get("errorKind")))
                     .and_then(Value::as_str)
                     .map(str::to_owned);
-                Ok(Incoming::ErrorResponse { id, message, kind })
+                Ok(Incoming::ErrorResponse {
+                    id,
+                    code,
+                    message,
+                    kind,
+                })
             } else {
                 Ok(Incoming::Response {
                     id,
@@ -936,6 +944,7 @@ mod tests {
                 .expect("parses");
         let Incoming::ErrorResponse {
             id: 3,
+            code: -32600,
             message,
             kind: None,
         } = err
@@ -949,10 +958,21 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"Internal error","data":{"errorKind":"authentication_failed"}}}"#,
         )
         .expect("parses");
-        let Incoming::ErrorResponse { id: 4, kind, .. } = expired else {
+        let Incoming::ErrorResponse {
+            id: 4, code, kind, ..
+        } = expired
+        else {
             panic!("an id+error line is an error response");
         };
         assert_eq!(kind.as_deref(), Some("authentication_failed"));
+        assert_eq!(
+            code, -32603,
+            "the typed code rides apart from the words too"
+        );
+        let unnamed = parse_line(r#"{"jsonrpc":"2.0","id":5,"error":{"message":"m"}}"#);
+        let Ok(Incoming::ErrorResponse { code: 0, .. }) = unnamed else {
+            panic!("an error naming no code reads as code 0: {unnamed:?}");
+        };
     }
 
     #[test]

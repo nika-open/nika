@@ -497,10 +497,9 @@ fn locus_of(p: &nika_catalog::Provider) -> EndpointLocus {
 }
 
 /// Every DECLARED secret name one task touches — the direct references
-/// across its effect surface (main verb · `with:` · `for_each` ·
-/// cleanups), plus the IFC propagation fact (a with-alias or tainted
-/// upstream output) when a valid DAG order computed one. NAMES only —
-/// law 13.
+/// across its effect surface (the verb · `with:` · `for_each`), plus every
+/// secret the IFC pass found reaching its effect (a with-alias, an item, a
+/// tainted upstream record). NAMES only — law 13.
 fn secret_names_of_task(
     idx: usize,
     task: &RawTask,
@@ -540,8 +539,9 @@ fn secret_names_of_task(
             other => unreachable!("unknown for_each form: {other:?}"),
         }
     }
-    // The propagation facts (valid order only — empty facts, never wrong).
-    if let Some(trace) = flow.effect_taint(idx) {
+    // The propagation facts, which the pass computes over every task: every
+    // secret reaching the effect, not only the first.
+    for trace in flow.effect_taints(idx) {
         out.insert(trace.secret.clone());
     }
     out

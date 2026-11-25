@@ -846,6 +846,14 @@ impl SpawnedHarness {
     }
 }
 
+/// A call whose deadline passed before its adapter started: nothing was spawned.
+fn deadline_passed() -> HarnessError {
+    HarnessError::Session {
+        reason: "the call deadline passed before the adapter started; nothing was spawned"
+            .to_owned(),
+    }
+}
+
 impl SpawnedHarness {
     /// Open one session stream and return it with the transport bound it was given. Each frame
     /// read and each write is bounded by [`crate::IDLE_TIMEOUT_SECS`], or, for a `call` (its
@@ -857,17 +865,15 @@ impl SpawnedHarness {
         request: HarnessRequest,
         call: Option<(Deadline, crate::authoring::acp::Progress)>,
     ) -> Result<(HarnessEventStream, std::time::Duration), HarnessError> {
-        let passed = || HarnessError::Session {
-            reason: "the call deadline passed before the adapter started; nothing was spawned"
-                .to_owned(),
-        };
         let spent = || (call.as_ref()).is_some_and(|(deadline, marks)| deadline.expired(marks));
         if spent() {
-            return Err(passed());
+            return Err(deadline_passed());
         }
-        let (start, profile_env) = self.prove().await?;
+        let (start, profile_env) = self
+            .prove_against(self.config_stamp(), call.as_ref())
+            .await?;
         if spent() {
-            return Err(passed());
+            return Err(deadline_passed());
         }
         let generic = std::time::Duration::from_secs(crate::IDLE_TIMEOUT_SECS);
         let idle = (call.as_ref()).map_or(generic, |(deadline, _)| deadline.allowance());
@@ -899,7 +905,7 @@ impl SpawnedHarness {
     async fn prove(
         &self,
     ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
-        self.prove_against(self.config_stamp()).await
+        self.prove_against(self.config_stamp(), None).await
     }
 
     /// What the Codex profile's proof is proven against now: the configuration the adapter's
@@ -916,15 +922,21 @@ impl SpawnedHarness {
 
     /// [`Self::prove`] against the configuration stamp `now`, read before any probe: a
     /// configuration written while the proof runs is proven again by the next session. The
-    /// seat's proof is held for the whole proof ([`Proven`]): one proof at a time.
+    /// seat's proof is held for the whole proof ([`Proven`]): one proof at a time. A `call`
+    /// whose deadline passed while it waited for another session's proof, which kept nothing,
+    /// runs no proof of its own: it spawns nothing, probe included.
     async fn prove_against(
         &self,
         now: Option<crate::authoring::acp::codex::ConfigStamp>,
+        call: Option<&(Deadline, crate::authoring::acp::Progress)>,
     ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
         let start = (self.adapter.probe_via_handshake).then(|| self.start_judge());
         let mut kept = self.proven.0.lock().await;
         if let Some(profile_env) = kept.as_ref().and_then(|kept| kept.serves(now.as_ref())) {
             return Ok((start, profile_env));
+        }
+        if call.is_some_and(|(deadline, marks)| deadline.expired(marks)) {
+            return Err(deadline_passed());
         }
         if self.adapter.probe_via_handshake {
             self.probe_command_shape().await?;

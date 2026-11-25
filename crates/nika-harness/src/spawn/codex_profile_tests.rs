@@ -142,16 +142,18 @@ async fn a_kept_codex_proof_is_proven_again_once_its_configuration_changes() {
     let (home, other) = (dir.path().join("codex-home"), dir.path().join("other-home"));
     std::fs::create_dir_all(&home).expect("home");
     std::fs::create_dir_all(&other).expect("other");
-    seat.prove_against(stamp(&home)).await.expect("proven");
+    seat.prove_against(stamp(&home), None)
+        .await
+        .expect("proven");
     assert_eq!(listings(), 2, "the defined servers, then the read-back");
-    seat.prove_against(stamp(&home)).await.expect("kept");
+    seat.prove_against(stamp(&home), None).await.expect("kept");
     assert_eq!(listings(), 2, "an unchanged configuration keeps the proof");
     std::fs::write(
         home.join("config.toml"),
         "[mcp_servers.added]\ncommand = \"x\"\n",
     )
     .expect("config");
-    seat.prove_against(stamp(&home))
+    seat.prove_against(stamp(&home), None)
         .await
         .expect("proven again");
     assert_eq!(
@@ -159,9 +161,9 @@ async fn a_kept_codex_proof_is_proven_again_once_its_configuration_changes() {
         4,
         "a configuration written since is proven again"
     );
-    seat.prove_against(stamp(&home)).await.expect("kept");
+    seat.prove_against(stamp(&home), None).await.expect("kept");
     assert_eq!(listings(), 4, "and that proof is kept");
-    seat.prove_against(stamp(&other))
+    seat.prove_against(stamp(&other), None)
         .await
         .expect("proven again");
     assert_eq!(listings(), 6, "another Codex home is proven again");

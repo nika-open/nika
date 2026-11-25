@@ -218,3 +218,47 @@ async fn sessions_that_start_together_run_one_proof() {
         "one proof serves the sessions that waited for it"
     );
 }
+
+/// NIK-385 review · a call that waited for another session's proof, which failed and kept
+/// nothing, and whose deadline passed meanwhile, runs no proof of its own: it spawns nothing,
+/// probe included, and says its deadline passed. The probe logs each answer it gives, takes a
+/// second to give it, and answers a version outside the pin.
+#[tokio::test]
+async fn a_call_spent_while_it_waited_for_a_proof_probes_nothing() {
+    let dir = tempfile::tempdir().expect("dir");
+    let log = dir.path().join("answers.log");
+    let script = format!(
+        "echo answered >> '{log}'; sleep 1; echo 'codex-acp 9.9.9'",
+        log = log.display()
+    );
+    let seat = SpawnedHarness::new(
+        HarnessAdapter::new("codex", "/bin/sh")
+            .expect("id")
+            .with_version_args(vec!["-c".to_owned(), script])
+            .with_version_pin(crate::probe::VersionPin::new((0, 16), 1)),
+    );
+    let clone = seat.clone();
+    let call = (
+        Deadline::start(std::time::Duration::from_millis(200)),
+        crate::authoring::acp::Progress::default(),
+    );
+    let (first, waited) = tokio::join!(seat.prove(), clone.prove_against(None, Some(&call)));
+    let refused = first
+        .map(|_| ())
+        .expect_err("the version is outside the pin");
+    assert!(
+        refused
+            .to_string()
+            .contains("version 9.9 is outside the pin"),
+        "the first proof refuses the version it read: {refused}"
+    );
+    let passed = waited
+        .map(|_| ())
+        .expect_err("the waiting call's deadline passed");
+    assert!(
+        matches!(&passed, HarnessError::Session { reason } if reason.contains("deadline passed")),
+        "{passed:?}"
+    );
+    let answers = std::fs::read_to_string(&log).map_or(0, |text| text.lines().count());
+    assert_eq!(answers, 1, "the spent call ran no probe of its own");
+}

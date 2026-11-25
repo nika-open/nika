@@ -968,6 +968,7 @@ impl<T> typenum::type_operators::Same for nika_harness::probe::LoginCheck
 pub type nika_harness::probe::LoginCheck::Output = T
 #[non_exhaustive] pub struct nika_harness::probe::AdapterProbeRow
 pub nika_harness::probe::AdapterProbeRow::authenticated: core::option::Option<bool>
+pub nika_harness::probe::AdapterProbeRow::hosts_off: bool
 pub nika_harness::probe::AdapterProbeRow::id: alloc::string::String
 pub nika_harness::probe::AdapterProbeRow::login: core::option::Option<nika_harness::probe::LoginCheck>
 pub nika_harness::probe::AdapterProbeRow::note: alloc::string::String
@@ -2406,6 +2407,7 @@ impl<T> typenum::type_operators::Same for nika_harness::run_acp::AcpOneShotRefus
 pub type nika_harness::run_acp::AcpOneShotRefused::Output = T
 #[non_exhaustive] pub struct nika_harness::AdapterProbeRow
 pub nika_harness::AdapterProbeRow::authenticated: core::option::Option<bool>
+pub nika_harness::AdapterProbeRow::hosts_off: bool
 pub nika_harness::AdapterProbeRow::id: alloc::string::String
 pub nika_harness::AdapterProbeRow::login: core::option::Option<nika_harness::probe::LoginCheck>
 pub nika_harness::AdapterProbeRow::note: alloc::string::String
@@ -3027,6 +3029,7 @@ pub fn nika_harness::probe::VersionPin::as_any(&self) -> &(dyn core::any::Any + 
 impl<T> typenum::type_operators::Same for nika_harness::probe::VersionPin
 pub type nika_harness::probe::VersionPin::Output = T
 pub const nika_harness::DISABLE_ENV: &str
+pub const nika_harness::HOSTS_ENV: &str
 pub const nika_harness::IDLE_TIMEOUT_SECS: u64
 pub const nika_harness::MAX_LINE_BYTES: usize
 pub const nika_harness::MAX_OFFERED_VALUES: usize
@@ -3035,6 +3038,7 @@ pub fn nika_harness::compose_env(parent: &alloc::collections::btree::map::BTreeM
 pub fn nika_harness::declared_adapter_id() -> core::option::Option<alloc::string::String>
 pub fn nika_harness::drive<R, W>(reader: R, writer: W, request: nika_kernel_ai::harness::HarnessRequest) -> nika_kernel_ai::harness::HarnessEventStream where R: tokio::io::async_read::AsyncRead + core::marker::Unpin + core::marker::Send + 'static, W: tokio::io::async_write::AsyncWrite + core::marker::Unpin + core::marker::Send + 'static
 pub fn nika_harness::drive_with_idle<R, W>(reader: R, writer: W, request: nika_kernel_ai::harness::HarnessRequest, idle: core::time::Duration) -> nika_kernel_ai::harness::HarnessEventStream where R: tokio::io::async_read::AsyncRead + core::marker::Unpin + core::marker::Send + 'static, W: tokio::io::async_write::AsyncWrite + core::marker::Unpin + core::marker::Send + 'static
+pub fn nika_harness::hosts_switched_off() -> bool
 pub fn nika_harness::judge_version(adapter_id: &str, output: &str, pin: &nika_harness::probe::VersionPin) -> core::result::Result<(u32, u32), nika_kernel_ai::harness::HarnessError>
 pub fn nika_harness::meet_acp_one_shot(seat: &str) -> core::result::Result<nika_harness::run_acp::AcpOneShot, nika_harness::run_acp::AcpOneShotRefused>
 pub fn nika_harness::meet_infer_grade(seat: &str, need: nika_harness::infer::StructuredOutputGrade) -> core::result::Result<nika_harness::infer::InferGradeSeat, nika_harness::infer::InferGradeError>

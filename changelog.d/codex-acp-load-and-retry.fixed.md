@@ -31,4 +31,7 @@ changes, so an MCP server defined during the run is disabled too). An error
   or removed for the size budget, failed traces fill a workflow's kept count
   before successful ones, and the budget removes every successful trace it
   may before a failed one (since 0.99.0, ten successful runs rotated a
-  failed trace out). The 30-day age cap still ends a failed trace.
+  failed trace out). The 30-day age cap still ends a failed trace. The
+  budget never removes the trace of a run still in flight (its writer
+  holds its lease, or this host cannot tell), where it could remove that
+  journal under its writer, and a run whose writer died counts as failed.

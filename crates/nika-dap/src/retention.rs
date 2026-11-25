@@ -19,7 +19,11 @@
 //! - rotation keeps a workflow's N finished traces failed ones first,
 //!   newest first within each group;
 //! - the budget removes every other eligible trace, oldest first, before
-//!   it removes a failed one, oldest first.
+//!   it removes a failed one, oldest first;
+//! - a `running` journal whose writer died (its lease is free on this
+//!   host) is a failed run; one whose writer holds its lease, or that this
+//!   host cannot vouch for, is a live run's journal: the budget never
+//!   removes it, and a held lease never ages out.
 //!
 //! A run keeps the child traces it started (spec 14 law 8), so a kept
 //! parent never cites a missing child:
@@ -50,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::liveness::Liveness;
 use crate::store::{self, TraceMeta, TraceState};
 
 /// The `traces.keep` rung, file-side (D-2026-08-11-N5) — discovery
@@ -245,10 +250,12 @@ impl Reason {
 /// are never marked, regardless of any cap. The newest `failed` root of
 /// each workflow is shielded from rotation and the budget, and ages out
 /// like any other root. Rotation applies to finished runs only
-/// (completed · failed · cancelled) and keeps failed ones first; the age
-/// cap and the budget bound every eligible root (so a torn trace ages
-/// out, while a live run's fresh journal is naturally safe), the budget
-/// reaching a failed root only once nothing else is left to remove.
+/// (completed · failed · cancelled) and keeps failed ones first. A
+/// running root whose writer died counts as failed. One whose writer
+/// holds its lease, or that this host cannot vouch for (no lease, another
+/// host), is a live journal: the budget never removes it, and a held lease
+/// never ages out, while a torn journal nobody vouches for still does. The
+/// budget reaches a failed root only once nothing else is left to remove.
 #[must_use]
 pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec<(usize, Reason)> {
     let runs = Runs::of(traces);
@@ -257,6 +264,7 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
     let exempt = |i: usize| traces[i].state == TraceState::Paused || newest.contains(&i);
     let last_failure = newest_where(traces, |i| root(i) && failed(&traces[i]));
     let shielded = |i: usize| exempt(i) || last_failure.contains(&i);
+    let held = |i: usize| matches!(traces[i].liveness, Some(Liveness::Alive { .. }));
     let mut marked: BTreeMap<usize, Reason> = BTreeMap::new();
 
     // Rotation — keep the N finished runs per workflow, failed ones first.
@@ -270,7 +278,7 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
 
     // Age cap — stale runs exit even under N.
     for (i, trace) in traces.iter().enumerate() {
-        if !root(i) || exempt(i) || marked.contains_key(&i) {
+        if !root(i) || exempt(i) || held(i) || marked.contains_key(&i) {
             continue;
         }
         let age = now.duration_since(trace.modified).unwrap_or_default();
@@ -297,7 +305,7 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
             if total <= cfg.budget_bytes {
                 break;
             }
-            if shielded(i) || marked.contains_key(&i) {
+            if shielded(i) || live(&traces[i]) || marked.contains_key(&i) {
                 continue;
             }
             marked.insert(i, Reason::OverBudget);
@@ -415,9 +423,19 @@ fn newest_where(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> BTreeSet<
     newest.into_values().collect()
 }
 
-/// Whether a trace is a failure: the one state the policy keeps first.
+/// Whether a trace is a failure, the one state the policy keeps first: a
+/// failed run, or a running journal whose writer died.
 fn failed(trace: &TraceMeta) -> bool {
     trace.state == TraceState::Failed
+        || (trace.state == TraceState::Running
+            && matches!(trace.liveness, Some(Liveness::Dead { .. })))
+}
+
+/// Whether a trace is a live run's journal: running, its writer holding
+/// its lease or one this host cannot see (no lease, another host). The
+/// budget never removes it.
+fn live(trace: &TraceMeta) -> bool {
+    trace.state == TraceState::Running && !failed(trace)
 }
 
 /// Finished traces per workflow among the indices `keep` admits, failed
@@ -1022,6 +1040,47 @@ mod tests {
         assert!(
             marked.contains(&(2, Reason::Aged)),
             "a torn trace ages out: {marked:?}"
+        );
+    }
+
+    /// NIK-385 review · the budget never removes a live run's journal: a running root whose
+    /// writer holds its lease, or whose writer this host cannot see, stays however tight the
+    /// budget. One whose writer died is a failed run: it goes after every success, and the
+    /// newest failure it is stays. A writer that holds its lease is never aged out either.
+    #[test]
+    fn the_budget_keeps_a_live_journal_and_counts_a_dead_one_as_failed() {
+        let year = Duration::from_secs(365 * DAY);
+        let running = TraceState::Running;
+        let traces = vec![
+            meta("ok-new.ndjson", "w", TraceState::Succeeded, 100, DAY),
+            meta("alive.ndjson", "w", running, 100, 2 * DAY)
+                .with_liveness(Liveness::Alive { pid: 7 }),
+            meta("unknown.ndjson", "w", running, 100, 3 * DAY).with_liveness(Liveness::Unknown),
+            meta("dead.ndjson", "w", running, 100, 9 * DAY)
+                .with_liveness(Liveness::Dead { pid: 8 }),
+            meta("ok-old.ndjson", "w", TraceState::Succeeded, 100, 8 * DAY),
+            meta("fail.ndjson", "w", TraceState::Failed, 100, 10 * DAY),
+        ];
+        assert_eq!(
+            plan(&traces, &RetentionConfig::new(10, year, 550), now()),
+            vec![(4, Reason::OverBudget)],
+            "the success goes first, never the dead journal before it"
+        );
+        assert_eq!(
+            plan(&traces, &RetentionConfig::new(10, year, 1), now()),
+            vec![(4, Reason::OverBudget), (5, Reason::OverBudget)],
+            "the live journals stay, and the dead one is the newest failure"
+        );
+        let held = vec![
+            meta("ok-new.ndjson", "w", TraceState::Succeeded, 100, DAY),
+            meta("alive.ndjson", "w", running, 100, 400 * DAY)
+                .with_liveness(Liveness::Alive { pid: 7 }),
+            meta("torn.ndjson", "w", running, 100, 400 * DAY).with_liveness(Liveness::Unknown),
+        ];
+        assert_eq!(
+            plan(&held, &RetentionConfig::new(10, year, u64::MAX), now()),
+            vec![(2, Reason::Aged)],
+            "a held lease never ages out; a journal nobody can vouch for does"
         );
     }
 

@@ -886,9 +886,8 @@ where
                 let mut ctx = self.task_ctx((task, wf), budget, ledger, witness, run_start);
                 ctx.stopped = Some(stopped.clone());
                 // B5 · one answer, one ask: a replay never re-arms an answer already spent.
-                if agent_buffer.gate_answer_spent() {
-                    ctx.gate_answer = None;
-                }
+                ctx.gate_answer
+                    .take_if(|_| agent_buffer.gate_answer_spent());
                 ctx
             };
             let attempts = async {

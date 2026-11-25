@@ -522,8 +522,9 @@ impl CitedChild {
 /// `on_error: skip` included), and the `child` of each `for_each` item
 /// row, inline (`items`) or paged (`task_items`).
 /// Retention keeps them with their run and `trace verify` names the ones
-/// that are missing: the ONE reader both share. A name with a directory
-/// part is never a citation (the journal is untrusted input).
+/// that are missing: the ONE reader both share. A name that is not one
+/// normal path component is never a citation (the journal is untrusted
+/// input).
 #[must_use]
 pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
     let mut seen = BTreeSet::new();
@@ -569,11 +570,18 @@ fn item_children(event: &Event) -> Vec<(String, Option<u64>)> {
         .collect()
 }
 
-/// A bare file name: no directory part, no control character.
+/// A bare file name: exactly one normal path component on every platform,
+/// since the journal is untrusted and may be read on another host. No
+/// separator of either kind, no drive or stream prefix (`:`), not `.` or
+/// `..`, not absolute, no control character: joined to the trace directory,
+/// it names a file in it and nowhere else.
 fn bare_file_name(name: &str) -> bool {
-    !matches!(name, "" | "." | "..")
-        && !name.contains(['/', '\\'])
-        && !name.chars().any(char::is_control)
+    let mut parts = std::path::Path::new(name).components();
+    let one_normal = matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(part)), None) if part == name
+    );
+    one_normal && !name.contains(['/', '\\', ':']) && !name.chars().any(char::is_control)
 }
 
 /// One string field off an event (the journal's additive KV vocabulary).
@@ -815,6 +823,42 @@ pub(crate) mod tests {
     }
 
     /// NIK-385 · the ONE citation reader: a task's `child` row, inline item
+    /// NIK-385 review · a cited name is exactly one normal path component on
+    /// every platform: a drive or stream prefix (`C:x`, `x:`), a parent or
+    /// current directory, a separator of either kind, an absolute path or a
+    /// control character never cites a trace, whatever host reads the journal.
+    #[test]
+    fn a_cited_name_is_one_normal_path_component() {
+        let refused = [
+            "C:x",
+            "C:",
+            "x:stream",
+            "..",
+            ".",
+            "",
+            "a/b",
+            "a\\b",
+            "/abs.ndjson",
+            "\\\\host\\x",
+            "kid\u{0}.ndjson",
+        ];
+        let rows: Vec<serde_json::Value> = refused
+            .iter()
+            .chain(["kid-ok.ndjson"].iter())
+            .zip(0u64..)
+            .map(|(child, index)| serde_json::json!({"child": child, "index": index, "status": "ok"}))
+            .collect();
+        let frame = event(EventKind::TaskCompleted, "task", "fan", 1).with_field(KeyValue::new(
+            "items",
+            Value::String(serde_json::to_string(&rows).expect("rows")),
+        ));
+        let cited: Vec<String> = cited_children(&[frame])
+            .into_iter()
+            .map(|child| child.trace_id)
+            .collect();
+        assert_eq!(cited, ["kid-ok.ndjson"]);
+    }
+
     /// rows and paged ones, each name once, in journal order. A name with a
     /// directory part is never a citation, a row without `child` cites
     /// nothing, and a frame of another kind is not read.

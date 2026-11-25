@@ -97,10 +97,15 @@ fn str_field<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
 
 #[tokio::test]
 async fn unwind_taint_lifts_record_the_cleanup_and_resolved_value() {
-    for (gate, binding, expected_receipts) in [
-        ("", "${{ inputs.p }}", 1),
-        ("    when: ${{ false }}\n", "${{ inputs.p }}", 0),
-        ("", "${{ tasks.main.output.missing }}", 0),
+    // The third binding carries `main`'s exec output, untrusted, into the
+    // cleanup's exec. With a private read granted, that completes the lethal
+    // trifecta, which the check judges on a cleanup task as on any other.
+    // The binding fails before dispatch, so that case needs no fs grant.
+    const FS_READ: &str = "  fs: { read: [\"datasets/**\"] }\n";
+    for (gate, binding, fs, expected_receipts) in [
+        ("", "${{ inputs.p }}", FS_READ, 1),
+        ("    when: ${{ false }}\n", "${{ inputs.p }}", FS_READ, 0),
+        ("", "${{ tasks.main.output.missing }}", "", 0),
     ] {
         let yaml = format!(
             r#"
@@ -109,8 +114,7 @@ inputs:
   p: {{ type: string, default: datasets/archive.tar }}
 permits:
   exec: [work, tar]
-  fs: {{ read: ["datasets/**"] }}
-tasks:
+{fs}tasks:
   main:
     exec: {{ command: [work] }}
   cleanup:

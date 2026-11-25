@@ -402,30 +402,52 @@ type ProvenEnv = Vec<(String, String)>;
 /// of the same seat. The seat lives as long as its run (one per composed runtime, one per
 /// `infer:` verb for an ACP one-shot), so a run probes an adapter once: on a loaded machine
 /// each probe is a chance to miss the deadline. A failed or unanswered proof is never kept,
-/// and the next session proves again. A change to the adapter's configuration during the
-/// run is not read again.
+/// and the next session proves again. Under the Codex profile the proof is kept with the
+/// configuration it was proven against ([`ConfigStamp`]): a session that finds another Codex
+/// home or a configuration file changed since proves again, so an MCP server defined during
+/// the run is disabled like the others.
+///
+/// [`ConfigStamp`]: crate::authoring::acp::codex::ConfigStamp
 #[derive(Clone, Default)]
-struct Proven(std::sync::Arc<std::sync::Mutex<Option<ProvenEnv>>>);
+struct Proven(std::sync::Arc<std::sync::Mutex<Option<Kept>>>);
+
+/// One kept proof and what it was proven against (`None` outside the Codex profile).
+#[derive(Clone)]
+struct Kept {
+    against: Option<crate::authoring::acp::codex::ConfigStamp>,
+    env: ProvenEnv,
+}
 
 impl Proven {
-    /// The kept environment, when a proof succeeded.
-    fn get(&self) -> Option<ProvenEnv> {
-        self.0.lock().ok().and_then(|kept| kept.clone())
+    /// The kept environment, when a proof succeeded against the configuration `now` reads.
+    fn get(&self, now: Option<&crate::authoring::acp::codex::ConfigStamp>) -> Option<ProvenEnv> {
+        let kept = self.0.lock().ok()?;
+        let kept = kept.as_ref()?;
+        (kept.against.as_ref() == now).then(|| kept.env.clone())
     }
 
-    fn keep(&self, env: &[(String, String)]) {
+    fn keep(
+        &self,
+        against: Option<crate::authoring::acp::codex::ConfigStamp>,
+        env: &[(String, String)],
+    ) {
         if let Ok(mut kept) = self.0.lock() {
-            *kept = Some(env.to_vec());
+            *kept = Some(Kept {
+                against,
+                env: env.to_vec(),
+            });
         }
+    }
+
+    fn is_kept(&self) -> bool {
+        self.0.lock().is_ok_and(|kept| kept.is_some())
     }
 }
 
 impl std::fmt::Debug for Proven {
     // The kept environment carries the profile's configuration: only whether one is kept.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Proven")
-            .field(&self.get().is_some())
-            .finish()
+        f.debug_tuple("Proven").field(&self.is_kept()).finish()
     }
 }
 
@@ -883,13 +905,35 @@ impl SpawnedHarness {
     /// other row keeps its version probe. Then the Codex completion profile, proven on the
     /// exact binary: the environment that carries it is returned.
     ///
-    /// The first good proof is kept for the seat's later sessions ([`Proven`]); a handshake
-    /// row's identity is still judged on each session's own `initialize`.
+    /// The first good proof is kept for the seat's later sessions ([`Proven`]), under the
+    /// Codex profile while its configuration is unchanged; a handshake row's identity is
+    /// still judged on each session's own `initialize`.
     async fn prove(
         &self,
     ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
+        self.prove_against(self.config_stamp()).await
+    }
+
+    /// What the Codex profile's proof is proven against now: the configuration the adapter's
+    /// environment resolves. `None` outside the Codex profile.
+    fn config_stamp(&self) -> Option<crate::authoring::acp::codex::ConfigStamp> {
+        let codex = (self.completion)
+            .is_some_and(|one_shot| one_shot.profile == crate::authoring::acp::Profile::Codex);
+        codex.then(|| {
+            let parent: BTreeMap<String, String> = std::env::vars().collect();
+            let env = compose_env(&parent, &self.adapter.passthrough_env);
+            crate::authoring::acp::codex::config_stamp(&env)
+        })
+    }
+
+    /// [`Self::prove`] against the configuration stamp `now`, read before any probe: a
+    /// configuration written while the proof runs is proven again by the next session.
+    async fn prove_against(
+        &self,
+        now: Option<crate::authoring::acp::codex::ConfigStamp>,
+    ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
         let start = (self.adapter.probe_via_handshake).then(|| self.start_judge());
-        if let Some(profile_env) = self.proven.get() {
+        if let Some(profile_env) = self.proven.get(now.as_ref()) {
             return Ok((start, profile_env));
         }
         if self.adapter.probe_via_handshake {
@@ -903,7 +947,7 @@ impl SpawnedHarness {
             }
             _ => Vec::new(),
         };
-        self.proven.keep(&profile_env);
+        self.proven.keep(now, &profile_env);
         Ok((start, profile_env))
     }
 

@@ -211,6 +211,58 @@ pub(crate) fn judge_conversation(listing: &[u8], name: &str) -> Result<(), Strin
     ))
 }
 
+/// What a proven profile was proven against: the Codex home the adapter resolves
+/// (`CODEX_HOME`, else `$HOME/.codex`) and a stat of its configuration file there
+/// (`config.toml`: device, inode, size and modification time, or its absence). The profile
+/// disables the MCP servers that configuration defined at proof time, so a kept proof holds
+/// only while this stamp is unchanged; another home, or a configuration written, replaced or
+/// removed since, is proven again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigStamp {
+    home: Option<PathBuf>,
+    file: Option<FileStamp>,
+}
+
+/// The identity and the last write of one file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    device: u64,
+    inode: u64,
+    size: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl FileStamp {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let (device, inode) = {
+            use std::os::unix::fs::MetadataExt as _;
+            (meta.dev(), meta.ino())
+        };
+        #[cfg(not(unix))]
+        let (device, inode) = (0, 0);
+        Self {
+            device,
+            inode,
+            size: meta.len(),
+            modified: meta.modified().ok(),
+        }
+    }
+}
+
+/// The [`ConfigStamp`] of the adapter environment `env` (the composed child environment:
+/// what the adapter's codex itself resolves). An unreadable configuration reads as absent.
+pub(crate) fn config_stamp(env: &BTreeMap<String, String>) -> ConfigStamp {
+    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
+    let home = set("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| set("HOME").map(|home| Path::new(home).join(".codex")));
+    let file = (home.as_ref())
+        .and_then(|home| std::fs::metadata(home.join("config.toml")).ok())
+        .map(|meta| FileStamp::of(&meta));
+    ConfigStamp { home, file }
+}
+
 /// The codex binary the adapter bundles, next to its own entry point in the npm package
 /// (`<package>/dist/index.js` → `<package>/node_modules/@openai/codex/bin/codex.js`). The
 /// adapter command is resolved on the child's PATH, symlinks followed.

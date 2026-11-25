@@ -146,6 +146,11 @@ pub enum LeakReason {
     /// clears it: the directory belongs in the file, in `inputs:` or in
     /// `const:`.
     WorkingDirectory,
+    /// The secret reaches an `agent:`'s `images.save:`, the path the run
+    /// writes each image to and the output names. A path is never a secret,
+    /// so no `egress:` rule clears it: the path belongs in the file, in
+    /// `inputs:` or in `const:`.
+    ImageSavePath,
 }
 
 /// Compute the refusal reason for one refused edge — the caller asks

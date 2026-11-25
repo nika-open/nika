@@ -23,7 +23,7 @@ use nika_schema::raw::{
     RawAction, RawAgentAction, RawInvokeAction, RawInvokeTarget, RawTask, RawWorkflow,
 };
 
-use super::flow::{FlowFacts, action_effect_fields, collect_json_strings, refs_in_str};
+use super::flow::{FlowFacts, Route, action_effect_fields, collect_json_strings, refs_in_str};
 use super::permits_fit::{
     BuiltinEffect, ConstStrings, builtin_effect, chart_vl_sibling, judgeable_arg, raw_arg,
     static_program, templated_url_host, url_host,
@@ -125,9 +125,9 @@ pub struct ModelEndpoint {
 pub struct SecretUse {
     /// The `secrets.<name>` — never the value, never the lookup key.
     pub name: String,
-    /// The tasks whose effect or `model:` route it reaches, as the settled
-    /// secret flow found it (directly or through the taint): none for a
-    /// secret the body names but never sends.
+    /// The tasks whose effect or route it reaches (a `model:`, a `cwd:`, an
+    /// `images.save:`), as the settled secret flow found it (directly or
+    /// through the taint): none for a secret the body names but never sends.
     pub tasks: Vec<String>,
     /// Where it goes: the external destinations of the tasks whose effect
     /// it reaches (a provider id · a public host · an MCP tool id) — the
@@ -244,11 +244,12 @@ pub(crate) fn collect(wf: &RawWorkflow, flow: &FlowFacts) -> DataJourney {
         for name in secrets_named_by(t, &declared) {
             secret_reach.entry(name).or_default();
         }
-        for (name, via) in secrets_reaching(idx, t, flow) {
+        for (name, via) in secrets_reaching(idx, flow) {
             let reach = secret_reach.entry(name).or_default();
             let tasks = match via {
                 Via::Effect => &mut reach.effects,
                 Via::Route => &mut reach.routes,
+                Via::Path => &mut reach.paths,
             };
             tasks.insert(id.clone());
         }
@@ -562,6 +563,9 @@ struct Reach {
     effects: BTreeSet<String>,
     /// The `infer:`/`agent:` tasks whose `model:` route it reaches.
     routes: BTreeSet<String>,
+    /// The `agent:` tasks whose `images.save:` path it reaches: a file the
+    /// run writes on this machine, so a task of the secret's, and no flow out.
+    paths: BTreeSet<String>,
 }
 
 /// What of a task a secret reaches.
@@ -571,6 +575,8 @@ enum Via {
     Effect,
     /// Its `model:`: the route the run sends as the provider and model.
     Route,
+    /// An `agent:`'s `images.save:`: the file the run writes an image to.
+    Path,
 }
 
 /// Every DECLARED secret reaching one task, as the settled secret flow
@@ -579,24 +585,20 @@ enum Via {
 /// sanctions the send) or its route. An exec's `cwd:` is the directory the
 /// program runs in, which goes to that program like its command, so the
 /// journey counts it with the effect; an `infer:`/`agent:` `model:` goes to
-/// the provider. These are the facts the SECRETS verdict reads, so the
-/// destinations the journey names and the verdict cannot disagree: a secret
-/// a task binds or iterates over but never sends reaches nothing. NAMES only
-/// — law 13.
-fn secrets_reaching<'f>(
-    idx: usize,
-    task: &RawTask,
-    flow: &'f FlowFacts,
-) -> impl Iterator<Item = (String, Via)> + 'f {
-    let runs_a_program = matches!(task.action, RawAction::Exec(_));
+/// the provider; an `agent:`'s `images.save:` names a file the run writes
+/// here, a task of the secret's with no destination. These are the facts the
+/// SECRETS verdict reads, so the destinations the journey names and the
+/// verdict cannot disagree: a secret a task binds or iterates over but never
+/// sends reaches nothing. NAMES only — law 13.
+fn secrets_reaching(idx: usize, flow: &FlowFacts) -> impl Iterator<Item = (String, Via)> + '_ {
     let effects = flow
         .effect_taints(idx)
         .map(|trace| (trace.secret.clone(), Via::Effect));
-    let routes = flow.route_taints(idx).map(move |trace| {
-        let via = if runs_a_program {
-            Via::Effect
-        } else {
-            Via::Route
+    let routes = flow.route_taints(idx).map(|(route, trace)| {
+        let via = match route {
+            Route::Model => Via::Route,
+            Route::WorkingDirectory => Via::Effect,
+            Route::ImageSave => Via::Path,
         };
         (trace.secret.clone(), via)
     });
@@ -641,7 +643,13 @@ fn secret_uses(
                 .flatten()
                 .cloned()
                 .collect();
-            let tasks: BTreeSet<String> = reach.effects.union(&reach.routes).cloned().collect();
+            let tasks: BTreeSet<String> = reach
+                .effects
+                .iter()
+                .chain(&reach.routes)
+                .chain(&reach.paths)
+                .cloned()
+                .collect();
             let consents = wf
                 .secrets
                 .iter()

@@ -293,12 +293,12 @@ fn a_flow_stopped_at_its_bound_fails_closed() {
     );
 }
 
-/// Every `model:` route as `(task, trace)`, in task order.
+/// Every route as `(task, trace)`, in task order.
 fn route_rows(wf: &RawWorkflow, f: &FlowFacts) -> Vec<(String, String)> {
     (0..wf.tasks.len())
         .flat_map(|i| {
             f.route_taints(i)
-                .map(move |trace| (wf.tasks[i].value.id.value.clone(), trace.render()))
+                .map(move |(_, trace)| (wf.tasks[i].value.id.value.clone(), trace.render()))
         })
         .collect()
 }

@@ -135,34 +135,30 @@ pub(super) fn scan_leaks(wf: &RawWorkflow, flow: &FlowFacts) -> Vec<SecretLeak> 
 }
 
 /// The route leaks of one task: a secret in an `infer:`/`agent:` `model:` (the
-/// provider and model the run calls) or in an `exec:` `cwd:` (the directory it
-/// spawns the program in) is refused whatever its `egress:`, since neither a
-/// model nor a directory is ever a secret.
+/// provider and model the run calls), in an `exec:` `cwd:` (the directory it
+/// spawns the program in) or in an `agent:` `images.save:` (the file it writes
+/// an image to) is refused whatever its `egress:`, since neither a model nor a
+/// path is ever a secret.
 fn route_leaks<'f>(
     task: &'f RawTask,
     idx: usize,
     flow: &'f FlowFacts,
 ) -> impl Iterator<Item = SecretLeak> + 'f {
-    use super::declass::LeakReason;
-    let (sink, reason) = match &task.action {
-        RawAction::Agent(_) => ("agent.model", LeakReason::ModelRoute),
-        RawAction::Exec(_) => ("exec.cwd", LeakReason::WorkingDirectory),
-        // Only an infer, agent or exec task has a route.
-        _ => ("infer.model", LeakReason::ModelRoute),
-    };
-    flow.route_taints(idx).map(move |trace| SecretLeak {
-        task: task.id.value.clone(),
-        secret: trace.secret.clone(),
-        sink,
-        sink_id: sink_id_of(&task.action),
-        trace: trace.render(),
-        reason: reason.clone(),
-    })
+    flow.route_taints(idx)
+        .map(move |(route, trace)| SecretLeak {
+            task: task.id.value.clone(),
+            secret: trace.secret.clone(),
+            sink: route.sink(&task.action),
+            sink_id: sink_id_of(&task.action),
+            trace: trace.render(),
+            reason: route.reason(),
+        })
 }
 
-/// The leaks of the two fields the run never renders a secret into, a task's
-/// `model:` and an `exec:`'s `cwd:` ([`LeakReason::ModelRoute`] ·
-/// [`LeakReason::WorkingDirectory`]), as [`crate::check`] reports them: the
+/// The leaks of the fields the run never renders a secret into, a task's
+/// `model:`, an `exec:`'s `cwd:` and an `agent:`'s `images.save:`
+/// ([`LeakReason::ModelRoute`] · [`LeakReason::WorkingDirectory`] ·
+/// [`LeakReason::ImageSavePath`]), as [`crate::check`] reports them: the
 /// same secret flow, every way a secret travels (a direct reference, a `with:`
 /// alias, a task output or `group.*` fold, a `for_each` item, an
 /// `on_error.recover` value, inside any template). The run reads them before it
@@ -175,6 +171,7 @@ fn route_leaks<'f>(
 ///
 /// [`LeakReason::ModelRoute`]: crate::LeakReason::ModelRoute
 /// [`LeakReason::WorkingDirectory`]: crate::LeakReason::WorkingDirectory
+/// [`LeakReason::ImageSavePath`]: crate::LeakReason::ImageSavePath
 #[must_use]
 pub fn secret_route_leaks(wf: &RawWorkflow) -> Vec<SecretLeak> {
     // The check's own wave order: the sweeps find the same leaks in any order,

@@ -768,6 +768,41 @@ fn a_literal_for_each_list_passes_its_fold_on_to_the_output() {
     assert_eq!(flows_to(&report), ["crm.example.com", "other.example.com"]);
 }
 
+/// The same literal list over one task's record, no fold: `hop`'s request was already judged
+/// with the item, its output was not.
+const LITERAL_LIST_OF_A_TASK: &str = r#"nika: list-of-a-task
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  hop:
+    with: { a: "${{ tasks.call_a.output }}" }
+    for_each: { items: ["${{ with.a }}"] }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/h", method: POST, body: "${{ item }}" } }
+  relay:
+    with: { legs: "${{ tasks.hop.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_literal_for_each_list_passes_a_task_read_on_to_the_output() {
+    let report = run(LITERAL_LIST_OF_A_TASK);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.a @ hop → item @ hop → \
+             tasks.hop.output → with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    assert_eq!(flows_to(&report), ["crm.example.com", "other.example.com"]);
+}
+
 /// `backup` loops over `call_a`'s record without sending an item, and recovers to the item.
 const RECOVER_TO_THE_ITEM: &str = r#"nika: recover-to-the-item
 secrets:

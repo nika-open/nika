@@ -44,9 +44,6 @@ const CODEX_VERSION_PIN: crate::probe::VersionPin = crate::probe::VersionPin::ne
 /// The product token the real CLI prints (`codex-cli 0.153.4`). A shim
 /// answering a bare number is not the seat it claims to be.
 const CODEX_PRODUCT: &str = "codex-cli";
-/// A `--version` is a millisecond operation; a probe that needs longer is a
-/// wrapper resolving something, not the seat answering.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Combined stdout + stderr a version probe may print.
 const MAX_PROBE_BYTES: usize = 64 * 1024;
 
@@ -137,6 +134,16 @@ pub enum InferGradeError {
         /// Spawn, timeout, exit, or JSONL detail.
         detail: String,
     },
+    /// An attestation probe started and did not answer inside the probe deadline: the
+    /// answer is unknown, never a refusal (NIK-385). The `infer:` verb reports it as the
+    /// transient session class (`NIKA-1804`), so a task's `retry:` replays it.
+    #[error("infer-grade seat `{seat}`: {detail}")]
+    Unanswered {
+        /// Seat id.
+        seat: &'static str,
+        /// The probe and the deadline it missed.
+        detail: String,
+    },
 }
 
 impl InferGradeError {
@@ -145,7 +152,7 @@ impl InferGradeError {
     pub fn witness(&self) -> &str {
         match self {
             Self::Refused { witness } => witness,
-            Self::Execution { detail, .. } => detail,
+            Self::Execution { detail, .. } | Self::Unanswered { detail, .. } => detail,
         }
     }
 }
@@ -155,7 +162,13 @@ impl nika_error::traits::NikaErrorCode for InferGradeError {
         match self {
             Self::Refused { .. } => nika_error::codes::NIKA_1800,
             Self::Execution { .. } => nika_error::codes::NIKA_430,
+            Self::Unanswered { .. } => nika_error::codes::NIKA_1804,
         }
+    }
+
+    /// Only the unanswered attestation may heal on retry: a refusal or a failed child never does.
+    fn is_transient(&self) -> bool {
+        matches!(self, Self::Unanswered { .. })
     }
 }
 
@@ -334,14 +347,15 @@ impl CodexExec {
                     self.command.display()
                 ))
             })?;
-        let output = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
+        let output = tokio::time::timeout(crate::probe::deadline(), child.wait_with_output())
             .await
-            .map_err(|_| {
-                refused(format!(
+            .map_err(|_| InferGradeError::Unanswered {
+                seat: "codex",
+                detail: format!(
                     "spawn-time attestation of `{}`: `{what}` did not answer in {}s",
                     self.command.display(),
-                    PROBE_TIMEOUT.as_secs()
-                ))
+                    crate::probe::deadline().as_secs()
+                ),
             })?
             .map_err(|e| execution(format!("{what} probe wait: {e}")))?;
         if output.stdout.len() > MAX_PROBE_BYTES || output.stderr.len() > MAX_PROBE_BYTES {

@@ -14,14 +14,15 @@
 //! identity before dialect, on one process.
 //!
 //! A judged start keeps the standalone probe's failure classes, so a task's
-//! retry policy reads the same facts as before. An adapter that does not
-//! answer within [`START_TIMEOUT`], closes its pipe before answering,
-//! answers as another program or sits outside its pin is
-//! [`HarnessError::Unavailable`], which no retry heals. A transport error
+//! retry policy reads the same facts as before. An adapter that closes its
+//! pipe before answering, answers as another program or sits outside its pin
+//! is [`HarnessError::Unavailable`], which no retry heals. An adapter that
+//! does not answer within the probe deadline ([`crate::probe::deadline`]) is
+//! unanswered, like every probe past it: a transient
+//! [`HarnessError::Session`], as the same silence already is under a shorter
+//! frame deadline. A transport error
 //! stays a session death. Without a judge (a lent transport, a scripted
 //! peer) nothing changes: the answer is awaited under the idle deadline.
-//!
-//! [`START_TIMEOUT`]: crate::client::start::START_TIMEOUT
 
 use std::time::Duration;
 
@@ -35,10 +36,12 @@ use super::{
 use crate::authoring::acp::Milestone;
 use crate::wire::{self, InitializeParams, NewSessionParams};
 
-/// How long a judged session waits for its `initialize` answer: the bound the
-/// standalone probe gave the same question (a cold wrapper resolve fits in it;
-/// a hung adapter is unavailable, never a hang).
-pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a judged session waits for its `initialize` answer: the probe
+/// deadline the standalone probe gives the same question (a cold wrapper
+/// resolve fits in it; a silent adapter is unanswered, never a hang).
+pub(crate) fn start_timeout() -> Duration {
+    crate::probe::deadline()
+}
 
 /// A judgment of an `initialize` result: admitted, or the refusal.
 type Judgment = dyn Fn(&Value) -> Result<(), HarnessError> + Send;
@@ -142,14 +145,17 @@ where
         let Some(start) = self.start.take() else {
             return self.await_response(ID_INITIALIZE, "initialize").await;
         };
-        let bound = START_TIMEOUT.min(self.idle);
+        let bound = start_timeout().min(self.idle);
         let answer = self.await_response::<Value>(ID_INITIALIZE, "initialize");
         let value = match tokio::time::timeout(bound, answer).await {
             Err(_) => {
-                return Err(start.unavailable(&format!(
-                    "the initialize handshake did not answer in {}s",
-                    bound.as_secs()
-                )));
+                return Err(HarnessError::Session {
+                    reason: format!(
+                        "adapter `{}`: the initialize handshake did not answer in {}s",
+                        start.adapter,
+                        bound.as_secs()
+                    ),
+                });
             }
             Ok(Err(HarnessError::Session { reason })) if reason == PIPE_CLOSED => {
                 return Err(

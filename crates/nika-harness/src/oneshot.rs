@@ -28,7 +28,6 @@ use crate::probe::VersionPin;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_PROBE_BYTES: usize = 64 * 1024;
 
 /// Which one-shot CLI a seat runs.
@@ -202,14 +201,15 @@ impl OneShotExec {
                     self.command.display()
                 ))
             })?;
-        let output = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
+        let output = tokio::time::timeout(crate::probe::deadline(), child.wait_with_output())
             .await
-            .map_err(|_| {
-                refused(format!(
+            .map_err(|_| InferGradeError::Unanswered {
+                seat: self.cli.seat(),
+                detail: format!(
                     "spawn-time attestation of `{}`: `--version` did not answer in {}s",
                     self.command.display(),
-                    PROBE_TIMEOUT.as_secs()
-                ))
+                    crate::probe::deadline().as_secs()
+                ),
             })?
             .map_err(|e| self.execution(format!("version probe wait: {e}")))?;
         if output.stdout.len() > MAX_PROBE_BYTES || output.stderr.len() > MAX_PROBE_BYTES {
@@ -826,6 +826,31 @@ mod tests {
             .await
             .expect_err("an error answer refuses");
         assert!(err.to_string().contains("without any message"), "{err}");
+    }
+
+    /// NIK-385 · an attestation that started and did not answer inside the probe deadline is
+    /// unanswered, never a refusal: the clock is paused, so the 30 s pass at once.
+    #[tokio::test(start_paused = true)]
+    async fn an_attestation_past_the_deadline_is_unanswered_not_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "#!/bin/sh\nexec sleep 600\n").expect("script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let err = OneShotExec::with_command(Cli::Claude, &bin)
+            .run(HarnessInferRequest::new("q", "claude-code/default"))
+            .await
+            .expect_err("--version never answers");
+        let InferGradeError::Unanswered { seat, detail } = &err else {
+            panic!("an unanswered attestation, got {err:?}");
+        };
+        assert_eq!(*seat, Cli::Claude.seat());
+        assert_eq!(
+            *detail,
+            format!(
+                "spawn-time attestation of `{}`: `--version` did not answer in 30s",
+                bin.display()
+            )
+        );
     }
 
     #[tokio::test]

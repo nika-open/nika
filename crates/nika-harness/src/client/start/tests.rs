@@ -174,28 +174,37 @@ async fn a_release_outside_the_pin_is_unavailable_before_any_session() {
     }
 }
 
-/// An adapter that reads `initialize` and never answers is unavailable at the
-/// start bound, well before the five-minute frame deadline.
+/// An adapter that reads `initialize` and never answers is unanswered at the
+/// start bound, well before the five-minute frame deadline: unknown and
+/// transient (a loaded machine), never the absent adapter a retry cannot heal.
 #[tokio::test(start_paused = true)]
-async fn a_silent_adapter_is_unavailable_at_the_start_bound() {
+async fn a_silent_adapter_is_unanswered_and_transient_at_the_start_bound() {
     let started = tokio::time::Instant::now();
-    let reason = unavailable(
-        judged(IDLE, |mut r, w| async move {
-            let init = read(&mut r).await.expect("initialize");
-            assert_eq!(init["method"], "initialize");
-            // Hold the pipe open and say nothing; the client gives up first.
-            assert!(read(&mut r).await.is_none(), "nothing follows");
-            drop(w);
-        })
-        .await,
+    let error = judged(IDLE, |mut r, w| async move {
+        let init = read(&mut r).await.expect("initialize");
+        assert_eq!(init["method"], "initialize");
+        // Hold the pipe open and say nothing; the client gives up first.
+        assert!(read(&mut r).await.is_none(), "nothing follows");
+        drop(w);
+    })
+    .await
+    .expect_err("silent past the start bound");
+    assert!(error.is_transient(), "a plain retry: replays it: {error:?}");
+    assert_eq!(
+        nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+        "NIKA-1804"
     );
+    let HarnessError::Session { reason } = error else {
+        panic!("an unanswered start, got {error:?}")
+    };
     assert_eq!(
         reason,
         "adapter `codex`: the initialize handshake did not answer in 30s"
     );
     let waited = started.elapsed();
     assert!(
-        waited >= super::START_TIMEOUT && waited < super::START_TIMEOUT + Duration::from_secs(1),
+        waited >= super::start_timeout()
+            && waited < super::start_timeout() + Duration::from_secs(1),
         "bounded by the start timeout, not the frame deadline: {waited:?}"
     );
 }

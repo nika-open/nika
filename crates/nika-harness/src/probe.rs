@@ -59,6 +59,51 @@ pub struct AdapterProbeRow {
 /// read a signed-in seat as signed out.
 const LOGIN_CHECK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// The probe deadline when [`DEADLINE_ENV`] does not set one.
+pub(crate) const DEFAULT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The machine's own probe deadline, in whole seconds from 1 to [`MAX_DEADLINE_SECS`]. A
+/// deadline is a fact of the machine (its load), not of a project or a workflow: it changes
+/// no check verdict and no workflow's meaning, and every entry (a run, a session, the
+/// language server) reads it without a flag to thread. A value outside the range is ignored.
+pub(crate) const DEADLINE_ENV: &str = "NIKA_HARNESS_PROBE_SECS";
+
+/// The longest probe deadline [`DEADLINE_ENV`] may set: ten minutes.
+const MAX_DEADLINE_SECS: u64 = 600;
+
+/// How long an identity or profile probe of a seat may take before its answer is unknown: a
+/// `--version`, a command-shape help page, the Codex profile listings, a direct one-shot's
+/// attestation and the `initialize` handshake share it. On a loaded machine (load 27 to 41 on
+/// 12 cores) the Codex listing answered in 1.4 to 3.8 s and sometimes past the former 10 s.
+/// A probe that misses it is unanswered, never absent: [`HarnessError::Session`], the
+/// transient class the idle deadline already speaks, so a task's plain `retry:` replays it; a
+/// binary that cannot start stays [`HarnessError::Unavailable`]. [`DEFAULT_DEADLINE`] unless
+/// [`DEADLINE_ENV`] sets it; read once per process.
+pub(crate) fn deadline() -> std::time::Duration {
+    static DEADLINE: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+    *DEADLINE.get_or_init(|| {
+        #[allow(clippy::disallowed_methods)] // the deadline's own boundary, as the host switch's
+        let set = std::env::var(DEADLINE_ENV).ok();
+        deadline_from(set.as_deref())
+    })
+}
+
+/// The deadline [`DEADLINE_ENV`]'s value sets: whole seconds from 1 to [`MAX_DEADLINE_SECS`],
+/// or [`DEFAULT_DEADLINE`] for an unset, malformed or out-of-range value.
+pub(crate) fn deadline_from(set: Option<&str>) -> std::time::Duration {
+    set.and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|secs| (1..=MAX_DEADLINE_SECS).contains(secs))
+        .map_or(DEFAULT_DEADLINE, std::time::Duration::from_secs)
+}
+
+/// The failure a probe that did not answer inside [`deadline`] leaves (`what` names the probe
+/// and the adapter): unknown and transient, never « not installed ».
+pub(crate) fn unanswered(what: &str) -> HarnessError {
+    HarnessError::Session {
+        reason: format!("{what} did not answer in {}s", deadline().as_secs()),
+    }
+}
+
 /// What a seat's own login command answered, read from its exit code alone
 /// (never a credential read). Only an answer is a verdict: a check that did
 /// not answer in time, or could not run here, leaves the sign-in unknown.
@@ -707,6 +752,21 @@ pub fn judge_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// NIK-385 · one probe deadline for every probe: 30 s unless the machine sets whole
+    /// seconds from 1 to 600 in `NIKA_HARNESS_PROBE_SECS`; any other value keeps the default.
+    #[test]
+    fn the_probe_deadline_is_thirty_seconds_unless_the_machine_sets_it() {
+        let secs = |set: Option<&str>| deadline_from(set).as_secs();
+        assert_eq!(DEADLINE_ENV, "NIKA_HARNESS_PROBE_SECS");
+        assert_eq!(secs(None), 30);
+        assert_eq!(secs(Some("90")), 90);
+        assert_eq!(secs(Some(" 45 ")), 45);
+        assert_eq!((secs(Some("1")), secs(Some("600"))), (1, 600));
+        for ignored in ["0", "601", "-5", "1.5", "30s", ""] {
+            assert_eq!(secs(Some(ignored)), 30, "{ignored:?}");
+        }
+    }
 
     /// A Command-auth row is configured ONLY by its login command's
     /// answer (the S18 shape of 0.118.7: an installed codex was a

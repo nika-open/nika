@@ -173,13 +173,26 @@ impl AcpOneShot {
         request: HarnessRequest,
         timeout: Option<Duration>,
     ) -> Result<HarnessOutcome, HarnessError> {
-        let harness = crate::seat_from_id(self.seat)
+        let harness = self.transport()?;
+        self.run_over(&harness, request, timeout).await
+    }
+
+    /// The route's registry adapter under its completion profile: the transport
+    /// [`Self::run`] spawns. A caller that keeps it for a run and hands it to
+    /// [`Self::run_over`] proves the adapter once for every later turn of that run
+    /// (its first good proof is kept, a failed or unanswered one is not).
+    ///
+    /// # Errors
+    ///
+    /// No registry row builds the adapter ([`HarnessError::Unavailable`]), or the
+    /// adapter has no audited completion profile ([`HarnessError::Refused`]).
+    pub fn transport(&self) -> Result<crate::SpawnedHarness, HarnessError> {
+        crate::seat_from_id(self.seat)
             .map_err(|reason| HarnessError::Unavailable { reason })?
             .ok_or_else(|| HarnessError::Unavailable {
                 reason: format!("no registry row builds the `{}` ACP adapter", self.seat),
             })?
-            .for_completion(Completion::Infer)?;
-        self.run_over(&harness, request, timeout).await
+            .for_completion(Completion::Infer)
     }
 
     /// [`Self::run`] over a lent transport, which MUST drive the completion

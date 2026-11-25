@@ -1,20 +1,22 @@
-- **A `group.<name>` read now carries the secrets its members' records
-  carry.** Since 0.109.0, the release that introduced `group:`, the secret
-  flow of `nika check` followed `tasks.<id>` reads and not `group.<name>`
-  reads. A task that received a secret and joined a group could have its
-  record sent anywhere by a task that folded the group: the same file that
-  `${{ tasks.<id>.output }}` made `NIKA-SEC-006` checked clean with
-  `${{ group.<name> }}`, and the journey line said no secret reaches an
-  external destination. The fold is now judged as the same records read one
-  task at a time, through `with:` aliases, `for_each:` items and members
-  that fold another group: a secret sent where its `egress:` does not
-  allow is `NIKA-SEC-006` naming the secret, the task and the path, and the
-  journey lists the destination. A group none of whose members received a
-  secret stays clean, and a destination the secret's `egress:` allows stays
-  allowed. A task's `on_error.recover:` value now rides its record the same
-  way: since 0.90.0, the first release with the secret flow check, a
-  recovered value that read a secret, or a record that carried one, left
-  the task's output clean, so a later task could send it anywhere. The run
-  resolves a secret in `recover:` in clear into the record. A secret sent
-  on from a recovered record is now `NIKA-SEC-006` with the path through
-  the recover; the recover itself is no destination and gets no finding.
+- **`nika check` follows a secret through a group fold, a recovered value
+  and every secret a task's output carries.** The secret flow of `nika
+  check` lost a secret on three paths, so a file that sends a secret where
+  its `egress:` rules do not allow could check clean. A
+  `${{ group.<name> }}` read carried none of its members' secrets: `check`
+  misjudged it from 0.109.0, the release that introduced `group:`, and the
+  run could send the fold from 0.121.0 (before that the read failed at run
+  with `NIKA-VAR-001`). Since 0.90.0, the first release with the secret flow
+  check, `check` did not read a task's `on_error.recover:` value, which the
+  run renders with secrets resolved in clear and makes the task's output.
+  Since 0.90.0 too, a task's output passed one secret on: an output that
+  held two gave later tasks and `outputs:` only the first. Each path is now
+  followed: a fold carries what each member's output carries, through
+  `with:` aliases, `for_each:` items, written as an expression or as a
+  literal list, and members that fold another group; a recovered output
+  carries what its value reads, wherever the task it reads runs, including
+  two tasks that recover from each other; an output keeps one path per
+  secret, the most direct one, and every request (`NIKA-SEC-006`), every
+  `outputs:` entry (`NIKA-SEC-007`, one finding per secret) and the data
+  journey read all of them. A group none of whose members received a secret
+  stays clean, a destination the `egress:` rules allow stays allowed, and
+  the recover itself is no destination.

@@ -11,32 +11,51 @@
 //! - **propagation** — a `with:` binding that references a secret makes
 //!   that `with.K` slot secret WITHIN its task; an `exec`/`invoke` task
 //!   whose effect-carrying fields reference a secret (directly, via a
-//!   `with:` alias, or via a tainted upstream output) makes its OUTPUT
+//!   `with:` alias, or via a tainted upstream record) makes its OUTPUT
 //!   secret (the captured stdout/tool-result can embed the value);
 //!   `infer`/`agent` outputs are NOT tainted from a prompt secret — the
 //!   provider is operator-chosen and trusted by that choice, and the model
-//!   response is not a verbatim echo (ADR-092 carve-out).
+//!   response is not a verbatim echo (ADR-092 carve-out). A task's
+//!   `on_error.recover:` value replaces its output whatever the verb, so the
+//!   record also carries what that value reads; a `group.<name>` fold
+//!   carries what each member record carries.
 //! - **sinks** — a secret reaching an `exec`/`invoke` effect is a LEAK;
 //!   a secret reaching the workflow `outputs:` is an EGRESS (the value
 //!   leaves the run as the return).
 //!
-//! **Soundness.** Because the dependency graph is acyclic BY CONSTRUCTION
-//! (ADR-002 · cycle = `NIKA-DAG-001`), a single pass in topological order
-//! computes the least fixpoint of this monotone propagation — every slot a
-//! task reads was finalized in an earlier wave. No iteration to convergence
-//! is needed; the topological order IS the fixpoint order.
+//! Every slot holds one trace PER SECRET, the most direct one found (fewest
+//! hops; a tie keeps the trace read first), so a record that carries two
+//! secrets passes both on and each sink judges each of them.
+//!
+//! **Soundness.** The scheduling graph is acyclic BY CONSTRUCTION (ADR-002 ·
+//! cycle = `NIKA-DAG-001`), but it does not order every read: a `recover:`
+//! read is no execution-order edge (spec 05 §recover · the run awaits the
+//! source), so a recover can read a task later in its own wave, in a later
+//! wave, or one that recovers from it in turn. One pass in topological order
+//! would judge such a record before the record it reads is known. The pass
+//! therefore repeats its sweep until a sweep moves no record: no new
+//! (task, secret) pair and no shorter trace. Propagation only adds pairs and
+//! only shortens traces, so it settles, and it settles within
+//! `tasks × secrets` sweeps (a most direct trace crosses each (task, secret)
+//! pair at most once, and each sweep settles one more pair of it); the loop is
+//! bounded by that count plus one. Findings are read once, from the settled
+//! facts.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use nika_schema::Spanned;
 use nika_schema::expression::{NamespaceRef, expr_refs, scan_templates};
-use nika_schema::raw::{RawAction, RawTask, RawWorkflow};
+use nika_schema::raw::{ForEachValue, RawAction, RawTask, RawWorkflow};
 use nika_schema::types::{EgressRule, OnErrorAction, OutputDecl, Permits};
 
 use super::declass;
 
+/// Secret name → the most direct trace of that secret reaching one slot.
 type Taints = BTreeMap<String, TaintTrace>;
 type WithTaints<'a> = BTreeMap<&'a str, Taints>;
+/// Task index → every secret its record carries.
+type Records = BTreeMap<usize, Taints>;
 
 /// One link in a [`TaintTrace`] hop chain — a structurally-shared cons-list.
 /// `via` prepends a link in O(1) (an `Arc` bump of the shared tail), never a
@@ -55,7 +74,7 @@ struct Hop {
 /// `tasks.a.output` ← `secrets.api_key` »).
 ///
 /// The hop chain is an `Arc` cons-list (the private `Hop`): extending or cloning a
-/// trace is O(1), so the IFC pass can carry one trace per tainted slot across
+/// trace is O(1), so the IFC pass can carry one trace per secret per slot across
 /// up to `MAX_TASKS` waves without the O(n²) memory + copy blow-up a
 /// per-trace `Vec<String>` caused (a 0.89 MiB workflow → 5.2 GB · 2026-06-16
 /// Gate-11 finding). The reachable hops are unchanged; only the storage is.
@@ -66,6 +85,8 @@ pub struct TaintTrace {
     pub secret: String,
     /// The most-recent hop; walk `prev` to reach the source.
     head: Arc<Hop>,
+    /// The hops between the source and `head`: what « most direct » compares.
+    hops: usize,
 }
 
 impl TaintTrace {
@@ -77,6 +98,7 @@ impl TaintTrace {
                 label: format!("secrets.{secret}").into(),
                 prev: None,
             }),
+            hops: 0,
         }
     }
 
@@ -89,6 +111,8 @@ impl TaintTrace {
                 label: hop.into(),
                 prev: Some(Arc::clone(&self.head)),
             }),
+            // One allocated hop each: the count cannot outgrow memory, let alone `usize`.
+            hops: self.hops.saturating_add(1),
         }
     }
 
@@ -107,50 +131,53 @@ impl TaintTrace {
     }
 }
 
-/// The fact base produced by the single topological pass — the taint slice
-/// of the unified flow IR (ADR-092 #3). Reports read from this; they never
+/// The fact base produced by the settled pass — the taint slice of the
+/// unified flow IR (ADR-092 #3). Reports read from this; they never
 /// re-walk the AST for taint.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct FlowFacts {
-    /// Task index → the taint reaching its EFFECT (`None` = clean). This
-    /// is the PROPAGATION fact — it feeds `output_taint` regardless of any
-    /// egress sanction (a sanctioned egress still lets the captured output
-    /// embed the secret · the sanction clears the SEND, not the capture).
-    /// The REPORTABLE leak is [`Self::effect_leak`] (sanction-filtered).
-    effect_taint: BTreeMap<usize, TaintTrace>,
+    /// Task index → every secret reaching its EFFECT, one most direct trace
+    /// each (absent = clean). This is the PROPAGATION fact — an exec/invoke
+    /// output carries each of them regardless of any egress sanction (a
+    /// sanctioned egress still lets the captured output embed the secret ·
+    /// the sanction clears the SEND, not the capture). The REPORTABLE leaks
+    /// are `effect_leaks` (sanction-filtered).
+    effect_taint: BTreeMap<usize, Taints>,
     /// Task index → every UNSANCTIONED secret edge reaching that effect.
-    /// Kept separate from the singular propagation fact: one captured
-    /// output still carries the historical first trace, while the sink
-    /// judge must assess every secret independently.
     effect_leaks: BTreeMap<usize, Taints>,
-    /// Task index → the taint of its OUTPUT (`tasks.<id>.output`).
-    output_taint: BTreeMap<usize, TaintTrace>,
-    /// Task index → every secret its `on_error.recover:` value reads. The recovered value
-    /// replaces the output (spec 05 §recovery), so the record carries each of them.
-    recover_taint: BTreeMap<usize, Taints>,
-    /// Workflow `outputs:` entry name → the taint reaching it (egress).
-    egress: BTreeMap<String, TaintTrace>,
+    /// Task index → every secret its RECORD carries (`tasks.<id>.output`, and
+    /// each `group.<name>` fold it joins): what an exec/invoke effect saw, and
+    /// what its `on_error.recover:` value reads (the recovered value replaces
+    /// the output whatever the verb · spec 05 §recovery).
+    output_taint: Records,
+    /// Workflow `outputs:` entry name → every secret reaching it unsanctioned
+    /// (egress).
+    egress: BTreeMap<String, Taints>,
 }
 
 impl FlowFacts {
-    /// The taint reaching `task`'s effect, if any — the PROPAGATION fact
-    /// (drives output taint · independent of any egress sanction).
+    /// One secret reaching `task`'s effect, if any — the first by name, with
+    /// its most direct trace. The PROPAGATION fact (independent of any egress
+    /// sanction).
     #[must_use]
     pub fn effect_taint(&self, task: usize) -> Option<&TaintTrace> {
-        self.effect_taint.get(&task)
+        self.effect_taint.get(&task)?.values().next()
     }
 
-    /// The first UNSANCTIONED effect leak of `task`, if any. Preserves the
-    /// historical first propagation trace when that edge is uncleared;
-    /// otherwise returns the first independently judged uncleared edge.
-    #[must_use]
-    pub fn effect_leak(&self, task: usize) -> Option<&TaintTrace> {
-        let leaks = self.effect_leaks.get(&task)?;
+    /// Every secret reaching `task`'s effect, one most direct trace each, by
+    /// secret name.
+    pub(crate) fn effect_taints(&self, task: usize) -> impl Iterator<Item = &TaintTrace> {
         self.effect_taint
             .get(&task)
-            .filter(|trace| leaks.contains_key(trace.secret.as_str()))
-            .or_else(|| leaks.values().next())
+            .into_iter()
+            .flat_map(BTreeMap::values)
+    }
+
+    /// The first UNSANCTIONED effect leak of `task` by secret name, if any.
+    #[must_use]
+    pub fn effect_leak(&self, task: usize) -> Option<&TaintTrace> {
+        self.effect_leaks.get(&task)?.values().next()
     }
 
     /// Every independently judged UNSANCTIONED edge at `task`'s effect.
@@ -161,13 +188,14 @@ impl FlowFacts {
             .flat_map(BTreeMap::values)
     }
 
-    /// The taint reaching one of `task`'s `on_finally` cleanup effects,
-    /// with the sink kind (`exec`/`invoke`) and the cleanup's index within
-    /// `on_finally` (the declassification check reads that exact action).
-    /// Every workflow-output egress (name → trace), sorted by name.
+    /// Every workflow-output egress, one row per (entry, secret), sorted by
+    /// entry name then secret name.
     #[must_use]
     pub fn egresses(&self) -> Vec<(&str, &TaintTrace)> {
-        self.egress.iter().map(|(k, v)| (k.as_str(), v)).collect()
+        self.egress
+            .iter()
+            .flat_map(|(name, taints)| taints.values().map(move |trace| (name.as_str(), trace)))
+            .collect()
     }
 }
 
@@ -175,9 +203,9 @@ impl FlowFacts {
 /// order (reuse the analyzer's `topo_waves` — same order the engine runs).
 #[must_use]
 pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts {
-    let declared: BTreeSet<&str> = wf.secrets.iter().map(|(n, _)| n.value.as_str()).collect();
+    let scope = Scope::of(wf);
     let mut facts = FlowFacts::default();
-    if declared.is_empty() {
+    if scope.declared.is_empty() {
         return facts; // no secrets declared → nothing can be tainted
     }
     // The per-secret egress policy (declass · ADR-092) — looked up by name
@@ -188,96 +216,82 @@ pub(super) fn analyze_flow(wf: &RawWorkflow, waves: &[Vec<usize>]) -> FlowFacts 
         .map(|(n, s)| (n.value.as_str(), s.value.egress.as_slice()))
         .collect();
     let permits = wf.permits.as_ref().map(|p| &p.value);
-    let names = Names {
-        id_of: wf
-            .tasks
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (t.value.id.value.as_str(), i))
-            .collect(),
-        groups: crate::analyzer::edges::group_members(&wf.tasks),
-    };
+    let reads: Vec<Reads<'_>> = wf
+        .tasks
+        .iter()
+        .map(|t| Reads::of(&t.value, &scope))
+        .collect();
 
-    // Single topological pass = the least fixpoint (acyclic ⇒ no iteration).
-    for wave in waves {
-        for &idx in wave {
-            let task = &wf.tasks[idx].value;
-            propagate_task(
-                idx, task, &declared, &egress_of, permits, &names, &mut facts,
-            );
-        }
-    }
-
-    // …then the UNWIND tasks, which carry effects but never enter wave
-    // assignment (spec 03 · E_f never schedules). The waves are this
-    // pass's ORDERING device, not its census: a task missing from them
-    // is a task no judge sees, and an unseen effect carrier is exactly
-    // the hole `unwind` was minted to close. They run after their
+    // The sweep order: the waves, then the UNWIND tasks, which carry effects
+    // but never enter wave assignment (spec 03 · E_f never schedules). The
+    // waves are this pass's ORDERING device, not its census: a task missing
+    // from them is a task no judge sees, and an unseen effect carrier is
+    // exactly the hole `unwind` was minted to close. They run after their
     // producer settles, so appending them here IS their order.
-    //
-    // This replaces the old `on_finally` special case: the compensation
-    // is gone because the units are ordinary tasks now, but the ORDERING
-    // still has to name them.
     let seen: BTreeSet<usize> = waves.iter().flatten().copied().collect();
-    for idx in 0..wf.tasks.len() {
-        if seen.contains(&idx) {
-            continue;
-        }
-        let task = &wf.tasks[idx].value;
-        propagate_task(
-            idx, task, &declared, &egress_of, permits, &names, &mut facts,
+    let order: Vec<usize> = waves
+        .iter()
+        .flatten()
+        .copied()
+        .chain((0..wf.tasks.len()).filter(|idx| !seen.contains(idx)))
+        .collect();
+    let (records, effects) = settle(&wf.tasks, &order, &reads, scope.declared.len());
+
+    // The findings read the settled facts, once.
+    for (idx, effect) in effects {
+        record_effect_leaks(
+            idx,
+            &wf.tasks[idx].value,
+            &effect,
+            &egress_of,
+            permits,
+            &mut facts,
         );
+        facts.effect_taint.insert(idx, effect);
     }
-
-    // Egress: a workflow `outputs:` entry referencing a tainted slot —
-    // UNLESS the owning secret declassifies the workflow boundary itself
-    // (`egress: [{ to: "outputs" }]` · spec 01-envelope §egress · the DLM
-    // owner's act, same as every sink; absent = default-deny, the report
-    // stands). Sink-only and secret-SPECIFIC: it clears nothing but THIS
-    // secret's taints reaching `outputs:` — never a send. An entry that
-    // reads a declared secret ITSELF is reported whatever the rule, rooted
-    // at THAT secret: the engine masks a secret's own value on every
-    // surface it writes, the outputs export included, so the rule
-    // declassifies what is DERIVED from a secret, never the value (E39 N7).
-    for (name, decl) in &wf.outputs {
-        let refs = refs_in_str(decl_value(decl));
-        let own = refs.iter().find_map(|r| match r {
-            NamespaceRef::Secrets(s) if declared.contains(s.as_str()) => Some(s.clone()),
-            _ => None,
-        });
-        if let Some(secret) = own {
-            let trace = TaintTrace::source(&secret).via(OWN_VALUE.to_owned());
-            facts.egress.insert(name.value.clone(), trace);
-        } else if let Some(trace) = taint_of_refs(refs, &declared, None, &names, &facts) {
-            let egress = egress_of.get(trace.secret.as_str()).copied().unwrap_or(&[]);
-            if !egress.iter().any(|rule| rule.to == "outputs") {
-                let trace = trace.via("outputs".to_owned());
-                facts.egress.insert(name.value.clone(), trace);
-            }
-        }
-    }
-
+    facts.output_taint = records;
+    judge_outputs(wf, &scope, &egress_of, &mut facts);
     facts
 }
 
-/// How a reference names the tasks it reads: `tasks.<id>` one task, `group.<name>` every task
-/// that declares `group: <name>` (spec 03 §group · the fold holds each member's record, so it
-/// carries whatever a member's output carries).
-struct Names<'a> {
-    id_of: BTreeMap<&'a str, usize>,
-    groups: BTreeMap<&'a str, Vec<usize>>,
-}
-
-impl Names<'_> {
-    /// The tasks whose records `r` reads; empty for any other reference.
-    fn producers(&self, r: &NamespaceRef) -> &[usize] {
-        match r {
-            NamespaceRef::Tasks { id, .. } => self
-                .id_of
-                .get(id.as_str())
-                .map_or(&[], std::slice::from_ref),
-            NamespaceRef::Group(name) => self.groups.get(name.as_str()).map_or(&[], Vec::as_slice),
-            _ => &[],
+/// Egress: every secret a workflow `outputs:` entry carries —
+/// UNLESS that secret declassifies the workflow boundary itself
+/// (`egress: [{ to: "outputs" }]` · spec 01-envelope §egress · the DLM
+/// owner's act, same as every sink; absent = default-deny, the report
+/// stands). Sink-only and secret-SPECIFIC: it clears nothing but THIS
+/// secret's taints reaching `outputs:` — never a send, never another secret
+/// the same entry carries. A secret the entry reads ITSELF is reported
+/// whatever the rule, rooted at THAT secret: the engine masks a secret's own
+/// value on every surface it writes, the outputs export included, so the rule
+/// declassifies what is DERIVED from a secret, never the value (E39 N7). One
+/// row per secret, as a sink with two unsanctioned secrets is two leaks.
+fn judge_outputs(
+    wf: &RawWorkflow,
+    scope: &Scope<'_>,
+    egress_of: &BTreeMap<&str, &[EgressRule]>,
+    facts: &mut FlowFacts,
+) {
+    for (name, decl) in &wf.outputs {
+        let reads = scope.resolve(refs_in_str(decl_value(decl)));
+        let mut reached = Taints::new();
+        for (secret, trace) in carried(&reads, None, None, &facts.output_taint) {
+            let own = reads
+                .iter()
+                .any(|r| matches!(r, Read::Secret(s) if *s == secret));
+            let cleared = || {
+                egress_of
+                    .get(secret.as_str())
+                    .is_some_and(|rules| rules.iter().any(|rule| rule.to == "outputs"))
+            };
+            if own {
+                let trace = TaintTrace::source(&secret).via(OWN_VALUE.to_owned());
+                reached.insert(secret, trace);
+            } else if !cleared() {
+                reached.insert(secret, trace.via("outputs".to_owned()));
+            }
+        }
+        if !reached.is_empty() {
+            facts.egress.insert(name.value.clone(), reached);
         }
     }
 }
@@ -291,200 +305,357 @@ pub(crate) fn is_own_value(rendered: &str) -> bool {
     rendered.ends_with(OWN_VALUE)
 }
 
-/// Compute one task's `with`-slot taints, effect taint, and output taint,
-/// recording them in `facts`. Runs once, in topological order, so every
-/// upstream `tasks.U.output` taint it reads is already final.
-fn propagate_task(
-    idx: usize,
-    task: &RawTask,
-    declared: &BTreeSet<&str>,
-    egress_of: &BTreeMap<&str, &[EgressRule]>,
-    permits: Option<&Permits>,
-    names: &Names<'_>,
-    facts: &mut FlowFacts,
-) {
-    // 1. `with:` slot taints (scoped to this task). A with-value referencing
-    //    a secret / a tainted upstream output taints that with-key.
-    let mut with_taint: BTreeMap<&str, TaintTrace> = BTreeMap::new();
-    for (key, value) in &task.with {
-        if let Some(trace) = taint_of_refs(refs_in_json(&value.value), declared, None, names, facts)
-        {
-            with_taint.insert(
-                key.value.as_str(),
-                trace.via(format!("with.{} @ {}", key.value, task.id.value)),
-            );
+/// What a reference can name in this workflow: the declared secrets, each
+/// task by id, and each group's members in declaration order (spec 03 §group
+/// · the fold holds each member's record, so it carries whatever a member's
+/// record carries).
+struct Scope<'a> {
+    declared: BTreeSet<&'a str>,
+    id_of: BTreeMap<&'a str, usize>,
+    groups: BTreeMap<&'a str, Vec<usize>>,
+}
+
+impl<'a> Scope<'a> {
+    fn of(wf: &'a RawWorkflow) -> Self {
+        Self {
+            declared: wf.secrets.iter().map(|(n, _)| n.value.as_str()).collect(),
+            id_of: wf
+                .tasks
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (t.value.id.value.as_str(), i))
+                .collect(),
+            groups: crate::analyzer::edges::group_members(&wf.tasks),
         }
     }
 
-    // 2. `for_each` item taint: if the collection source references a tainted
-    //    slot, the loop-local `item` carries that taint within the task.
-    let item_taint = task.for_each.as_ref().and_then(|f| match &f.value {
-        nika_schema::raw::ForEachValue::Expression(src) => {
-            taint_of_refs(refs_in_str(src), declared, Some(&with_taint), names, facts)
-                .map(|t| t.via(format!("item @ {}", task.id.value)))
-        }
-        nika_schema::raw::ForEachValue::List(_) => None, // literal list = no taint
-        #[allow(
-            clippy::unreachable,
-            reason = "non_exhaustive future variant — enum and checker ship together; fail loud beats silently-wrong output"
-        )]
-        _ => unreachable!("unknown for_each form"),
-    });
-    let (with_taints, item_taints) = task_local_taints(task, declared, names, facts);
+    /// Each reference resolved to where a secret it reads would come from; a
+    /// reference that can carry none (an undeclared secret, a constant, an
+    /// input) is dropped.
+    fn resolve(&self, refs: Vec<NamespaceRef>) -> Vec<Read> {
+        refs.into_iter()
+            .filter_map(|r| match r {
+                NamespaceRef::Secrets(name) if self.declared.contains(name.as_str()) => {
+                    Some(Read::Secret(name))
+                }
+                NamespaceRef::With(key) => Some(Read::With(key)),
+                NamespaceRef::Item => Some(Read::Item),
+                r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
+                    let producers = self.producers(&r);
+                    (!producers.is_empty()).then(|| Read::Records(producers.to_vec()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 
-    // 3. Effect taint: do this task's effect-carrying fields see a secret?
-    let effect = action_effect_fields(&task.action)
-        .into_iter()
-        .find_map(|text| {
-            taint_of_refs_full(
-                refs_in_str(text),
-                declared,
-                &with_taint,
-                item_taint.as_ref(),
-                names,
-                facts,
-            )
+    /// The tasks whose records `r` reads: `tasks.<id>` one, `group.<name>`
+    /// each member; empty for any other reference.
+    fn producers(&self, r: &NamespaceRef) -> &[usize] {
+        match r {
+            NamespaceRef::Tasks { id, .. } => self
+                .id_of
+                .get(id.as_str())
+                .map_or(&[], std::slice::from_ref),
+            NamespaceRef::Group(name) => self.groups.get(name.as_str()).map_or(&[], Vec::as_slice),
+            _ => &[],
+        }
+    }
+}
+
+/// One reference, resolved once: where a secret it reads would come from.
+enum Read {
+    /// A declared `secrets.<name>`: the source itself.
+    Secret(String),
+    /// A task-local `with.<key>` slot.
+    With(String),
+    /// The `for_each` loop's `item`.
+    Item,
+    /// The records a `tasks.<id>` read names (one) or a `group.<name>` fold
+    /// holds (each member, in declaration order).
+    Records(Vec<usize>),
+}
+
+/// What each surface of one task reads, resolved once: the sweep repeats,
+/// the template scan does not.
+struct Reads<'a> {
+    /// Each `with:` key and what its value reads.
+    with: Vec<(&'a str, Vec<Read>)>,
+    /// What the `for_each:` collection reads, expression or literal list.
+    item: Option<Vec<Read>>,
+    /// What the effect-carrying fields read ([`action_effect_fields`]).
+    effect: Vec<Read>,
+    /// What the `on_error.recover:` value reads.
+    recover: Option<Vec<Read>>,
+}
+
+impl<'a> Reads<'a> {
+    fn of(task: &'a RawTask, scope: &Scope<'_>) -> Self {
+        let with = task
+            .with
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.value.as_str(),
+                    scope.resolve(refs_in_json(&value.value)),
+                )
+            })
+            .collect();
+        let item = task.for_each.as_ref().map(|f| {
+            scope.resolve(match &f.value {
+                ForEachValue::Expression(src) => refs_in_str(src),
+                ForEachValue::List(list) => refs_in_json(list),
+                #[allow(
+                    clippy::unreachable,
+                    reason = "non_exhaustive future variant — enum and checker ship together; fail loud beats silently-wrong output"
+                )]
+                _ => unreachable!("unknown for_each form"),
+            })
         });
-    let effect_taints = all_taints_of_refs(
-        action_effect_fields(&task.action)
-            .into_iter()
-            .flat_map(refs_in_str)
-            .collect(),
-        declared,
-        &with_taints,
-        Some(&item_taints),
-        names,
-        facts,
-    );
-    if let Some(trace) = &effect {
-        // Propagation fact (always · feeds output taint below).
-        facts.effect_taint.insert(idx, trace.clone());
-    }
-    record_effect_leaks(idx, task, effect_taints, egress_of, permits, facts);
-
-    // 4. Output taint: an exec/invoke whose effect saw taint can embed it in
-    //    the captured output. infer/agent are provider-bound (no output taint).
-    let taints_output = matches!(task.action, RawAction::Exec(_) | RawAction::Invoke(_));
-    if taints_output && let Some(trace) = &effect {
-        facts
-            .output_taint
-            .insert(idx, trace.via(format!("tasks.{}.output", task.id.value)));
+        let effect = scope.resolve(
+            action_effect_fields(&task.action)
+                .into_iter()
+                .flat_map(refs_in_str)
+                .collect(),
+        );
+        let recover = match task.on_error.as_ref().map(|e| &e.value.action) {
+            Some(OnErrorAction::Recover(value)) => Some(scope.resolve(refs_in_json(&value.value))),
+            _ => None,
+        };
+        Self {
+            with,
+            item,
+            effect,
+            recover,
+        }
     }
 
-    // 4b. A recovered value replaces the output whatever the verb, so the record carries what
-    //     the value reads besides what the request did. Written to the record, not sent: no
-    //     sink here, each later reader is judged as usual.
-    let recovered = recover_taints(task, declared, &with_taints, &item_taints, names, facts);
-    if !facts.output_taint.contains_key(&idx)
-        && let Some(trace) = recovered.values().next()
-    {
-        facts.output_taint.insert(idx, trace.clone());
+    /// Every task whose record this task reads, on any surface.
+    fn producers(&self) -> impl Iterator<Item = usize> + '_ {
+        self.with
+            .iter()
+            .flat_map(|(_, reads)| reads)
+            .chain(self.item.iter().flatten())
+            .chain(&self.effect)
+            .chain(self.recover.iter().flatten())
+            .filter_map(|read| match read {
+                Read::Records(producers) => Some(producers),
+                _ => None,
+            })
+            .flatten()
+            .copied()
     }
-    if !recovered.is_empty() {
-        facts.recover_taint.insert(idx, recovered);
-    }
-
-    // 5. `on_finally` cleanup effects are sinks too (extracted for the
-    //    100-LOC fn cap · same env / same declass filter as the main effect).
 }
 
-fn task_local_taints<'a>(
-    task: &'a RawTask,
-    declared: &BTreeSet<&str>,
-    names: &Names<'_>,
-    facts: &FlowFacts,
-) -> (WithTaints<'a>, Taints) {
-    let mut with_taints = WithTaints::new();
-    for (key, value) in &task.with {
-        let taints = all_taints_of_refs(
-            refs_in_json(&value.value),
-            declared,
-            &WithTaints::new(),
-            None,
-            names,
-            facts,
-        )
-        .into_iter()
-        .map(|(secret, trace)| {
-            (
-                secret,
-                trace.via(format!("with.{} @ {}", key.value, task.id.value)),
-            )
-        })
-        .collect();
-        with_taints.insert(key.value.as_str(), taints);
-    }
-    let item_refs = task.for_each.as_ref().map(|f| match &f.value {
-        nika_schema::raw::ForEachValue::Expression(src) => refs_in_str(src),
-        nika_schema::raw::ForEachValue::List(list) => refs_in_json(list),
-        #[allow(
-            clippy::unreachable,
-            reason = "non_exhaustive future variant — enum and checker ship together; fail loud beats silently-wrong output"
-        )]
-        _ => unreachable!("unknown for_each form"),
-    });
-    let item_taints = item_refs
-        .map(|refs| all_taints_of_refs(refs, declared, &with_taints, None, names, facts))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(secret, trace)| (secret, trace.via(format!("item @ {}", task.id.value))))
-        .collect();
-    (with_taints, item_taints)
+/// The most sweeps the records can take to settle: a most direct trace
+/// crosses each (task, secret) pair at most once and each sweep settles one
+/// more pair of it, so `tasks × secrets` sweeps settle every record, and one
+/// more is the margin. Counted in `u128`, where the product of two `usize`
+/// plus one cannot overflow.
+fn sweep_bound(tasks: usize, secrets: usize) -> u128 {
+    (tasks as u128) * (secrets as u128) + 1
 }
 
-/// Every secret `task`'s `on_error.recover:` value reads, each traced through the recovered
-/// record: a `secrets.*` read, and what a `tasks.*`, `group.*`, `with.*` or `item` read
-/// carries (the content walk reads the same value for the content law).
-fn recover_taints(
-    task: &RawTask,
-    declared: &BTreeSet<&str>,
-    with_taints: &WithTaints<'_>,
-    item_taints: &Taints,
-    names: &Names<'_>,
-    facts: &FlowFacts,
-) -> Taints {
-    let Some(OnErrorAction::Recover(value)) = task.on_error.as_ref().map(|e| &e.value.action)
-    else {
-        return Taints::new();
+/// Evaluate the tasks until every record settles; returns the settled
+/// records and what each effect sees, read from them.
+///
+/// A sweep evaluates the tasks in `order`, and the sweeps repeat while one
+/// moves a record (a recover read is no scheduling edge, so a record can be
+/// read before it is known). A task is evaluated again only when a record it
+/// reads moved since its last evaluation: later in the same sweep when it
+/// comes after the task that moved, in the next sweep otherwise. Its result
+/// is a function of those records alone, so an evaluation skipped would move
+/// nothing: the sweeps are those of the full pass, without the idle work.
+fn settle(
+    tasks: &[Spanned<RawTask>],
+    order: &[usize],
+    reads: &[Reads<'_>],
+    secrets: usize,
+) -> (Records, Records) {
+    let mut at_of = vec![0; tasks.len()];
+    for (at, &idx) in order.iter().enumerate() {
+        at_of[idx] = at;
+    }
+    let mut readers: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); tasks.len()];
+    for (reader, task_reads) in reads.iter().enumerate() {
+        for producer in task_reads.producers() {
+            readers[producer].insert(reader);
+        }
+    }
+    let (mut records, mut effects) = (Records::new(), Records::new());
+    let mut due: BTreeSet<usize> = (0..order.len()).collect();
+    let (bound, mut sweeps) = (sweep_bound(tasks.len(), secrets), 0_u128);
+    while !due.is_empty() && sweeps < bound {
+        sweeps += 1;
+        let mut next = BTreeSet::new();
+        while let Some(at) = due.pop_first() {
+            let idx = order[at];
+            let (effect, record) = evaluate(&tasks[idx].value, &reads[idx], &records);
+            if !effect.is_empty() {
+                effects.insert(idx, effect);
+            }
+            if !merge_record(&mut records, idx, record) {
+                continue;
+            }
+            for &reader in &readers[idx] {
+                let reader_at = at_of[reader];
+                if reader_at > at {
+                    due.insert(reader_at);
+                } else {
+                    next.insert(reader_at);
+                }
+            }
+        }
+        due = next;
+    }
+    debug_assert!(due.is_empty(), "the records settle within the sweep bound");
+    (records, effects)
+}
+
+/// What `task`'s effect sees and what its record carries, from the records
+/// known so far.
+fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> (Taints, Taints) {
+    let id = task.id.value.as_str();
+    // 1. `with:` slot taints (scoped to this task): a value reading a secret
+    //    or a tainted record taints that key.
+    let mut with = WithTaints::new();
+    for (key, value) in &reads.with {
+        let taints = carried(value, None, None, records);
+        with.insert(*key, via_each(taints, &format!("with.{key} @ {id}")));
+    }
+    // 2. `for_each` item taint: what the collection reads (an expression or a
+    //    literal list, which may hold `with.*` reads), the loop-local `item`
+    //    carries within the task.
+    let item = match &reads.item {
+        Some(value) => via_each(
+            carried(value, Some(&with), None, records),
+            &format!("item @ {id}"),
+        ),
+        None => Taints::new(),
     };
-    let refs = refs_in_json(&value.value);
-    all_taints_of_refs(refs, declared, with_taints, Some(item_taints), names, facts)
+    // 3. Effect taint: do this task's effect-carrying fields see a secret?
+    let effect = carried(&reads.effect, Some(&with), Some(&item), records);
+    // 4. The record: an exec/invoke whose effect saw a secret can embed it in
+    //    the captured output (infer/agent are provider-bound: no output
+    //    taint), and a recovered value replaces the output whatever the verb.
+    //    Written to the record, not sent: no sink here, each later reader is
+    //    judged as usual.
+    let output = format!("tasks.{id}.output");
+    let mut record = Taints::new();
+    if matches!(task.action, RawAction::Exec(_) | RawAction::Invoke(_)) {
+        for trace in effect.values() {
+            keep_most_direct(&mut record, trace.via(output.clone()));
+        }
+    }
+    if let Some(value) = &reads.recover {
+        let recover = format!("on_error.recover @ {id}");
+        for trace in carried(value, Some(&with), Some(&item), records).into_values() {
+            keep_most_direct(&mut record, trace.via(recover.clone()).via(output.clone()));
+        }
+    }
+    (effect, record)
+}
+
+/// Each trace extended by one more hop.
+fn via_each(taints: Taints, hop: &str) -> Taints {
+    taints
         .into_iter()
-        .map(|(secret, trace)| {
-            let recovered = trace
-                .via(format!("on_error.recover @ {}", task.id.value))
-                .via(format!("tasks.{}.output", task.id.value));
-            (secret, recovered)
-        })
+        .map(|(secret, trace)| (secret, trace.via(hop.to_owned())))
         .collect()
 }
 
-/// Every trace `task`'s record carries: its output's propagation fact, then each secret its
-/// recover value reads.
-fn record_taints(facts: &FlowFacts, task: usize) -> impl Iterator<Item = &TaintTrace> {
-    facts.output_taint.get(&task).into_iter().chain(
-        facts
-            .recover_taint
-            .get(&task)
-            .into_iter()
-            .flat_map(BTreeMap::values),
-    )
+/// Merge one evaluation's record into the held one; whether it moved.
+fn merge_record(records: &mut Records, idx: usize, record: Taints) -> bool {
+    if record.is_empty() {
+        return false;
+    }
+    let held = records.entry(idx).or_default();
+    let mut moved = false;
+    for trace in record.into_values() {
+        moved |= keep_most_direct(held, trace);
+    }
+    moved
+}
+
+/// Keep `trace` when no trace of its secret is held or when it has fewer hops
+/// than the one held. A tie keeps the one held: the first read, in reading
+/// order (references as written, a fold's members as declared), or from an
+/// earlier sweep. Whether it was kept.
+fn keep_most_direct(held: &mut Taints, trace: TaintTrace) -> bool {
+    match held.get_mut(trace.secret.as_str()) {
+        Some(kept) if kept.hops <= trace.hops => false,
+        Some(kept) => {
+            *kept = trace;
+            true
+        }
+        None => {
+            held.insert(trace.secret.clone(), trace);
+            true
+        }
+    }
+}
+
+/// Every secret `reads` carries, one most direct trace each: a declared
+/// secret read is its own source; a `with.*` slot or the `item` carries what
+/// the task bound to it; a `tasks.*` read carries what that record carries,
+/// and a `group.*` fold what each member record carries. Each slot and
+/// record is read once however often it is named, so the work is bounded by
+/// the reads plus the distinct secrets, not their product.
+fn carried(
+    reads: &[Read],
+    with: Option<&WithTaints<'_>>,
+    item: Option<&Taints>,
+    records: &Records,
+) -> Taints {
+    let mut out = Taints::new();
+    let mut seen_with = BTreeSet::new();
+    let mut seen_records = BTreeSet::new();
+    let mut saw_item = false;
+    let keep_all = |out: &mut Taints, taints: Option<&Taints>| {
+        for trace in taints.into_iter().flat_map(BTreeMap::values) {
+            keep_most_direct(out, trace.clone());
+        }
+    };
+    for read in reads {
+        match read {
+            Read::Secret(name) => {
+                keep_most_direct(&mut out, TaintTrace::source(name));
+            }
+            Read::With(key) if seen_with.insert(key.as_str()) => {
+                keep_all(&mut out, with.and_then(|slots| slots.get(key.as_str())));
+            }
+            Read::Item if !saw_item => {
+                saw_item = true;
+                keep_all(&mut out, item);
+            }
+            Read::Records(producers) => {
+                for &producer in producers {
+                    if seen_records.insert(producer) {
+                        keep_all(&mut out, records.get(&producer));
+                    }
+                }
+            }
+            Read::With(_) | Read::Item => {}
+        }
+    }
+    out
 }
 
 fn record_effect_leaks(
     idx: usize,
     task: &RawTask,
-    effect_taints: Taints,
+    effect_taints: &Taints,
     egress_of: &BTreeMap<&str, &[EgressRule]>,
     permits: Option<&Permits>,
     facts: &mut FlowFacts,
 ) {
     let leaks: Taints = effect_taints
-        .into_iter()
+        .iter()
         .filter(|(_, trace)| {
             let egress = egress_of.get(trace.secret.as_str()).copied().unwrap_or(&[]);
             !declass::is_sanctioned(&trace.secret, egress, &task.action, permits)
         })
+        .map(|(secret, trace)| (secret.clone(), trace.clone()))
         .collect();
     if !leaks.is_empty() {
         facts.effect_leaks.insert(idx, leaks);
@@ -503,7 +674,7 @@ fn record_effect_leaks(
 /// §Vision inputs). A secret
 /// reaching one with no `egress:` sanction is a leak (BUG#3 · now CANONICAL ·
 /// spec `01-envelope.md` §egress aligned to this strict behavior · F-03).
-/// The OUTPUT carve-out is SEPARATE and PRESERVED (see `propagate_task`
+/// The OUTPUT carve-out is SEPARATE and PRESERVED (see `evaluate`
 /// step 4 · the model response is not a verbatim echo, so infer/agent OUTPUT
 /// is never tainted from a prompt secret · ADR-092). To send a secret to a
 /// provider, the author sanctions it explicitly (`egress: [{ to: "infer" }]`
@@ -532,7 +703,7 @@ pub fn action_effect_fields(action: &RawAction) -> Vec<&str> {
             .unwrap_or_default(),
         // The prompt (+ system) is a third-party egress sink — a secret
         // reaching it is a leak unless the author sanctions `to: "infer"`/
-        // `"agent"` (BUG#3). Output taint stays excluded (propagate_task §4).
+        // `"agent"` (BUG#3). Output taint stays excluded (evaluate §4).
         // An `infer:`'s `vision:` entries ride the same request (spec 02
         // §Vision inputs): a URL the provider fetches, and a file path that
         // chooses the bytes the provider receives. Both are sink fields, so a
@@ -578,117 +749,6 @@ pub(crate) fn prompt_system_fields<'a>(
         fields.push(system.value.as_str());
     }
     fields
-}
-
-/// Resolve a set of refs to a taint, considering secrets + tainted upstream
-/// outputs (no `with`/`item` context — for envelope `outputs:` + with-values).
-fn taint_of_refs(
-    refs: Vec<NamespaceRef>,
-    declared: &BTreeSet<&str>,
-    with_taint: Option<&BTreeMap<&str, TaintTrace>>,
-    names: &Names<'_>,
-    facts: &FlowFacts,
-) -> Option<TaintTrace> {
-    taint_of_refs_full(
-        refs,
-        declared,
-        with_taint.unwrap_or(&BTreeMap::new()),
-        None,
-        names,
-        facts,
-    )
-}
-
-/// The full resolver — secrets, `with`-aliases, `for_each` item, and
-/// tainted upstream outputs. Returns the FIRST taint found (any one secret
-/// reaching the slot is enough to flag it).
-fn taint_of_refs_full(
-    refs: Vec<NamespaceRef>,
-    declared: &BTreeSet<&str>,
-    with_taint: &BTreeMap<&str, TaintTrace>,
-    item_taint: Option<&TaintTrace>,
-    names: &Names<'_>,
-    facts: &FlowFacts,
-) -> Option<TaintTrace> {
-    for r in refs {
-        match r {
-            NamespaceRef::Secrets(name) if declared.contains(name.as_str()) => {
-                return Some(TaintTrace::source(&name));
-            }
-            NamespaceRef::With(key) => {
-                if let Some(trace) = with_taint.get(key.as_str()) {
-                    return Some(trace.clone());
-                }
-            }
-            NamespaceRef::Item => {
-                if let Some(trace) = item_taint {
-                    return Some(trace.clone());
-                }
-            }
-            r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
-                let upstream = names.producers(&r);
-                if let Some(trace) = upstream.iter().find_map(|u| facts.output_taint.get(u)) {
-                    return Some(trace.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Resolve every distinct secret reaching one effect-local surface.
-///
-/// Upstream outputs deliberately retain the singular propagation fact;
-/// this function widens only direct refs and task-local `with`/`item`
-/// aliases. Repeated aliases are merged once, bounding work by authored
-/// references plus the distinct secret set instead of their product.
-fn all_taints_of_refs(
-    refs: Vec<NamespaceRef>,
-    declared: &BTreeSet<&str>,
-    with_taints: &WithTaints<'_>,
-    item_taints: Option<&Taints>,
-    names: &Names<'_>,
-    facts: &FlowFacts,
-) -> Taints {
-    let mut out = BTreeMap::new();
-    let mut seen_with = BTreeSet::new();
-    let mut seen_tasks = BTreeSet::new();
-    let mut saw_item = false;
-    for r in refs {
-        match r {
-            NamespaceRef::Secrets(name) if declared.contains(name.as_str()) => {
-                out.entry(name.clone())
-                    .or_insert_with(|| TaintTrace::source(&name));
-            }
-            NamespaceRef::With(key) if seen_with.insert(key.clone()) => {
-                if let Some(taints) = with_taints.get(key.as_str()) {
-                    extend_first(&mut out, taints.values().cloned());
-                }
-            }
-            NamespaceRef::Item if !saw_item => {
-                saw_item = true;
-                if let Some(taints) = item_taints {
-                    extend_first(&mut out, taints.values().cloned());
-                }
-            }
-            r @ (NamespaceRef::Tasks { .. } | NamespaceRef::Group(_)) => {
-                for &upstream in names.producers(&r) {
-                    if seen_tasks.insert(upstream) {
-                        extend_first(&mut out, record_taints(facts, upstream).cloned());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-fn extend_first(target: &mut Taints, traces: impl Iterator<Item = TaintTrace>) {
-    for trace in traces {
-        target.entry(trace.secret.clone()).or_insert(trace);
-    }
 }
 
 /// The `${{ … }}` references inside a string (via the real extractor — the
@@ -855,6 +915,64 @@ tasks:
             rendered.contains("tasks.t0.output"),
             "the first propagation hop must be in the intact trace"
         );
+    }
+
+    /// The worst sweep order: each task recovers to the record of the task declared after it
+    /// and only the last one sends the secret, so every sweep settles one more record, from the
+    /// back. Re-evaluating only the tasks whose read record moved keeps that linear (a full
+    /// re-sweep would be quadratic in the chain); the secret still reaches the head, through
+    /// every recover.
+    #[test]
+    fn a_backward_recover_chain_settles_in_linear_work() {
+        use std::fmt::Write as _;
+        const N: usize = 3_000;
+        let mut y = format!("nika: w\n{S}tasks:\n");
+        for k in 0..N - 1 {
+            let next = k + 1;
+            write!(
+                y,
+                "  t{k}:\n    exec: {{ command: [\"echo\", \"{k}\"] }}\n    on_error: {{ recover: \"${{{{ tasks.t{next}.output }}}}\" }}\n"
+            )
+            .expect("write to String is infallible");
+        }
+        write!(
+            y,
+            "  t{}:\n    exec: {{ command: [\"echo\", \"${{{{ secrets.api_key }}}}\"] }}\n",
+            N - 1
+        )
+        .expect("write to String is infallible");
+        let (wf, f) = facts(&y);
+        let head = f
+            .output_taint
+            .get(&idx(&wf, "t0"))
+            .and_then(|taints| taints.get("api_key"))
+            .expect("the secret reaches the head of the chain");
+        assert_eq!(
+            head.hops,
+            1 + 2 * (N - 1),
+            "one recover and one output hop per link"
+        );
+        let rendered = head.render();
+        assert!(
+            rendered.starts_with(&format!(
+                "secrets.api_key → tasks.t{}.output → on_error.recover @ t{}",
+                N - 1,
+                N - 2
+            )),
+            "trace must be source-first: {rendered:.80}"
+        );
+        assert!(
+            rendered.ends_with("on_error.recover @ t0 → tasks.t0.output"),
+            "the trace ends at the head of the chain"
+        );
+    }
+
+    #[test]
+    fn the_sweep_bound_cannot_overflow() {
+        assert_eq!(sweep_bound(0, 0), 1);
+        assert_eq!(sweep_bound(3, 2), 7);
+        let max = u128::try_from(usize::MAX).expect("a usize fits in a u128");
+        assert_eq!(sweep_bound(usize::MAX, usize::MAX), max * max + 1);
     }
 
     #[test]
@@ -1117,44 +1235,39 @@ tasks:
 
     #[test]
     fn undeclared_secret_ref_is_not_tainted() {
-        // Kills `taint_of_refs_full` 417 — forcing the guard
-        // `declared.contains(&name.as_str())` → `true`. The resolver is
+        // Kills the `Scope::resolve` guard mutant — forcing
+        // `declared.contains(name.as_str())` → `true`. The resolver is
         // handed a `secrets.unknown` ref while `declared` lists only
-        // `api_key`; the guard must REJECT the undeclared name and the
-        // resolver returns `None` (no taint). The forced-true mutant would
-        // treat ANY `secrets.<name>` as a live secret and return
-        // `Some(source("unknown"))`. (Driven directly because the public
-        // `analyze` path rejects an undeclared `secrets.X` ref before the IFC
-        // pass ever runs, so the guard cannot be reached end-to-end.)
-        let declared: BTreeSet<&str> = BTreeSet::from(["api_key"]);
-        let no_facts = FlowFacts::default();
-        let names = Names {
+        // `api_key`; the guard must REJECT the undeclared name, so nothing is
+        // carried. The forced-true mutant would treat ANY `secrets.<name>` as
+        // a live secret and carry `source("unknown")`. (Driven directly
+        // because the public `analyze` path rejects an undeclared `secrets.X`
+        // ref before the IFC pass ever runs, so the guard cannot be reached
+        // end-to-end.)
+        let scope = Scope {
+            declared: BTreeSet::from(["api_key"]),
             id_of: BTreeMap::new(),
             groups: BTreeMap::new(),
         };
-        let with_taint: BTreeMap<&str, TaintTrace> = BTreeMap::new();
+        let no_records = Records::new();
 
         // Undeclared name → the guard fails → no taint.
-        let undeclared = vec![NamespaceRef::Secrets("unknown".to_owned())];
+        let undeclared = scope.resolve(vec![NamespaceRef::Secrets("unknown".to_owned())]);
         assert_eq!(
-            taint_of_refs_full(undeclared, &declared, &with_taint, None, &names, &no_facts),
-            None,
+            carried(&undeclared, None, None, &no_records),
+            Taints::new(),
             "an undeclared secret name must NOT be classified as a live secret"
         );
 
         // Sanity anchor · the SAME resolver with the DECLARED name DOES taint,
         // proving the test exercises the live guard (not a dead path).
-        let declared_ref = vec![NamespaceRef::Secrets("api_key".to_owned())];
-        let got = taint_of_refs_full(
-            declared_ref,
-            &declared,
-            &with_taint,
-            None,
-            &names,
-            &no_facts,
-        )
-        .expect("a declared secret name is tainted");
-        assert_eq!(got.secret, "api_key");
+        let declared = scope.resolve(vec![NamespaceRef::Secrets("api_key".to_owned())]);
+        let got = carried(&declared, None, None, &no_records);
+        let rendered: Vec<(&str, String)> = got
+            .iter()
+            .map(|(secret, trace)| (secret.as_str(), trace.render()))
+            .collect();
+        assert_eq!(rendered, [("api_key", "secrets.api_key".to_owned())]);
     }
 
     /// E39 10C case F5-P03 (N7), its program verbatim: `egress: [{ to: outputs }]` and an outputs

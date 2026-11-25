@@ -10,6 +10,11 @@
 //! A task's record is also what its `on_error.recover:` value makes it (spec 05 §recovery): the
 //! recovered value replaces the output, so a secret the value reads rides the record. The
 //! recover itself sends nothing and is no destination; each later reader is judged as usual.
+//! A recover read is no scheduling edge, so its source may come later in the sweep: the flow
+//! repeats until no record moves.
+//!
+//! A record carries one trace per secret, the most direct one, and every sink (a request, the
+//! workflow `outputs:`, the data journey) reads all of them.
 
 use nika_check::{CheckReport, check};
 use nika_schema::{FileId, ParseMode, parse};
@@ -399,4 +404,481 @@ fn a_recover_value_that_reads_a_fold_with_one_tainted_member_is_a_leak() {
         )]
     );
     assert_eq!(findings(&report), [sec_006("relay")]);
+}
+
+/// A leak of any secret, as `(task, secret, path)`.
+fn leak_of(task: &str, secret: &str, path: &str) -> Leak {
+    (task.to_owned(), secret.to_owned(), path.to_owned())
+}
+
+/// The external destinations the journey says `secret` reaches.
+fn flows_to_of(report: &CheckReport, secret: &str) -> Vec<String> {
+    report
+        .data_journey
+        .secrets_used
+        .iter()
+        .find(|used| used.name == secret)
+        .map(|used| used.flows_to.clone())
+        .unwrap_or_default()
+}
+
+/// Every workflow-output egress, as `(output, secret, path)`.
+fn egresses(report: &CheckReport) -> Vec<(String, String, String)> {
+    report
+        .secret_egresses
+        .iter()
+        .map(|e| (e.output.clone(), e.secret.clone(), e.trace.clone()))
+        .collect()
+}
+
+fn sec_007() -> Finding {
+    ("secret_egress", Some("NIKA-SEC-007".to_owned()), None)
+}
+
+/// `backup` recovers to `call_a`'s record, but runs in the first wave while `call_a` waits on
+/// `prep`: a recover read is no scheduling edge, so the source comes after the reader.
+const RECOVER_FROM_A_LATER_WAVE: &str = r#"nika: recover-before-its-source
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  prep:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/p" } }
+  call_a:
+    after: { prep: success }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  backup:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "${{ tasks.call_a.output }}" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+/// `backup` and `call_a` share the first wave, `backup` declared first.
+const RECOVER_FROM_LATER_IN_THE_WAVE: &str = r#"nika: recover-relay
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  backup:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "${{ tasks.call_a.output }}" }
+  call_a:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_recover_whose_source_comes_later_in_the_sweep_still_carries_its_secret() {
+    for yaml in [RECOVER_FROM_A_LATER_WAVE, RECOVER_FROM_LATER_IN_THE_WAVE] {
+        let report = run(yaml);
+        assert_eq!(
+            leaks(&report),
+            [leak(
+                "relay",
+                "secrets.token → tasks.call_a.output → on_error.recover @ backup → \
+                 tasks.backup.output → with.legs @ relay"
+            )],
+            "{yaml}"
+        );
+        assert_eq!(findings(&report), [sec_006("relay")], "{yaml}");
+        assert_eq!(
+            flows_to(&report),
+            ["crm.example.com", "other.example.com"],
+            "{yaml}"
+        );
+    }
+}
+
+/// `left` sends `alpha` and recovers to `right`'s record; `right` sends `omega` and recovers to
+/// `left`'s. Each relay posts one of them to other.example.com, where neither secret may go.
+const RECOVER_FROM_EACH_OTHER: &str = r#"nika: recover-from-each-other
+secrets:
+  alpha: { source: env, key: A, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+  omega: { source: env, key: O, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  left:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/l", headers: { authorization: "Bearer ${{ secrets.alpha }}" } } }
+    on_error: { recover: "${{ tasks.right.output }}" }
+  right:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/r", headers: { authorization: "Bearer ${{ secrets.omega }}" } } }
+    on_error: { recover: "${{ tasks.left.output }}" }
+  relay_left:
+    with: { legs: "${{ tasks.left.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/l", method: POST, body: "${{ with.legs }}" } }
+  relay_right:
+    with: { legs: "${{ tasks.right.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/r", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+/// The pass settles on a recover cycle, and each record carries both secrets: its own send's,
+/// directly, and the other's, through the recover.
+#[test]
+fn two_tasks_that_recover_from_each_other_each_carry_both_secrets() {
+    let report = run(RECOVER_FROM_EACH_OTHER);
+    assert_eq!(
+        leaks(&report),
+        [
+            leak_of(
+                "relay_left",
+                "alpha",
+                "secrets.alpha → tasks.left.output → with.legs @ relay_left"
+            ),
+            leak_of(
+                "relay_left",
+                "omega",
+                "secrets.omega → tasks.right.output → on_error.recover @ left → \
+                 tasks.left.output → with.legs @ relay_left"
+            ),
+            leak_of(
+                "relay_right",
+                "alpha",
+                "secrets.alpha → tasks.left.output → on_error.recover @ right → \
+                 tasks.right.output → with.legs @ relay_right"
+            ),
+            leak_of(
+                "relay_right",
+                "omega",
+                "secrets.omega → tasks.right.output → with.legs @ relay_right"
+            ),
+        ]
+    );
+    assert_eq!(
+        findings(&report),
+        [
+            sec_006("relay_left"),
+            sec_006("relay_left"),
+            sec_006("relay_right"),
+            sec_006("relay_right")
+        ]
+    );
+    for secret in ["alpha", "omega"] {
+        assert_eq!(
+            flows_to_of(&report, secret),
+            ["crm.example.com", "other.example.com"],
+            "{secret}"
+        );
+    }
+}
+
+/// `call_a` sends `alpha` and `call_b` sends `omega`, both to crm.example.com. `hop` posts the
+/// fold to crm.example.com, where both may go; `relay` posts `hop`'s record to
+/// other.example.com, where only `alpha` may go.
+const TWO_SECRETS_ONE_FOLD: &str = r#"nika: two-secrets-one-fold
+secrets:
+  alpha: { source: env, key: A, egress: [{ to: "nika:fetch", host: "crm.example.com" }, { to: "nika:fetch", host: "other.example.com" }] }
+  omega: { source: env, key: O, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.alpha }}" } } }
+  call_b:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b", headers: { authorization: "Bearer ${{ secrets.omega }}" } } }
+  hop:
+    with: { legs: "${{ group.calls }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/h", method: POST, body: "${{ with.legs }}" } }
+  relay:
+    with: { legs: "${{ tasks.hop.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_record_past_the_first_hop_carries_every_secret_its_fold_held() {
+    let report = run(TWO_SECRETS_ONE_FOLD);
+    assert_eq!(
+        leaks(&report),
+        [leak_of(
+            "relay",
+            "omega",
+            "secrets.omega → tasks.call_b.output → with.legs @ hop → tasks.hop.output → \
+             with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    // The journey reads every secret at every effect, not the first one only.
+    for secret in ["alpha", "omega"] {
+        assert_eq!(
+            flows_to_of(&report, secret),
+            ["crm.example.com", "other.example.com"],
+            "{secret}"
+        );
+    }
+}
+
+/// `backup` sends `alpha` and recovers to `omega`; `hop` posts `backup`'s record to
+/// crm.example.com and `relay` posts `hop`'s to other.example.com, where only `alpha` may go.
+const EFFECT_AND_RECOVER: &str = r#"nika: effect-and-recover
+secrets:
+  alpha: { source: env, key: A, egress: [{ to: "nika:fetch", host: "crm.example.com" }, { to: "nika:fetch", host: "other.example.com" }] }
+  omega: { source: env, key: O, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_o:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/o", headers: { authorization: "Bearer ${{ secrets.omega }}" } } }
+  backup:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b", headers: { authorization: "Bearer ${{ secrets.alpha }}" } } }
+    on_error: { recover: "VALUE" }
+  hop:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/h", method: POST, body: "${{ with.legs }}" } }
+  relay:
+    with: { legs: "${{ tasks.hop.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_record_carries_its_recovered_secret_beside_its_effect_two_hops_on() {
+    for (value, root) in [
+        ("${{ secrets.omega }}", "secrets.omega"),
+        (
+            "${{ tasks.call_o.output }}",
+            "secrets.omega → tasks.call_o.output",
+        ),
+    ] {
+        let report = run(&EFFECT_AND_RECOVER.replace("VALUE", value));
+        let path = format!(
+            "{root} → on_error.recover @ backup → tasks.backup.output → with.legs @ hop → \
+             tasks.hop.output → with.legs @ relay"
+        );
+        assert_eq!(
+            leaks(&report),
+            [leak_of("relay", "omega", &path)],
+            "{value}"
+        );
+        assert_eq!(findings(&report), [sec_006("relay")], "{value}");
+    }
+}
+
+/// `backup` sends `alpha` and recovers to `omega`; the workflow returns `backup`'s record.
+/// `ALPHA_RULES` decide whether `alpha` may leave as the return value.
+const RECOVER_TO_OUTPUTS: &str = r#"nika: recover-to-outputs
+secrets:
+  alpha: { source: env, key: A, egress: [ALPHA_RULES] }
+  omega: { source: env, key: O, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com"] }
+tasks:
+  backup:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b", headers: { authorization: "Bearer ${{ secrets.alpha }}" } } }
+    on_error: { recover: "${{ secrets.omega }}" }
+outputs:
+  r: "${{ tasks.backup.output }}"
+"#;
+
+/// `to: outputs` clears the return value for `alpha` only: `omega`, which the same record
+/// carries through the recover, is still `NIKA-SEC-007`.
+#[test]
+fn the_outputs_boundary_judges_every_secret_the_record_carries() {
+    let report = run(&RECOVER_TO_OUTPUTS.replace(
+        "ALPHA_RULES",
+        r#"{ to: "nika:fetch", host: "crm.example.com" }, { to: "outputs" }"#,
+    ));
+    assert_eq!(
+        egresses(&report),
+        [(
+            "r".to_owned(),
+            "omega".to_owned(),
+            "secrets.omega → on_error.recover @ backup → tasks.backup.output → outputs".to_owned()
+        )]
+    );
+    assert_eq!(leaks(&report), Vec::<Leak>::new());
+    assert_eq!(findings(&report), [sec_007()]);
+}
+
+/// One entry carrying two secrets neither of which may leave is two refusals, one per secret,
+/// as a request carrying two unsanctioned secrets is two leaks.
+#[test]
+fn an_outputs_entry_carrying_two_forbidden_secrets_is_refused_for_each() {
+    let report = run(&RECOVER_TO_OUTPUTS.replace(
+        "ALPHA_RULES",
+        r#"{ to: "nika:fetch", host: "crm.example.com" }"#,
+    ));
+    assert_eq!(
+        egresses(&report),
+        [
+            (
+                "r".to_owned(),
+                "alpha".to_owned(),
+                "secrets.alpha → tasks.backup.output → outputs".to_owned()
+            ),
+            (
+                "r".to_owned(),
+                "omega".to_owned(),
+                "secrets.omega → on_error.recover @ backup → tasks.backup.output → outputs"
+                    .to_owned()
+            ),
+        ]
+    );
+    assert_eq!(findings(&report), [sec_007(), sec_007()]);
+}
+
+/// `hop` loops over a literal list that holds its fold of `calls`, posts each item to
+/// crm.example.com, and `relay` posts `hop`'s record to other.example.com.
+const LITERAL_LIST_OF_A_FOLD: &str = r#"nika: list-of-a-fold
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  call_b:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+  hop:
+    with: { legs: "${{ group.calls }}" }
+    for_each: { items: ["${{ with.legs }}"] }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/h", method: POST, body: "${{ item }}" } }
+  relay:
+    with: { legs: "${{ tasks.hop.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn a_literal_for_each_list_passes_its_fold_on_to_the_output() {
+    let report = run(LITERAL_LIST_OF_A_FOLD);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.legs @ hop → item @ hop → \
+             tasks.hop.output → with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+    assert_eq!(flows_to(&report), ["crm.example.com", "other.example.com"]);
+}
+
+/// `backup` loops over `call_a`'s record without sending an item, and recovers to the item.
+const RECOVER_TO_THE_ITEM: &str = r#"nika: recover-to-the-item
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["crm.example.com", "other.example.com"] }
+tasks:
+  call_a:
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/a", headers: { authorization: "Bearer ${{ secrets.token }}" } } }
+  backup:
+    with: { legs: "${{ tasks.call_a.output }}" }
+    for_each: { items: "${{ with.legs }}", max_items: 10 }
+    invoke: { tool: "nika:fetch", args: { url: "https://crm.example.com/b" } }
+    on_error: { recover: "${{ item }}" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+#[test]
+fn an_item_read_in_a_recover_value_rides_the_record() {
+    let report = run(RECOVER_TO_THE_ITEM);
+    assert_eq!(
+        leaks(&report),
+        [leak(
+            "relay",
+            "secrets.token → tasks.call_a.output → with.legs @ backup → item @ backup → \
+             on_error.recover @ backup → tasks.backup.output → with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&report), [sec_006("relay")]);
+}
+
+/// `backup` is a model task (`VERB`) that recovers to the token; `relay` posts its record.
+const MODEL_TASK_RECOVERS: &str = r#"nika: model-recovers
+secrets:
+  token: { source: env, key: T, egress: [{ to: "nika:fetch", host: "crm.example.com" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["other.example.com"] }
+tasks:
+  backup:
+    VERB
+    on_error: { recover: "${{ secrets.token }}" }
+  relay:
+    with: { legs: "${{ tasks.backup.output }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+/// The model carve-out covers what the provider answers, not a recovered value: whatever the
+/// verb, the recovered record carries the secret.
+#[test]
+fn a_model_task_whose_recover_reads_a_secret_carries_it() {
+    for verb in [
+        r#"infer: { model: "mock/echo", prompt: "summarize the day", max_tokens: 10 }"#,
+        r#"agent: { model: "mock/echo", prompt: "summarize the day", max_turns: 2 }"#,
+    ] {
+        let report = run(&MODEL_TASK_RECOVERS.replace("VERB", verb));
+        assert_eq!(
+            leaks(&report),
+            [leak(
+                "relay",
+                "secrets.token → on_error.recover @ backup → tasks.backup.output → \
+                 with.legs @ relay"
+            )],
+            "{verb}"
+        );
+        assert_eq!(findings(&report), [sec_006("relay")], "{verb}");
+    }
+}
+
+/// `ask` is an `infer:` member of `calls` whose prompt the token may reach; `RECOVER` is its
+/// error handling. `relay` posts the fold to other.example.com.
+const INFER_MEMBER: &str = r#"nika: infer-member
+secrets:
+  token: { source: env, key: T, egress: [{ to: "infer" }] }
+permits:
+  tools: ["nika:fetch"]
+  net: { http: ["other.example.com"] }
+tasks:
+  ask:
+    group: calls
+    infer: { model: "mock/echo", prompt: "use ${{ secrets.token }}", max_tokens: 10 }
+    RECOVER
+  call_b:
+    group: calls
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/b" } }
+  relay:
+    with: { legs: "${{ group.calls }}" }
+    invoke: { tool: "nika:fetch", args: { url: "https://other.example.com/in", method: POST, body: "${{ with.legs }}" } }
+"#;
+
+/// A fold reads an `infer:` member as a task read does: the answer is not tainted by the
+/// prompt's secret, a recovered value is.
+#[test]
+fn an_infer_member_of_a_fold_is_judged_as_its_task_read() {
+    let answered = run(&INFER_MEMBER.replace("RECOVER", ""));
+    assert_eq!(leaks(&answered), Vec::<Leak>::new());
+    assert_eq!(findings(&answered), Vec::<Finding>::new());
+
+    let recovered = run(&INFER_MEMBER.replace(
+        "RECOVER",
+        r#"on_error: { recover: "${{ secrets.token }}" }"#,
+    ));
+    assert_eq!(
+        leaks(&recovered),
+        [leak(
+            "relay",
+            "secrets.token → on_error.recover @ ask → tasks.ask.output → with.legs @ relay"
+        )]
+    );
+    assert_eq!(findings(&recovered), [sec_006("relay")]);
 }

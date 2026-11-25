@@ -540,8 +540,9 @@ fn secret_names_of_task(
             other => unreachable!("unknown for_each form: {other:?}"),
         }
     }
-    // The propagation facts (valid order only — empty facts, never wrong).
-    if let Some(trace) = flow.effect_taint(idx) {
+    // The propagation facts (valid order only — empty facts, never wrong):
+    // every secret reaching the effect, not only the first.
+    for trace in flow.effect_taints(idx) {
         out.insert(trace.secret.clone());
     }
     out

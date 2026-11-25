@@ -394,3 +394,30 @@ fn a_live_shield_ends_a_day_after_its_run_began() {
         "past a day, the shield is gone"
     );
 }
+
+/// NIK-385 review · the shield starts a minute before the live run's opening frame: a child
+/// whose file time a clock step back put just before that frame stays, and one written two
+/// minutes before it rotates.
+#[test]
+fn a_child_written_just_before_the_live_start_stays() {
+    let ok = TraceState::Succeeded;
+    let opened = now() - Duration::from_secs(2 * 3_600);
+    let traces = vec![
+        meta(
+            "calibration-live",
+            "calibration",
+            TraceState::Running,
+            10,
+            60,
+        )
+        .with_liveness(Liveness::Alive { pid: 4_242 })
+        .with_started(Some(opened)),
+        meta("late", "round", ok, 10, 600),
+        meta("early", "round", ok, 10, 2 * 3_600 + 30),
+        meta("before", "round", ok, 10, 2 * 3_600 + 120),
+    ];
+    assert_eq!(
+        plan_names(&traces, &keeping(1)),
+        each(&["before"], Reason::Rotated)
+    );
+}

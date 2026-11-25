@@ -440,11 +440,16 @@ fn newest_where(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> BTreeSet<
 /// for longer no longer holds back the collection of what it wrote (NIK-385).
 const LIVE_SHIELD: Duration = Duration::from_secs(24 * 3_600);
 
-/// The earliest start of a run in flight whose writer holds its lease, begun less than
-/// [`LIVE_SHIELD`] ago (a start after `now`, a clock stepped back, is a run that just began): a
-/// live run cites the children it ran only once its fan-out ends, so every root written since
-/// may be one of them (NIK-385). A journal this host cannot vouch for (no lease, an older engine,
-/// another host, a system without leases) shields nothing.
+/// How far before a live run's opening frame its shield starts: a file time a clock step back
+/// put just before that frame still marks a child the run wrote.
+const CLOCK_MARGIN: Duration = Duration::from_secs(60);
+
+/// When the shield of the runs in flight starts: [`CLOCK_MARGIN`] before the earliest start of
+/// a run whose writer holds its lease, begun less than [`LIVE_SHIELD`] ago (a start after `now`,
+/// a clock stepped back, is a run that just began). A live run cites the children it ran only
+/// once its fan-out ends, so every root written since may be one of them (NIK-385). A journal
+/// this host cannot vouch for (no lease, an older engine, another host, a system without leases)
+/// shields nothing.
 fn live_shield(traces: &[TraceMeta], now: SystemTime) -> Option<SystemTime> {
     (traces.iter())
         .filter(|t| t.state == TraceState::Running)
@@ -455,6 +460,7 @@ fn live_shield(traces: &[TraceMeta], now: SystemTime) -> Option<SystemTime> {
                 .map_or(true, |age| age < LIVE_SHIELD)
         })
         .min()
+        .map(|started| started.checked_sub(CLOCK_MARGIN).unwrap_or(started))
 }
 
 /// Whether a trace is a failure, the one state the policy keeps first: a

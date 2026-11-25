@@ -23,7 +23,7 @@
 //! trace descent); the CLI keeps its display vocabulary (the age cell)
 //! and re-exports this seam at the old path.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -525,11 +525,14 @@ impl CitedChild {
 /// Retention keeps them with their run and `trace verify` names the ones
 /// that are missing: the ONE reader both share. A name that is not one
 /// normal path component is never a citation (the journal is untrusted
-/// input).
+/// input). A name cited again keeps its first place; a citation that names
+/// its item gives that item to one that named none (a fan-out's retry
+/// frame cites an attempt before its row does).
 #[must_use]
 pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
-    let mut seen = BTreeSet::new();
-    let mut cited = Vec::new();
+    // Each cited name's place in `cited`: a later citation of it only adds the item it names.
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut cited: Vec<CitedChild> = Vec::new();
     for event in events {
         let citing = matches!(
             event.kind,
@@ -549,9 +552,18 @@ pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
             .and_then(|row| row.get("trace_id")?.as_str().map(str::to_owned))
             .map(|trace_id| (trace_id, None::<u64>));
         for (trace_id, index) in single.into_iter().chain(item_children(event)) {
-            if bare_file_name(&trace_id) && seen.insert(trace_id.clone()) {
-                cited.push(CitedChild::new(trace_id, task.to_owned(), index));
+            if !bare_file_name(&trace_id) {
+                continue;
             }
+            if let Some(&at) = seen.get(&trace_id) {
+                // A fan-out's retry frame cites an attempt before its row names the item.
+                if cited[at].index.is_none() {
+                    cited[at].index = index;
+                }
+                continue;
+            }
+            seen.insert(trace_id.clone(), cited.len());
+            cited.push(CitedChild::new(trace_id, task.to_owned(), index));
         }
     }
     cited
@@ -868,6 +880,42 @@ pub(crate) mod tests {
                 row("a-1.ndjson"),
                 row("a-2.ndjson"),
                 row("a-3.ndjson"),
+            ]
+        );
+    }
+
+    /// NIK-385 review · a fan-out's retry frame cites a failed attempt's trace before the
+    /// terminal frame's item row names it again with its item: the row's index replaces the
+    /// citation that had none, at the place it was first cited, and the name stays cited once.
+    #[test]
+    fn a_citation_with_its_item_replaces_one_without() {
+        let retried = r#"{"target":"./kid.nika","trace_id":"a-1.ndjson","outcome":"failure"}"#;
+        let rows =
+            r#"[{"child":"a-2.ndjson","child_attempts":["a-1.ndjson"],"index":4,"status":"ok"}]"#;
+        let with = |frame: Event, key: &str, text: &str| {
+            frame.with_field(KeyValue::new(key, Value::String(text.to_owned())))
+        };
+        let events = vec![
+            with(
+                event(EventKind::TaskRetrying, "task", "fan", 1),
+                "child",
+                retried,
+            ),
+            with(
+                event(EventKind::TaskCompleted, "task", "fan", 2),
+                "items",
+                rows,
+            ),
+        ];
+        let cited: Vec<(String, Option<u64>)> = cited_children(&events)
+            .into_iter()
+            .map(|c| (c.trace_id, c.index))
+            .collect();
+        assert_eq!(
+            cited,
+            [
+                ("a-1.ndjson".to_owned(), Some(4)),
+                ("a-2.ndjson".to_owned(), Some(4)),
             ]
         );
     }

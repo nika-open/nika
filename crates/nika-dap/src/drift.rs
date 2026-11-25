@@ -523,15 +523,22 @@ impl BodyUsage {
         }
     }
 
-    /// `agent.images.save` (spec 02 §Harness images): the engine writes the first image there,
-    /// judged against `permits.fs.write`, so the grant covering a literal path is a USE, never
-    /// `declared-but-unused` advice that would order the removal of a write the run requires.
-    /// A templated path poisons the set (no claim). Images after the first take `-n` before
-    /// the extension; a grant that only those would match is not modelled.
+    /// `agent.images.save` (spec 02 §Harness images): the engine writes the first image there
+    /// and each later one at its `-n` sibling, every path judged against `permits.fs.write`,
+    /// so a grant covering any of them is a USE, never `declared-but-unused` advice that would
+    /// order the removal of a write the run requires (the check fits all of them,
+    /// [`nika_types::access::harness_image_paths`]). A templated path poisons the set (no
+    /// claim).
     fn eat_image_writes(&mut self, a: &RawAgentAction) {
-        if let Some(save) = a.images.as_ref().and_then(|i| i.value.save.as_ref()) {
-            let literal = (!save.value.contains("${{")).then(|| save.value.clone());
-            offer(&mut self.writes, literal);
+        let Some(save) = a.images.as_ref().and_then(|i| i.value.save.as_ref()) else {
+            return;
+        };
+        if save.value.contains("${{") {
+            offer(&mut self.writes, None);
+            return;
+        }
+        for path in nika_types::access::harness_image_paths(&save.value) {
+            offer(&mut self.writes, Some(path));
         }
     }
 
@@ -1388,6 +1395,19 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("`permits.fs.write` entry `./other/**`")),
             "{advice:?}"
+        );
+        // A grant that only an image after the first reaches is a use too: the check fits every
+        // sibling, so removing it would refuse the save at check.
+        let siblings = drifted(
+            "nika: w\npermits:\n  fs: { write: [\"./out/hero.png\", \"./out/hero-*.png\"] }\ntasks:\n  \
+             draw:\n    agent:\n      prompt: \"draw\"\n      images:\n        save: \
+             \"./out/hero.png\"\n",
+        );
+        assert!(
+            !siblings
+                .iter()
+                .any(|a| a.contains("`permits.fs.write` entry")),
+            "{siblings:?}"
         );
         let rendered = drifted(
             "nika: w\ninputs:\n  name: { type: string, required: true }\npermits:\n  fs: { write: \

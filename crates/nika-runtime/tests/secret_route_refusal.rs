@@ -2,9 +2,11 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! The run never renders a secret into a task's `model:` or an `exec:`'s `cwd:`.
+//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:` or a media
+//! builtin's `args.model` (an `agent:`'s `images.save:` is pinned on a harness seat, in the
+//! crate's `harness_image_values` tests).
 //!
-//! `nika check` refuses both (`NIKA-SEC-006`), and the run refuses a dirty report, so every run
+//! `nika check` refuses each (`NIKA-SEC-006`), and the run refuses a dirty report, so every run
 //! below holds the report an older check gave for the same bytes: one that did not judge these
 //! fields and passed them clean. On that report the run refuses the task itself, before it
 //! renders the field: no provider request, no spawn, no inference call, no ledger line. The

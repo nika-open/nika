@@ -173,7 +173,9 @@ pub struct FlowFacts {
     route_taint: Routes,
     /// Task index → every secret its RECORD carries (`tasks.<id>.output`, and
     /// each `group.<name>` fold it joins): what an exec/invoke effect saw and
-    /// an exec's `cwd:` reads, and what its `on_error.recover:` value reads
+    /// a route the output names reads (an exec's `cwd:`, an agent's
+    /// `images.save:`, a media builtin's `args.model`), and what its
+    /// `on_error.recover:` value reads
     /// (the recovered value replaces the output whatever the verb · spec 05
     /// §recovery).
     output_taint: Records,
@@ -1007,21 +1009,29 @@ fn tool_model(a: &RawInvokeAction) -> Option<&str> {
 /// provider, the author sanctions it explicitly (`egress: [{ to: "infer" }]`
 /// / `{ to: "agent" }`).
 ///
-/// Every route but a task's `model:` is part of the effect too
-/// ([`Route::is_effect_field`]): an `exec:`'s `cwd:`, which the run renders,
-/// labels and re-gates as a path (`regate_exec_cwd`) and which chooses what
-/// the program reads; an `agent:`'s `images.save:`, which chooses the files
-/// the run writes; a media builtin's `args.model`, an argument of its call.
-/// Every reader of this table sees them as it sees an argument. The secret
-/// flow alone reads the table without them ([`sink_fields`]): a secret there
-/// is a route, refused whatever its `egress:`, never a send an `egress:` rule
-/// could clear.
+/// Every route but a task's `model:` is part of the effect too: an
+/// `exec:`'s `cwd:`, which the run renders, labels and re-gates as a path
+/// (`regate_exec_cwd`) and which chooses what the program reads; an
+/// `agent:`'s `images.save:`, which chooses the files the run writes; a media
+/// builtin's `args.model`, an argument of its call. Every reader of this table
+/// sees them as it sees an argument. The secret flow alone reads the table
+/// without them: a secret there is a route, refused whatever its `egress:`,
+/// never a send an `egress:` rule could clear.
 ///
 /// `pub` (F-O1 PR-1): `nika-runtime`'s integrity walk reads the SAME
 /// effect-surface table — check≡run by construction, never a duplicated
 /// field list.
 #[must_use]
 pub fn action_effect_fields(action: &RawAction) -> Vec<&str> {
+    // An invoke's effect is its whole `args`, in their own order, its model
+    // route included: a reader that names the first field carrying a value
+    // names the same one whether or not the tool takes a model.
+    if let RawAction::Invoke(a) = action {
+        return a
+            .args
+            .as_ref()
+            .map_or_else(Vec::new, |args| collect_json_strings(&args.value));
+    }
     let mut fields = sink_fields(action);
     fields.extend(
         route_fields(action)

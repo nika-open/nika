@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:`
-//! or an `agent:`'s `images.save:` (spec 10 · `NIKA-SEC-006`, the run-time
-//! twin of the check).
+//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:`,
+//! an `agent:`'s `images.save:` or a media builtin's `args.model` (spec 10 ·
+//! `NIKA-SEC-006`, the run-time twin of the check).
 //!
 //! Each field decides where the effect goes: the provider and model the run
-//! calls, the directory it spawns the program in, the file it writes an image
+//! or the tool calls, the directory it spawns the program in, the file it writes an image
 //! to. Rendered with secrets resolved, one would carry the value into every
 //! place that names a route (the call's frame, the ledger, the settlement, the
 //! access lane), into the spawn and the sandbox profile, or into a file name

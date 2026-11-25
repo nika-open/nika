@@ -84,3 +84,52 @@ fn a_taint_door_on_an_input_only_the_save_path_reads_is_live() {
         "the save path counts only when it reads the binding"
     );
 }
+
+/// `page` fetches a feed, `draw` asks `PROMPT` and saves at `SAVE`, and `send` posts `draw`'s
+/// output to another host, under a grant to read private notes (the third leg).
+fn fetched(prompt: &str, save: &str) -> String {
+    format!(
+        r#"nika: fetched-save
+model: mock/echo
+permits:
+  tools: ["nika:fetch"]
+  fs: {{ read: ["./notes/**"], write: ["./out/**"] }}
+  net: {{ http: ["feed.example.com", "sink.example.com"] }}
+tasks:
+  page:
+    invoke: {{ tool: "nika:fetch", args: {{ url: "https://feed.example.com/a" }} }}
+  draw:
+    with: {{ got: "${{{{ tasks.page.output }}}}" }}
+    agent: {{ prompt: "{prompt}", images: {{ save: "{save}" }} }}
+  send:
+    with: {{ body: "${{{{ tasks.draw.output }}}}" }}
+    invoke: {{ tool: "nika:fetch", args: {{ url: "https://sink.example.com/in", method: POST, body: "${{{{ with.body }}}}" }} }}
+"#
+    )
+}
+
+/// Every `NIKA-SEC-009` finding as `(sink, source)`.
+fn trifecta(report: &CheckReport) -> Vec<(String, Option<String>)> {
+    report
+        .trifecta_findings
+        .iter()
+        .map(|v| (v.task.clone(), v.source.clone()))
+        .collect()
+}
+
+#[test]
+fn fetched_content_that_picks_the_save_path_reaches_the_output_that_names_it() {
+    for (prompt, save) in [
+        ("draw a boat", "./out/${{ with.got }}.png"),
+        ("draw ${{ with.got }}", "./out/boat.png"),
+    ] {
+        let report = run(&fetched(prompt, save));
+        assert_eq!(
+            trifecta(&report),
+            [("send".to_owned(), Some("page".to_owned()))],
+            "{prompt} {save}"
+        );
+    }
+    let report = run(&fetched("draw a boat", "./out/boat.png"));
+    assert_eq!(trifecta(&report), Vec::new());
+}

@@ -100,7 +100,7 @@ fn a_secret_in_a_media_model_is_refused_whatever_its_rule() {
                     format!(
                         "leak into invoke.args.model (task `say`) — {path} · fix: a model is a \
                          route, not a secret, and no `egress:` rule clears `secrets.token` in \
-                         `model:` — name the model there, or read it from `inputs:` or \
+                         `args.model:` — name the model there, or read it from `inputs:` or \
                          `const:` (`model: \"${{{{ inputs.model }}}}\"`)"
                     )
                 )],
@@ -159,7 +159,8 @@ tasks:
     assert_eq!(leaks(&report), Vec::new());
 }
 
-/// The journey names `say` in the routes of `token`: the provider receives the model.
+/// The journey names `say` in the routes of `token`: the provider receives the model. A route is
+/// no send, so the tool is no destination of the secret.
 #[test]
 fn the_journey_names_a_media_model_as_a_model_route() {
     for tool in TOOLS {
@@ -168,11 +169,23 @@ fn the_journey_names_a_media_model_as_a_model_route() {
             .data_journey
             .secrets_used
             .iter()
-            .map(|s| (s.name.as_str(), s.tasks.clone(), s.routes.clone()))
+            .map(|s| {
+                (
+                    s.name.as_str(),
+                    s.tasks.clone(),
+                    s.flows_to.clone(),
+                    s.routes.clone(),
+                )
+            })
             .collect();
         assert_eq!(
             used,
-            [("token", vec!["say".to_owned()], vec!["say".to_owned()])],
+            [(
+                "token",
+                vec!["say".to_owned()],
+                Vec::<String>::new(),
+                vec!["say".to_owned()]
+            )],
             "{tool}"
         );
     }

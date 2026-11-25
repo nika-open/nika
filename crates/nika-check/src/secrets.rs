@@ -11,8 +11,10 @@
 //!
 //! - [`SecretLeak`] — a secret reaches an `exec`/`invoke` EFFECT (directly,
 //!   via a `with:` alias, via a `for_each` item, or transitively through a
-//!   tainted upstream output), or a ROUTE: the `model:` of an `infer`/`agent`
-//!   task or the `cwd:` of an `exec` task, which no `egress:` rule clears.
+//!   tainted upstream output), or a ROUTE, which no `egress:` rule clears:
+//!   the `model:` of an `infer`/`agent` task, the `cwd:` of an `exec` task,
+//!   the `images.save:` of an `agent` task, or the `args.model` of a media
+//!   builtin call.
 //!   The full taint chain is carried.
 //! - [`SecretEgress`] — a secret reaches the workflow `outputs:` (it leaves
 //!   the run as the return value · the literal exfiltration case).
@@ -35,7 +37,8 @@ pub struct SecretLeak {
     /// The originating secret name (`secrets.<name>`).
     pub secret: String,
     /// The effect surface (`exec` · `invoke` · `infer` · `agent`), or the
-    /// route (`infer.model` · `agent.model` · `exec.cwd`).
+    /// route (`infer.model` · `agent.model` · `exec.cwd` · `agent.images.save`
+    /// · `invoke.args.model`).
     pub sink: &'static str,
     /// The EXACT `egress.to:` value that would sanction this sink — the
     /// tool id for an invoke (`nika:jq`), else the surface (`exec` ·

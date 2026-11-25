@@ -5,8 +5,9 @@
 //!
 //! The run renders with secrets resolved the fields an `egress:` rule lets a
 //! secret reach: an `exec:`'s argv and env, a prompt, a tool's arguments. (A
-//! `model:` and a `cwd:` never carry one: the run refuses such a task before it
-//! starts, `task::secret_route`.) When the dispatch fails (a spawn that fails,
+//! route never carries one, a `model:`, a `cwd:`, an `images.save:` or a media
+//! builtin's `args.model`: the run refuses such a task before it starts,
+//! `task::secret_route`.) When the dispatch fails (a spawn that fails,
 //! a provider or a tool that echoes what it received) its note and its error
 //! record can name what was rendered. The event lane masks them through
 //! the run's `RedactingSink`, but the error record is also data the sink never

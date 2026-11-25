@@ -39,7 +39,12 @@
 //!   reach goes with the last of them, and a paused child never goes;
 //! - the budget removes a whole run, the root with its children and
 //!   their bytes, at the root's place in its order;
-//! - a child whose parent is gone from disk is an ordinary trace.
+//! - a child whose parent is gone from disk is an ordinary trace;
+//! - a run in flight cites its children only when its fan-out ends, while
+//!   every `nika run` collects at its start: a root written after a live
+//!   journal in the same directory began may be one of its children, so it
+//!   is neither rotated nor removed for the budget while that run lives (a
+//!   live journal with no opening frame names no start and holds nothing).
 //!
 //! Collection is FAIL-OPEN end to end: a broken GC must never block a
 //! run. But a SUCCESSFUL collection speaks exactly ONE stderr line —
@@ -254,7 +259,9 @@ impl Reason {
 /// running root whose writer died counts as failed. One whose writer
 /// holds its lease, or that this host cannot vouch for (no lease, another
 /// host), is a live journal: the budget never removes it, and a held lease
-/// never ages out, while a torn journal nobody vouches for still does. The
+/// never ages out, while a torn journal nobody vouches for still does. A
+/// root written after a live journal began is neither rotated nor budgeted
+/// while it lives (it may be a child the run has not cited yet). The
 /// budget reaches a failed root only once nothing else is left to remove.
 #[must_use]
 pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec<(usize, Reason)> {
@@ -265,12 +272,18 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
     let last_failure = newest_where(traces, |i| root(i) && failed(&traces[i]));
     let shielded = |i: usize| exempt(i) || last_failure.contains(&i);
     let held = |i: usize| matches!(traces[i].liveness, Some(Liveness::Alive { .. }));
+    // A live run cites the children it ran only once its fan-out ends: every root
+    // written since the earliest live start may be one of them (NIK-385).
+    let live_since = (traces.iter().filter(|t| live(t)))
+        .filter_map(|t| t.started)
+        .min();
+    let in_flight = |i: usize| live_since.is_some_and(|since| traces[i].modified > since);
     let mut marked: BTreeMap<usize, Reason> = BTreeMap::new();
 
     // Rotation — keep the N finished runs per workflow, failed ones first.
     for indices in finished_by_workflow(traces, root).values() {
         for &i in indices.iter().skip(cfg.keep_last) {
-            if !shielded(i) {
+            if !shielded(i) && !in_flight(i) {
                 marked.insert(i, Reason::Rotated);
             }
         }
@@ -305,7 +318,7 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
             if total <= cfg.budget_bytes {
                 break;
             }
-            if shielded(i) || live(&traces[i]) || marked.contains_key(&i) {
+            if shielded(i) || live(&traces[i]) || in_flight(i) || marked.contains_key(&i) {
                 continue;
             }
             marked.insert(i, Reason::OverBudget);

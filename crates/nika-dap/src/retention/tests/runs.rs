@@ -258,3 +258,55 @@ fn a_kept_failed_root_keeps_its_children() {
         "every removable success goes; the newest failure and its children stay"
     );
 }
+
+/// NIK-385 review · a fan-out cites its children only when it ends, while every `nika run`
+/// collects at its start. Two runs: one ended a day ago, and one is in flight, its fan-out past
+/// ten finished `round` children it has not cited yet. Those children are neither rotated nor
+/// budgeted while it runs, however full their workflow's window; the older run's traces still
+/// are, and the collection removes exactly them.
+#[test]
+fn a_live_fan_out_keeps_the_children_it_has_not_cited_yet() {
+    let dir = temp_store("live-fan-out");
+    let (hours, minutes) = (
+        |h: u64| Duration::from_secs(h * 3_600),
+        |m: u64| Duration::from_secs(m * 60),
+    );
+    let round = ndjson(&run_events("round", Some(EventKind::WorkflowCompleted)));
+    stage_trace(&dir, "round-old-0.ndjson", &round, hours(30));
+    stage_trace(&dir, "round-old-1.ndjson", &round, hours(29));
+    // The live run opened two hours ago: no terminal frame, no citation yet, no lease here.
+    let opened = SystemTime::now() - hours(2);
+    let opened_ms = opened
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_millis();
+    let mut live = run_events("calibration", None);
+    live[0].timestamp = nika_types::timestamp::Timestamp::from_unix_ms(
+        u64::try_from(opened_ms).expect("a 64-bit millisecond clock"),
+    );
+    stage_trace(&dir, "calibration-live.ndjson", &ndjson(&live), minutes(1));
+    let children: Vec<String> = (0..12).map(|i| format!("child-{i:02}.ndjson")).collect();
+    for (name, i) in children.iter().zip(0u64..) {
+        stage_trace(&dir, name, &round, minutes(10 + 5 * (12 - i)));
+    }
+    let older = ["round-old-0.ndjson", "round-old-1.ndjson"];
+    let scanned = store::scan(&dir);
+    assert_eq!(
+        plan_names(&scanned, &keeping(10)),
+        each(&older, Reason::Rotated),
+        "the run that ended rotates; the live fan-out's twelve children stay"
+    );
+    let tight = RetentionConfig::new(100, Duration::from_secs(365 * DAY), 1);
+    assert_eq!(
+        plan_names(&scanned, &tight),
+        each(&older, Reason::OverBudget),
+        "the budget reaches only what ended before the live run began"
+    );
+    let report = collect(&dir, &RetentionConfig::default(), SystemTime::now()).expect("collected");
+    assert_eq!((report.rotated, report.kept), (2, 13), "{report:?}");
+    let mut kept = children;
+    kept.push("calibration-live.ndjson".to_owned());
+    kept.sort();
+    assert_eq!(file_names(&dir), kept);
+    let _ = std::fs::remove_dir_all(dir);
+}

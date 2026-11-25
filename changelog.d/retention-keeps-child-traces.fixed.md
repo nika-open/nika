@@ -15,7 +15,11 @@
   count, stays as long as its parent stays, even past the age cap, and
   goes with its parent, for the parent's reason. A paused child never
   goes. The size budget removes a whole run, the parent with its children.
-  A child whose parent is already gone is an ordinary trace. `nika trace
+  A child whose parent is already gone is an ordinary trace. A run still
+  in flight cites its children only once its fan-out ends, so while it
+  runs no trace written after it began is rotated or removed for the size
+  budget: a `nika run` started beside a long fan-out no longer removes the
+  children that fan-out has not cited yet. `nika trace
   verify` on a parent now adds one line for each child trace it cites that
   is not beside its journal, naming the trace, its task and, for a
   `for_each`, the item; the tier and the exit code do not change.

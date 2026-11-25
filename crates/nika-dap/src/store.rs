@@ -134,6 +134,9 @@ pub struct TraceMeta {
     /// The child traces this run cites ([`cited_children`]), by file name,
     /// each once: the traces retention keeps with the run (NIK-385).
     pub(crate) children: Vec<String>,
+    /// When the run began: its opening `workflow_started` frame's time.
+    /// `None` when no opening frame was read (or it predates 1970).
+    pub(crate) started: Option<SystemTime>,
 }
 
 impl TraceMeta {
@@ -163,6 +166,7 @@ impl TraceMeta {
             run_id: None,
             project: None,
             children: Vec::new(),
+            started: None,
         }
     }
 
@@ -192,6 +196,13 @@ impl TraceMeta {
     #[must_use]
     pub(crate) fn with_children(mut self, children: Vec<String>) -> Self {
         self.children = children;
+        self
+    }
+
+    /// Attach when the run began (its opening frame's time).
+    #[must_use]
+    pub(crate) const fn with_started(mut self, started: Option<SystemTime>) -> Self {
+        self.started = started;
         self
     }
 
@@ -403,12 +414,19 @@ fn read_meta(path: &Path) -> Result<(TraceMeta, Vec<DoubtWhy>), SkipWhy> {
     )
     .with_resumed_from(field("resumed_from"))
     .with_identity(run_id, field("project_root_fingerprint"))
-    .with_children(children.map(|child| child.trace_id).collect());
+    .with_children(children.map(|child| child.trace_id).collect())
+    .with_started(started.and_then(|opening| at(opening.timestamp)));
     // A running trace asks its lease (ADR-129): alive · dead · unknown.
     if state == TraceState::Running {
         facts = facts.with_liveness(crate::liveness::probe(path));
     }
     Ok((facts, doubts))
+}
+
+/// A frame's time on the system clock; `None` before 1970.
+fn at(timestamp: nika_types::timestamp::Timestamp) -> Option<SystemTime> {
+    let ms = u64::try_from(timestamp.unix_ms()).ok()?;
+    SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(ms))
 }
 
 /// What a recovered journal cannot vouch for: a torn suffix, a missing

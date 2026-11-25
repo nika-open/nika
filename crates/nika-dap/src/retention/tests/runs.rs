@@ -260,10 +260,12 @@ fn a_kept_failed_root_keeps_its_children() {
 }
 
 /// NIK-385 review · a fan-out cites its children only when it ends, while every `nika run`
-/// collects at its start. Two runs: one ended a day ago, and one is in flight, its fan-out past
-/// ten finished `round` children it has not cited yet. Those children are neither rotated nor
-/// budgeted while it runs, however full their workflow's window; the older run's traces still
-/// are, and the collection removes exactly them.
+/// collects at its start. Two runs: one ended a day ago, and one is in flight (its writer holds
+/// its lease), its fan-out past ten finished `round` children it has not cited yet. Those
+/// children are neither rotated nor budgeted while it runs, however full their workflow's
+/// window; the older run's traces still are, and the collection removes exactly them. A lease is
+/// a unix lock, so the test runs there.
+#[cfg(unix)]
 #[test]
 fn a_live_fan_out_keeps_the_children_it_has_not_cited_yet() {
     let dir = temp_store("live-fan-out");
@@ -274,7 +276,7 @@ fn a_live_fan_out_keeps_the_children_it_has_not_cited_yet() {
     let round = ndjson(&run_events("round", Some(EventKind::WorkflowCompleted)));
     stage_trace(&dir, "round-old-0.ndjson", &round, hours(30));
     stage_trace(&dir, "round-old-1.ndjson", &round, hours(29));
-    // The live run opened two hours ago: no terminal frame, no citation yet, no lease here.
+    // The live run opened two hours ago: no terminal frame and no citation yet.
     let opened = SystemTime::now() - hours(2);
     let opened_ms = opened
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -284,13 +286,21 @@ fn a_live_fan_out_keeps_the_children_it_has_not_cited_yet() {
     live[0].timestamp = nika_types::timestamp::Timestamp::from_unix_ms(
         u64::try_from(opened_ms).expect("a 64-bit millisecond clock"),
     );
-    stage_trace(&dir, "calibration-live.ndjson", &ndjson(&live), minutes(1));
+    let journal = stage_trace(&dir, "calibration-live.ndjson", &ndjson(&live), minutes(1));
+    let _lease = crate::liveness::hold(&journal).expect("the writer holds its lease");
     let children: Vec<String> = (0..12).map(|i| format!("child-{i:02}.ndjson")).collect();
     for (name, i) in children.iter().zip(0u64..) {
         stage_trace(&dir, name, &round, minutes(10 + 5 * (12 - i)));
     }
     let older = ["round-old-0.ndjson", "round-old-1.ndjson"];
     let scanned = store::scan(&dir);
+    // The journals carry this clock's times: the plan reads it too.
+    let plan_names = |traces: &[TraceMeta], cfg: &RetentionConfig| -> BTreeMap<String, Reason> {
+        plan(traces, cfg, SystemTime::now())
+            .into_iter()
+            .map(|(i, reason)| (traces[i].name.clone(), reason))
+            .collect()
+    };
     assert_eq!(
         plan_names(&scanned, &keeping(10)),
         each(&older, Reason::Rotated),
@@ -305,8 +315,82 @@ fn a_live_fan_out_keeps_the_children_it_has_not_cited_yet() {
     let report = collect(&dir, &RetentionConfig::default(), SystemTime::now()).expect("collected");
     assert_eq!((report.rotated, report.kept), (2, 13), "{report:?}");
     let mut kept = children;
-    kept.push("calibration-live.ndjson".to_owned());
+    kept.extend(["calibration-live.ndjson", "calibration-live.ndjson.lock"].map(str::to_owned));
     kept.sort();
     assert_eq!(file_names(&dir), kept);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A `calibration` run in flight (`liveness`, opened `opened_h` hours ago) beside the twelve
+/// finished `round` children it wrote since, which it has not cited yet, and two `round` runs
+/// that ended before it began.
+fn in_flight(liveness: Liveness, opened_h: u64) -> Vec<TraceMeta> {
+    let ok = TraceState::Succeeded;
+    let opened = now() - Duration::from_secs(opened_h * 3_600);
+    let mut traces = vec![
+        meta(
+            "calibration-live",
+            "calibration",
+            TraceState::Running,
+            10,
+            60,
+        )
+        .with_liveness(liveness)
+        .with_started(Some(opened)),
+    ];
+    traces.extend((0..12u64).map(|i| {
+        meta(
+            &format!("child-{i:02}"),
+            "round",
+            ok,
+            10,
+            600 + 300 * (12 - i),
+        )
+    }));
+    traces.push(meta("round-old-0", "round", ok, 10, 30 * 3_600));
+    traces.push(meta("round-old-1", "round", ok, 10, 29 * 3_600));
+    traces
+}
+
+/// What rotation removes when nothing holds the children: the two older runs and the two
+/// oldest children, past the ten newest `round` runs.
+const UNHELD: [&str; 4] = ["child-00", "child-01", "round-old-0", "round-old-1"];
+
+/// NIK-385 review · only a writer that holds its lease shields what was written after its start.
+/// A journal this host cannot vouch for (no lease, an older engine, another host, a system
+/// without leases) shields nothing: the children rotate and the budget reaches them, while the
+/// journal itself is still never budgeted.
+#[test]
+fn an_unknown_journal_shields_nothing() {
+    let traces = in_flight(Liveness::Unknown, 2);
+    assert_eq!(
+        plan_names(&traces, &keeping(10)),
+        each(&UNHELD, Reason::Rotated)
+    );
+    let tight = RetentionConfig::new(100, Duration::from_secs(365 * DAY), 1);
+    let mut gone: Vec<String> = (0..11).map(|i| format!("child-{i:02}")).collect();
+    gone.extend(["round-old-0", "round-old-1"].map(str::to_owned));
+    let gone: Vec<&str> = gone.iter().map(String::as_str).collect();
+    assert_eq!(
+        plan_names(&traces, &tight),
+        each(&gone, Reason::OverBudget),
+        "every success but the newest round goes; the unknown journal stays"
+    );
+}
+
+/// NIK-385 review · a live shield ends a day after its run began, whatever its lease: a writer
+/// that holds its lease for longer no longer holds back the collection of what it wrote.
+#[test]
+fn a_live_shield_ends_a_day_after_its_run_began() {
+    let held = Liveness::Alive { pid: 4_242 };
+    assert_eq!(
+        plan_names(&in_flight(held, 2), &keeping(10)),
+        each(&["round-old-0", "round-old-1"], Reason::Rotated),
+        "two hours in, the children it has not cited yet stay"
+    );
+    assert_eq!(
+        plan_names(&in_flight(held, 25), &keeping(10)),
+        each(&UNHELD, Reason::Rotated),
+        "past a day, the shield is gone"
+    );
 }

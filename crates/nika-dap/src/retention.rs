@@ -41,10 +41,11 @@
 //!   their bytes, at the root's place in its order;
 //! - a child whose parent is gone from disk is an ordinary trace;
 //! - a run in flight cites its children only when its fan-out ends, while
-//!   every `nika run` collects at its start: a root written after a live
-//!   journal in the same directory began may be one of its children, so it
-//!   is neither rotated nor removed for the budget while that run lives (a
-//!   live journal with no opening frame names no start and holds nothing).
+//!   every `nika run` collects at its start: a root written after a journal
+//!   in the same directory began, whose writer holds its lease, may be one
+//!   of its children, so it is neither rotated nor removed for the budget
+//!   while that run lives, for at most a day after its start. A journal this
+//!   host cannot vouch for, or with no opening frame, holds nothing.
 //!
 //! Collection is FAIL-OPEN end to end: a broken GC must never block a
 //! run. But a SUCCESSFUL collection speaks exactly ONE stderr line —
@@ -260,9 +261,10 @@ impl Reason {
 /// holds its lease, or that this host cannot vouch for (no lease, another
 /// host), is a live journal: the budget never removes it, and a held lease
 /// never ages out, while a torn journal nobody vouches for still does. A
-/// root written after a live journal began is neither rotated nor budgeted
-/// while it lives (it may be a child the run has not cited yet). The
-/// budget reaches a failed root only once nothing else is left to remove.
+/// root written after a journal whose writer holds its lease began is
+/// neither rotated nor budgeted while it lives, for at most a day after
+/// that start (it may be a child the run has not cited yet). The budget
+/// reaches a failed root only once nothing else is left to remove.
 #[must_use]
 pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec<(usize, Reason)> {
     let runs = Runs::of(traces);
@@ -272,11 +274,7 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
     let last_failure = newest_where(traces, |i| root(i) && failed(&traces[i]));
     let shielded = |i: usize| exempt(i) || last_failure.contains(&i);
     let held = |i: usize| matches!(traces[i].liveness, Some(Liveness::Alive { .. }));
-    // A live run cites the children it ran only once its fan-out ends: every root
-    // written since the earliest live start may be one of them (NIK-385).
-    let live_since = (traces.iter().filter(|t| live(t)))
-        .filter_map(|t| t.started)
-        .min();
+    let live_since = live_shield(traces, now);
     let in_flight = |i: usize| live_since.is_some_and(|since| traces[i].modified > since);
     let mut marked: BTreeMap<usize, Reason> = BTreeMap::new();
 
@@ -436,6 +434,27 @@ fn newest_where(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> BTreeSet<
         }
     }
     newest.into_values().collect()
+}
+
+/// How long a live run shields what was written after it began: a writer that holds its lease
+/// for longer no longer holds back the collection of what it wrote (NIK-385).
+const LIVE_SHIELD: Duration = Duration::from_secs(24 * 3_600);
+
+/// The earliest start of a run in flight whose writer holds its lease, begun less than
+/// [`LIVE_SHIELD`] ago (a start after `now`, a clock stepped back, is a run that just began): a
+/// live run cites the children it ran only once its fan-out ends, so every root written since
+/// may be one of them (NIK-385). A journal this host cannot vouch for (no lease, an older engine,
+/// another host, a system without leases) shields nothing.
+fn live_shield(traces: &[TraceMeta], now: SystemTime) -> Option<SystemTime> {
+    (traces.iter())
+        .filter(|t| t.state == TraceState::Running)
+        .filter(|t| matches!(t.liveness, Some(Liveness::Alive { .. })))
+        .filter_map(|t| t.started)
+        .filter(|&started| {
+            now.duration_since(started)
+                .map_or(true, |age| age < LIVE_SHIELD)
+        })
+        .min()
 }
 
 /// Whether a trace is a failure, the one state the policy keeps first: a

@@ -24,7 +24,9 @@
   in flight cites its children only once its fan-out ends, so while it
   runs no trace written after it began is rotated or removed for the size
   budget: a `nika run` started beside a long fan-out no longer removes the
-  children that fan-out has not cited yet. `nika trace
+  children that fan-out has not cited yet. Only a run whose writer holds
+  its lease shields them, for at most a day after it began; a journal this
+  host cannot vouch for (no lease, another host) shields nothing. `nika trace
   verify` on a parent now adds one line for each child trace it cites that
   is not beside its journal, naming the trace, its task and, for a
   `for_each`, the item; the tier and the exit code do not change.

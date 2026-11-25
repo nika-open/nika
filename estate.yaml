@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8219
+  classified_files: 8222
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 4961
+    authored: 4964
     authored-pin: 2
     generated: 283
     pinned-copy: 266
@@ -152,12 +152,12 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2434
-  aggregate_sha256: dd49714bc2914b846613e416df125c36a686b5a297b26a2a4371df42946ee61d
+  aggregate_sha256: 2075f71f8dee3cb66ccd1cd780d5a65f61049ba152bedf6e748df16745bc0d52
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
-  match_count: 874
-  aggregate_sha256: c8f4fb84f0070474f5b7258ae8286f9ea7930f44b0c362ed8c16ea8d0a07eeb4
+  match_count: 875
+  aggregate_sha256: 3539b7961d1d25d02efcc9974ee067ba4aeda536c14f379fb80378374d29627f
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 12
-  aggregate_sha256: 425f9c6c1903955a99d0e48d6285b4469b901da595312cb4204471160a31547c
+  match_count: 14
+  aggregate_sha256: 1631674d855ff543fdf54d63f1134fba7139a38ae946ebd9d2d9387605fac1c9
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

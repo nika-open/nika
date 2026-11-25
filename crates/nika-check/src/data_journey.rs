@@ -133,8 +133,9 @@ pub struct SecretUse {
     /// it reaches (a provider id · a public host · an MCP tool id) — the
     /// rows the JOURNEY rung warns on.
     pub flows_to: Vec<String>,
-    /// The `infer:`/`agent:` tasks whose `model:` it reaches (each in `tasks`
-    /// too): the provider receives the route a secret chooses, so each is an
+    /// The `infer:`/`agent:` tasks whose `model:` it reaches, and the media
+    /// builtin calls whose `args.model` it reaches (each in `tasks` too): the
+    /// provider receives the route a secret chooses, so each is an
     /// external flow of its own, and no `egress:` rule clears it
     /// (`NIKA-SEC-006`), so a reader names the remedy, not a consent.
     pub routes: Vec<String>,
@@ -561,7 +562,8 @@ fn secrets_named_by(task: &RawTask, declared: &BTreeSet<&str>) -> BTreeSet<Strin
 struct Reach {
     /// The tasks whose effect it reaches.
     effects: BTreeSet<String>,
-    /// The `infer:`/`agent:` tasks whose `model:` route it reaches.
+    /// The tasks whose model route it reaches: an `infer:`/`agent:` `model:`,
+    /// a media builtin's `args.model`.
     routes: BTreeSet<String>,
     /// The `agent:` tasks whose `images.save:` path it reaches: a file the
     /// run writes on this machine, so a task of the secret's, and no flow out.
@@ -596,7 +598,7 @@ fn secrets_reaching(idx: usize, flow: &FlowFacts) -> impl Iterator<Item = (Strin
         .map(|trace| (trace.secret.clone(), Via::Effect));
     let routes = flow.route_taints(idx).map(|(route, trace)| {
         let via = match route {
-            Route::Model => Via::Route,
+            Route::Model | Route::ToolModel => Via::Route,
             Route::WorkingDirectory => Via::Effect,
             Route::ImageSave => Via::Path,
         };

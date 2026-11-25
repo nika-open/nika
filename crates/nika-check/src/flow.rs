@@ -27,14 +27,15 @@
 //!   secret reaching the workflow `outputs:` is an EGRESS (the value leaves
 //!   the run as the return). A secret reaching a ROUTE ([`Route`]: an
 //!   `infer:`/`agent:` `model:`, an `exec:`'s `cwd:`, an `agent:`'s
-//!   `images.save:`) is refused: the run renders each with secrets resolved,
-//!   as the provider and model it calls, the directory it spawns the program
-//!   in or the file it writes an image to, and neither a model name nor a
-//!   path is ever a secret, so no `egress:` rule clears it (the run refuses
-//!   such a task before the field renders). A model route carries nothing
-//!   into the record (the output carve-out above); a path route does: a
-//!   program can print its working directory, and an agent's output names
-//!   the path of each image it saved.
+//!   `images.save:`, a media builtin's `args.model`) is refused: the run
+//!   renders each with secrets resolved, as the provider and model it calls,
+//!   the directory it spawns the program in or the file it writes, and
+//!   neither a model name nor a path is ever a secret, so no `egress:` rule
+//!   clears it (the run refuses such a task before the field renders). A task
+//!   model carries nothing into the record (the output carve-out above); the
+//!   other routes do: a program can print its working directory, an agent's
+//!   output names the path of each image it saved, and a media builtin names
+//!   its model in the file it saves and in its output.
 //!
 //! Every slot holds one trace PER SECRET, the most direct one found (fewest
 //! hops; a tie keeps the trace read first), so a record that carries two
@@ -62,7 +63,9 @@ use std::sync::Arc;
 
 use nika_schema::Spanned;
 use nika_schema::expression::{NamespaceRef, expr_refs, scan_templates};
-use nika_schema::raw::{ForEachValue, RawAction, RawTask, RawWorkflow};
+use nika_schema::raw::{
+    ForEachValue, RawAction, RawInvokeAction, RawInvokeTarget, RawTask, RawWorkflow,
+};
 use nika_schema::types::{EgressRule, OnErrorAction, OutputDecl, Permits};
 
 use super::declass;
@@ -737,9 +740,10 @@ fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> Evaluation 
         .collect();
     // 5. The record: an exec/invoke whose effect saw a secret can embed it in
     //    the captured output (infer/agent are provider-bound: no output
-    //    taint), and a path route names its path in the output whatever the
-    //    verb (a program can print its working directory, an agent's output
-    //    names each image it saved); a recovered value replaces the output
+    //    taint), and a route of the effect names its value in the output
+    //    whatever the verb (a program can print its working directory, an
+    //    agent's output names each image it saved, a media builtin its model);
+    //    a recovered value replaces the output
     //    whatever the verb. Written to the record, not sent: no sink here,
     //    each later reader is judged as usual.
     let output = format!("tasks.{id}.output");
@@ -749,7 +753,7 @@ fn evaluate(task: &RawTask, reads: &Reads<'_>, records: &Records) -> Evaluation 
             keep_most_direct(&mut record, trace.via(output.clone()));
         }
     }
-    for (_, taints) in routed.iter().filter(|(route, _)| route.is_path()) {
+    for (_, taints) in routed.iter().filter(|(route, _)| route.is_effect_field()) {
         for trace in taints.values() {
             keep_most_direct(&mut record, trace.via(output.clone()));
         }
@@ -893,7 +897,14 @@ pub(crate) enum Route {
     /// An `agent:` `images.save:` (spec 02 §images), the file the run writes
     /// each image the turn delivered to, and the path the output names.
     ImageSave,
+    /// A media builtin's `args.model` ([`MODEL_TOOLS`]), the model the tool
+    /// calls and, without a `provider:`, the provider it infers from it. The
+    /// file the tool saves and its output name it.
+    ToolModel,
 }
+
+/// The builtins whose `args.model` names the model they call.
+const MODEL_TOOLS: [&str; 2] = ["nika:image_generate", "nika:tts_generate"];
 
 impl Route {
     /// The field, as the last hop of a trace names it.
@@ -902,6 +913,7 @@ impl Route {
             Self::Model => "model",
             Self::WorkingDirectory => "cwd",
             Self::ImageSave => "images.save",
+            Self::ToolModel => "args.model",
         }
     }
 
@@ -912,24 +924,26 @@ impl Route {
             Self::Model => "infer.model",
             Self::WorkingDirectory => "exec.cwd",
             Self::ImageSave => "agent.images.save",
+            Self::ToolModel => "invoke.args.model",
         }
     }
 
     /// Why no `egress:` rule clears a secret here.
     pub(crate) const fn reason(self) -> declass::LeakReason {
         match self {
-            Self::Model => declass::LeakReason::ModelRoute,
+            Self::Model | Self::ToolModel => declass::LeakReason::ModelRoute,
             Self::WorkingDirectory => declass::LeakReason::WorkingDirectory,
             Self::ImageSave => declass::LeakReason::ImageSavePath,
         }
     }
 
-    /// Whether the route is a PATH the effect touches, which the shared
-    /// effect table lists too ([`action_effect_fields`]) and which the task's
+    /// Whether the route is a field of the effect too, which the shared
+    /// effect table lists ([`action_effect_fields`]) and which the task's
     /// output names (a program can print its working directory, an agent's
-    /// output names each image it saved). A model is neither.
-    const fn is_path(self) -> bool {
-        matches!(self, Self::WorkingDirectory | Self::ImageSave)
+    /// output names each image it saved, a media builtin its model). A task's
+    /// `model:` is neither.
+    const fn is_effect_field(self) -> bool {
+        !matches!(self, Self::Model)
     }
 
     /// The last hop of a trace into this route of `task`: `<field> @ <task>`.
@@ -958,9 +972,22 @@ fn route_fields(action: &RawAction) -> Vec<(Route, &str)> {
                     .map(|d| (Route::WorkingDirectory, d.value.as_str())),
             );
         }
+        RawAction::Invoke(a) => routes.extend(tool_model(a).map(|m| (Route::ToolModel, m))),
         _ => {}
     }
     routes
+}
+
+/// The `args.model` text of a media builtin call ([`Route::ToolModel`]),
+/// when the call names one.
+fn tool_model(a: &RawInvokeAction) -> Option<&str> {
+    let RawInvokeTarget::Tool(tool) = &a.target else {
+        return None;
+    };
+    if !MODEL_TOOLS.contains(&tool.value.as_str()) {
+        return None;
+    }
+    a.args.as_ref()?.value.get("model")?.as_str()
 }
 
 /// The text fields of an action's EFFECT (the sink surface): one table for
@@ -980,13 +1007,15 @@ fn route_fields(action: &RawAction) -> Vec<(Route, &str)> {
 /// provider, the author sanctions it explicitly (`egress: [{ to: "infer" }]`
 /// / `{ to: "agent" }`).
 ///
-/// A path route ([`Route`]) is part of the effect too: an `exec:`'s `cwd:`,
-/// which the run renders, labels and re-gates as a path (`regate_exec_cwd`)
-/// and which chooses what the program reads, and an `agent:`'s
-/// `images.save:`, which chooses the files the run writes. Every reader of
-/// this table sees them as it sees an argument. The secret flow alone reads
-/// the table without them ([`sink_fields`]): a secret there is a route,
-/// refused whatever its `egress:`, never a send an `egress:` rule could clear.
+/// Every route but a task's `model:` is part of the effect too
+/// ([`Route::is_effect_field`]): an `exec:`'s `cwd:`, which the run renders,
+/// labels and re-gates as a path (`regate_exec_cwd`) and which chooses what
+/// the program reads; an `agent:`'s `images.save:`, which chooses the files
+/// the run writes; a media builtin's `args.model`, an argument of its call.
+/// Every reader of this table sees them as it sees an argument. The secret
+/// flow alone reads the table without them ([`sink_fields`]): a secret there
+/// is a route, refused whatever its `egress:`, never a send an `egress:` rule
+/// could clear.
 ///
 /// `pub` (F-O1 PR-1): `nika-runtime`'s integrity walk reads the SAME
 /// effect-surface table — check≡run by construction, never a duplicated
@@ -997,15 +1026,15 @@ pub fn action_effect_fields(action: &RawAction) -> Vec<&str> {
     fields.extend(
         route_fields(action)
             .into_iter()
-            .filter(|(route, _)| route.is_path())
+            .filter(|(route, _)| route.is_effect_field())
             .map(|(_, text)| text),
     );
     fields
 }
 
 /// The fields a secret is judged at as a SEND, which an `egress:` rule can
-/// clear: the effect table ([`action_effect_fields`]) without the path routes
-/// it shares.
+/// clear: the effect table ([`action_effect_fields`]) without the routes it
+/// shares.
 fn sink_fields(action: &RawAction) -> Vec<&str> {
     match action {
         RawAction::Exec(a) => {
@@ -1018,11 +1047,16 @@ fn sink_fields(action: &RawAction) -> Vec<&str> {
             }
             fields
         }
-        RawAction::Invoke(a) => a
-            .args
-            .as_ref()
-            .map(|args| collect_json_strings(&args.value))
-            .unwrap_or_default(),
+        RawAction::Invoke(a) => match (a.args.as_ref().map(|args| &args.value), tool_model(a)) {
+            // A media builtin's model is its route, judged there alone.
+            (Some(serde_json::Value::Object(args)), Some(_)) => args
+                .iter()
+                .filter(|(key, _)| key.as_str() != "model")
+                .flat_map(|(_, value)| collect_json_strings(value))
+                .collect(),
+            (Some(args), _) => collect_json_strings(args),
+            (None, _) => Vec::new(),
+        },
         // The prompt (+ system) is a third-party egress sink — a secret
         // reaching it is a leak unless the author sanctions `to: "infer"`/
         // `"agent"` (BUG#3). Output taint stays excluded (evaluate §5).

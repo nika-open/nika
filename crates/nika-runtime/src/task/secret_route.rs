@@ -61,21 +61,20 @@ impl SecretRoutes {
 /// The record of one refused route: the task, the field and the path from
 /// the secret, never a value.
 fn refusal(leak: &SecretLeak) -> TaskErrorRecord {
-    let (field, remedy) = match leak.reason {
-        LeakReason::WorkingDirectory => (
-            "cwd",
-            "name the directory there, or read it from `inputs:` or `const:`",
-        ),
-        LeakReason::ModelRoute => (
-            "model",
-            "name the model there, or read it from `inputs:` or `const:`",
-        ),
-        LeakReason::ImageSavePath => (
-            "images.save",
-            "name the path there, or read it from `inputs:` or `const:`",
-        ),
-        // A route the run does not know yet is refused under its sink.
-        _ => (leak.sink, "keep the secret out of it"),
+    // The field is the sink without its verb: `model`, `cwd`, `images.save`,
+    // `args.model`.
+    let field = leak
+        .sink
+        .split_once('.')
+        .map_or(leak.sink, |(_, field)| field);
+    let remedy = match leak.reason {
+        LeakReason::WorkingDirectory => {
+            "name the directory there, or read it from `inputs:` or `const:`"
+        }
+        LeakReason::ModelRoute => "name the model there, or read it from `inputs:` or `const:`",
+        LeakReason::ImageSavePath => "name the path there, or read it from `inputs:` or `const:`",
+        // A route the run does not know yet is refused under its field.
+        _ => "keep the secret out of it",
     };
     TaskErrorRecord::new(
         SECRET_ROUTE_CODE,
@@ -179,6 +178,37 @@ tasks:
                     "refused before the task ran: a secret reaches the `images.save:` of task \
                      `draw` (secrets.k → images.save @ draw), and the run renders no secret \
                      there · name the path there, or read it from `inputs:` or `const:`",
+                    false,
+                ),
+            )])
+        );
+    }
+
+    #[test]
+    fn a_secret_in_a_media_model_is_refused_by_its_argument() {
+        let refused = routes(
+            r#"nika: tool-model
+secrets:
+  k: { source: env, key: K, egress: [{ to: "nika:tts_generate" }] }
+permits:
+  tools: ["nika:tts_generate"]
+  fs: { write: ["./out/**"] }
+tasks:
+  say:
+    invoke: { tool: "nika:tts_generate", args: { model: "${{ secrets.k }}", text: hi, output_dir: "./out" } }
+  plain:
+    invoke: { tool: "nika:tts_generate", args: { model: mock-tts-1, text: "${{ secrets.k }}", output_dir: "./out" } }
+"#,
+        );
+        assert_eq!(
+            refused.0,
+            BTreeMap::from([(
+                "say".to_owned(),
+                TaskErrorRecord::new(
+                    "NIKA-SEC-006",
+                    "refused before the task ran: a secret reaches the `args.model:` of task \
+                     `say` (secrets.k → args.model @ say), and the run renders no secret there \
+                     · name the model there, or read it from `inputs:` or `const:`",
                     false,
                 ),
             )])

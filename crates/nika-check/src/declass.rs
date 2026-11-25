@@ -136,8 +136,9 @@ pub enum LeakReason {
     /// not exactly the lone secret, or another secret co-occurs in the
     /// payload (the non-occlusion guard).
     SelfShapeBroken,
-    /// The secret reaches an `infer:`/`agent:` `model:`, the route the run
-    /// sends as the provider and model it calls. A model name is never a
+    /// The secret reaches an `infer:`/`agent:` `model:`, or a media builtin's
+    /// `args.model` (`nika:tts_generate` · `nika:image_generate`), the route
+    /// the run sends as the provider and model it calls. A model name is never a
     /// secret, so no `egress:` rule clears it: the model belongs in the file,
     /// in `inputs:` or in `const:`.
     ModelRoute,

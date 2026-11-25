@@ -26,6 +26,11 @@ use std::time::Duration;
 use nika_schema::types::Permits;
 use serde_json::Value;
 
+mod announce;
+
+pub(crate) use announce::ChildAnnounce;
+pub use announce::announce_trace;
+
 /// The run-recursion bound (`NIKA-SEC-003` · spec `14-composition.md`
 /// §errors). Defense in depth: the PRIMARY guard is static acyclicity
 /// (`NIKA-COMP-003` at check); this cap refuses fail-closed at run the
@@ -179,7 +184,9 @@ pub trait ChildRunner: Send + Sync {
     /// fail-closed `NIKA-SEC-003`) and rendered the args; the runner
     /// resolves + parses + checks + runs the child, composing budgets
     /// (`min(remaining, declared)`), permits (`child ∩ parent`) and the
-    /// child's own trace sink.
+    /// child's own trace sink. Once that trace opens, the runner names it
+    /// with [`announce_trace`], so a `for_each:` iteration the batch
+    /// abandons still cites it (NIK-385).
     fn run_child<'a>(
         &'a self,
         call: ChildCall,

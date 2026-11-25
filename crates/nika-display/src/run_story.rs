@@ -573,8 +573,8 @@ pub struct ChildRun {
 }
 
 impl ChildRun {
-    /// The child row a task's settle frame (`task_completed`, the only frame
-    /// the producer writes it on) carries, if it carries one.
+    /// The child row a task's `task_completed` frame carries, if it carries
+    /// one (the producer writes it on `task_failed` and `task_cancelled` too).
     #[must_use]
     pub fn of(event: &Event) -> Option<Self> {
         if event.kind != EventKind::TaskCompleted {

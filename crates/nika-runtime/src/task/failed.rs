@@ -10,14 +10,16 @@ impl crate::task::RunResult {
     /// An `on_error: recover` repair — the ONE constructor both recover
     /// paths share: author-supplied value, the WHOLE original error
     /// riding as `recovered_from` (spec 13 §payload), the failed
-    /// attempts' spend kept (recovery never refunds it), no child, no
-    /// model (nothing inferred the fallback value). Lives here with the
-    /// rest of the failure channel — `task.rs` sits at the LOC wall.
+    /// attempts' spend kept (recovery never refunds it), the failed
+    /// child run of an `invoke: workflow:` call still cited (spec 14
+    /// law 8 · its trace lives as long as its root, NIK-385), no model
+    /// (nothing inferred the fallback value). Lives here with the rest
+    /// of the failure channel — `task.rs` sits at the LOC wall.
     pub(crate) fn recovered(
         value: serde_json::Value,
         original: TaskErrorRecord,
-        cost_usd: Option<f64>,
-        cost_unpriced: Option<nika_types::cost::UnpricedReason>,
+        (cost_usd, cost_unpriced): (Option<f64>, Option<nika_types::cost::UnpricedReason>),
+        child: Option<Box<crate::child::ChildRunSummary>>,
     ) -> Self {
         Self::Success {
             access: None,
@@ -25,7 +27,7 @@ impl crate::task::RunResult {
             tokens: None,
             recovered_from: Some(original),
             warning: None,
-            child: None,
+            child,
             cost_usd,
             cost_unpriced,
             model: None,

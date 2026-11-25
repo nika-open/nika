@@ -437,11 +437,12 @@ fn settle_ran_terminal(
             error,
             cost_usd,
             cost_unpriced,
+            child,
         } => settle_skip_with_error(
             id,
             error,
             (cost_usd, cost_unpriced),
-            run.evidence.as_ref(),
+            (run.evidence.as_ref(), child.as_deref()),
             record,
             stamper,
             sink,
@@ -773,7 +774,10 @@ fn settle_skip_with_error(
     id: &str,
     error: TaskErrorRecord,
     spend: (Option<f64>, Option<nika_types::cost::UnpricedReason>),
-    evidence: Option<&crate::dispatch::commit::CommitEvidence>,
+    (evidence, child): (
+        Option<&crate::dispatch::commit::CommitEvidence>,
+        Option<&child::ChildRunSummary>,
+    ),
     record: &mut TaskRecord,
     stamper: &mut dyn Stamper,
     sink: &mut dyn EventSink,
@@ -788,6 +792,9 @@ fn settle_skip_with_error(
         ("detail", s(&detail)),
     ];
     push_spend_fields(&mut fields, spend.0, spend.1);
+    // spec 14 law 8 · the failed child an `on_error: skip` passed over rides
+    // the same typed `child` row, so its trace lives as long as its root.
+    emit_task::push_child_field(&mut fields, child);
     // F-P6 · a skipped divergence refusal keeps its finding (never a warn).
     push_commit_fields(&mut fields, evidence);
     fields.push(("outcome", s(&record::outcome_json(record))));

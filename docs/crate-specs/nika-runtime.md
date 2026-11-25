@@ -490,6 +490,16 @@ silent).
   unchanged; nothing is drained, and neither word is a billing or
   physical-request verdict (the ledger owns spend, above). Paged
   terminals always carry `items_cancelled`, including 0.
+- Item rows name their child trace (NIK-385 · spec 14 law 8 · spec 17).
+  A row whose iteration ran `invoke: workflow:` carries `child`, the
+  trace file name, whatever its status: the settled result's summary for
+  a kept row (a skip or a recovery included, beside the child's code),
+  else the trace the child named once it opened. `started_on_first_poll`
+  listens for that through `child::ChildAnnounce`, a thread slot set for
+  each poll of the iteration (the core keeps no tokio edge); a child
+  runner calls `child::announce_trace` at its call's depth, so a
+  grandchild is never taken for the item's child. A `task_skipped`
+  frame keeps the `child` row as the completed and failed ones do.
 - Task output = the array of per-iteration outputs in input order ·
   task status = failure if ANY iteration failed unrecovered.
 - Events: ONE task-level Started/Completed/Failed pair (iterations are

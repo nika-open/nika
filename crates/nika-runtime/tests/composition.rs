@@ -571,3 +571,147 @@ async fn a_composed_report_still_vouches_for_the_child_it_resolved() {
         .expect("the composed report vouches");
     assert_eq!(calls.lock().expect("lock").len(), 1, "the child ran");
 }
+
+// ─── NIK-385 · every child a parent ran is cited ─────────────────────────
+
+/// A failed child run that kept the trace `trace_id`.
+fn failed_child(call: &ChildCall, trace_id: &str) -> ChildOutcome {
+    ChildOutcome {
+        ok: false,
+        outputs: BTreeMap::new(),
+        cost_usd: None,
+        unpriced_calls: 0,
+        trace: Some(ChildRunSummary::new(
+            call.target.clone(),
+            false,
+            (Some(trace_id.to_owned()), Some("head".to_owned()), None),
+        )),
+        failure: Some(("NIKA-EXEC-002".to_owned(), "exit 3".to_owned())),
+        paused: None,
+    }
+}
+
+/// The `child` row a task's terminal frame carries, and its item rows.
+fn citations(events: &[Event], task: &str) -> (Option<Value>, Vec<Value>) {
+    let terminal = |kind: EventKind| {
+        matches!(
+            kind,
+            EventKind::TaskCompleted | EventKind::TaskFailed | EventKind::TaskSkipped
+        )
+    };
+    let frame = (events.iter().rev())
+        .find(|e| terminal(e.kind) && str_field(e, "task") == Some(task))
+        .expect("the task's terminal frame");
+    let child = str_field(frame, "child").map(|text| serde_json::from_str(text).expect("JSON"));
+    let rows = str_field(frame, "items").map_or_else(Vec::new, |text| {
+        serde_json::from_str(text).expect("the item rows")
+    });
+    (child, rows)
+}
+
+/// A child that names its trace and never settles (`hold`), beside one that
+/// fails once the holding one has begun (`fail`).
+#[derive(Default)]
+struct HoldOrFail {
+    held: std::sync::atomic::AtomicBool,
+}
+
+impl ChildRunner for HoldOrFail {
+    fn run_child<'a>(
+        &'a self,
+        call: ChildCall,
+    ) -> Pin<Box<dyn Future<Output = Result<ChildOutcome, ChildRunRefusal>> + 'a>> {
+        Box::pin(async move {
+            if call.args.get("item").and_then(Value::as_str) == Some("hold") {
+                nika_runtime::child::announce_trace(call.depth, "hold-child.ndjson");
+                self.held.store(true, std::sync::atomic::Ordering::SeqCst);
+                std::future::pending::<()>().await;
+            }
+            for _ in 0..10_000 {
+                if self.held.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            Ok(failed_child(&call, "fail-child.ndjson"))
+        })
+    }
+}
+
+/// An iteration `fail_fast` drops while its child runs leaves a `cancelled`
+/// row that still names the trace that child opened: that trace lives as
+/// long as its root (spec 17 · spec 14 law 8).
+#[tokio::test]
+async fn an_abandoned_iteration_cites_the_trace_its_child_opened() {
+    let yaml = "\
+nika: parent
+tasks:
+  fan:
+    for_each: { items: [\"hold\", \"fail\"], fail_fast: true }
+    invoke:
+      workflow: \"./child.nika\"
+      args: { item: \"${{ item }}\" }
+";
+    let rt = runtime(RuntimeConfig::default()).with_child_runner(Arc::new(HoldOrFail::default()));
+    let (outcome, events) = drive(yaml, rt).await;
+    assert!(!outcome.ok);
+    let (_, rows) = citations(&events, "fan");
+    let rows: Vec<(&Value, &Value, &Value)> = (rows.iter())
+        .map(|r| (&r["status"], &r["code"], &r["child"]))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                &json!("cancelled"),
+                &Value::Null,
+                &json!("hold-child.ndjson")
+            ),
+            (
+                &json!("failed"),
+                &json!("NIKA-EXEC-002"),
+                &json!("fail-child.ndjson")
+            ),
+        ]
+    );
+}
+
+/// A failed child that `on_error:` skipped or recovered is still cited: on
+/// the task's own frame, and on a fan-out's row beside the child's code.
+#[tokio::test]
+async fn a_skipped_or_recovered_child_is_still_cited() {
+    let yaml = "\
+nika: parent
+tasks:
+  skipped:
+    invoke: { workflow: \"./child.nika\" }
+    on_error: { skip: true }
+  mended:
+    invoke: { workflow: \"./child.nika\" }
+    on_error: { recover: \"fallback\" }
+  fan:
+    for_each: { items: [\"a\"] }
+    invoke: { workflow: \"./child.nika\" }
+    on_error: { skip: true }
+";
+    let (runner, _) = MockChildRunner::new(Box::new(|call| Ok(failed_child(call, "t-9"))));
+    let (outcome, events) = drive(
+        yaml,
+        runtime(RuntimeConfig::default()).with_child_runner(runner),
+    )
+    .await;
+    assert!(outcome.ok, "{events:?}");
+    for task in ["skipped", "mended"] {
+        let (child, _) = citations(&events, task);
+        assert_eq!(
+            child.map(|row| row["trace_id"].clone()),
+            Some(json!("t-9")),
+            "{task}"
+        );
+    }
+    let (_, rows) = citations(&events, "fan");
+    assert_eq!(
+        (&rows[0]["status"], &rows[0]["code"], &rows[0]["child"]),
+        (&json!("recovered"), &json!("NIKA-EXEC-002"), &json!("t-9"))
+    );
+}

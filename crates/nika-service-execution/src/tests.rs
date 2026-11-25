@@ -1369,3 +1369,62 @@ fn caller_origins_mark_bound_keys_and_keep_default_file_provenance() -> TestResu
     assert_eq!(origins.get("note"), None);
     Ok(())
 }
+
+thread_local! {
+    /// What the child lanes of this test thread told their iteration.
+    static TOLD: std::cell::RefCell<Vec<(u32, String)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn told(depth: u32, trace_id: &str) {
+    TOLD.with(|told| told.borrow_mut().push((depth, trace_id.to_owned())));
+}
+
+/// A trace lane that opens its file at its first frame, as the CLI's does.
+#[derive(Default)]
+struct OpensOnFirstFrame(usize);
+
+impl EventSink for OpensOnFirstFrame {
+    fn emit(&mut self, _event: Event) {
+        self.0 += 1;
+    }
+}
+
+impl ChildTrace for OpensOnFirstFrame {
+    fn sink(&mut self) -> &mut dyn EventSink {
+        self
+    }
+    fn metadata(&self) -> ChildTraceMetadata {
+        ChildTraceMetadata::new((self.0 > 0).then(|| "kid.ndjson".to_owned()), None)
+    }
+}
+
+/// NIK-385 · a child's lane names its trace to the calling iteration once,
+/// at the depth of its call, right after the first frame opened it, and
+/// still hands every frame to the trace. A lane that keeps no trace names
+/// nothing.
+#[test]
+fn a_child_lane_names_its_trace_once_its_first_frame_opened_it() {
+    let frame = || {
+        Event::new(
+            EventId::nil(),
+            Timestamp::from_unix_ms(0),
+            EventKind::TaskStarted,
+        )
+    };
+    let mut trace = OpensOnFirstFrame::default();
+    let mut lane = Announcing::new(&mut trace, 2);
+    lane.announce = told;
+    for _ in 0..3 {
+        lane.emit(frame());
+    }
+    assert_eq!(trace.0, 3, "every frame reaches the trace");
+    let mut silent = RecordedChildTrace::default();
+    let mut lane = Announcing::new(&mut silent, 1);
+    lane.announce = told;
+    lane.emit(frame());
+    assert_eq!(
+        TOLD.with(|told| told.borrow().clone()),
+        [(2, "kid.ndjson".to_owned())]
+    );
+}

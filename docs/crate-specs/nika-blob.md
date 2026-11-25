@@ -66,8 +66,9 @@ pattern as `nika-fs`/`nika-http`/`nika-clock`).
    keeps the dep surface minimal + sovereign).
 2. **Unique temp name** — brouillon used `path.with_extension("tmp")`,
    which COLLIDES under concurrent puts of identical content (same hash
-   → same temp path). Diamond uses `.nika-tmp.{pid}.{counter}` (the
-   nika-fs pattern), so concurrent dedup races never clobber.
+   → same temp path). Diamond publishes through `nika_fs::replace_file`
+   (a new `.nika-tmp.<random>` file, created exclusively), so concurrent dedup
+   races never clobber and no entry already in the shard folder takes the bytes.
 3. **Atomic both files** — bytes AND sidecar each land via temp+rename.
 4. **Dedup** — `try_exists` short-circuits the byte write; the sidecar
    is refreshed so a re-put with a new declared mime updates the record.
@@ -149,8 +150,8 @@ stable handle workflows pass between tasks.
 | `blake3` (workspace pin 1) | content-addressed hashing · CC0-1.0 OR Apache-2.0 (allowlisted) | L1 ✓ |
 | `bytes` | kernel put/get payloads | ✓ |
 | `tokio` (`fs`) | the storage backend | L1+ ✓ |
+| `nika-fs` (path) | `replace_file`: each blob and sidecar lands through a new random temporary; also the descriptor-rooted integration fixtures | L1 ← L1 lateral ✓ |
 | dev: `proptest` · `tempfile` | Gate 6 + tempdir fixtures | dev-only |
-| dev: `nika-fs` | Real descriptor-rooted integration fixtures | dev-only |
 
 deny.toml `tokio` wrapper extended with nika-blob. blake3 added to
 `[workspace.dependencies]` (RUST_ENFORCEMENT §2 pin-once). No `infer`

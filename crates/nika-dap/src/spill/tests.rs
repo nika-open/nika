@@ -194,3 +194,33 @@ fn a_line_no_value_can_shorten_is_still_refused() {
     let raw = std::fs::read_to_string(&path).expect("prefix");
     assert_eq!(raw.lines().count(), 1);
 }
+
+/// A kept value lands through a new owner-only temporary file: a link
+/// waiting at the pid-shaped temporary name of earlier releases keeps
+/// pointing at its outside file, which keeps its bytes.
+#[cfg(unix)]
+#[test]
+fn a_kept_value_never_writes_through_a_link_at_the_old_temporary_name() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let outside = tempfile::tempdir().expect("outside");
+    let victim = outside.path().join("rc");
+    std::fs::write(&victim, "export KEEP=1\n").expect("outside file");
+    let dir = tmp.path().join("values");
+    std::fs::create_dir(&dir).expect("values dir");
+    let digest = "a".repeat(64);
+    let planted = dir.join(format!(".{digest}.{}.tmp", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &planted).expect("planted link");
+    super::store(&dir, &digest, b"the kept value").expect("kept");
+    assert_eq!(
+        std::fs::read_to_string(&victim).expect("outside file"),
+        "export KEEP=1\n"
+    );
+    assert_eq!(std::fs::read_link(&planted).expect("still a link"), victim);
+    let kept = dir.join(&digest);
+    let meta = std::fs::symlink_metadata(&kept).expect("kept value");
+    assert!(meta.file_type().is_file());
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::read(&kept).expect("value"), b"the kept value");
+    assert_eq!(std::fs::read_dir(&dir).expect("list").count(), 2);
+}

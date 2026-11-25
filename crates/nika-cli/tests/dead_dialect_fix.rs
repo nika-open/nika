@@ -114,3 +114,64 @@ fn fix_accepts_trailing_commas_in_legacy_verb_mappings() {
         "nika: legacy\npermits: {exec: [echo]}\ntasks:\n  say:\n    exec: {command: [echo],}\n",
     );
 }
+
+/// The repair publishes through a new temporary file: a link waiting at the
+/// fixed temporary name of earlier releases keeps pointing at a file outside
+/// the project, that file keeps its bytes, and the workflow is repaired.
+#[cfg(unix)]
+#[test]
+fn fix_never_writes_through_a_link_at_the_old_temporary_name() {
+    let room = tempfile::tempdir().expect("isolated room");
+    let home = room.path().join("home");
+    std::fs::create_dir(&home).expect("home");
+    let project = room.path().join("project");
+    std::fs::create_dir(&project).expect("project");
+    let outside = room.path().join("outside.rc");
+    std::fs::write(&outside, "export KEEP=1\n").expect("outside file");
+    let path = project.join("legacy.nika");
+    std::fs::write(
+        &path,
+        "nika: legacy\npermits: {tools: [nika:log]}\ntasks:\n  say:\n    invoke: {tool: nika:log, params: {message: hi}}\n",
+    )
+    .expect("fixture");
+    let planted = project.join(".nika-fix-tmp.legacy.nika");
+    std::os::unix::fs::symlink(&outside, &planted).expect("planted link");
+    let output = Command::new(env!("CARGO_BIN_EXE_nika"))
+        .args(["check", "legacy.nika", "--fix"])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &home)
+        .env("NIKA_KEYCHAIN", "off")
+        .env("NO_COLOR", "1")
+        .current_dir(&project)
+        .output()
+        .expect("isolated CLI");
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(&outside).expect("outside file"),
+        "export KEEP=1\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("repaired file"),
+        "nika: legacy\npermits: {tools: [nika:log]}\ntasks:\n  say:\n    invoke: {tool: nika:log, args: {message: hi}}\n",
+    );
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .expect("lstat")
+            .file_type()
+            .is_file()
+    );
+    assert_eq!(std::fs::read_link(&planted).expect("still a link"), outside);
+    let mut left: Vec<String> = std::fs::read_dir(&project)
+        .expect("list")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    left.sort();
+    assert_eq!(left, [".nika-fix-tmp.legacy.nika", "legacy.nika"]);
+}

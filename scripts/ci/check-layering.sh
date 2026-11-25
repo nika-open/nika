@@ -13,6 +13,9 @@
 #   L4  → L0, L0.5, L1, L2, L3
 #   L5  → L0, L0.5, L1, L2, L3, L4
 #
+# A crate may also depend on a crate of its own layer (nika-blob → nika-fs
+# at L1, lateral L4 → L4 edges): only a dependency of a HIGHER rank fails.
+#
 # Usage:
 #   bash scripts/ci/check-layering.sh
 #

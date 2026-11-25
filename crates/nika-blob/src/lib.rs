@@ -46,7 +46,6 @@ mod filesystem;
 pub use filesystem::FsBlobStore;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use nika_kernel::blob::BlobStoreDyn;
@@ -58,10 +57,6 @@ const DEFAULT_MAX_SIZE: u64 = 500 * 1024 * 1024;
 const HASH_PREFIX: &str = "blake3:";
 /// Default mime when no sidecar records one.
 const DEFAULT_MIME: &str = "application/octet-stream";
-
-/// Monotonic discriminator for temp-file names: two concurrent puts of
-/// the SAME content would otherwise collide on the same temp path.
-static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Content-addressable blob storage backed by the filesystem.
 ///
@@ -143,30 +138,25 @@ impl DiskBlobStore {
     }
 
     /// Atomically write `contents` to `path` (temp-in-same-dir + rename).
-    /// The temp name carries a unique discriminator so two concurrent
-    /// writers (e.g. dedup races on identical content) never collide.
+    /// The temporary is a new file under a random name
+    /// (`nika_fs::replace_file`): two concurrent writers (dedup races on
+    /// identical content) never collide, and no entry planted in the shard
+    /// folder catches the bytes. Any failure removes the temporary. The
+    /// mode is what `tokio::fs::write` gave a new file, and no sync is
+    /// added, as before.
     async fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let file_disc = format!(
-            ".nika-tmp.{}.{}",
-            std::process::id(),
-            TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
-        );
-        let tmp = parent.join(file_disc);
-        // Write the temp then publish by rename. ANY failure after the temp
-        // path is chosen removes it best-effort at ONE site — a partial
-        // `tokio::fs::write` (e.g. ENOSPC mid-stream) would otherwise leak a
-        // `.nika-tmp.*` in the shard dir. On rename success the temp no
-        // longer exists, so the guard only fires on a real failure.
-        let publish = async {
-            tokio::fs::write(&tmp, contents).await?;
-            tokio::fs::rename(&tmp, path).await
-        };
-        let result = publish.await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(&tmp).await;
-        }
-        result
+        let path = path.to_path_buf();
+        let contents = contents.to_vec();
+        tokio::task::spawn_blocking(move || {
+            nika_fs::replace_file(
+                &path,
+                &contents,
+                nika_fs::ReplaceMode::New(0o666),
+                nika_fs::Durability::Unsynced,
+            )
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 }
 
@@ -382,13 +372,6 @@ mod tests {
     }
 
     #[test]
-    fn tmp_counter_is_monotonic() {
-        let a = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let b = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        assert!(b > a);
-    }
-
-    #[test]
     fn default_max_size_is_500_mib() {
         // Pins the 500 * 1024 * 1024 arithmetic exactly.
         assert_eq!(DiskBlobStore::new("/x").max_size(), 524_288_000);
@@ -398,5 +381,45 @@ mod tests {
     #[test]
     fn with_max_size_overrides_the_default() {
         assert_eq!(DiskBlobStore::with_max_size("/x", 4096).max_size(), 4096);
+    }
+
+    /// A blob lands through a new temporary file: links waiting at the
+    /// pid-and-counter temporary names of earlier releases keep pointing
+    /// at their outside file, which keeps its bytes.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::expect_used)]
+    async fn a_blob_write_never_writes_through_a_link_at_an_old_temporary_name() {
+        let shard = tempfile::tempdir().expect("shard");
+        let outside = tempfile::tempdir().expect("outside");
+        let victim = outside.path().join("rc");
+        std::fs::write(&victim, "export KEEP=1\n").expect("outside file");
+        let pid = std::process::id();
+        let planted: Vec<PathBuf> = (0..64)
+            .map(|n| {
+                let link = shard.path().join(format!(".nika-tmp.{pid}.{n}"));
+                std::os::unix::fs::symlink(&victim, &link).expect("planted link");
+                link
+            })
+            .collect();
+        let blob = shard.path().join("abcd");
+        for body in [b"first".as_slice(), b"second".as_slice()] {
+            DiskBlobStore::atomic_write(&blob, body).await.expect("put");
+            assert_eq!(std::fs::read(&blob).expect("blob"), body);
+        }
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("outside file"),
+            "export KEEP=1\n"
+        );
+        for link in &planted {
+            assert_eq!(std::fs::read_link(link).expect("still a link"), victim);
+        }
+        assert!(
+            std::fs::symlink_metadata(&blob)
+                .expect("blob")
+                .file_type()
+                .is_file()
+        );
+        assert_eq!(std::fs::read_dir(shard.path()).expect("list").count(), 65);
     }
 }

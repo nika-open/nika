@@ -1,4 +1,42 @@
 pub mod nika_fs
+#[non_exhaustive] pub enum nika_fs::Beneath
+pub nika_fs::Beneath::Missing
+pub nika_fs::Beneath::Missing::folder: std::path::PathBuf
+pub nika_fs::Beneath::Missing::rest: std::path::PathBuf
+pub nika_fs::Beneath::There(std::path::PathBuf)
+impl core::clone::Clone for nika_fs::Beneath
+pub fn nika_fs::Beneath::clone(&self) -> nika_fs::Beneath
+impl core::cmp::Eq for nika_fs::Beneath
+impl core::cmp::PartialEq for nika_fs::Beneath
+pub fn nika_fs::Beneath::eq(&self, other: &nika_fs::Beneath) -> bool
+impl core::fmt::Debug for nika_fs::Beneath
+pub fn nika_fs::Beneath::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_fs::Beneath
+impl<D> owo_colors::OwoColorize for nika_fs::Beneath
+impl<T, U> core::convert::Into<U> for nika_fs::Beneath where U: core::convert::From<T>
+pub fn nika_fs::Beneath::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_fs::Beneath where U: core::convert::Into<T>
+pub type nika_fs::Beneath::Error = core::convert::Infallible
+pub fn nika_fs::Beneath::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_fs::Beneath where U: core::convert::TryFrom<T>
+pub type nika_fs::Beneath::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_fs::Beneath::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_fs::Beneath where T: core::clone::Clone
+pub type nika_fs::Beneath::Owned = T
+pub fn nika_fs::Beneath::clone_into(&self, target: &mut T)
+pub fn nika_fs::Beneath::to_owned(&self) -> T
+impl<T> core::any::Any for nika_fs::Beneath where T: 'static + ?core::marker::Sized
+pub fn nika_fs::Beneath::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_fs::Beneath where T: ?core::marker::Sized
+pub fn nika_fs::Beneath::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_fs::Beneath where T: ?core::marker::Sized
+pub fn nika_fs::Beneath::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_fs::Beneath where T: core::clone::Clone
+pub unsafe fn nika_fs::Beneath::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_fs::Beneath
+pub fn nika_fs::Beneath::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_fs::Beneath where T: 'static
+pub fn nika_fs::Beneath::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub enum nika_fs::ContainedRead
 pub nika_fs::ContainedRead::Linked
 pub nika_fs::ContainedRead::Missing
@@ -37,6 +75,70 @@ impl<T> core::convert::From<T> for nika_fs::ContainedRead
 pub fn nika_fs::ContainedRead::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_fs::ContainedRead where T: 'static
 pub fn nika_fs::ContainedRead::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub enum nika_fs::Durability
+pub nika_fs::Durability::All
+pub nika_fs::Durability::Data
+pub nika_fs::Durability::Unsynced
+impl core::clone::Clone for nika_fs::Durability
+pub fn nika_fs::Durability::clone(&self) -> nika_fs::Durability
+impl core::cmp::Eq for nika_fs::Durability
+impl core::cmp::PartialEq for nika_fs::Durability
+pub fn nika_fs::Durability::eq(&self, other: &nika_fs::Durability) -> bool
+impl core::fmt::Debug for nika_fs::Durability
+pub fn nika_fs::Durability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_fs::Durability
+impl core::marker::StructuralPartialEq for nika_fs::Durability
+impl<D> owo_colors::OwoColorize for nika_fs::Durability
+impl<T, U> core::convert::Into<U> for nika_fs::Durability where U: core::convert::From<T>
+pub fn nika_fs::Durability::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_fs::Durability where U: core::convert::Into<T>
+pub type nika_fs::Durability::Error = core::convert::Infallible
+pub fn nika_fs::Durability::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_fs::Durability where U: core::convert::TryFrom<T>
+pub type nika_fs::Durability::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_fs::Durability::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_fs::Durability where T: core::clone::Clone
+pub type nika_fs::Durability::Owned = T
+pub fn nika_fs::Durability::clone_into(&self, target: &mut T)
+pub fn nika_fs::Durability::to_owned(&self) -> T
+impl<T> core::any::Any for nika_fs::Durability where T: 'static + ?core::marker::Sized
+pub fn nika_fs::Durability::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_fs::Durability where T: ?core::marker::Sized
+pub fn nika_fs::Durability::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_fs::Durability where T: ?core::marker::Sized
+pub fn nika_fs::Durability::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_fs::Durability where T: core::clone::Clone
+pub unsafe fn nika_fs::Durability::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_fs::Durability
+pub fn nika_fs::Durability::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_fs::Durability where T: 'static
+pub fn nika_fs::Durability::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub enum nika_fs::Escape
+pub nika_fs::Escape::Dangling(std::path::PathBuf)
+pub nika_fs::Escape::Io(std::path::PathBuf, core::io::error::Error)
+pub nika_fs::Escape::Loop(std::path::PathBuf)
+pub nika_fs::Escape::Outside(std::path::PathBuf)
+impl core::fmt::Debug for nika_fs::Escape
+pub fn nika_fs::Escape::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D> owo_colors::OwoColorize for nika_fs::Escape
+impl<T, U> core::convert::Into<U> for nika_fs::Escape where U: core::convert::From<T>
+pub fn nika_fs::Escape::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_fs::Escape where U: core::convert::Into<T>
+pub type nika_fs::Escape::Error = core::convert::Infallible
+pub fn nika_fs::Escape::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_fs::Escape where U: core::convert::TryFrom<T>
+pub type nika_fs::Escape::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_fs::Escape::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for nika_fs::Escape where T: 'static + ?core::marker::Sized
+pub fn nika_fs::Escape::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_fs::Escape where T: ?core::marker::Sized
+pub fn nika_fs::Escape::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_fs::Escape where T: ?core::marker::Sized
+pub fn nika_fs::Escape::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for nika_fs::Escape
+pub fn nika_fs::Escape::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_fs::Escape where T: 'static
+pub fn nika_fs::Escape::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub enum nika_fs::LedgerRefusal
 #[non_exhaustive] pub nika_fs::LedgerRefusal::Budget
 pub nika_fs::LedgerRefusal::Budget::bytes_left: u64
@@ -126,6 +228,44 @@ impl<T> core::convert::From<T> for nika_fs::Phase
 pub fn nika_fs::Phase::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_fs::Phase where T: 'static
 pub fn nika_fs::Phase::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub enum nika_fs::ReplaceMode
+pub nika_fs::ReplaceMode::Exactly(u32)
+pub nika_fs::ReplaceMode::KeepOr(u32)
+pub nika_fs::ReplaceMode::New(u32)
+impl core::clone::Clone for nika_fs::ReplaceMode
+pub fn nika_fs::ReplaceMode::clone(&self) -> nika_fs::ReplaceMode
+impl core::cmp::Eq for nika_fs::ReplaceMode
+impl core::cmp::PartialEq for nika_fs::ReplaceMode
+pub fn nika_fs::ReplaceMode::eq(&self, other: &nika_fs::ReplaceMode) -> bool
+impl core::fmt::Debug for nika_fs::ReplaceMode
+pub fn nika_fs::ReplaceMode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_fs::ReplaceMode
+impl core::marker::StructuralPartialEq for nika_fs::ReplaceMode
+impl<D> owo_colors::OwoColorize for nika_fs::ReplaceMode
+impl<T, U> core::convert::Into<U> for nika_fs::ReplaceMode where U: core::convert::From<T>
+pub fn nika_fs::ReplaceMode::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_fs::ReplaceMode where U: core::convert::Into<T>
+pub type nika_fs::ReplaceMode::Error = core::convert::Infallible
+pub fn nika_fs::ReplaceMode::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_fs::ReplaceMode where U: core::convert::TryFrom<T>
+pub type nika_fs::ReplaceMode::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_fs::ReplaceMode::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_fs::ReplaceMode where T: core::clone::Clone
+pub type nika_fs::ReplaceMode::Owned = T
+pub fn nika_fs::ReplaceMode::clone_into(&self, target: &mut T)
+pub fn nika_fs::ReplaceMode::to_owned(&self) -> T
+impl<T> core::any::Any for nika_fs::ReplaceMode where T: 'static + ?core::marker::Sized
+pub fn nika_fs::ReplaceMode::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_fs::ReplaceMode where T: ?core::marker::Sized
+pub fn nika_fs::ReplaceMode::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_fs::ReplaceMode where T: ?core::marker::Sized
+pub fn nika_fs::ReplaceMode::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_fs::ReplaceMode where T: core::clone::Clone
+pub unsafe fn nika_fs::ReplaceMode::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_fs::ReplaceMode
+pub fn nika_fs::ReplaceMode::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_fs::ReplaceMode where T: 'static
+pub fn nika_fs::ReplaceMode::as_any(&self) -> &(dyn core::any::Any + 'static)
 pub struct nika_fs::AnchoredFs
 impl nika_fs::AnchoredFs
 pub fn nika_fs::AnchoredFs::new(root: impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -596,7 +736,10 @@ pub async fn nika_fs::TokioFs::remove_file(&self, path: &std::path::Path) -> cor
 pub fn nika_fs::TokioFs::remove_regular_file(&self, path: &std::path::Path) -> impl core::future::future::Future<Output = core::result::Result<(), nika_kernel_core::io::fs::FsError>> + core::marker::Send
 pub async fn nika_fs::TokioFs::write(&self, path: &std::path::Path, contents: &[u8]) -> core::result::Result<(), nika_kernel_core::io::fs::FsError>
 pub fn nika_fs::TokioFs::write_new(&self, path: &std::path::Path, contents: &[u8]) -> impl core::future::future::Future<Output = core::result::Result<(), nika_kernel_core::io::fs::FsError>> + core::marker::Send
+pub const nika_fs::MAX_LINKS: usize
 pub fn nika_fs::contained_reader(base: &std::path::Path, limit: u64) -> impl core::ops::function::FnMut(&str) -> core::result::Result<alloc::vec::Vec<u8>, nika_fs::ContainedRead> + use<>
 pub fn nika_fs::open_owned(path: &std::path::Path) -> core::io::error::Result<core::option::Option<std::fs::File>>
 pub fn nika_fs::read_capped(reader: &mut impl alloc::io::read::Read, limit: u64) -> core::io::error::Result<nika_fs::Capped>
 pub fn nika_fs::read_owned(path: &std::path::Path, cap: u64) -> core::io::error::Result<core::option::Option<alloc::string::String>>
+pub fn nika_fs::replace_file(path: &std::path::Path, body: &[u8], mode: nika_fs::ReplaceMode, durability: nika_fs::Durability) -> core::io::error::Result<()>
+pub fn nika_fs::resolve_beneath(folder: &std::path::Path, path: &std::path::Path) -> core::result::Result<nika_fs::Beneath, nika_fs::Escape>

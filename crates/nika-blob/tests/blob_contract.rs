@@ -142,8 +142,9 @@ async fn concurrent_puts_of_identical_content_dedup_to_one_blob_no_residue() {
     // concurrently (interleaving at every `.await` — try_exists, temp
     // write, rename) must (a) all return the SAME blake3 hash, (b) leave
     // exactly ONE blob + ONE sidecar (dedup, last rename wins on identical
-    // content), and (c) leave ZERO `.nika-tmp.*` residue — the TMP_COUNTER
-    // guarantee exercised end-to-end, not just the unit. A temp collision
+    // content), and (c) leave ZERO `.nika-tmp.*` residue — the distinct
+    // random temporary names (`nika_fs::replace_file`) exercised
+    // end-to-end, not just the unit. A temp collision
     // or a non-idempotent dedup race would surface here.
     let (dir, s) = store();
     let payload = Bytes::from_static(b"contended-identical-content");

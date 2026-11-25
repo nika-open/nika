@@ -22,7 +22,7 @@
 //! refused as before. Nothing is dropped.
 
 use std::collections::BTreeSet;
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use nika_event::Event;
@@ -120,18 +120,15 @@ fn store(dir: &Path, digest: &str, bytes: &[u8]) -> std::io::Result<()> {
     if path.is_file() {
         return Ok(());
     }
-    let staged = dir.join(format!(".{digest}.{}.tmp", std::process::id()));
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&staged)?;
-    file.write_all(bytes)?;
-    file.sync_data()?;
-    std::fs::rename(&staged, &path)
+    // A new owner-only temporary under a random name, renamed over the
+    // digest's name: a fixed name could be an entry planted there. Its
+    // data is synced before the rename, as before.
+    nika_fs::replace_file(
+        &path,
+        bytes,
+        nika_fs::ReplaceMode::New(0o600),
+        nika_fs::Durability::Data,
+    )
 }
 
 /// The digest a kept value's reference names, when `text` is one.

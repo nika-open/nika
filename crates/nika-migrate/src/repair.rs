@@ -71,7 +71,7 @@ pub fn splice_unique(source: &mut String, old: &str, new: &str) -> bool {
     }
 }
 
-/// Publish the healed source ATOMICALLY: write a temp sibling, then one
+/// Publish `contents` at `path` through a new temporary sibling and one
 /// `rename` (POSIX-atomic within a filesystem — the same contract the
 /// `nika-fs` effect crate documents for `nika:write`). A crash or ENOSPC
 /// mid-write leaves the ORIGINAL file untouched and at most a
@@ -79,27 +79,107 @@ pub fn splice_unique(source: &mut String, old: &str, new: &str) -> bool {
 /// temp lands in the target's own directory (rename across filesystems
 /// is not atomic); any failure removes it best-effort at this one site.
 ///
+/// The temporary is always a NEW file, created with `create_new`
+/// (`O_CREAT | O_EXCL`): it never opens an entry already in the folder and
+/// never follows a link at that name, so nothing planted beside the
+/// workflow receives its bytes. That open is the guarantee; the name (16
+/// hex digits of a randomly keyed hash, never the target's name or the
+/// pid) is hard to guess, but that is not promised. A replaced regular
+/// file keeps its permission bits (no set-id bit); a new one gets `0o666`
+/// under the umask, as `std::fs::write` gave it. No sync is added, as
+/// before. This is `nika_fs::replace_file` with `Durability::Unsynced`,
+/// restated in std alone because this L0 crate may not depend on the L1
+/// `nika-fs`.
+///
 /// # Errors
 ///
-/// The underlying `std::fs::write` / `std::fs::rename` failure (a
-/// missing parent directory, a permissions refusal); the temp sibling
-/// is swept before the error returns.
+/// `InvalidInput` when `path` names no file; otherwise the create, write,
+/// mode change or rename failure (a missing parent directory, a
+/// permissions refusal, a folder at the workflow's name); the temp
+/// sibling is swept before the error returns.
 pub fn write_atomic(path: &str, contents: &str) -> std::io::Result<()> {
     let target = std::path::Path::new(path);
-    let dir = target.parent().filter(|p| !p.as_os_str().is_empty());
-    let name = target
-        .file_name()
-        .ok_or_else(|| std::io::Error::other("write path has no file name"))?;
-    let tmp_name = format!(".nika-fix-tmp.{}", name.to_string_lossy());
-    let tmp = dir.map_or_else(
-        || std::path::PathBuf::from(&tmp_name),
-        |d| d.join(&tmp_name),
-    );
-    let publish = std::fs::write(&tmp, contents).and_then(|()| std::fs::rename(&tmp, target));
+    if target.file_name().is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "write path has no file name",
+        ));
+    }
+    let kept = std::fs::symlink_metadata(target)
+        .ok()
+        .filter(std::fs::Metadata::is_file)
+        .map(|meta| meta.permissions());
+    let (tmp, mut file) = create_spare(target, kept.is_some())?;
+    let publish = lay(&mut file, contents.as_bytes(), kept).and_then(|()| {
+        drop(file);
+        std::fs::rename(&tmp, target)
+    });
     if publish.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     publish
+}
+
+/// A new file at a fresh random `.nika-fix-tmp.<hex>` name beside
+/// `target`. Only a name this call created is handed back, so the sweep
+/// never removes an entry somebody else made.
+fn create_spare(
+    target: &std::path::Path,
+    keeps: bool,
+) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    use std::hash::BuildHasher as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = target.parent().filter(|p| !p.as_os_str().is_empty());
+    let mut last = None;
+    for _ in 0..8 {
+        let random = std::hash::RandomState::new().hash_one(NEXT.fetch_add(1, Ordering::Relaxed));
+        let name = format!(".nika-fix-tmp.{random:016x}");
+        let tmp = dir.map_or_else(|| std::path::PathBuf::from(&name), |d| d.join(&name));
+        match open_spare(&tmp, keeps) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
+}
+
+/// Open `tmp` only as a file this call creates (`O_CREAT | O_EXCL`): an
+/// entry already at that name, a link included (dangling or not), is
+/// never opened or followed and is refused with `AlreadyExists`.
+fn open_spare(tmp: &std::path::Path, keeps: bool) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Owner-only until a kept mode is set through the handle; a new
+        // workflow gets what `std::fs::write` gave it.
+        options.mode(if keeps { 0o600 } else { 0o666 });
+    }
+    #[cfg(not(unix))]
+    let _ = keeps;
+    options.open(tmp)
+}
+
+/// The kept mode and the bytes, through the create's handle.
+fn lay(
+    file: &mut std::fs::File,
+    body: &[u8],
+    kept: Option<std::fs::Permissions>,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    if let Some(kept) = kept {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            file.set_permissions(std::fs::Permissions::from_mode(kept.mode() & 0o777))?;
+        }
+        #[cfg(not(unix))]
+        file.set_permissions(kept)?;
+    }
+    file.write_all(body)
 }
 
 #[cfg(test)]
@@ -181,5 +261,156 @@ mod tests {
             .collect();
         assert!(residue.is_empty(), "no residue: {residue:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A link planted at the fixed temporary name of earlier releases (and
+    /// at pid-shaped ones) never receives the bytes: the outside file it
+    /// points at keeps its bytes, the links stay, the workflow is replaced
+    /// with its own mode, and nothing else is left.
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_never_writes_through_a_planted_temporary_name() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let top = std::env::temp_dir().join(format!("nika-repair-planted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let project = top.join("project");
+        std::fs::create_dir_all(&project).expect("project");
+        let outside = top.join("rc");
+        std::fs::write(&outside, "export KEEP=1\n").expect("outside");
+        let target = project.join("wf.nika");
+        std::fs::write(&target, "nika: v0\n").expect("workflow");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).expect("mode");
+        let pid = std::process::id();
+        let names = [
+            ".nika-fix-tmp.wf.nika".to_owned(),
+            format!(".nika-fix-tmp.wf.nika.{pid}"),
+            format!(".wf.nika.{pid}.tmp"),
+        ];
+        for name in &names {
+            std::os::unix::fs::symlink(&outside, project.join(name)).expect("plant");
+        }
+        let path = target.to_str().expect("utf8");
+        write_atomic(path, "nika: v1\n").expect("first");
+        write_atomic(path, "nika: v2\n").expect("second");
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside"),
+            "export KEEP=1\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("workflow"),
+            "nika: v2\n"
+        );
+        let meta = std::fs::symlink_metadata(&target).expect("lstat");
+        assert!(meta.file_type().is_file());
+        assert_eq!(meta.permissions().mode() & 0o7777, 0o640);
+        let mut left: Vec<String> = std::fs::read_dir(&project)
+            .expect("list")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let mut expected: Vec<String> = names.to_vec();
+        expected.push("wf.nika".to_owned());
+        expected.sort();
+        assert_eq!(left, expected, "no temporary left behind");
+        for name in &names {
+            assert_eq!(
+                std::fs::read_link(project.join(name)).expect("still a link"),
+                outside
+            );
+        }
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    /// A scratch folder of this test's own, removed when it ends.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("nika-repair-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("scratch");
+            Self(dir)
+        }
+
+        fn names(&self) -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(&self.0)
+                .expect("list")
+                .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The rename is the last step that can fail: over a folder that holds
+    /// a file it does, the error comes back and the temporary is swept.
+    #[test]
+    fn a_failed_rename_leaves_no_temporary_behind() {
+        let scratch = Scratch::new("rename");
+        let target = scratch.0.join("wf.nika");
+        std::fs::create_dir(&target).expect("a folder at the name");
+        std::fs::write(target.join("inside"), "kept").expect("a file in it");
+        let error = write_atomic(target.to_str().expect("utf8"), "nika: v1\n")
+            .expect_err("a file cannot replace a folder that holds one");
+        assert_ne!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+        assert_eq!(scratch.names(), ["wf.nika"], "no temporary is left");
+        assert_eq!(
+            std::fs::read_to_string(target.join("inside")).expect("inside"),
+            "kept"
+        );
+    }
+
+    /// The open itself, at a name already taken: a link to a file outside,
+    /// a dangling link and a plain file are each refused, never opened,
+    /// followed or created through, in both modes of the open.
+    #[cfg(unix)]
+    #[test]
+    fn a_temporary_name_already_taken_is_never_opened_or_followed() {
+        let scratch = Scratch::new("taken");
+        let victim = scratch.0.join("rc");
+        std::fs::write(&victim, "export KEEP=1\n").expect("victim");
+        let gone = scratch.0.join("gone");
+        let to_victim = scratch.0.join(".nika-fix-tmp.a");
+        let dangling = scratch.0.join(".nika-fix-tmp.b");
+        let plain = scratch.0.join(".nika-fix-tmp.c");
+        std::os::unix::fs::symlink(&victim, &to_victim).expect("link");
+        std::os::unix::fs::symlink(&gone, &dangling).expect("dangling");
+        std::fs::write(&plain, "someone's").expect("plain");
+        for taken in [&to_victim, &dangling, &plain] {
+            for keeps in [false, true] {
+                let error = open_spare(taken, keeps).expect_err("a taken name is refused");
+                assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists, "{error}");
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("victim"),
+            "export KEEP=1\n"
+        );
+        assert!(std::fs::symlink_metadata(&gone).is_err(), "never created");
+        assert_eq!(std::fs::read_to_string(&plain).expect("plain"), "someone's");
+        assert_eq!(std::fs::read_link(&to_victim).expect("link"), victim);
+    }
+
+    /// A new workflow gets the mode `std::fs::write` gives a new file:
+    /// `0o666` under the umask, whatever the umask is.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_workflow_gets_the_mode_std_write_gives_it() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let scratch = Scratch::new("mode");
+        let reference = scratch.0.join("reference");
+        std::fs::write(&reference, "x").expect("reference");
+        let workflow = scratch.0.join("wf.nika");
+        write_atomic(workflow.to_str().expect("utf8"), "nika: v1\n").expect("create");
+        let mode =
+            |p: &std::path::Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777;
+        assert_eq!(mode(&workflow), mode(&reference));
     }
 }

@@ -696,7 +696,11 @@ exit vocabulary.
 - **Project hooks**: Cursor and Claude project settings point at the same
   canonical kit scripts, copied into each client's `hooks-nika/` directory.
   Claude commands anchor at the quoted `CLAUDE_PROJECT_DIR`; existing settings
-  are skipped under the normal law. A settings file is written last, and only
+  are skipped under the normal law. Every command starts its script with
+  `/bin/bash -p`, as the kit's manifests do, so the host's PATH never picks
+  the shell and bash takes no `BASH_ENV` file or function from the
+  environment, and both wirings give the run guard a 30 s timeout, above
+  the 20 s its hook holds the judge to. A settings file is written last, and only
   when every script it runs is a regular file holding exactly what this
   `init` writes (`hook_copies`: `HOOK_WIRING` · `scaffold_body`): a skipped
   script with other bytes refuses the wiring with one `✖ refused` row and

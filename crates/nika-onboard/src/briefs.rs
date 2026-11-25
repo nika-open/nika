@@ -440,13 +440,13 @@ const KIT_CODEX_MANIFEST: &str = include_str!(concat!(
 const CURSOR_HOOKS_JSON: &str = r#"{
   "hooks": {
     "sessionStart": [
-      { "command": "./.cursor/hooks-nika/session-context.sh" }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/session-context.sh" }
     ],
     "afterFileEdit": [
-      { "command": "./.cursor/hooks-nika/check-on-edit.sh" }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/check-on-edit.sh" }
     ],
     "beforeShellExecution": [
-      { "command": "./.cursor/hooks-nika/guard-run.sh", "timeout": 30 }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/guard-run.sh", "timeout": 30 }
     ]
   }
 }
@@ -454,16 +454,19 @@ const CURSOR_HOOKS_JSON: &str = r#"{
 
 // Project-root anchoring also works after an agent changes directory.
 // https://code.claude.com/docs/en/hooks-guide
+// Both wirings start each script with `/bin/bash -p`, as the kit's
+// manifests do: the host's PATH never picks the interpreter, and bash
+// takes no function, BASH_ENV or SHELLOPTS from the environment.
 const CLAUDE_SETTINGS_JSON: &str = r#"{
   "hooks": {
     "SessionStart": [{ "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/session-context.sh" }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/session-context.sh" }
     ] }],
     "PreToolUse": [{ "matcher": "Bash", "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh", "timeout": 30 }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh", "timeout": 30 }
     ] }],
     "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit", "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/check-on-edit.sh" }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/check-on-edit.sh" }
     ] }]
   }
 }
@@ -1218,7 +1221,8 @@ mod tests {
 
     /// Every command in the project hooks wiring resolves to a script the
     /// SAME scaffold writes — a hooks.json naming a path init does not
-    /// create would be a dead seatbelt on every fresh repo.
+    /// create would be a dead seatbelt on every fresh repo — and starts it
+    /// with `/bin/bash -p`, never through the host's PATH.
     #[test]
     fn project_hooks_point_at_scaffolded_scripts() {
         let paths: Vec<&str> = targets().iter().map(|(p, _)| *p).collect();
@@ -1229,7 +1233,9 @@ mod tests {
         for (event, entries) in hooks {
             for entry in entries.as_array().expect("entry array") {
                 let cmd = entry["command"].as_str().expect("command string");
-                let rel = cmd.strip_prefix("./").unwrap_or(cmd);
+                let rel = cmd
+                    .strip_prefix("/bin/bash -p ./")
+                    .unwrap_or_else(|| panic!("{event}: {cmd} is not started by /bin/bash -p"));
                 assert!(
                     paths.contains(&rel),
                     "{event} points at {rel}, which the scaffold never writes"
@@ -1316,8 +1322,8 @@ mod tests {
                     let path = hook["command"]
                         .as_str()
                         .expect("command")
-                        .strip_prefix("\"$CLAUDE_PROJECT_DIR\"/")
-                        .expect("quoted project root");
+                        .strip_prefix("/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/")
+                        .expect("started by /bin/bash -p from the quoted project root");
                     assert!(emitted.contains_key(path), "unshipped hook: {path}");
                 }
             }

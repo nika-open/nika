@@ -22,30 +22,81 @@
 
 # >>> nika-clean-path: every kit hook and helper opens with this same block,
 # before it starts any other program (a test keeps the copies identical).
-# Hosts start hooks in the open project, so a relative PATH entry (".",
-# "bin", "node_modules/.bin", the empty one) names a folder the repository
-# holds. Only the absolute entries are kept, so every program this script
-# starts, nika included, comes from an absolute folder. The host has already
-# started bash through its own PATH before this line runs (see the README).
-nika_path=""
-nika_rest="${PATH:-}"
-while [ -n "$nika_rest" ]; do
-  nika_dir="${nika_rest%%:*}"
-  case "$nika_rest" in
-    *:*) nika_rest="${nika_rest#*:}" ;;
-    *) nika_rest="" ;;
+# Hosts start hooks in the open project, and the PATH can name folders the
+# repository holds: a relative entry (".", "bin", "node_modules/.bin", the
+# empty one) resolves there, and an absolute one can lead there too. Only
+# the absolute entries whose real folder (cd -P) lies outside the project
+# are kept, as those real folders. The project is each of
+# CLAUDE_PROJECT_DIR, CURSOR_PROJECT_DIR and the working folder, with the
+# git work tree around each (the nearest folder above holding .git), but
+# never the home or a folder above it. A function of builtins, run once in
+# a subshell (bash 3.2 cannot parse a case inside $(...)): nothing runs
+# before the PATH is set. The kit's manifests start this script with
+# /bin/bash -p (see the README for what that does and does not cover).
+nika_clean_path() {
+  local here dir top root home kept rest
+  here="${PWD:-}"
+  set --
+  home=/
+  case "${HOME:-}" in
+    /*) cd -P -- "$HOME" 2>/dev/null && home="$PWD" ;;
   esac
-  case "$nika_dir" in
-    /*) nika_path="${nika_path:+$nika_path:}$nika_dir" ;;
-  esac
-done
+  for dir in "${CLAUDE_PROJECT_DIR:-}" "${CURSOR_PROJECT_DIR:-}" "$here"; do
+    case "$dir" in
+      /*) cd -P -- "$dir" 2>/dev/null || continue ;;
+      *) continue ;;
+    esac
+    top="$PWD"
+    while [ -n "$top" ] && [ ! -e "$top/.git" ]; do
+      top="${top%/*}"
+    done
+    for root in "$PWD" "$top"; do
+      case "$root" in
+        '' | /) continue ;;
+      esac
+      case "$home/" in
+        "$root"/*) continue ;;
+      esac
+      set -- "$@" "$root"
+    done
+  done
+  kept=""
+  rest="${PATH:-}"
+  while [ -n "$rest" ]; do
+    dir="${rest%%:*}"
+    case "$rest" in
+      *:*) rest="${rest#*:}" ;;
+      *) rest="" ;;
+    esac
+    case "$dir" in
+      /*) cd -P -- "$dir" 2>/dev/null || continue ;;
+      *) continue ;;
+    esac
+    for root; do
+      case "$PWD/" in
+        "$root"/*) continue 2 ;;
+      esac
+    done
+    kept="${kept:+$kept:}$PWD"
+  done
+  printf '%s' "$kept"
+}
+nika_path="$(nika_clean_path)"
+unset -f nika_clean_path
 PATH="${nika_path:-/usr/bin:/bin}"
 export PATH
-unset nika_path nika_rest nika_dir
-# nika_on_path: the nika this PATH names, when there is one.
+unset nika_path
+# nika_on_path: the nika this PATH names, as an absolute path, when there is
+# one. `type -P` searches the PATH alone: a function or an alias named nika
+# never answers.
 # shellcheck disable=SC2329 # not every script asks for nika
 nika_on_path() {
-  command -v nika
+  local bin
+  bin="$(type -P nika)" || return 1
+  case "$bin" in
+    /*) printf '%s\n' "$bin" ;;
+    *) return 1 ;;
+  esac
 }
 # <<< nika-clean-path
 
@@ -65,7 +116,7 @@ done_quiet() {
 # (both dialects carry exactly one "file_path" key, so the flat
 # fallback matches either nesting).
 if command -v python3 >/dev/null 2>&1; then
-  file="$(printf '%s' "$input" | python3 -c 'import json,sys
+  file="$(printf '%s' "$input" | python3 -I -c 'import json,sys
 try:
     d = json.load(sys.stdin)
     print(d.get("file_path") or d.get("tool_input", {}).get("file_path", ""))
@@ -100,7 +151,16 @@ esac
 # the environment the client gives its hooks. Same capability-honesty: an
 # unset or broken NIKA_BIN and a missing binary fall back to silence, never
 # to a failure.
-NIKA="${NIKA_BIN:-}"
+#
+# Only an absolute NIKA_BIN counts, and the PATH is searched in its absolute
+# folders only: a relative one resolves against the edited project.
+
+NIKA=""
+case "${NIKA_BIN:-}" in
+  "") ;;
+  /*) NIKA="$NIKA_BIN" ;;
+  *) echo "check-on-edit: NIKA_BIN is not an absolute path, so this hook ignores it" >&2 ;;
+esac
 # Inside the plugin, every helper asks the one resolver, which sits beside
 # this hook and applies the order written above. `nika init` empties this
 # one line in the copy it writes into a project: there the folder beside the
@@ -112,7 +172,7 @@ if [ -n "$resolver" ]; then
   kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$resolver"
 fi
 if [ -n "$kit" ] && [ -x "$kit" ]; then
-  answer="$("$kit" --path "$(dirname "$file")" 2>/dev/null || true)"
+  answer="$(bash -p "$kit" --path "$(dirname -- "$file")" 2>/dev/null || true)"
   case "$answer" in
     /*) NIKA="$answer" ;;
     *) [ -n "$NIKA" ] || NIKA="$(nika_on_path || true)" ;;
@@ -121,7 +181,7 @@ elif [ -z "$NIKA" ]; then
   NIKA="$(nika_on_path || true)"
   case "${CARGO_TARGET_DIR:-}" in
     /*)
-      root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
+      root="$(git -C "$(dirname -- "$file")" rev-parse --show-toplevel 2>/dev/null || true)"
       if [ -n "$root" ] && [ -f "$root/crates/nika-cli/Cargo.toml" ] \
         && [ -f "$CARGO_TARGET_DIR/debug/nika" ] && [ -x "$CARGO_TARGET_DIR/debug/nika" ]; then
         build="$(cd "$CARGO_TARGET_DIR/debug" 2>/dev/null && pwd -P || true)"
@@ -161,14 +221,14 @@ if [ "$kind" = project ]; then
   # read the JSON, every UNREADY beat is reported. `nika arm` discovers nika.yaml
   # from its working directory, so it runs from the edited file's own
   # directory.
-  project_dir="$(cd "$(dirname "$file")" && pwd)"
-  shape="$("$NIKA" check "$file" --color never 2>&1)"
+  project_dir="$(cd -- "$(dirname -- "$file")" && pwd)"
+  shape="$("$NIKA" check --color never -- "$file" 2>&1)"
   shape_rc=$?
   beats="$(cd "$project_dir" && "$NIKA" arm --color never 2>&1)"
   beats_rc=$?
   blocked=""
   if command -v python3 >/dev/null 2>&1; then
-    blocked="$(cd "$project_dir" && "$NIKA" arm --json 2>/dev/null | python3 -c 'import json, sys
+    blocked="$(cd "$project_dir" && "$NIKA" arm --json 2>/dev/null | python3 -I -c 'import json, sys
 try:
     rows = json.load(sys.stdin).get("schedules") or []
 except Exception:
@@ -189,7 +249,7 @@ print("blocked" if any(row.get("blockers") for row in rows) else "")' 2>/dev/nul
 }$beats"
   fi
 else
-  findings="$("$NIKA" check "$file" --native-strict --color never 2>&1)"
+  findings="$("$NIKA" check --native-strict --color never -- "$file" 2>&1)"
   rc=$?
 fi
 set -e
@@ -250,7 +310,7 @@ else
 fi
 printf 'oracle: %s (tag %s · a tag does not say what the build contains)\n' \
   "$oracle" "${tag:-unknown}" >&2
-printf 'the judge: NIKA_BIN when set, else inside the engine tree the session build under CARGO_TARGET_DIR (an absolute folder outside the tree), else the PATH; a build inside a project is never picked. To name another, set NIKA_BIN=<path-to-nika> where the client starts its hooks\n' >&2
+printf 'the judge: NIKA_BIN when set to an absolute path, else inside the engine tree the session build under CARGO_TARGET_DIR (an absolute folder outside the tree), else the first nika in an absolute PATH folder; a build inside a project is never picked. To name another, set NIKA_BIN=<absolute-path-to-nika> where the client starts its hooks\n' >&2
 if [ -n "$cc" ]; then
   # PostToolUse exit 2 = stderr fed to Claude, edit already applied.
   exit 2

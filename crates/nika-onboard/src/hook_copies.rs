@@ -161,7 +161,9 @@ mod tests {
             let mut run: Vec<String> = run
                 .iter()
                 .map(|cmd| {
-                    cmd.trim_start_matches("\"$CLAUDE_PROJECT_DIR\"/")
+                    cmd.strip_prefix("/bin/bash -p ")
+                        .unwrap_or_else(|| panic!("{rel}: {cmd} is not started by /bin/bash -p"))
+                        .trim_start_matches("\"$CLAUDE_PROJECT_DIR\"/")
                         .trim_start_matches("./")
                         .to_owned()
                 })

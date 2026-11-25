@@ -47,6 +47,87 @@
 # The warning shows once until nika is found again: a marker under
 # ${XDG_STATE_HOME:-~/.local/state}/nika/ is written when warning and
 # removed the next time the hook finds the binary.
+
+# >>> nika-clean-path: every kit hook and helper opens with this same block,
+# before it starts any other program (a test keeps the copies identical).
+# Hosts start hooks in the open project, and the PATH can name folders the
+# repository holds: a relative entry (".", "bin", "node_modules/.bin", the
+# empty one) resolves there, and an absolute one can lead there too. Only
+# the absolute entries whose real folder (cd -P) lies outside the project
+# are kept, as those real folders. The project is each of
+# CLAUDE_PROJECT_DIR, CURSOR_PROJECT_DIR and the working folder, with the
+# git work tree around each (the nearest folder above holding .git), but
+# never the home or a folder above it. A function of builtins, run once in
+# a subshell (bash 3.2 cannot parse a case inside $(...)): nothing runs
+# before the PATH is set. The kit's manifests start this script with
+# /bin/bash -p (see the README for what that does and does not cover).
+nika_clean_path() {
+  local here dir top root home kept rest
+  here="${PWD:-}"
+  set --
+  home=/
+  case "${HOME:-}" in
+    /*) cd -P -- "$HOME" 2>/dev/null && home="$PWD" ;;
+  esac
+  for dir in "${CLAUDE_PROJECT_DIR:-}" "${CURSOR_PROJECT_DIR:-}" "$here"; do
+    case "$dir" in
+      /*) cd -P -- "$dir" 2>/dev/null || continue ;;
+      *) continue ;;
+    esac
+    top="$PWD"
+    while [ -n "$top" ] && [ ! -e "$top/.git" ]; do
+      top="${top%/*}"
+    done
+    for root in "$PWD" "$top"; do
+      case "$root" in
+        '' | /) continue ;;
+      esac
+      case "$home/" in
+        "$root"/*) continue ;;
+      esac
+      set -- "$@" "$root"
+    done
+  done
+  kept=""
+  rest="${PATH:-}"
+  while [ -n "$rest" ]; do
+    dir="${rest%%:*}"
+    case "$rest" in
+      *:*) rest="${rest#*:}" ;;
+      *) rest="" ;;
+    esac
+    case "$dir" in
+      /*) cd -P -- "$dir" 2>/dev/null || continue ;;
+      *) continue ;;
+    esac
+    for root; do
+      case "$PWD/" in
+        "$root"/*) continue 2 ;;
+      esac
+    done
+    kept="${kept:+$kept:}$PWD"
+  done
+  printf '%s' "$kept"
+}
+nika_path="$(nika_clean_path)"
+unset -f nika_clean_path
+PATH="${nika_path:-/usr/bin:/bin}"
+export PATH
+unset nika_path
+# nika_on_path: the nika this PATH names, as an absolute path, when there is
+# one. `type -P` searches the PATH alone: a function or an alias named nika
+# never answers.
+# shellcheck disable=SC2329 # not every script asks for nika
+nika_on_path() {
+  local bin
+  bin="$(type -P nika)" || return 1
+  case "$bin" in
+    /*) printf '%s\n' "$bin" ;;
+    *) return 1 ;;
+  esac
+}
+# <<< nika-clean-path
+
 set -uo pipefail
 
 restore='Put nika back on the editor PATH (brew install nika-open/tap/nika, other paths: nika.sh) and restart the session.'
@@ -118,7 +199,9 @@ without_binary() {
   exit 1
 }
 
-if command -v nika >/dev/null 2>&1; then
+# The judge is the first nika in an absolute PATH folder, and the hook runs
+# that exact file: a repository cannot put one in front of it.
+if bin="$(nika_on_path)"; then
   # The binary is back: the next time it goes missing, warn again.
   if [ -n "$warned" ] && [ -e "$warned" ]; then
     rm -f "$warned" 2>/dev/null
@@ -186,7 +269,7 @@ trap 'exit 2' HUP INT TERM PIPE ALRM USR1 USR2
 # stderr carries only refusals, so it points at /dev/null for the fork.
 exec 3>&2 2>/dev/null
 set -m
-nika guard --stdin <&0 >"$scratch/verdict" 2>/dev/null 3>&- &
+"$bin" guard --stdin <&0 >"$scratch/verdict" 2>/dev/null 3>&- &
 judge=$!
 set +m
 exec 2>&3 3>&-

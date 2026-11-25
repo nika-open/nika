@@ -67,6 +67,12 @@ pub struct HarnessRequest {
     /// files). The client sends them only to an agent whose `initialize` advertises image
     /// prompts (`promptCapabilities.image`), and refuses before the session otherwise.
     pub images: Vec<HarnessPromptImage>,
+    /// Room for ONE follow-up prompt on the same session once the turn ends (an `agent:`
+    /// task's schema repair, spec 02 §agent). A backend that can keep its session open then
+    /// ends the turn with [`HarnessEvent::TurnEnded`] before [`HarnessEvent::Completed`]; one
+    /// that cannot ignores it and completes as before, which the caller reads as a closed
+    /// session.
+    pub follow_up: bool,
 }
 
 impl HarnessRequest {
@@ -83,7 +89,15 @@ impl HarnessRequest {
             requested_service_tier: None,
             confinement: None,
             images: Vec::new(),
+            follow_up: false,
         }
+    }
+
+    /// Keep room for one follow-up prompt on the same session (see [`Self::follow_up`]).
+    #[must_use]
+    pub fn with_follow_up(mut self) -> Self {
+        self.follow_up = true;
+        self
     }
 
     /// Ask for a service tier by the language's word (`None` keeps the session's own).
@@ -215,6 +229,32 @@ impl core::fmt::Debug for PermissionReply {
     }
 }
 
+/// The lane of [`HarnessEvent::TurnEnded`]: ONE follow-up prompt sent on the session whose
+/// turn just ended. Dropping the lane unused closes the session.
+pub struct FollowUpReply {
+    send: Box<dyn FnOnce(String) + Send>,
+}
+
+impl FollowUpReply {
+    /// Wrap the backend's follow-up lane (INV-019).
+    #[must_use]
+    pub fn new(send: Box<dyn FnOnce(String) + Send>) -> Self {
+        Self { send }
+    }
+
+    /// Send `prompt` as the session's next turn — consumes the lane (one follow-up, never
+    /// two).
+    pub fn prompt(self, prompt: String) {
+        (self.send)(prompt);
+    }
+}
+
+impl core::fmt::Debug for FollowUpReply {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("FollowUpReply(..)")
+    }
+}
+
 /// The engine's verdict on a harness permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -307,6 +347,18 @@ pub enum HarnessEvent {
     ClientCallRefused {
         /// The method the agent called, verbatim.
         method: String,
+    },
+    /// The turn ended and the session stays open for the ONE follow-up the request kept room
+    /// for ([`HarnessRequest::follow_up`]): the turn's outcome, and the lane that sends the
+    /// follow-up on the same session. Dropping the lane closes the session, and the same
+    /// outcome then arrives as [`Self::Completed`]: a consumer that does not know this variant
+    /// still receives its terminal beat. After a follow-up the session ends with
+    /// [`Self::Completed`].
+    TurnEnded {
+        /// The outcome of the turn that ended.
+        outcome: Box<HarnessOutcome>,
+        /// The one-shot follow-up lane.
+        follow_up: FollowUpReply,
     },
     /// The run completed — the terminal beat. Boxed: the outcome is
     /// the fat variant and every OTHER beat is hot-path (the clippy
@@ -670,7 +722,8 @@ pub type HarnessEventStream =
 #[trait_variant::make(AgentBackendDyn: Send)]
 pub trait AgentBackend: Send + Sync {
     /// Run ONE delegated agentic turn; events stream until
-    /// [`HarnessEvent::Completed`].
+    /// [`HarnessEvent::Completed`] (a request that keeps room for a follow-up may see
+    /// [`HarnessEvent::TurnEnded`] first).
     async fn run_agent(&self, request: HarnessRequest) -> Result<HarnessEventStream, HarnessError>;
 }
 
@@ -714,6 +767,22 @@ mod tests {
         _assert_send::<HarnessOutcome>();
         _assert_send::<HarnessError>();
         _assert_send::<PermissionReply>();
+        _assert_send::<FollowUpReply>();
+    }
+
+    /// The follow-up lane delivers the one prompt it is given; a request keeps no room for a
+    /// follow-up unless asked.
+    #[test]
+    fn the_follow_up_lane_sends_its_one_prompt() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        FollowUpReply::new(Box::new(move |prompt| {
+            let _ = tx.send(prompt);
+        }))
+        .prompt("repair".to_owned());
+        assert_eq!(rx.try_recv().as_deref(), Ok("repair"));
+        assert!(rx.try_recv().is_err(), "one prompt, never two");
+        assert!(!HarnessRequest::new("p", "/tmp").follow_up);
+        assert!(HarnessRequest::new("p", "/tmp").with_follow_up().follow_up);
     }
 
     /// Under an exact selection only a move of an APPLIED dimension refuses;

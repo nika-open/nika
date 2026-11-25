@@ -547,6 +547,9 @@ pub nika_kernel_ai::harness::HarnessEvent::SessionConfined
 pub nika_kernel_ai::harness::HarnessEvent::SessionConfined::mode: core::option::Option<alloc::string::String>
 pub nika_kernel_ai::harness::HarnessEvent::SessionConfined::selected: bool
 pub nika_kernel_ai::harness::HarnessEvent::SessionConfined::unasked: alloc::string::String
+pub nika_kernel_ai::harness::HarnessEvent::TurnEnded
+pub nika_kernel_ai::harness::HarnessEvent::TurnEnded::follow_up: nika_kernel_ai::harness::FollowUpReply
+pub nika_kernel_ai::harness::HarnessEvent::TurnEnded::outcome: alloc::boxed::Box<nika_kernel_ai::harness::HarnessOutcome>
 impl core::fmt::Debug for nika_kernel_ai::harness::HarnessEvent
 pub fn nika_kernel_ai::harness::HarnessEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<D> owo_colors::OwoColorize for nika_kernel_ai::harness::HarnessEvent
@@ -645,6 +648,31 @@ impl<T> core::convert::From<T> for nika_kernel_ai::harness::PermissionDecision
 pub fn nika_kernel_ai::harness::PermissionDecision::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_kernel_ai::harness::PermissionDecision where T: 'static
 pub fn nika_kernel_ai::harness::PermissionDecision::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub struct nika_kernel_ai::harness::FollowUpReply
+impl nika_kernel_ai::harness::FollowUpReply
+pub fn nika_kernel_ai::harness::FollowUpReply::new(send: alloc::boxed::Box<(dyn core::ops::function::FnOnce(alloc::string::String) + core::marker::Send)>) -> Self
+pub fn nika_kernel_ai::harness::FollowUpReply::prompt(self, prompt: alloc::string::String)
+impl core::fmt::Debug for nika_kernel_ai::harness::FollowUpReply
+pub fn nika_kernel_ai::harness::FollowUpReply::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D> owo_colors::OwoColorize for nika_kernel_ai::harness::FollowUpReply
+impl<T, U> core::convert::Into<U> for nika_kernel_ai::harness::FollowUpReply where U: core::convert::From<T>
+pub fn nika_kernel_ai::harness::FollowUpReply::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_kernel_ai::harness::FollowUpReply where U: core::convert::Into<T>
+pub type nika_kernel_ai::harness::FollowUpReply::Error = core::convert::Infallible
+pub fn nika_kernel_ai::harness::FollowUpReply::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_kernel_ai::harness::FollowUpReply where U: core::convert::TryFrom<T>
+pub type nika_kernel_ai::harness::FollowUpReply::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_kernel_ai::harness::FollowUpReply::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for nika_kernel_ai::harness::FollowUpReply where T: 'static + ?core::marker::Sized
+pub fn nika_kernel_ai::harness::FollowUpReply::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_kernel_ai::harness::FollowUpReply where T: ?core::marker::Sized
+pub fn nika_kernel_ai::harness::FollowUpReply::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_kernel_ai::harness::FollowUpReply where T: ?core::marker::Sized
+pub fn nika_kernel_ai::harness::FollowUpReply::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for nika_kernel_ai::harness::FollowUpReply
+pub fn nika_kernel_ai::harness::FollowUpReply::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_kernel_ai::harness::FollowUpReply where T: 'static
+pub fn nika_kernel_ai::harness::FollowUpReply::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub struct nika_kernel_ai::harness::HarnessEscalation
 pub nika_kernel_ai::harness::HarnessEscalation::escalated_command: core::option::Option<alloc::string::String>
 pub nika_kernel_ai::harness::HarnessEscalation::mcp: core::option::Option<alloc::string::String>
@@ -822,6 +850,7 @@ pub fn nika_kernel_ai::harness::HarnessPromptImage::as_any(&self) -> &(dyn core:
 #[non_exhaustive] pub struct nika_kernel_ai::harness::HarnessRequest
 pub nika_kernel_ai::harness::HarnessRequest::confinement: core::option::Option<nika_kernel_ai::harness::HarnessConfinement>
 pub nika_kernel_ai::harness::HarnessRequest::cwd: std::path::PathBuf
+pub nika_kernel_ai::harness::HarnessRequest::follow_up: bool
 pub nika_kernel_ai::harness::HarnessRequest::images: alloc::vec::Vec<nika_kernel_ai::harness::HarnessPromptImage>
 pub nika_kernel_ai::harness::HarnessRequest::prompt: alloc::string::String
 pub nika_kernel_ai::harness::HarnessRequest::requested_effort: core::option::Option<alloc::string::String>
@@ -832,6 +861,7 @@ pub nika_kernel_ai::harness::HarnessRequest::system: core::option::Option<alloc:
 impl nika_kernel_ai::harness::HarnessRequest
 pub fn nika_kernel_ai::harness::HarnessRequest::new(prompt: impl core::convert::Into<alloc::string::String>, cwd: impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_confinement(self, confinement: nika_kernel_ai::harness::HarnessConfinement) -> Self
+pub fn nika_kernel_ai::harness::HarnessRequest::with_follow_up(self) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_images(self, images: alloc::vec::Vec<nika_kernel_ai::harness::HarnessPromptImage>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_requested_effort(self, effort: core::option::Option<alloc::string::String>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_requested_mode(self, mode: impl core::convert::Into<alloc::string::String>) -> Self

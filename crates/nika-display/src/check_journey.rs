@@ -134,28 +134,73 @@ pub(crate) fn secrets_rung(out: &mut String, report: &CheckReport, t: Theme) {
         .map(|d| d.target.as_str())
         .collect();
     for (name, dest, pinned) in &flows {
-        let clauses: Vec<String> = report
+        // Each sink once, in the file's order: a sink pinned to one host
+        // and left open beside it is one sink.
+        let mut clauses: Vec<&str> = Vec::new();
+        for c in report
             .data_journey
             .consents
             .iter()
             .filter(|c| &c.secret == name)
-            .map(|c| c.to.clone())
-            .collect();
+        {
+            if !clauses.contains(&c.to.as_str()) {
+                clauses.push(&c.to);
+            }
+        }
         let via = clauses.join(" · ");
-        let tail = if !hosts.contains(dest.as_str()) {
-            format!("egress.to {via}")
-        } else if *pinned {
-            format!("egress.to {via} · host pinned")
+        let tail = if hosts.contains(dest.as_str()) {
+            host_clause(&report.data_journey.consents, name, dest, &via, *pinned)
         } else {
-            format!(
-                "egress.to {via} pins no host (any host the tool reaches) · exact form: egress: [{{ to: \"{via}\", host: \"{dest}\" }}]"
-            )
+            format!("egress.to {via}")
         };
         let _ = writeln!(
             out,
             " {warn} {label} sanctioned · secret `{name}` → {dest} · {tail}"
         );
     }
+}
+
+/// What the `egress:` rules of `name` say about `dest`, a host of the net
+/// grant. They pin it; or they pin no host, which clears any host the tool
+/// reaches, and the row prints the pinned form; or they pin other hosts,
+/// which the row names (« pins no host » would contradict the file), and
+/// says when a rule beside them pins none.
+fn host_clause(
+    consents: &[nika_check::JourneyConsent],
+    name: &str,
+    dest: &str,
+    via: &str,
+    pinned: bool,
+) -> String {
+    if pinned {
+        return format!("egress.to {via} · host pinned");
+    }
+    let exact = format!("exact form: egress: [{{ to: \"{via}\", host: \"{dest}\" }}]");
+    let rules = || consents.iter().filter(|c| c.secret == name);
+    let pins: std::collections::BTreeSet<&str> =
+        rules().filter_map(|c| c.host.as_deref()).collect();
+    if pins.is_empty() {
+        return format!("egress.to {via} pins no host (any host the tool reaches) · {exact}");
+    }
+    let pins = pins.into_iter().collect::<Vec<_>>().join(", ");
+    if rules().any(|c| c.host.is_none() && reaches_hosts(&c.to)) {
+        format!(
+            "egress.to {via} pins {pins}, not {dest}, and a rule with no host clears any host the tool reaches · {exact}"
+        )
+    } else {
+        format!("egress.to {via} pins {pins}, not {dest}")
+    }
+}
+
+/// Whether a rule's sink can address a host: a network builtin, or an
+/// agent (its tools reach the net grant). `exec`, `outputs` and the other
+/// sinks carry no host, so a rule naming one pins nothing about a host.
+fn reaches_hosts(to: &str) -> bool {
+    to == "agent"
+        || matches!(
+            nika_cap::builtin_effect(to, None),
+            Some(nika_cap::BuiltinEffect::Net { .. })
+        )
 }
 
 /// JOURNEY rung (P0-18 · audit UX 2026-07-30) — the data voyage made
@@ -253,3 +298,6 @@ pub(crate) fn journey_rung(out: &mut String, report: &CheckReport, t: Theme) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

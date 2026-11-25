@@ -134,7 +134,9 @@ async fn run_on(backend: Arc<dyn DynAgentBackend>) -> (TaskErrorRecord, Value) {
 }
 
 /// A real program whose identity probe never answers: the probe deadline passes, the task is
-/// retried to its declared bound, and the record names the unanswered probe.
+/// retried to its declared bound, and the record names the unanswered probe. The program is
+/// `/bin/sh`, so the test runs where it exists.
+#[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn an_unanswered_identity_probe_is_retried_by_a_plain_retry() {
     let adapter = nika_harness::HarnessAdapter::new("codex", "/bin/sh")

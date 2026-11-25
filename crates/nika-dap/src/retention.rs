@@ -21,6 +21,22 @@
 //! - the budget removes every other eligible trace, oldest first, before
 //!   it removes a failed one, oldest first.
 //!
+//! A run keeps the child traces it started (spec 14 law 8), so a kept
+//! parent never cites a missing child:
+//!
+//! - a trace another scanned trace cites (a task's `child` row, a skipped
+//!   or recovered task's included, an item row's `child`, a cancelled
+//!   row's included) is a child; following the citations up, cycle-safe,
+//!   reaches its root, a trace nothing scanned cites;
+//! - the caps and the exemptions above judge roots only: a child never
+//!   counts in a workflow's window;
+//! - a child goes only with its root, for the root's reason, and stays
+//!   while its root stays, past the age cap too; a child several roots
+//!   reach goes with the last of them, and a paused child never goes;
+//! - the budget removes a whole run, the root with its children and
+//!   their bytes, at the root's place in its order;
+//! - a child whose parent is gone from disk is an ordinary trace.
+//!
 //! Collection is FAIL-OPEN end to end: a broken GC must never block a
 //! run. But a SUCCESSFUL collection speaks exactly ONE stderr line —
 //! silent deletion is forbidden (the anti-hidden-magic invariant); the
@@ -223,25 +239,28 @@ impl Reason {
 
 /// The pure policy (D1): which traces to collect, and why.
 ///
-/// Exemptions are ABSOLUTE — a `paused` trace and the newest trace of
-/// each workflow are never marked, regardless of any cap. The newest
-/// `failed` trace of each workflow is shielded from rotation and the
-/// budget, and ages out like any other trace. Rotation applies to
-/// finished runs only (completed · failed · cancelled) and keeps failed
-/// ones first; the age cap and the budget bound everything eligible (so
-/// a torn trace ages out, while a live run's fresh journal is naturally
-/// safe), the budget reaching a failed trace only once nothing else is
-/// left to remove.
+/// The policy judges runs by their roots (see the module doc): a child
+/// trace is marked only with its root, for the root's reason. Exemptions
+/// are ABSOLUTE — a `paused` trace and the newest root of each workflow
+/// are never marked, regardless of any cap. The newest `failed` root of
+/// each workflow is shielded from rotation and the budget, and ages out
+/// like any other root. Rotation applies to finished runs only
+/// (completed · failed · cancelled) and keeps failed ones first; the age
+/// cap and the budget bound every eligible root (so a torn trace ages
+/// out, while a live run's fresh journal is naturally safe), the budget
+/// reaching a failed root only once nothing else is left to remove.
 #[must_use]
 pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec<(usize, Reason)> {
-    let newest = newest_per_workflow(traces);
+    let runs = Runs::of(traces);
+    let root = |i: usize| runs.is_root(i);
+    let newest = newest_where(traces, root);
     let exempt = |i: usize| traces[i].state == TraceState::Paused || newest.contains(&i);
-    let last_failure = newest_where(traces, failed);
+    let last_failure = newest_where(traces, |i| root(i) && failed(&traces[i]));
     let shielded = |i: usize| exempt(i) || last_failure.contains(&i);
     let mut marked: BTreeMap<usize, Reason> = BTreeMap::new();
 
-    // Rotation — keep the N finished traces per workflow, failed ones first.
-    for indices in finished_by_workflow(traces).values() {
+    // Rotation — keep the N finished runs per workflow, failed ones first.
+    for indices in finished_by_workflow(traces, root).values() {
         for &i in indices.iter().skip(cfg.keep_last) {
             if !shielded(i) {
                 marked.insert(i, Reason::Rotated);
@@ -249,9 +268,9 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
         }
     }
 
-    // Age cap — stale traces exit even under N.
+    // Age cap — stale runs exit even under N.
     for (i, trace) in traces.iter().enumerate() {
-        if exempt(i) || marked.contains_key(&i) {
+        if !root(i) || exempt(i) || marked.contains_key(&i) {
             continue;
         }
         let age = now.duration_since(trace.modified).unwrap_or_default();
@@ -260,30 +279,118 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
         }
     }
 
-    // Budget — remove oldest-first until the project total fits, every
-    // other trace before a failed one. Exempt traces count toward usage
-    // but are never collected (the budget may stay unmet by design —
-    // fixture: the newest survives even alone over budget).
+    // Budget — remove whole runs oldest-first until the project total
+    // fits, every other run before a failed one. Exempt runs count toward
+    // usage but are never collected (the budget may stay unmet by design
+    // — fixture: the newest survives even alone over budget).
+    let mut gone: BTreeSet<usize> = (0..traces.len())
+        .filter(|&i| runs.goes(i, traces, &marked).is_some())
+        .collect();
     let mut total: u64 = traces
         .iter()
         .enumerate()
-        .filter(|(i, _)| !marked.contains_key(i))
+        .filter(|(i, _)| !gone.contains(i))
         .map(|(_, t)| t.bytes)
         .sum();
     if total > cfg.budget_bytes {
-        for i in budget_order(traces) {
+        for i in budget_order(traces, root) {
             if total <= cfg.budget_bytes {
                 break;
             }
             if shielded(i) || marked.contains_key(&i) {
                 continue;
             }
-            total = total.saturating_sub(traces[i].bytes);
             marked.insert(i, Reason::OverBudget);
+            for j in std::iter::once(i).chain(runs.descendants[i].iter().copied()) {
+                if runs.goes(j, traces, &marked).is_some() && gone.insert(j) {
+                    total = total.saturating_sub(traces[j].bytes);
+                }
+            }
         }
     }
 
-    marked.into_iter().collect()
+    (0..traces.len())
+        .filter_map(|i| runs.goes(i, traces, &marked).map(|reason| (i, reason)))
+        .collect()
+}
+
+/// The runs a scan holds (NIK-385): each root with the child traces its
+/// citations reach, at any depth. A trace no scanned trace cites is a
+/// root, and so is a cited one no root reaches (a cycle).
+struct Runs {
+    /// The roots whose citations reach each trace, in index order: empty
+    /// for a root.
+    roots_of: Vec<Vec<usize>>,
+    /// The traces each root's citations reach: empty for a child.
+    descendants: Vec<Vec<usize>>,
+}
+
+impl Runs {
+    fn of(traces: &[TraceMeta]) -> Self {
+        let mut by_name: BTreeMap<&str, usize> = BTreeMap::new();
+        for (i, trace) in traces.iter().enumerate() {
+            by_name.entry(trace.name.as_str()).or_insert(i);
+        }
+        // A cited child that is absent from disk is simply absent.
+        let cites: Vec<Vec<usize>> = traces
+            .iter()
+            .enumerate()
+            .map(|(i, trace)| {
+                trace
+                    .children
+                    .iter()
+                    .filter_map(|name| by_name.get(name.as_str()).copied())
+                    .filter(|&child| child != i)
+                    .collect()
+            })
+            .collect();
+        let mut is_child = vec![false; traces.len()];
+        for &child in cites.iter().flatten() {
+            is_child[child] = true;
+        }
+        let mut runs = Self {
+            roots_of: vec![Vec::new(); traces.len()],
+            descendants: vec![Vec::new(); traces.len()],
+        };
+        for root in (0..traces.len()).filter(|&i| !is_child[i]) {
+            let mut seen = BTreeSet::from([root]);
+            let mut stack = cites[root].clone();
+            while let Some(i) = stack.pop() {
+                if seen.insert(i) {
+                    runs.roots_of[i].push(root);
+                    runs.descendants[root].push(i);
+                    stack.extend(&cites[i]);
+                }
+            }
+        }
+        runs
+    }
+
+    fn is_root(&self, i: usize) -> bool {
+        self.roots_of[i].is_empty()
+    }
+
+    /// Why trace `i` goes once the roots in `marked` go: a root by its own
+    /// mark, a child once every root that reaches it is marked, for the
+    /// first one's reason. A paused child never goes.
+    fn goes(
+        &self,
+        i: usize,
+        traces: &[TraceMeta],
+        marked: &BTreeMap<usize, Reason>,
+    ) -> Option<Reason> {
+        if self.is_root(i) {
+            return marked.get(&i).copied();
+        }
+        if traces[i].state == TraceState::Paused {
+            return None;
+        }
+        let reasons: Option<Vec<Reason>> = self.roots_of[i]
+            .iter()
+            .map(|root| marked.get(root).copied())
+            .collect();
+        reasons?.first().copied()
+    }
 }
 
 /// The newest trace of each workflow (ANY state) — the standing resume
@@ -294,11 +401,11 @@ pub fn newest_per_workflow(traces: &[TraceMeta]) -> BTreeSet<usize> {
     newest_where(traces, |_| true)
 }
 
-/// The newest trace of each workflow among those `keep` admits, by the
-/// same deterministic pick as [`newest_per_workflow`].
-fn newest_where(traces: &[TraceMeta], keep: impl Fn(&TraceMeta) -> bool) -> BTreeSet<usize> {
+/// The newest trace of each workflow among the indices `keep` admits, by
+/// the same deterministic pick as [`newest_per_workflow`].
+fn newest_where(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> BTreeSet<usize> {
     let mut newest: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, trace) in traces.iter().enumerate().filter(|(_, t)| keep(t)) {
+    for (i, trace) in traces.iter().enumerate().filter(|&(i, _)| keep(i)) {
         let slot = newest.entry(trace.workflow.as_str()).or_insert(i);
         let held = &traces[*slot];
         if (trace.modified, &trace.name) > (held.modified, &held.name) {
@@ -313,12 +420,15 @@ fn failed(trace: &TraceMeta) -> bool {
     trace.state == TraceState::Failed
 }
 
-/// Finished traces per workflow, failed ones first, newest first within
-/// each group (the rotation windows).
-fn finished_by_workflow(traces: &[TraceMeta]) -> BTreeMap<&str, Vec<usize>> {
+/// Finished traces per workflow among the indices `keep` admits, failed
+/// ones first, newest first within each group (the rotation windows).
+fn finished_by_workflow(
+    traces: &[TraceMeta],
+    keep: impl Fn(usize) -> bool,
+) -> BTreeMap<&str, Vec<usize>> {
     let mut by_wf: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (i, trace) in traces.iter().enumerate() {
-        if trace.state.is_finished() {
+        if keep(i) && trace.state.is_finished() {
             by_wf.entry(trace.workflow.as_str()).or_default().push(i);
         }
     }
@@ -331,10 +441,10 @@ fn finished_by_workflow(traces: &[TraceMeta]) -> BTreeMap<&str, Vec<usize>> {
     by_wf
 }
 
-/// Every index, oldest first, every other trace before a failed one (the
-/// budget's removal order).
-fn budget_order(traces: &[TraceMeta]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..traces.len()).collect();
+/// Every index `keep` admits, oldest first, every other trace before a
+/// failed one (the budget's removal order).
+fn budget_order(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..traces.len()).filter(|&i| keep(i)).collect();
     order.sort_by(|&a, &b| {
         let (a, b) = (&traces[a], &traces[b]);
         (failed(a), a.modified, &a.name).cmp(&(failed(b), b.modified, &b.name))
@@ -385,14 +495,25 @@ impl GcReport {
 /// at least one trace — the caller MUST speak its line.
 ///
 /// Fail-open per file: a removal that errors (a vanished file · a
-/// permission wall) leaves that trace counted as kept and continues —
-/// never an error, never a veto on the run.
+/// permission wall) leaves that trace counted as kept, with the children
+/// it cites, and continues — never an error, never a veto on the run.
 #[must_use = "a successful collection MUST speak its line (D2) — dropping the report is silent deletion"]
 pub fn collect(dir: &Path, cfg: &RetentionConfig, now: SystemTime) -> Option<GcReport> {
     let traces = store::scan(dir);
-    let marked = plan(&traces, cfg, now);
+    let runs = Runs::of(&traces);
+    // Roots first: a child goes only once every root that cites it went,
+    // so a root whose removal failed keeps its children.
+    let (roots, children): (Vec<_>, Vec<_>) = plan(&traces, cfg, now)
+        .into_iter()
+        .partition(|&(i, _)| runs.is_root(i));
     let mut removed: BTreeMap<usize, Reason> = BTreeMap::new();
-    for (i, reason) in marked {
+    for (i, reason) in roots.into_iter().chain(children) {
+        if runs.roots_of[i]
+            .iter()
+            .any(|root| !removed.contains_key(root))
+        {
+            continue;
+        }
         if std::fs::remove_file(&traces[i].path).is_ok() {
             crate::liveness::remove_lease(&traces[i].path);
             crate::spill::remove_values(&traces[i].path);
@@ -469,6 +590,8 @@ pub fn prune_claims(home: &Path, cfg: &RetentionConfig, now: SystemTime) -> Opti
 
 #[cfg(test)]
 mod tests {
+    mod runs;
+
     use super::*;
     use crate::store::tests::{ndjson, run_events, stage_trace, temp_store};
     use nika_event::EventKind;

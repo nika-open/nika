@@ -23,6 +23,7 @@
 //! trace descent); the CLI keeps its display vocabulary (the age cell)
 //! and re-exports this seam at the old path.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -130,6 +131,9 @@ pub struct TraceMeta {
     /// The project the journal was recorded for: the opening frame's
     /// `project_root_fingerprint`, when recorded.
     pub project: Option<String>,
+    /// The child traces this run cites ([`cited_children`]), by file name,
+    /// each once: the traces retention keeps with the run (NIK-385).
+    pub(crate) children: Vec<String>,
 }
 
 impl TraceMeta {
@@ -158,6 +162,7 @@ impl TraceMeta {
             resumed_from: None,
             run_id: None,
             project: None,
+            children: Vec::new(),
         }
     }
 
@@ -180,6 +185,13 @@ impl TraceMeta {
     pub fn with_identity(mut self, run_id: Option<String>, project: Option<String>) -> Self {
         self.run_id = run_id;
         self.project = project;
+        self
+    }
+
+    /// Attach the child traces this run cites, by file name.
+    #[must_use]
+    pub(crate) fn with_children(mut self, children: Vec<String>) -> Self {
+        self.children = children;
         self
     }
 
@@ -379,6 +391,7 @@ fn read_meta(path: &Path) -> Result<(TraceMeta, Vec<DoubtWhy>), SkipWhy> {
     let doubts = doubts(&recovered, started.is_some(), run_id.is_some());
     // The values the journal keeps beside it are its bytes too (the retention budget).
     let bytes = meta.len().saturating_add(crate::spill::kept_bytes(path));
+    let children = cited_children(&recovered.events).into_iter();
     let mut facts = TraceMeta::new(
         path.to_path_buf(),
         name,
@@ -389,7 +402,8 @@ fn read_meta(path: &Path) -> Result<(TraceMeta, Vec<DoubtWhy>), SkipWhy> {
         modified,
     )
     .with_resumed_from(field("resumed_from"))
-    .with_identity(run_id, field("project_root_fingerprint"));
+    .with_identity(run_id, field("project_root_fingerprint"))
+    .with_children(children.map(|child| child.trace_id).collect());
     // A running trace asks its lease (ADR-129): alive · dead · unknown.
     if state == TraceState::Running {
         facts = facts.with_liveness(crate::liveness::probe(path));
@@ -455,6 +469,93 @@ pub fn fold_facts(events: &[Event]) -> (String, TraceState, Option<String>) {
         };
     }
     (workflow, state, paused_task)
+}
+
+/// One child trace a journal cites (spec 14 law 8): the child journal's
+/// file name, the task that ran it, and the `for_each` item when an
+/// iteration ran it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CitedChild {
+    /// The child journal's file name, in the directory of the journal that
+    /// cites it.
+    pub trace_id: String,
+    /// The task that ran the child.
+    pub task: String,
+    /// The index of the `for_each` item that ran the child; `None` for a
+    /// plain `invoke`.
+    pub index: Option<u64>,
+}
+
+impl CitedChild {
+    /// Construct (INV-019).
+    #[must_use]
+    pub const fn new(trace_id: String, task: String, index: Option<u64>) -> Self {
+        Self {
+            trace_id,
+            task,
+            index,
+        }
+    }
+}
+
+/// The child traces a journal cites, in journal order, each name once
+/// (spec 14 law 8): the `child` row of a task terminal (a skip under
+/// `on_error: skip` included), and the `child` of each `for_each` item
+/// row, inline (`items`) or paged (`task_items`).
+/// Retention keeps them with their run and `trace verify` names the ones
+/// that are missing: the ONE reader both share. A name with a directory
+/// part is never a citation (the journal is untrusted input).
+#[must_use]
+pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
+    let mut seen = BTreeSet::new();
+    let mut cited = Vec::new();
+    for event in events {
+        let citing = matches!(
+            event.kind,
+            EventKind::TaskCompleted
+                | EventKind::TaskFailed
+                | EventKind::TaskSkipped
+                | EventKind::TaskCancelled
+                | EventKind::TaskItems
+        );
+        if !citing {
+            continue;
+        }
+        let task = str_field(event, "task").unwrap_or_default();
+        let single = str_field(event, "child")
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|row| row.get("trace_id")?.as_str().map(str::to_owned))
+            .map(|trace_id| (trace_id, None::<u64>));
+        for (trace_id, index) in single.into_iter().chain(item_children(event)) {
+            if bare_file_name(&trace_id) && seen.insert(trace_id.clone()) {
+                cited.push(CitedChild::new(trace_id, task.to_owned(), index));
+            }
+        }
+    }
+    cited
+}
+
+/// The `child` of each item row an event's `items` text carries, with the
+/// row's index. A text that names no `child` is not parsed.
+fn item_children(event: &Event) -> Vec<(String, Option<u64>)> {
+    let Some(text) = str_field(event, "items").filter(|text| text.contains("\"child\"")) else {
+        return Vec::new();
+    };
+    let rows: Vec<serde_json::Value> = serde_json::from_str(text).unwrap_or_default();
+    rows.iter()
+        .filter_map(|row| {
+            let child = row.get("child")?.as_str()?.to_owned();
+            Some((child, row.get("index").and_then(serde_json::Value::as_u64)))
+        })
+        .collect()
+}
+
+/// A bare file name: no directory part, no control character.
+fn bare_file_name(name: &str) -> bool {
+    !matches!(name, "" | "." | "..")
+        && !name.contains(['/', '\\'])
+        && !name.chars().any(char::is_control)
 }
 
 /// One string field off an event (the journal's additive KV vocabulary).
@@ -693,6 +794,58 @@ pub(crate) mod tests {
             "a fresh run: no claim"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// NIK-385 · the ONE citation reader: a task's `child` row, inline item
+    /// rows and paged ones, each name once, in journal order. A name with a
+    /// directory part is never a citation, a row without `child` cites
+    /// nothing, and a frame of another kind is not read.
+    #[test]
+    fn cited_children_reads_every_citation_once() {
+        let solo = r#"{"target":"./kid.nika","trace_id":"kid-a.ndjson","outcome":"failure"}"#;
+        let inline = r#"[{"child":"kid-b.ndjson","index":0,"item":"a","status":"ok"},{"index":1,"item":"b","status":"ok"},{"child":"../out.ndjson","index":2,"item":"c","status":"ok"}]"#;
+        let page = r#"[{"child":"kid-c.ndjson","index":3,"item":"d","status":"ok"},{"child":"kid-b.ndjson","index":4,"item":"e","status":"ok"}]"#;
+        let with = |frame: Event, key: &str, text: &str| {
+            frame.with_field(KeyValue::new(key, Value::String(text.to_owned())))
+        };
+        let events = vec![
+            event(EventKind::WorkflowStarted, "workflow", "w", 0),
+            with(
+                event(EventKind::TaskFailed, "task", "solo", 1),
+                "child",
+                solo,
+            ),
+            with(
+                event(EventKind::TaskCompleted, "task", "fan", 2),
+                "items",
+                inline,
+            ),
+            with(
+                event(EventKind::TaskItems, "task", "pages", 3),
+                "items",
+                page,
+            ),
+            with(
+                event(EventKind::TaskStarted, "task", "noise", 4),
+                "child",
+                r#"{"trace_id":"kid-z.ndjson"}"#,
+            ),
+            // The failed child an `on_error: skip` passed over.
+            with(
+                event(EventKind::TaskSkipped, "task", "skipped", 5),
+                "child",
+                r#"{"target":"./kid.nika","trace_id":"kid-d.ndjson","outcome":"failure"}"#,
+            ),
+        ];
+        assert_eq!(
+            cited_children(&events),
+            vec![
+                CitedChild::new("kid-a.ndjson".to_owned(), "solo".to_owned(), None),
+                CitedChild::new("kid-b.ndjson".to_owned(), "fan".to_owned(), Some(0)),
+                CitedChild::new("kid-c.ndjson".to_owned(), "pages".to_owned(), Some(3)),
+                CitedChild::new("kid-d.ndjson".to_owned(), "skipped".to_owned(), None),
+            ]
+        );
     }
 
     /// The journal of one run: started(workflow) · a task · a terminal.

@@ -485,7 +485,7 @@ struct Reads<'a> {
     with: Vec<Binding<'a>>,
     /// What the `for_each:` collection reads, expression or literal list.
     item: Option<Vec<Read>>,
-    /// What the effect-carrying fields read ([`action_effect_fields`]).
+    /// What the fields a secret is SENT through read ([`sink_fields`]).
     effect: Vec<Read>,
     /// What the route reads ([`route_field`]): an `infer:`/`agent:` `model:`,
     /// an `exec:` `cwd:`.
@@ -527,7 +527,7 @@ impl<'a> Reads<'a> {
             })
         });
         let effect = scope.resolve(
-            action_effect_fields(&task.action)
+            sink_fields(&task.action)
                 .into_iter()
                 .flat_map(refs_in_str)
                 .collect(),
@@ -851,8 +851,8 @@ fn record_effect_leaks(
 /// directory it spawns the program in (and a literal of the sandbox profile).
 /// `None` for every other verb, and for a task that names neither (the
 /// envelope `model:` is never rendered at run). The shared effect table
-/// ([`action_effect_fields`]) leaves `cwd:` out for its other readers (the
-/// integrity labels of the run's re-gate among them).
+/// ([`action_effect_fields`]) lists `cwd:` too, for its other readers; the
+/// secret flow judges it here alone.
 fn route_field(action: &RawAction) -> Option<&str> {
     match action {
         RawAction::Infer(a) => a.model.as_ref().map(|m| m.value.as_str()),
@@ -890,11 +890,31 @@ fn route_hop(task: &RawTask) -> String {
 /// provider, the author sanctions it explicitly (`egress: [{ to: "infer" }]`
 /// / `{ to: "agent" }`).
 ///
+/// An `exec:`'s `cwd:` is part of the effect too: the run renders it, labels it
+/// and re-gates a tainted one as a path (`regate_exec_cwd`), and it chooses what
+/// the program reads, so every reader of this table sees it as it sees an
+/// argument. The secret flow alone reads the table without it ([`sink_fields`]):
+/// a secret there is a route ([`route_field`]), refused whatever its `egress:`,
+/// never a send an `egress:` rule could clear.
+///
 /// `pub` (F-O1 PR-1): `nika-runtime`'s integrity walk reads the SAME
 /// effect-surface table — check≡run by construction, never a duplicated
 /// field list.
 #[must_use]
 pub fn action_effect_fields(action: &RawAction) -> Vec<&str> {
+    let mut fields = sink_fields(action);
+    if let RawAction::Exec(a) = action
+        && let Some(cwd) = &a.cwd
+    {
+        fields.push(cwd.value.as_str());
+    }
+    fields
+}
+
+/// The fields a secret is judged at as a SEND, which an `egress:` rule can
+/// clear: the effect table ([`action_effect_fields`]) without the route it
+/// shares, an exec's `cwd:`.
+fn sink_fields(action: &RawAction) -> Vec<&str> {
     match action {
         RawAction::Exec(a) => {
             let mut fields = a.command.text_fragments();

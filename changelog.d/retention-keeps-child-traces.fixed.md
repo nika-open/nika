@@ -10,7 +10,12 @@
   item the batch stopped while its child ran, names the trace that child
   had opened. A task that `on_error:` skipped or recovered keeps its
   `child` row too; before, a failed child an `on_error: skip` passed over
-  was cited nowhere and went at the next collection. Retention now counts
+  was cited nowhere and went at the next collection. A retried child call
+  keeps one trace per attempt, and each is cited: the `task_retrying` frame
+  names the trace of the attempt it replays (`child`, the same row as a
+  terminal's), and an item row names its earlier attempts' traces
+  (`child_attempts`, oldest first) beside `child`, the last one, an
+  abandoned iteration's included. Retention now counts
   a run by its root trace: a child never counts toward its workflow's kept
   count, stays as long as its parent stays, even past the age cap, and
   goes with its parent, for the parent's reason. A paused child never

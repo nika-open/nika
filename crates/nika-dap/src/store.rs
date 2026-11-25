@@ -519,8 +519,9 @@ impl CitedChild {
 
 /// The child traces a journal cites, in journal order, each name once
 /// (spec 14 law 8): the `child` row of a task terminal (a skip under
-/// `on_error: skip` included), and the `child` of each `for_each` item
-/// row, inline (`items`) or paged (`task_items`).
+/// `on_error: skip` included) and of each `task_retrying` frame (the
+/// failed attempt a retry replays), and the `child_attempts` and `child`
+/// of each `for_each` item row, inline (`items`) or paged (`task_items`).
 /// Retention keeps them with their run and `trace verify` names the ones
 /// that are missing: the ONE reader both share. A name that is not one
 /// normal path component is never a citation (the journal is untrusted
@@ -537,6 +538,7 @@ pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
                 | EventKind::TaskSkipped
                 | EventKind::TaskCancelled
                 | EventKind::TaskItems
+                | EventKind::TaskRetrying
         );
         if !citing {
             continue;
@@ -555,17 +557,26 @@ pub fn cited_children(events: &[Event]) -> Vec<CitedChild> {
     cited
 }
 
-/// The `child` of each item row an event's `items` text carries, with the
-/// row's index. A text that names no `child` is not parsed.
+/// The traces each item row an event's `items` text carries names, with the
+/// row's index: its earlier attempts (`child_attempts`, oldest first), then
+/// its `child`. A text that names no `child` is not parsed.
 fn item_children(event: &Event) -> Vec<(String, Option<u64>)> {
-    let Some(text) = str_field(event, "items").filter(|text| text.contains("\"child\"")) else {
+    let Some(text) = str_field(event, "items").filter(|text| text.contains("\"child")) else {
         return Vec::new();
     };
     let rows: Vec<serde_json::Value> = serde_json::from_str(text).unwrap_or_default();
     rows.iter()
-        .filter_map(|row| {
-            let child = row.get("child")?.as_str()?.to_owned();
-            Some((child, row.get("index").and_then(serde_json::Value::as_u64)))
+        .flat_map(|row| {
+            let index = row.get("index").and_then(serde_json::Value::as_u64);
+            let attempts = (row
+                .get("child_attempts")
+                .and_then(serde_json::Value::as_array))
+            .into_iter()
+            .flatten();
+            attempts
+                .chain(row.get("child"))
+                .filter_map(serde_json::Value::as_str)
+                .map(move |name| (name.to_owned(), index))
         })
         .collect()
 }
@@ -823,6 +834,44 @@ pub(crate) mod tests {
     }
 
     /// NIK-385 · the ONE citation reader: a task's `child` row, inline item
+    /// NIK-385 review · a retried child call cites every attempt: the `child` row of a
+    /// `task_retrying` frame, and the `child_attempts` of an item row beside its `child`, each
+    /// a citation (a separator still names none).
+    #[test]
+    fn every_attempt_of_a_retried_child_is_a_citation() {
+        let retried = r#"{"target":"./kid.nika","trace_id":"solo-1.ndjson","outcome":"failure"}"#;
+        let rows = r#"[{"child":"a-3.ndjson","child_attempts":["a-1.ndjson","../a-2.ndjson","a-2.ndjson"],"index":4,"status":"ok"}]"#;
+        let with = |frame: Event, key: &str, text: &str| {
+            frame.with_field(KeyValue::new(key, Value::String(text.to_owned())))
+        };
+        let events = vec![
+            with(
+                event(EventKind::TaskRetrying, "task", "solo", 1),
+                "child",
+                retried,
+            ),
+            with(
+                event(EventKind::TaskCompleted, "task", "fan", 2),
+                "items",
+                rows,
+            ),
+        ];
+        let cited: Vec<(String, String, Option<u64>)> = cited_children(&events)
+            .into_iter()
+            .map(|c| (c.trace_id, c.task, c.index))
+            .collect();
+        let row = |name: &str| (name.to_owned(), "fan".to_owned(), Some(4));
+        assert_eq!(
+            cited,
+            [
+                ("solo-1.ndjson".to_owned(), "solo".to_owned(), None),
+                row("a-1.ndjson"),
+                row("a-2.ndjson"),
+                row("a-3.ndjson"),
+            ]
+        );
+    }
+
     /// NIK-385 review · a cited name is exactly one normal path component on
     /// every platform: a drive or stream prefix (`C:x`, `x:`), a parent or
     /// current directory, a separator of either kind, an absolute path or a

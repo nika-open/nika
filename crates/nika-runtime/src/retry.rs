@@ -117,13 +117,14 @@ where
     /// `timeout:` budget (spec 03 · "including any retries and their
     /// backoff sleeps") · then `on_error:` (spec 05).
     /// One failed attempt's debit + retry decision (spec 05) — split out
-    /// of `attempt_loop` for the 100-line fn ratchet · the error rides
-    /// the `FailedOutcome` when the policy admits no more (BOXED · clippy
-    /// `result_large_err` · unboxed at the one caller).
+    /// of `attempt_loop` for the 100-line fn ratchet · the retry it
+    /// schedules (its delay, and the child run the failed attempt ran) when
+    /// the policy admits one · else the error rides the `FailedOutcome`
+    /// (BOXED · clippy `result_large_err` · unboxed at the one caller).
     // REASON: the retry decision reads the task + the dispatch + the
     // ledger + the spend fold + the attempt counters — the loop's own seam.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn failed_attempt_delay(
+    pub(crate) fn failed_attempt_retry(
         &self,
         task: &RawTask,
         failed: crate::dispatch::FailedDispatch,
@@ -133,7 +134,7 @@ where
         attempt: u32,
         max_attempts: u32,
         jitter_key: &str,
-    ) -> Result<u64, Box<FailedOutcome>> {
+    ) -> Result<crate::task::RetryStamp, Box<FailedOutcome>> {
         // F-P6 · the binding evidence is lifted BEFORE the spend fold
         // consumes the dispatch (a divergence is never transient).
         let evidence = failed.evidence.clone();
@@ -164,7 +165,12 @@ where
                     .with_child(child),
             ));
         };
-        Ok(delay)
+        Ok(crate::task::RetryStamp {
+            attempt,
+            max_attempts,
+            delay_ms: delay,
+            child,
+        })
     }
 
     /// The retry decision — `Some(delay_ms)` when attempts remain AND

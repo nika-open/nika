@@ -287,7 +287,8 @@ fn with_named(mut record: TaskRecord, named: BTreeMap<String, Value>) -> TaskRec
 /// the terminal frame · the result record (spec §3.9). A SUCCESS with a
 /// resume stamp carries the ADR-099 identity + output on its
 /// `task_completed` frame (additive trace fields · the checkpoint).
-/// The attempt history, one `TaskRetrying` frame per retry — split from
+/// The attempt history, one `TaskRetrying` frame per retry, each naming
+/// the child run its failed attempt ran (`child`) — split from
 /// [`settle_ran`] at the 100-line cap (the block is self-contained: it
 /// reads only the retry ledger and touches no record state).
 fn emit_retry_history(
@@ -297,17 +298,15 @@ fn emit_retry_history(
     sink: &mut dyn EventSink,
 ) {
     for r in retries {
-        emit(
-            stamper,
-            sink,
-            EventKind::TaskRetrying,
-            &[
-                ("task", s(id)),
-                ("attempt", i(i64::from(r.attempt))),
-                ("max_attempts", i(i64::from(r.max_attempts))),
-                ("delay_ms", i(i64::try_from(r.delay_ms).unwrap_or(i64::MAX))),
-            ],
-        );
+        let mut fields = vec![
+            ("task", s(id)),
+            ("attempt", i(i64::from(r.attempt))),
+            ("max_attempts", i(i64::from(r.max_attempts))),
+            ("delay_ms", i(i64::try_from(r.delay_ms).unwrap_or(i64::MAX))),
+        ];
+        // The failed attempt's child run, cited like a terminal's (NIK-385).
+        emit_task::push_child_field(&mut fields, r.child.as_deref());
+        emit(stamper, sink, EventKind::TaskRetrying, &fields);
     }
 }
 

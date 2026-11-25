@@ -28,21 +28,32 @@ thread_local! {
 pub(crate) struct ChildAnnounce {
     /// The depth of the child the iteration calls: its run's depth, plus one.
     depth: u32,
-    /// The trace last told: a retried call's later attempt replaces the earlier one.
-    trace: Mutex<Option<String>>,
+    /// Every trace told, oldest first, each once: one per attempt of a retried call.
+    traces: Mutex<Vec<String>>,
 }
 
 impl ChildAnnounce {
     pub(crate) fn new(depth: u32) -> Arc<Self> {
         Arc::new(Self {
             depth,
-            trace: Mutex::new(None),
+            traces: Mutex::new(Vec::new()),
         })
     }
 
-    /// The trace the iteration's child call told, if one opened.
+    /// The trace the iteration's last child call told, if one opened.
     pub(crate) fn trace(&self) -> Option<String> {
-        self.trace.lock().ok().and_then(|trace| trace.clone())
+        self.traces
+            .lock()
+            .ok()
+            .and_then(|traces| traces.last().cloned())
+    }
+
+    /// Every trace the iteration's child calls told, oldest first: a retried call's attempts.
+    pub(crate) fn traces(&self) -> Vec<String> {
+        self.traces
+            .lock()
+            .map(|traces| traces.clone())
+            .unwrap_or_default()
     }
 
     /// `future`, listening on every poll.
@@ -94,9 +105,10 @@ pub fn announce_trace(depth: u32, trace_id: &str) {
     let _ = LISTENING.try_with(|listening| {
         if let Some(slot) = listening.borrow().as_ref()
             && slot.depth == depth
-            && let Ok(mut trace) = slot.trace.lock()
+            && let Ok(mut traces) = slot.traces.lock()
+            && !traces.iter().any(|told| told == trace_id)
         {
-            *trace = Some(trace_id.to_owned());
+            traces.push(trace_id.to_owned());
         }
     });
 }
@@ -113,16 +125,19 @@ mod tests {
             .poll(&mut Context::from_waker(std::task::Waker::noop()))
     }
 
-    /// The child's trace reaches the iteration polling it; a retry's later attempt replaces it.
+    /// The child's trace reaches the iteration polling it; a retry's later attempt is the last
+    /// one, and every attempt is kept, once each.
     #[test]
     fn the_listening_iteration_hears_its_child_and_the_last_attempt_wins() {
         let slot = ChildAnnounce::new(1);
         let heard = Arc::clone(&slot).listen(async {
             announce_trace(1, "a.ndjson");
             announce_trace(1, "b.ndjson");
+            announce_trace(1, "a.ndjson");
         });
         assert!(poll_once(heard).is_ready());
         assert_eq!(slot.trace().as_deref(), Some("b.ndjson"));
+        assert_eq!(slot.traces(), ["a.ndjson", "b.ndjson"]);
     }
 
     /// A call at another depth, and a call outside any iteration, change nothing.

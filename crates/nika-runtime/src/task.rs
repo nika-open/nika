@@ -236,6 +236,9 @@ pub(crate) struct RetryStamp {
     pub attempt: u32,
     pub max_attempts: u32,
     pub delay_ms: u64,
+    /// The child run the failed attempt ran (spec 14 law 8): its trace is cited on the
+    /// retry's frame, so a retried `invoke: workflow:` call cites every attempt (NIK-385).
+    pub child: Option<Box<crate::child::ChildRunSummary>>,
 }
 
 /// The task's terminal result.
@@ -933,8 +936,8 @@ where
                             if let Some(u) = &failed.usage {
                                 failed_calls.extend_from_slice(&u.inference_calls);
                             }
-                            let delay = self
-                                .failed_attempt_delay(
+                            let retry = self
+                                .failed_attempt_retry(
                                     task,
                                     failed,
                                     ledger,
@@ -945,12 +948,9 @@ where
                                     &jitter_key,
                                 )
                                 .map_err(|failed| retain_failed_calls(*failed, &failed_calls))?;
-                            retries.push(RetryStamp {
-                                attempt,
-                                max_attempts,
-                                delay_ms: delay,
-                            });
-                            self.clock.sleep(Duration::from_millis(delay)).await;
+                            let delay = Duration::from_millis(retry.delay_ms);
+                            retries.push(retry);
+                            self.clock.sleep(delay).await;
                             attempt += 1;
                         }
                     }

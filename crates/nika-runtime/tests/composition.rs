@@ -715,3 +715,93 @@ tasks:
         (&json!("recovered"), &json!("NIKA-EXEC-002"), &json!("t-9"))
     );
 }
+
+/// A child that fails its first attempt and settles green on its second, each attempt keeping
+/// its own trace, `<item>-<attempt>` (`solo` off a fan-out).
+#[derive(Default)]
+struct GreenOnSecond {
+    attempts: Mutex<BTreeMap<String, u32>>,
+}
+
+impl ChildRunner for GreenOnSecond {
+    fn run_child<'a>(
+        &'a self,
+        call: ChildCall,
+    ) -> Pin<Box<dyn Future<Output = Result<ChildOutcome, ChildRunRefusal>> + 'a>> {
+        Box::pin(async move {
+            let key = (call.args.get("item").and_then(Value::as_str))
+                .unwrap_or("solo")
+                .to_owned();
+            let attempt = {
+                let mut attempts = self.attempts.lock().expect("lock");
+                let attempt = attempts.entry(key.clone()).or_default();
+                *attempt += 1;
+                *attempt
+            };
+            let trace = format!("{key}-{attempt}");
+            if attempt == 1 {
+                return Ok(failed_child(&call, &trace));
+            }
+            let mut green = green_child(None)(&call)?;
+            green.trace = Some(ChildRunSummary::new(
+                call.target.clone(),
+                true,
+                (Some(trace), Some("head".to_owned()), None),
+            ));
+            Ok(green)
+        })
+    }
+}
+
+/// The `trace_id` of the `child` row each `task_retrying` frame of `task` carries, in order.
+fn retried_children(events: &[Event], task: &str) -> Vec<Option<Value>> {
+    (events.iter())
+        .filter(|e| e.kind == EventKind::TaskRetrying && str_field(e, "task") == Some(task))
+        .map(|e| {
+            str_field(e, "child").map(|text| {
+                let row: Value = serde_json::from_str(text).expect("JSON");
+                row["trace_id"].clone()
+            })
+        })
+        .collect()
+}
+
+/// NIK-385 review · a retried child call keeps one trace per attempt, and the parent cites each:
+/// the `task_retrying` frame names the trace of the attempt it retries, the terminal frame the
+/// last one, and a fan-out row names its earlier attempts' traces (`child_attempts`).
+#[tokio::test]
+async fn every_attempt_of_a_retried_child_is_cited() {
+    let yaml = "\
+nika: parent
+tasks:
+  solo:
+    invoke: { workflow: \"./child.nika\" }
+    retry: { max_attempts: 2, backoff_ms: 1, backoff_strategy: fixed, jitter: false, on_codes: [NIKA-EXEC-002] }
+  fan:
+    for_each: { items: [\"a\"] }
+    invoke:
+      workflow: \"./child.nika\"
+      args: { item: \"${{ item }}\" }
+    retry: { max_attempts: 2, backoff_ms: 1, backoff_strategy: fixed, jitter: false, on_codes: [NIKA-EXEC-002] }
+";
+    let rt =
+        runtime(RuntimeConfig::default()).with_child_runner(Arc::new(GreenOnSecond::default()));
+    let (outcome, events) = drive(yaml, rt).await;
+    assert!(outcome.ok, "{events:?}");
+    assert_eq!(retried_children(&events, "solo"), [Some(json!("solo-1"))]);
+    let (child, _) = citations(&events, "solo");
+    assert_eq!(
+        child.map(|row| row["trace_id"].clone()),
+        Some(json!("solo-2"))
+    );
+    assert_eq!(retried_children(&events, "fan"), [Some(json!("a-1"))]);
+    let (_, rows) = citations(&events, "fan");
+    assert_eq!(
+        (
+            &rows[0]["status"],
+            &rows[0]["child"],
+            &rows[0]["child_attempts"]
+        ),
+        (&json!("ok"), &json!("a-2"), &json!(["a-1"]))
+    );
+}

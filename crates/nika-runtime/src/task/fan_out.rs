@@ -106,6 +106,9 @@ where
 }
 
 fn consume_iteration(acc: &mut FanOutAccum, index: usize, iter_ran: RanTask) {
+    let attempts: Vec<String> = (iter_ran.retries.iter())
+        .filter_map(|retry| retry.child.as_ref()?.trace_id.clone())
+        .collect();
     acc.retries.extend(iter_ran.retries);
     acc.agent_events.extend(iter_ran.agent_events);
     acc.decisions.extend(iter_ran.decisions);
@@ -174,7 +177,8 @@ fn consume_iteration(acc: &mut FanOutAccum, index: usize, iter_ran: RanTask) {
             row
         }
     };
-    acc.items.push(with_child(row, child));
+    acc.items
+        .push(with_attempts(with_child(row, child), attempts));
 }
 
 /// The trace file the child workflow of an iteration wrote (spec 14 law 8),
@@ -199,6 +203,32 @@ fn with_child(mut row: Value, child: Option<String>) -> Value {
         object
             .entry("child")
             .or_insert_with(|| Value::String(child));
+    }
+    row
+}
+
+/// The row, naming the traces of the earlier attempts of its iteration's retried child call
+/// (`child_attempts`, oldest first), so every attempt's trace lives as long as its root
+/// (NIK-385). A trace the row already names, as `child` or an earlier attempt, is not repeated;
+/// a row with no earlier attempt has no `child_attempts`.
+fn with_attempts(mut row: Value, traces: Vec<String>) -> Value {
+    let Some(object) = row.as_object_mut() else {
+        return row;
+    };
+    let last = object
+        .get("child")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let mut named: Vec<Value> = (object.get("child_attempts").and_then(Value::as_array))
+        .cloned()
+        .unwrap_or_default();
+    for trace in traces {
+        if last.as_deref() != Some(trace.as_str()) && !named.iter().any(|n| *n == trace) {
+            named.push(Value::String(trace));
+        }
+    }
+    if !named.is_empty() {
+        object.insert("child_attempts".to_owned(), Value::Array(named));
     }
     row
 }
@@ -439,8 +469,9 @@ pub(super) async fn started_on_first_poll<F: std::future::Future>(
 /// batch stopped without one (`fail_fast` · the budget) is `cancelled` if it
 /// began, else `never_started`; neither has an output or is a billing verdict
 /// (spec 17). A row whose iteration's child workflow opened a trace names it
-/// (`child`), the `cancelled` row of an abandoned iteration included. Rendered
-/// on the terminal frame as `items`.
+/// (`child`), the `cancelled` row of an abandoned iteration included, and the
+/// earlier attempts of a retried child call (`child_attempts`). Rendered on
+/// the terminal frame as `items`.
 pub(super) fn items_json(rows: Vec<Value>, items: &[Value], marks: &[ItemMark]) -> String {
     let mut rows = rows.into_iter().peekable();
     let table: Vec<Value> = (items.iter().enumerate())
@@ -453,7 +484,8 @@ pub(super) fn items_json(rows: Vec<Value>, items: &[Value], marks: &[ItemMark]) 
                     let status = if began { "cancelled" } else { "never_started" };
                     item_row(index, &item_identity(item), status, None)
                 });
-            with_child(row, mark.and_then(|m| m.child.trace()))
+            let row = with_child(row, mark.and_then(|m| m.child.trace()));
+            with_attempts(row, mark.map(|m| m.child.traces()).unwrap_or_default())
         })
         .collect();
     serde_json::to_string(&table).unwrap_or_else(|_| "[]".to_owned())
@@ -863,6 +895,35 @@ mod tests {
         assert_eq!(
             rows[2],
             serde_json::json!({"index": 2, "item": "gamma", "status": "never_started"})
+        );
+    }
+
+    /// NIK-385 review · an iteration abandoned during its retried child call names the trace
+    /// of every attempt: the last one as `child`, the earlier ones, oldest first, as
+    /// `child_attempts`. A trace told twice is named once.
+    #[test]
+    fn an_abandoned_retried_item_row_names_every_attempt() {
+        use std::future::Future as _;
+        let marks = unstarted(1, 0);
+        let mut iteration = std::pin::pin!(started_on_first_poll(0, marks.first(), async {
+            crate::child::announce_trace(1, "attempt-1.ndjson");
+            crate::child::announce_trace(1, "attempt-2.ndjson");
+            crate::child::announce_trace(1, "attempt-2.ndjson");
+            crate::child::announce_trace(1, "attempt-3.ndjson");
+            std::future::pending::<()>().await;
+        }));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(iteration.as_mut().poll(&mut cx).is_pending());
+        let rows: Vec<Value> =
+            serde_json::from_str(&items_json(Vec::new(), &[Value::from("alpha")], &marks))
+                .expect("rows");
+        assert_eq!(
+            rows[0],
+            serde_json::json!({
+                "child": "attempt-3.ndjson",
+                "child_attempts": ["attempt-1.ndjson", "attempt-2.ndjson"],
+                "index": 0, "item": "alpha", "status": "cancelled"
+            })
         );
     }
 

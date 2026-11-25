@@ -499,7 +499,11 @@ silent).
   each poll of the iteration (the core keeps no tokio edge); a child
   runner calls `child::announce_trace` at its call's depth, so a
   grandchild is never taken for the item's child. A `task_skipped`
-  frame keeps the `child` row as the completed and failed ones do.
+  frame keeps the `child` row as the completed and failed ones do. A
+  retried child call cites every attempt: `RetryStamp` keeps the failed
+  attempt's child summary and its `task_retrying` frame carries it as
+  `child`; the slot keeps every trace told, and a row names the earlier
+  attempts' traces, oldest first, as `child_attempts` beside `child`.
 - Task output = the array of per-iteration outputs in input order ·
   task status = failure if ANY iteration failed unrecovered.
 - Events: ONE task-level Started/Completed/Failed pair (iterations are

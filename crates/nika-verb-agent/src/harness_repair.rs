@@ -90,6 +90,22 @@ impl<'a> SchemaRepair<'a> {
         Ok(None)
     }
 
+    /// The repair turn did not come back: the host exited after the first turn, answered the
+    /// follow-up with an error, or went silent past its idle deadline. Once the repair prompt
+    /// went out, the task fails `NIKA-INFER-002` with the first turn's message at
+    /// `partial_output` and its violations, the repair's failure named as the cause, so the
+    /// work and an `on_codes: [NIKA-INFER-002]` recovery survive it. `None` before any repair
+    /// prompt: the failure is the session's own.
+    pub(crate) fn repair_failed(&self, cause: &dyn std::fmt::Display) -> Option<VerbAgentError> {
+        let (first, validator) = (self.first.as_ref()?, self.validator?);
+        let AgentValue::Text(text) = &first.output else {
+            return None;
+        };
+        let rejection = crate::shape::validate_text(text, validator).err()?;
+        let detail = format!("{} (the repair turn failed: {cause})", rejection.detail());
+        Some(rejection.into_error(detail, text.clone()))
+    }
+
     /// The session's terminal turn: the first one of a session that closed on it, or the
     /// repair turn. Its final message is validated; a miss is `NIKA-INFER-002` with the
     /// message and every violation it holds.

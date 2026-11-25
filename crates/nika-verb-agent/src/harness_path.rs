@@ -184,14 +184,19 @@ pub(crate) async fn run_on_harness(
                 // per-chunk observer taps arrive with B5) and any
                 // future event kind: observed, never fatal.
             }
-            Some(Err(e)) => return Err(harness_err(e, typed)),
+            // A failure after the repair prompt keeps the first turn's work (NIKA-INFER-002).
+            Some(Err(e)) => {
+                return Err(repair
+                    .repair_failed(&e)
+                    .unwrap_or_else(|| harness_err(e, typed)));
+            }
             None => {
-                return Err(harness_err(
-                    HarnessError::Session {
-                        reason: "the harness stream ended without a Completed beat".to_owned(),
-                    },
-                    typed,
-                ));
+                let e = HarnessError::Session {
+                    reason: "the harness stream ended without a Completed beat".to_owned(),
+                };
+                return Err(repair
+                    .repair_failed(&e)
+                    .unwrap_or_else(|| harness_err(e, typed)));
             }
         }
     }

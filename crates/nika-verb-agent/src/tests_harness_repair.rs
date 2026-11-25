@@ -24,12 +24,14 @@ use crate::harness_path::HarnessSeat;
 use crate::observe::NudgeReason;
 
 /// One scripted turn of a seat: its final message, its reported usage, and whether its
-/// session stays open after it (a `TurnEnded` lane) or closes on it (`Completed`).
+/// session stays open after it (a `TurnEnded` lane) or closes on it (`Completed`); a failing
+/// turn is the session dying instead, past the idle deadline.
 #[derive(Clone)]
 struct Turn {
     text: &'static str,
     usage: Option<(u64, u64)>,
     open: bool,
+    fail: bool,
 }
 
 fn open(text: &'static str) -> Turn {
@@ -37,6 +39,7 @@ fn open(text: &'static str) -> Turn {
         text,
         usage: None,
         open: true,
+        fail: false,
     }
 }
 
@@ -45,6 +48,17 @@ fn closed(text: &'static str) -> Turn {
         text,
         usage: None,
         open: false,
+        fail: false,
+    }
+}
+
+/// The session dies on this turn: no frame within the idle deadline.
+fn dies() -> Turn {
+    Turn {
+        text: "",
+        usage: None,
+        open: false,
+        fail: true,
     }
 }
 
@@ -76,6 +90,11 @@ impl futures_core::Stream for Playback {
             return Poll::Ready(None);
         }
         let turn = this.turns.remove(0);
+        if turn.fail {
+            return Poll::Ready(Some(Err(HarnessError::Session {
+                reason: "no frame within the idle deadline".to_owned(),
+            })));
+        }
         let mut outcome = HarnessOutcome::new(turn.text);
         outcome.usage = turn
             .usage
@@ -325,4 +344,52 @@ async fn a_valid_message_or_an_untyped_task_spends_no_repair() {
     let out = verb.run(AgentInput::new("talk")).await.expect("untyped");
     assert_eq!(out.output, AgentValue::Text("plain prose".to_owned()));
     assert!(!script.asked.lock().unwrap()[0].follow_up);
+}
+
+/// The repair turn that never answers keeps the first turn's work: once the repair prompt went
+/// out, a host that exits after its turn or a session that dies on the follow-up fails
+/// `NIKA-INFER-002` with the first message at `partial_output`, its violations, and the
+/// repair's failure as the cause, so `on_codes: [NIKA-INFER-002]` still matches.
+#[tokio::test]
+async fn a_repair_turn_that_fails_keeps_the_first_message() {
+    let first = r#"{"note": "seven minutes of research"}"#;
+    let cases = [
+        (
+            vec![open(first)],
+            "harness session failed: the harness stream ended without a Completed beat",
+        ),
+        (
+            vec![open(first), dies()],
+            "harness session failed: no frame within the idle deadline",
+        ),
+    ];
+    for (turns, cause) in cases {
+        let (verb, script) = seated(turns);
+        let err = verb.run(typed()).await.expect_err("the repair failed");
+        assert_eq!(err.spec_code(), "NIKA-INFER-002", "{err:?}");
+        assert!(!err.is_transient());
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "agent final message failed schema validation: {THREE_MISSING} (the repair \
+                 turn failed: {cause})"
+            )
+        );
+        assert_eq!(
+            VerbAgentError::details_of(&err),
+            Some(serde_json::json!({
+                "partial_output": first,
+                "violations": [
+                    "\"title\" is a required property",
+                    "\"summary\" is a required property",
+                    "\"tags\" is a required property"
+                ]
+            }))
+        );
+        assert_eq!(
+            script.prompts.lock().unwrap().len(),
+            1,
+            "the one repair went out"
+        );
+    }
 }

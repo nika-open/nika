@@ -159,8 +159,10 @@ which still holds the agent's work: the prompt lists every violation and the
 schema and asks for the final message only, and the trace shows it as an
 `agent_nudge` with reason `schema_repair`. The repair is one more prompt on
 your subscription and must fit the task's `max_tokens_total`. A repaired
-message that still does not validate, or a session the application closed
-with its final message, fails `NIKA-INFER-002`; the failure's `details` keep
+message that still does not validate, a session the application closed
+with its final message, or a repair turn that never answers (the
+application exits, answers with an error or goes silent), fails
+`NIKA-INFER-002`; the failure's `details` keep
 the rejected message (`partial_output`) and its violations, each worded
 without the value it judged. An `on_error:` recovery reads the whole message;
 the trace keeps its first 64 KiB, cut after the run's secrets in it are

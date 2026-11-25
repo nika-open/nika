@@ -147,7 +147,9 @@ pub struct McpServer {
 
 impl McpServer {
     /// Explicit constructor — required because [`McpServer`] is
-    /// `#[non_exhaustive]` (invariant #19).
+    /// `#[non_exhaustive]` (invariant #19). The entry is [`McpStatus::Current`] with no
+    /// note; [`Self::with_status`] says otherwise. The signature is the published one, so a
+    /// caller written against 0.125.1 builds unchanged.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     // REASON: 14 fields reflect the real MCP-registry wire surface
@@ -167,8 +169,6 @@ impl McpServer {
         category: Category,
         pricing: McpPricing,
         last_verified: &'static str,
-        status: McpStatus,
-        status_note: Option<&'static str>,
         tags: &'static [crate::types::Tag],
         extra_tags: &'static [&'static str],
         effect_hints: &'static [ToolEffectHints],
@@ -185,11 +185,21 @@ impl McpServer {
             category,
             pricing,
             last_verified,
-            status,
-            status_note,
+            status: McpStatus::Current,
+            status_note: None,
             tags,
             extra_tags,
             effect_hints,
+        }
+    }
+
+    /// The same entry with its status and the note that says why it is not current.
+    #[must_use]
+    pub const fn with_status(self, status: McpStatus, status_note: Option<&'static str>) -> Self {
+        Self {
+            status,
+            status_note,
+            ..self
         }
     }
 }
@@ -234,6 +244,38 @@ mod tests {
         assert_eq!(s.status.as_str(), "current");
         assert_eq!(McpStatus::Deprecated.as_str(), "deprecated");
         assert_eq!(McpStatus::Restricted.as_str(), "restricted");
+    }
+
+    /// `new` keeps its published arity and builds a current entry; `with_status` changes
+    /// the status and its note and nothing else.
+    #[test]
+    fn new_is_current_and_with_status_sets_only_the_status() {
+        const S: McpServer = McpServer::new(
+            "legacy",
+            &[],
+            "Legacy",
+            "A server its vendor retired.",
+            &[],
+            &[],
+            &[],
+            None,
+            Category::Anthropic,
+            McpPricing::Free,
+            "2026-11-24",
+            &[],
+            &[],
+            &[],
+        );
+        assert_eq!((S.status, S.status_note), (McpStatus::Current, None));
+        let retired = S.with_status(McpStatus::Deprecated, Some("the vendor archived it"));
+        assert_eq!(
+            (retired.status, retired.status_note),
+            (McpStatus::Deprecated, Some("the vendor archived it"))
+        );
+        assert_eq!(
+            (retired.id, retired.title, retired.last_verified),
+            ("legacy", "Legacy", "2026-11-24")
+        );
     }
 
     #[test]

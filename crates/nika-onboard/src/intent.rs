@@ -29,6 +29,11 @@ use nika_bm25::{BmIndex, BmParams};
 /// the lowest score of an honest route kept green is 5.479 (« scrape a
 /// website and summarize » → website-brief). 3.0 sits between. Governs
 /// the SKELETON corpus (the wizard's world — scores are corpus-relative).
+/// Since then that phrase stopped routing on this corpus (0.125.1 already
+/// asked): website-brief leads at 8.854 on 2026-11-25, inside the 1.3
+/// margin of api-upload-and-create at 6.872, so the wizard asks with
+/// website-brief first, and a law pins it. The floor itself was not
+/// re-derived on this corpus.
 const TAU: f64 = 3.0;
 
 /// The floor for the WHOLE-catalog corpus (BM25 scores are IDF-relative,
@@ -45,14 +50,15 @@ const TAU: f64 = 3.0;
 /// is a same-facet coin-flip either way. The lowest honest tops that
 /// route are 14.415 (« scrape a website and summarize it » →
 /// 05-fetch-chain), 14.950 (« translate my docs folder to spanish » →
-/// localization-factory) and 15.071 (« which example fetches a url and
-/// summarizes it? » → 05-fetch-chain). 12.5 sits between them. Three
+/// localization-factory) and 16.434 (« a weekend summary of three URLs »
+/// → 05-fetch-chain, and its plural twin). 12.5 sits between them. Three
 /// honest but weak tops stay under it and ask, naming the job first:
 /// « what's a good template for a digest? » (05-fetch-chain 11.990, with
 /// feed-digest beside it), « is there a template for invoices? »
 /// (invoice-chaser 11.483, a same-facet coin-flip anyway) and « show me a
 /// template for fetching a URL » (05-fetch-chain 4.560, under the old
-/// floor too).
+/// floor too). Any floor in (11.990, 14.415] gives the probe the same
+/// verdicts.
 /// (2026-07-31, on 49 docs:
 /// 4.949 vague, 6.220 honest, floor 5.5.)
 const TAU_CATALOG: f64 = 12.5;
@@ -589,32 +595,44 @@ fn body_of(name: &str) -> Option<&'static str> {
     nika_pack::template(name).or_else(|| nika_pack::example(name))
 }
 
-/// BM25-route a free-form intent against the embedded catalog, gated by
-/// the [`IntentContract`]: extract FIRST, then score. A candidate must
-/// carry every required capability (and none forbidden); the winner must
-/// clear [`TAU`] and outscore the runner-up by [`MARGIN`]. Anything else
-/// is a [`RoutingOutcome::NeedsClarification`] — routing below the
-/// evidence bar would be a guess (P0-1 · P0-10).
-/// The naive singular of a plural token — `invoices` → `invoice`.
-/// Query-side only, like every other expansion here: documents are never
-/// rewritten, so a wrong guess costs one term that matches nothing.
+/// The singular candidates of a plural token, so `invoices` finds the
+/// documents that say `invoice`. Query-side only, like every other
+/// expansion here: documents are never rewritten, so a wrong candidate
+/// costs one term that matches nothing.
 ///
-/// `-es` goes whole only where English adds it, after `ss`, `x`, `zz`,
-/// `ch` and `sh` (`processes` → `process`, `fetches` → `fetch`);
-/// anywhere else the `e` is the stem's own (`summarizes` →
-/// `summarize`, `releases` → `release`), so only the `s` goes.
-fn singular_of(token: &str) -> Option<&str> {
-    if let Some(stem) = token.strip_suffix("es")
-        && stem.len() >= 3
-        && ["ss", "x", "zz", "ch", "sh"]
-            .iter()
-            .any(|end| stem.ends_with(end))
-    {
-        return Some(stem);
-    }
-    token
+/// - `-ies` gives `-y` and the bare `-s` form (`summaries` → `summary`,
+///   `movies` → `movie`).
+/// - `-es` goes whole after `x`, `sh` and `ss` (`boxes` → `box`,
+///   `wishes` → `wish`, `processes` → `process`).
+/// - After a single `s`, after `ch` and after `zz`, English writes both
+///   forms, so both are candidates (`buses` → `bus`, `cases` → `case`,
+///   `fetches` → `fetch`, `caches` → `cache`, `buzzes` → `buzz`).
+/// - Anywhere else only the `s` goes (`summarizes` → `summarize`).
+///
+/// Not covered: a doubled final consonant (`quizzes` → `quiz`) and the
+/// irregular plurals.
+fn singulars_of(token: &str) -> Vec<String> {
+    let bare_s = token
         .strip_suffix('s')
-        .filter(|stem| stem.len() >= 3 && !stem.ends_with('s'))
+        .filter(|stem| stem.len() >= 3 && !stem.ends_with('s'));
+    let mut out: Vec<String> = Vec::new();
+    if let Some(stem) = token.strip_suffix("ies").filter(|stem| stem.len() >= 2) {
+        out.push(format!("{stem}y"));
+        out.extend(bare_s.map(str::to_owned));
+    } else if let Some(stem) = token.strip_suffix("es").filter(|stem| stem.len() >= 3) {
+        if ["x", "sh", "ss"].iter().any(|end| stem.ends_with(end)) {
+            out.push(stem.to_owned());
+        } else if ["s", "ch", "zz"].iter().any(|end| stem.ends_with(end)) {
+            out.push(stem.to_owned());
+            out.extend(bare_s.map(str::to_owned));
+        } else {
+            out.extend(bare_s.map(str::to_owned));
+        }
+    } else {
+        out.extend(bare_s.map(str::to_owned));
+    }
+    out.retain(|c| c.len() >= 3 && c != token);
+    out
 }
 
 /// Index each entry's MEANINGFUL vocabulary — verbs · tools ·
@@ -731,7 +749,10 @@ fn exact_catalog_hit(intent: &str) -> Option<String> {
 }
 
 /// Signal-bearing query: drop stopwords + Nika boilerplate, then expand
-/// aliases and simple singulars. `None` on an all-boilerplate utterance.
+/// aliases and simple singulars. A plural with no alias of its own takes
+/// its singular's (`summaries` expands as `summary` does); one that has
+/// its own (`urls`) keeps it alone, so no word counts twice. `None` on an
+/// all-boilerplate utterance.
 fn expand_query(intent: &str) -> Option<String> {
     let tokens: Vec<String> = intent
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -741,24 +762,36 @@ fn expand_query(intent: &str) -> Option<String> {
     if tokens.is_empty() {
         return None;
     }
+    let aliases_of = |form: &str| {
+        ALIASES
+            .iter()
+            .find(|(word, _)| *word == form)
+            .map(|(_, expansions)| *expansions)
+    };
     let mut query = tokens.join(" ");
     for token in &tokens {
-        for (word, expansions) in ALIASES {
-            if token == *word {
-                for e in *expansions {
-                    query.push(' ');
-                    query.push_str(e);
-                }
-            }
-        }
-        if let Some(singular) = singular_of(token) {
+        let singulars = singulars_of(token);
+        let expansions = aliases_of(token)
+            .or_else(|| singulars.iter().find_map(|s| aliases_of(s)))
+            .unwrap_or_default();
+        for e in expansions {
             query.push(' ');
-            query.push_str(singular);
+            query.push_str(e);
+        }
+        for singular in singulars {
+            query.push(' ');
+            query.push_str(&singular);
         }
     }
     Some(query)
 }
 
+/// BM25-route a free-form intent against the embedded catalog, gated by
+/// the [`IntentContract`]: extract FIRST, then score. A candidate must
+/// carry every required capability (and none forbidden); the winner must
+/// clear [`TAU`] and outscore the runner-up by [`MARGIN`]. Anything else
+/// is a [`RoutingOutcome::NeedsClarification`] — routing below the
+/// evidence bar would be a guess (P0-1 · P0-10).
 fn route_impl(intent: &str, names: &[String], tau: f64) -> RoutingOutcome {
     let contract = extract(intent);
     if let Some(name) = exact_catalog_hit(intent)
@@ -1194,14 +1227,19 @@ mod adversarial_pass_2026_07_31 {
         );
     }
 
-    /// The LIVING bounds of [`TAU_CATALOG`] (Q2 of the socratic pass):
-    /// the floor was measured against TODAY's corpus, and nothing used
+    /// The LIVING bounds of [`TAU_CATALOG`] (Q2 of the socratic pass): the
+    /// floor was measured against TODAY's corpus, and nothing used
     /// to force a re-measure when the corpus moves. These probes ARE
     /// the bounds — a corpus change that lets a vague or wrong top
     /// route (or starves an honest one below the floor plus the
     /// contract gate) turns this red, and red here means « re-run
     /// `calibration_probe`, re-derive `TAU_CATALOG` », never « bump the
     /// assertion ».
+    ///
+    /// On 2026-11-25 any floor in (11.990, 14.415] keeps every verdict of
+    /// the probe: the window runs from the highest top the floor alone
+    /// holds back (the gallery's digest question) to the lowest honest top
+    /// that routes (the website phrase).
     #[test]
     fn tau_catalog_bounds_hold_on_the_living_corpus() {
         for vague in [

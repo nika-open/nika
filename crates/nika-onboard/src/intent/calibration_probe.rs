@@ -10,6 +10,8 @@ use super::*;
 fn print_catalog_scores() {
     let names = catalog_names();
     let index = build_template_index(&names);
+    let skeleton_names = nika_pack::template_names();
+    let skeleton_index = build_template_index(&skeleton_names);
     // Every utterance a catalog routing law of this crate or of the
     // MCP oracle names, plus the vague probes the floor must refuse.
     let cases = [
@@ -24,7 +26,9 @@ fn print_catalog_scores() {
         "summarize every item in parallel",
         "an agentic loop that researches until the budget runs out",
         "scrape a website and summarize it",
+        "scrape a website and summarize",
         "a weekend summary of three URLs",
+        "weekend summaries of three URLs",
         // The Session gallery's routing phrases (nika-session facts.rs).
         "show me a template for fetching a URL",
         "which example fetches a url and summarizes it?",
@@ -60,8 +64,22 @@ fn print_catalog_scores() {
         // The same corpus under the floor before 2026-11-25: a flip
         // between the two columns is a phrase the new floor moved.
         let before = said(route_impl(intent, &names, 5.5));
+        // The skeleton door shares the query expansion: its verdict moves
+        // with every alias and singular rule.
+        let skeleton_ranked = skeleton_index.top_k(&query, skeleton_names.len());
+        let skeleton_top: Vec<String> =
+            contract_qualified(&skeleton_ranked, &skeleton_names, &extract(intent))
+                .iter()
+                .take(2)
+                .map(|(n, s)| format!("{n}={s:.3}"))
+                .collect();
+        let skeleton = format!(
+            "{} {}",
+            said(route_skeletons(intent)),
+            skeleton_top.join(" · ")
+        );
         println!(
-            "CAL · {intent} → {} · {verdict} · at 5.5: {before}",
+            "CAL · {intent} → {} · {verdict} · at 5.5: {before} · skeletons: {skeleton}",
             row.join(" · ")
         );
     }

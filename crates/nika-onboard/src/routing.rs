@@ -90,8 +90,8 @@ mod tests {
     /// A request to read one site and sum it up, and the gallery's
     /// question for the same shape, route to the lesson that does exactly
     /// that: « summarize » carries the « summary » its body says, and
-    /// « summarizes » reads as « summarize » (2026-11-25, 14.415 and
-    /// 15.071 over the 12.5 floor).
+    /// « summarizes » reads as « summarize » and takes its alias
+    /// (2026-11-25, 14.415 and 18.650 over the 12.5 floor).
     #[test]
     fn a_website_summary_routes_to_the_fetch_chain() {
         for words in [

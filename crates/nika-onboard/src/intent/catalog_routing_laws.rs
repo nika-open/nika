@@ -4,27 +4,95 @@
 
 use super::*;
 
-/// The singular rule drops `-es` only where English adds it, so a verb
-/// such as « summarizes » keeps the `e` of its stem (2026-11-25: it
-/// read `summariz`, and the gallery question lost 05-fetch-chain).
+/// Every regular English plural and third-person verb finds its singular
+/// among the candidates (2026-11-25: `summarizes` had read as
+/// `summariz`, and the gallery's shape question lost 05-fetch-chain). The
+/// rule does not claim the doubled consonant (`quizzes`) or the irregular
+/// plurals.
 #[test]
-fn the_singular_drops_es_only_where_english_adds_it() {
+fn the_singular_candidates_hold_the_english_singular() {
     for (plural, singular) in [
         ("processes", "process"),
         ("boxes", "box"),
+        ("wishes", "wish"),
         ("buzzes", "buzz"),
         ("fetches", "fetch"),
-        ("wishes", "wish"),
-        ("summarizes", "summarize"),
-        ("releases", "release"),
+        ("caches", "cache"),
+        ("buses", "bus"),
+        ("statuses", "status"),
+        ("aliases", "alias"),
+        ("bonuses", "bonus"),
+        ("lenses", "lens"),
         ("cases", "case"),
+        ("releases", "release"),
+        ("summarizes", "summarize"),
+        ("summaries", "summary"),
+        ("entries", "entry"),
+        ("queries", "query"),
+        ("movies", "movie"),
         ("invoices", "invoice"),
         ("urls", "url"),
     ] {
-        assert_eq!(singular_of(plural), Some(singular), "{plural}");
+        let candidates = singulars_of(plural);
+        assert!(
+            candidates.iter().any(|c| c == singular),
+            "{plural} → {candidates:?} must hold {singular}"
+        );
     }
     for word in ["class", "its", "bus"] {
-        assert_eq!(singular_of(word), None, "{word}");
+        assert!(singulars_of(word).is_empty(), "{word} is no plural");
+    }
+    // The exact candidates, so a rule that adds terms cannot pass the
+    // membership check above.
+    for (token, exact) in [
+        ("processes", &["process"][..]),
+        ("boxes", &["box"]),
+        ("summarizes", &["summarize"]),
+        ("invoices", &["invoice"]),
+        ("cases", &["cas", "case"]),
+        ("fetches", &["fetch", "fetche"]),
+        ("summaries", &["summary", "summarie"]),
+    ] {
+        assert_eq!(singulars_of(token), exact, "{token}");
+    }
+}
+
+/// The `-ies` rule on the route itself: the weekend phrase in the plural
+/// finds `summary` and takes its alias, so it routes as its singular twin
+/// does (both 16.434 on 2026-11-25). Without the alias the plural asked,
+/// its top at 9.673.
+#[test]
+fn an_ies_plural_routes_as_its_singular_twin() {
+    let plural = "weekend summaries of three URLs";
+    assert!(
+        expand_query(plural).is_some_and(|q| q.split(' ').any(|t| t == "summary")),
+        "the plural query carries `summary`"
+    );
+    for phrase in ["a weekend summary of three URLs", plural] {
+        match route(phrase) {
+            RoutingOutcome::Routed { template, .. } => {
+                assert_eq!(template, "05-fetch-chain", "`{phrase}`");
+            }
+            other @ RoutingOutcome::NeedsClarification { .. } => {
+                panic!("`{phrase}` routes: {other:?}")
+            }
+        }
+    }
+}
+
+/// The skeleton door shares the query expansion, so its website phrase is
+/// pinned too: website-brief leads it inside the margin of
+/// api-upload-and-create (8.854 against 6.872 on 2026-11-25), so the
+/// wizard asks, as 0.125.1 did.
+#[test]
+fn the_skeleton_door_asks_for_a_website_summary_with_website_brief_first() {
+    match route_skeletons("scrape a website and summarize") {
+        RoutingOutcome::NeedsClarification { candidates, .. } => assert_eq!(
+            candidates.first().map(String::as_str),
+            Some("website-brief"),
+            "{candidates:?}"
+        ),
+        other @ RoutingOutcome::Routed { .. } => panic!("the skeleton door asks: {other:?}"),
     }
 }
 

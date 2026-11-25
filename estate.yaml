@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8134
+  classified_files: 8136
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 4943
+    authored: 4945
     authored-pin: 2
     generated: 283
     pinned-copy: 201
@@ -152,17 +152,17 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2431
-  aggregate_sha256: 908d610769a598f536206d2d0d4b148d33b8567ce37f8a610aeddbbe260b01d8
+  aggregate_sha256: 7fc33126b60740d45936994c548af93bb8357acd6c9e4861cfa69cf81b0f8455
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
-  match_count: 872
-  aggregate_sha256: 39fea1fef903635380759aed4f4a5b4b72f9433888c996f1c67606b8f76637e1
+  match_count: 873
+  aggregate_sha256: 7ec3a4eea4c637f24fce93bc3703f8e085545f4f3594a9f9d3ab891695632b0a
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
   match_count: 714
-  aggregate_sha256: cb80ce7aeb64da8139780ffb3efc6d7b6cf436ad23a6c58252cd0821e2b9d97d
+  aggregate_sha256: 52fea1aa2810ff97d668ed4806a64ad980e0cb1e419350512c40c04cf5c713d0
   evidence: "the remaining crate surface — Cargo.toml manifests · build.rs · benches · READMEs · hand-curated data catalogs (llm-providers · mcp-servers · embeddings · model-capabilities, probed daily by catalog-verify.yml); the pricing snapshot is excepted in files:"
   note: "scripts/sync-pack.sh is the ONE vendoring lane; the divergent crate-local duplicate was retired"
 - glob: "fuzz/**"
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 1
-  aggregate_sha256: 6b53a86aaa149c6719b91ac3e4afb6b688f06035aacf5a34608e8ea089deff36
+  match_count: 2
+  aggregate_sha256: 800691f82e071b635c6a93226fef47d99ed081ea849033fde84cdd4fef3c7eee
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

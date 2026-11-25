@@ -86,35 +86,38 @@ mod tests {
         dispatched
     }
 
-    /// The failure of an `exec:` whose argv an `egress:` rule lets carry the
-    /// token, when the program refuses it and the shell error echoes it.
+    /// The failure of an `exec:` whose program an `egress:` rule lets the
+    /// token name, when the spawn fails and the shell error echoes it: the
+    /// note names the program alone (`exec · <argv0>`, as the dispatch writes
+    /// it), the message and the details carry it too.
     fn refused_spawn(secret: &str) -> Dispatched {
         failed(
-            &format!("exec · deploy {secret}"),
-            &format!("shell execution failed: shell error: deploy refused the key `{secret}`"),
-            Some(json!({ "argv": ["deploy", secret], "exit_code": 1 })),
+            &format!("exec · {secret}"),
+            &format!("shell execution failed: shell error: cannot spawn `{secret}`"),
+            Some(json!({ "argv": [secret, "deploy"], "exit_code": 127 })),
         )
     }
 
     #[test]
     fn a_failure_names_no_resolved_secret_value() {
         let dispatched = refused_spawn(SECRET).masked(&secrets());
-        assert_eq!(dispatched.note, "exec · deploy ***");
+        assert_eq!(dispatched.note, "exec · ***");
         let record = dispatched.result.err().expect("still a failure").record;
         assert_eq!(record.code, "NIKA-EXEC-002");
         assert_eq!(
             record.message,
-            "shell execution failed: shell error: deploy refused the key `***`"
+            "shell execution failed: shell error: cannot spawn `***`"
         );
         assert_eq!(
             Value::Object(record.details.expect("details kept")),
-            json!({ "argv": ["deploy", "***"], "exit_code": 1 })
+            json!({ "argv": ["***", "deploy"], "exit_code": 127 })
         );
     }
 
     /// One secret inside another (`abc` in `abcdef`): the longer is masked
     /// whole before the shorter can cut it, so no fragment of either remains
-    /// (never `***def`), in the note, the message or the details.
+    /// (never `***def`), in the note (a program path both name), the message
+    /// or the details.
     #[test]
     fn a_secret_inside_another_leaves_no_fragment_of_either() {
         let secrets = BTreeMap::from([
@@ -122,17 +125,17 @@ mod tests {
             ("long".to_owned(), Value::from("abcdef")),
         ]);
         let dispatched = failed(
-            "exec · deploy abcdef abc",
+            "exec · ./abcdef/abc",
             "deploy refused the keys `abcdef` and `abc`",
-            Some(json!({ "argv": ["deploy", "abcdef", "abc", "xabcdefx"] })),
+            Some(json!({ "argv": ["./abcdef/abc", "abcdef", "abc", "xabcdefx"] })),
         )
         .masked(&secrets);
-        assert_eq!(dispatched.note, "exec · deploy *** ***");
+        assert_eq!(dispatched.note, "exec · ./***/***");
         let record = dispatched.result.err().expect("still a failure").record;
         assert_eq!(record.message, "deploy refused the keys `***` and `***`");
         assert_eq!(
             Value::Object(record.details.expect("details kept")),
-            json!({ "argv": ["deploy", "***", "***", "x***x"] })
+            json!({ "argv": ["./***/***", "***", "***", "x***x"] })
         );
     }
 

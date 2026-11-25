@@ -100,9 +100,11 @@ struct Ran {
     cell: Arc<LiveInspect>,
 }
 
-/// The seams of one run: the provider's HTTP seam and the shell.
+/// The seams of one run: the provider's HTTP seam, the agent verb's provider and the shell. An
+/// `agent:` calls its provider, never the HTTP seam, so a refused agent leaves both untouched.
 struct Seams {
     wire: Arc<Wire>,
+    agent: Arc<MockProvider>,
     shell: MockShell,
 }
 
@@ -110,6 +112,7 @@ impl Seams {
     fn new(shell: MockShell) -> Self {
         Self {
             wire: Arc::new(Wire::default()),
+            agent: Arc::new(MockProvider::new("mock")),
             shell,
         }
     }
@@ -132,7 +135,7 @@ async fn run_on(
         Arc::clone(&invoke),
         InferVerb::new(Arc::new(registry), "mock/echo"),
         AgentVerb::new(
-            Arc::new(MockProvider::new("mock")),
+            Arc::clone(&seams.agent),
             invoke,
             Arc::new(MockToolDefinitionProvider::new()),
             "mock/echo",
@@ -466,6 +469,11 @@ async fn every_way_a_secret_reaches_a_model_is_refused_at_run() {
         assert_eq!(
             *seams.wire.models.lock().expect("models"),
             Vec::<String>::new()
+        );
+        assert_eq!(
+            seams.agent.captured_requests().len(),
+            0,
+            "no request reaches the agent's provider: {verb} {with} {model}"
         );
     }
 }

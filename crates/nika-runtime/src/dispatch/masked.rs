@@ -79,46 +79,73 @@ mod tests {
     }
 
     fn failed(note: &str, message: &str, details: Option<Value>) -> Dispatched {
-        let mut dispatched = Dispatched::comp_refusal(note, "NIKA-EXEC-001", message.to_owned());
+        let mut dispatched = Dispatched::comp_refusal(note, "NIKA-EXEC-002", message.to_owned());
         if let Err(failed) = &mut dispatched.result {
             failed.record.details = details.and_then(|d| d.as_object().cloned());
         }
         dispatched
     }
 
+    /// The failure of an `exec:` whose argv an `egress:` rule lets carry the
+    /// token, when the program refuses it and the shell error echoes it.
+    fn refused_spawn(secret: &str) -> Dispatched {
+        failed(
+            &format!("exec · deploy {secret}"),
+            &format!("shell execution failed: shell error: deploy refused the key `{secret}`"),
+            Some(json!({ "argv": ["deploy", secret], "exit_code": 1 })),
+        )
+    }
+
     #[test]
     fn a_failure_names_no_resolved_secret_value() {
-        let dispatched = failed(
-            &format!("infer · openai/{SECRET}"),
-            &format!(
-                "refused before the provider request: cloud model `openai/{SECRET}` is unpriced"
-            ),
-            Some(json!({ "seat": format!("openai/{SECRET}"), "calls": 1 })),
-        )
-        .masked(&secrets());
-        assert_eq!(dispatched.note, "infer · openai/***");
+        let dispatched = refused_spawn(SECRET).masked(&secrets());
+        assert_eq!(dispatched.note, "exec · deploy ***");
         let record = dispatched.result.err().expect("still a failure").record;
-        assert_eq!(record.code, "NIKA-EXEC-001");
+        assert_eq!(record.code, "NIKA-EXEC-002");
         assert_eq!(
             record.message,
-            "refused before the provider request: cloud model `openai/***` is unpriced"
+            "shell execution failed: shell error: deploy refused the key `***`"
         );
         assert_eq!(
             Value::Object(record.details.expect("details kept")),
-            json!({ "seat": "openai/***", "calls": 1 })
+            json!({ "argv": ["deploy", "***"], "exit_code": 1 })
+        );
+    }
+
+    /// One secret inside another (`abc` in `abcdef`): the longer is masked
+    /// whole before the shorter can cut it, so no fragment of either remains
+    /// (never `***def`), in the note, the message or the details.
+    #[test]
+    fn a_secret_inside_another_leaves_no_fragment_of_either() {
+        let secrets = BTreeMap::from([
+            ("short".to_owned(), Value::from("abc")),
+            ("long".to_owned(), Value::from("abcdef")),
+        ]);
+        let dispatched = failed(
+            "exec · deploy abcdef abc",
+            "deploy refused the keys `abcdef` and `abc`",
+            Some(json!({ "argv": ["deploy", "abcdef", "abc", "xabcdefx"] })),
+        )
+        .masked(&secrets);
+        assert_eq!(dispatched.note, "exec · deploy *** ***");
+        let record = dispatched.result.err().expect("still a failure").record;
+        assert_eq!(record.message, "deploy refused the keys `***` and `***`");
+        assert_eq!(
+            Value::Object(record.details.expect("details kept")),
+            json!({ "argv": ["deploy", "***", "***", "x***x"] })
         );
     }
 
     #[test]
     fn no_secret_and_no_failure_leave_the_dispatch_as_it_was() {
-        let text = format!("cwd `{SECRET}` was not found");
-        let unscrubbed = failed("exec · true", &text, None).masked(&BTreeMap::new());
+        let text = format!("deploy refused the key `{SECRET}`");
+        let unscrubbed = failed("exec · deploy", &text, None).masked(&BTreeMap::new());
         assert_eq!(
             unscrubbed.result.err().expect("failure").record.message,
             text
         );
         let other = BTreeMap::from([("token".to_owned(), Value::from("another-value"))]);
-        let untouched = failed("exec · true", &text, None).masked(&other);
+        let untouched = failed("exec · deploy", &text, None).masked(&other);
         assert_eq!(
             untouched.result.err().expect("failure").record.message,
             text

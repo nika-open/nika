@@ -31,7 +31,13 @@
     no ledger line, no spawn, and the journal records only the refusal. An
     `unwind` cleanup task is refused the same way. The run raises the same
     `NIKA-SEC-006` as `check`: one law, one code, whichever of the two finds
-    it. The error a failed task records (the text later tasks
-    read as `tasks.<id>.error`) no longer carries a resolved secret value
-    that an `egress:` rule let a field render, as the event stream already
-    did not.
+    it, and names the same path. The error a failed task records (the text
+    later tasks read as `tasks.<id>.error`) no longer carries a resolved
+    secret value that an `egress:` rule let a field render, as the event
+    stream already did not, and one secret inside another (`abc` in
+    `abcdef`) leaves no fragment of the longer one there, in the event
+    stream or in the `outputs:` map.
+  - **Limit.** The run's refusal follows the same static flow as `check`.
+    An `infer:` or `agent:` output carries no secret taint, so a model that
+    echoes a secret it was given into a later task's `model:` is not
+    caught.

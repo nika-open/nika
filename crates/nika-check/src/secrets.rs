@@ -169,13 +169,19 @@ fn route_leaks<'f>(
 /// starts a task, so a report that did not judge these fields cannot run one.
 /// Names and paths only, never a value.
 ///
+/// Its limit is the check's: it follows the static flow of the file, and an
+/// `infer:` or `agent:` output carries no secret taint, so a model that echoes
+/// a secret it was given into a later task's `model:` is not caught here.
+///
 /// [`LeakReason::ModelRoute`]: crate::LeakReason::ModelRoute
 /// [`LeakReason::WorkingDirectory`]: crate::LeakReason::WorkingDirectory
 #[must_use]
 pub fn secret_route_leaks(wf: &RawWorkflow) -> Vec<SecretLeak> {
-    // The order of the sweeps decides how fast the flow settles, never what it
-    // finds, so the declaration order judges as the check's wave order does.
-    let flow = super::flow::analyze_flow(wf, &[]);
+    // The check's own wave order: the sweeps find the same leaks in any order,
+    // but on a tie between two paths of one length the flow keeps the first it
+    // meets, so this order names the path the check finding names.
+    let (_, waves, _) = crate::dag_facts(wf);
+    let flow = super::flow::analyze_flow(wf, &waves);
     wf.tasks
         .iter()
         .enumerate()

@@ -65,23 +65,10 @@ impl<'a> RedactingSink<'a> {
     /// secrets map (the same map the run's [`Scope`](crate::expr::Scope)
     /// binds).
     pub fn new(inner: &'a mut dyn EventSink, resolved: &BTreeMap<String, Value>) -> Self {
-        let needles = resolved
-            .values()
-            .filter_map(|v| match v {
-                // PROVENANCE, not length (P0-19): every resolved value is
-                // a needle, down to one byte — only the EMPTY string is
-                // refused (replacing it would detonate every field).
-                Value::String(s) if !s.is_empty() => Some(s.clone()),
-                _ => None,
-            })
-            .collect::<std::collections::BTreeSet<_>>() // two secrets may share a value
-            .into_iter()
-            .map(|raw| {
-                let escaped = json_escaped(&raw);
-                (raw, escaped)
-            })
-            .collect();
-        Self { inner, needles }
+        Self {
+            inner,
+            needles: needles_of(resolved),
+        }
     }
 
     /// Rewrite every needle occurrence in `text` to the marker — the
@@ -237,19 +224,7 @@ impl std::io::Write for Capped {
 /// does not apply here: a six-byte token in a returned value is exactly
 /// the leak, not a false positive.
 pub fn scrub_outputs(outputs: &mut BTreeMap<String, Value>, resolved: &BTreeMap<String, Value>) {
-    let needles: Vec<(String, String)> = resolved
-        .values()
-        .filter_map(|v| match v {
-            Value::String(s) if !s.is_empty() => Some(s.clone()),
-            _ => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .map(|raw| {
-            let escaped = json_escaped(&raw);
-            (raw, escaped)
-        })
-        .collect();
+    let needles = needles_of(resolved);
     if needles.is_empty() {
         return;
     }
@@ -321,6 +296,33 @@ impl EventSink for RedactingSink<'_> {
         }
         self.inner.emit(event);
     }
+}
+
+/// The (raw · json-escaped) needle pairs of the resolved secrets map, each
+/// value once (two secrets may share one), the LONGEST first. PROVENANCE, not
+/// length (P0-19): every resolved value is a needle, down to one byte; only
+/// the EMPTY string is refused (replacing it would detonate every field). The
+/// longest goes first because one secret can hold another (`abc` inside
+/// `abcdef`): masked whole before the shorter one can cut it, no tail of it
+/// survives (never `***def`). Equal lengths keep the value order.
+fn needles_of(resolved: &BTreeMap<String, Value>) -> Vec<(String, String)> {
+    let mut raws: Vec<String> = resolved
+        .values()
+        .filter_map(|v| match v {
+            Value::String(s) if !s.is_empty() => Some(s.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    // A stable sort: the set's value order breaks a tie.
+    raws.sort_by_key(|raw| std::cmp::Reverse(raw.len()));
+    raws.into_iter()
+        .map(|raw| {
+            let escaped = json_escaped(&raw);
+            (raw, escaped)
+        })
+        .collect()
 }
 
 /// The value as it appears INSIDE a serialized JSON text (the shape the
@@ -905,6 +907,23 @@ mod outputs_scrub_tests {
         assert_eq!(outputs["code"].as_str(), Some("otp ***"));
     }
 
+    /// One secret inside another (`abc` in `abcdef`): the longer is masked
+    /// whole first, so no fragment of either survives in an output (never
+    /// `***def`).
+    #[test]
+    fn a_secret_inside_another_leaves_no_fragment_of_either() {
+        let secrets = BTreeMap::from([
+            ("short".to_owned(), Value::from("abc")),
+            ("long".to_owned(), Value::from("abcdef")),
+        ]);
+        let mut outputs = BTreeMap::from([(
+            "keys".to_owned(),
+            json!(["abcdef", "abc", "xabcdefx", "abc abcdef"]),
+        )]);
+        scrub_outputs(&mut outputs, &secrets);
+        assert_eq!(outputs["keys"], json!(["***", "***", "x***x", "*** ***"]));
+    }
+
     /// A run with no secrets pays nothing and changes nothing.
     #[test]
     fn no_secrets_leaves_every_output_untouched() {
@@ -958,6 +977,27 @@ mod outputs_record_tests {
         (events[0].fields.iter())
             .map(|kv| (kv.key.clone(), kv.value.clone()))
             .collect()
+    }
+
+    /// One secret inside another (`abc` in `abcdef`) in an event's payload
+    /// field: the sink masks the longer whole first, so no fragment of either
+    /// survives (never `***def`).
+    #[test]
+    fn a_secret_inside_another_leaves_no_fragment_in_an_event() {
+        let event = terminal(
+            EventKind::TaskFailed,
+            vec![(
+                "detail",
+                FieldValue::String("keys abcdef and abc".to_owned()),
+            )],
+        );
+        assert_eq!(
+            through(&["abc", "abcdef"], event),
+            [(
+                "detail".to_owned(),
+                FieldValue::String("keys *** and ***".to_owned())
+            )]
+        );
     }
 
     #[test]

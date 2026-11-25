@@ -14,6 +14,7 @@
 //! rendered exactly as written beside a secret of any length.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use nika_builtin::{LiveInspect, WorkflowIntrospect as _};
@@ -48,10 +49,19 @@ impl WorkflowSecretResolver for MapSecrets {
 }
 
 /// A provider that answers every chat completion for the model it was sent, and keeps the
-/// models it was sent. No network: the registry's HTTP seam is this value.
+/// models it was sent and how many requests reached it. No network: the registry's HTTP seam is
+/// this value.
 #[derive(Default)]
 struct Wire {
     models: Mutex<Vec<String>>,
+    requests: AtomicUsize,
+}
+
+impl Wire {
+    /// How many requests reached the provider, streamed or not.
+    fn requests(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
+    }
 }
 
 impl HttpPostDyn for Wire {
@@ -59,6 +69,7 @@ impl HttpPostDyn for Wire {
         false
     }
     async fn post(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
+        self.requests.fetch_add(1, Ordering::SeqCst);
         let sent: serde_json::Value =
             serde_json::from_slice(req.body.as_ref().expect("a body")).expect("json");
         let model = sent["model"].as_str().expect("a model").to_owned();
@@ -76,6 +87,7 @@ impl HttpPostDyn for Wire {
         ))
     }
     async fn send_streaming(&self, _: HttpRequest) -> Result<HttpStreamResponse, HttpError> {
+        self.requests.fetch_add(1, Ordering::SeqCst);
         panic!("no route here streams");
     }
 }
@@ -188,12 +200,15 @@ fn tariff_table(ran: &Ran) -> Option<&str> {
 
 /// Every place `value` reached: a string field of an event, the event's trace line (its JSON
 /// serialization, the line the trace file holds), the settlement, the ledger and records the
-/// inspect cell reads, and the run's records. The tariff table is left out.
+/// inspect cell reads, and the run's records. The tariff table of `WorkflowStarted` is left out,
+/// and only there: the same field on any other event is scanned.
 fn places_carrying(ran: &Ran, value: &str) -> Vec<String> {
     let mut places = Vec::new();
     for event in &ran.events {
         let mut line = event.clone();
-        line.fields.retain(|f| f.key != TARIFF_TABLE);
+        if event.kind == EventKind::WorkflowStarted {
+            line.fields.retain(|f| f.key != TARIFF_TABLE);
+        }
         for f in &line.fields {
             if let FieldValue::String(s) = &f.value
                 && s.contains(value)
@@ -484,6 +499,71 @@ tasks:
         )
     );
     assert_eq!(kinds_of(&ran.events, "ask"), REFUSED_FRAMES);
+    assert_eq!(seams.wire.requests(), 0);
+    assert_eq!(
+        *seams.wire.models.lock().expect("models"),
+        Vec::<String>::new()
+    );
+}
+
+/// Two paths of one length reach `ask`'s model, through `m`, which runs on `a`'s and `b`'s
+/// outputs: `c → a` and `d → b`. A sweep in declaration order meets `b`'s path first (`a` waits
+/// for `c`, declared after it) and keeps it on the tie; the check's wave order meets both at once
+/// and keeps `a`'s, read first.
+const TIE_MODEL: &str = r#"nika: tie-model
+secrets:
+  token: { source: env, key: T, egress: [{ to: "exec" }] }
+permits:
+  exec: ["echo"]
+tasks:
+  d:
+    exec: { command: ["echo", "${{ secrets.token }}"] }
+  a:
+    with: { v: "${{ tasks.c.output }}" }
+    exec: { command: ["echo", "${{ with.v }}"] }
+  b:
+    with: { v: "${{ tasks.d.output }}" }
+    exec: { command: ["echo", "${{ with.v }}"] }
+  m:
+    with: { x: "${{ tasks.a.output }}", y: "${{ tasks.b.output }}" }
+    exec: { command: ["echo", "${{ with.x }}", "${{ with.y }}"] }
+  c:
+    exec: { command: ["echo", "${{ secrets.token }}"] }
+  ask:
+    with: { m: "${{ tasks.m.output }}" }
+    infer: { model: "${{ with.m }}", prompt: hi, max_tokens: 10 }
+"#;
+
+/// On a tie between two paths of one length, the run's refusal names the path the check
+/// finding names, never the other one.
+#[tokio::test]
+async fn a_tie_between_two_paths_is_refused_on_the_checks_path() {
+    let wf = parse(TIE_MODEL, FileId::new(0), ParseMode::Strict).expect("fixture parses");
+    let checked: Vec<String> = check(&wf)
+        .secret_leaks
+        .iter()
+        .filter(|l| l.task == "ask")
+        .map(|l| l.trace.clone())
+        .collect();
+    assert_eq!(
+        checked,
+        [
+            "secrets.token → tasks.c.output → with.v @ a → tasks.a.output → with.x @ m → \
+         tasks.m.output → with.m @ ask → model @ ask"
+        ]
+    );
+    let seams = Seams::new(
+        MockShell::new()
+            .enqueue_ok("printed")
+            .enqueue_ok("printed")
+            .enqueue_ok("printed")
+            .enqueue_ok("printed")
+            .enqueue_ok("printed"),
+    );
+    let ran = run_on_a_stale_report(TIE_MODEL, &["ask"], &[("token", "q7")], &seams).await;
+    assert_eq!(error_of(&ran, "ask"), refusal("ask", "model", &checked[0]));
+    assert_eq!(kinds_of(&ran.events, "ask"), REFUSED_FRAMES);
+    assert_eq!(seams.wire.requests(), 0);
 }
 
 /// Every way into a `cwd:`: a `with:` alias, a task output, a `for_each` item.

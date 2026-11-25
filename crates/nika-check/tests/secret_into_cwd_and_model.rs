@@ -412,6 +412,54 @@ fn the_route_leaks_the_run_reads_are_the_checks_own() {
     );
 }
 
+/// Two paths of one length reach `ask`'s model, through `m`, which runs on `a`'s and `b`'s
+/// outputs: `c → a` and `d → b`. A sweep in declaration order meets `b`'s path first (`a` waits
+/// for `c`, declared after it) and keeps it on the tie; the check's wave order meets both at once
+/// and keeps `a`'s, read first.
+const TIE_MODEL: &str = r#"nika: tie-model
+secrets:
+  token: { source: env, key: T, egress: [{ to: "exec" }] }
+permits:
+  exec: ["echo"]
+tasks:
+  d:
+    exec: { command: ["echo", "${{ secrets.token }}"] }
+  a:
+    with: { v: "${{ tasks.c.output }}" }
+    exec: { command: ["echo", "${{ with.v }}"] }
+  b:
+    with: { v: "${{ tasks.d.output }}" }
+    exec: { command: ["echo", "${{ with.v }}"] }
+  m:
+    with: { x: "${{ tasks.a.output }}", y: "${{ tasks.b.output }}" }
+    exec: { command: ["echo", "${{ with.x }}", "${{ with.y }}"] }
+  c:
+    exec: { command: ["echo", "${{ secrets.token }}"] }
+  ask:
+    with: { m: "${{ tasks.m.output }}" }
+    infer: { model: "${{ with.m }}", prompt: hi, max_tokens: 10 }
+"#;
+
+/// On a tie the run's refusal names the path the check finding names: the run reads the flow
+/// in the check's own wave order.
+#[test]
+fn a_tie_between_two_paths_names_the_checks_path_at_run() {
+    let wf = parse(TIE_MODEL, FileId::new(0), ParseMode::Strict).expect("parses");
+    let checked: Vec<_> = check(&wf)
+        .secret_leaks
+        .into_iter()
+        .filter(|l| matches!(l.reason, LeakReason::ModelRoute))
+        .collect();
+    assert_eq!(
+        checked.iter().map(|l| l.trace.as_str()).collect::<Vec<_>>(),
+        [
+            "secrets.token → tasks.c.output → with.v @ a → tasks.a.output → with.x @ m → \
+         tasks.m.output → with.m @ ask → model @ ask"
+        ]
+    );
+    assert_eq!(nika_check::secret_route_leaks(&wf), checked);
+}
+
 /// `ask` calls `VERB` with each item of `[secrets.token]` as its model.
 const ITEM_MODEL: &str = r#"nika: item-model
 secrets:

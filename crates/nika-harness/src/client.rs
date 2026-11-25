@@ -302,8 +302,10 @@ where
                             activity::completed(self.progress.as_ref());
                             return Ok(outcome);
                         }
-                        Incoming::ErrorResponse { message, kind, .. } => {
-                            return Err(answered_error(message, kind.as_deref()));
+                        Incoming::ErrorResponse {
+                            code, message, kind, ..
+                        } => {
+                            return Err(answered_error(code, message, kind.as_deref()));
                         }
                         Incoming::Notification { method, params }
                             if method == wire::METHOD_SESSION_UPDATE =>
@@ -949,13 +951,15 @@ pub(crate) fn signed_out() -> HarnessError {
     }
 }
 
-/// The failure an error answer to the prompt is: a lost sign-in by the adapter's typed kind,
-/// else a session that ended before a complete answer.
-fn answered_error(message: String, kind: Option<&str>) -> HarnessError {
-    match kind {
-        Some(SIGN_IN_KIND) => signed_out(),
-        _ => HarnessError::Session { reason: message },
-    }
+/// The failure an error answer to the prompt is. The adapter's typed kind it knows keeps its
+/// classification: `authentication_failed` is a lost sign-in, whatever the code. Without one
+/// (no kind, or a kind this client does not know), the code decides, by the same table as an
+/// answer to a request before the prompt ([`request_error`]): `-32000` (authentication
+/// required) is a lost sign-in, final; `-32603` (internal error) is a session that ended before
+/// a complete answer, which a retry may heal; every other code, an undefined one or none
+/// included, is the final refusal it is. An unknown code fails closed: it is never retried.
+fn answered_error(code: i64, message: String, kind: Option<&str>) -> HarnessError {
+    request_error(code, message, kind)
 }
 
 /// ACP's `auth_required` error code: authentication is required before the operation (ACP v1

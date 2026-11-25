@@ -334,6 +334,63 @@ async fn an_auth_required_or_undefined_code_at_session_new_is_final() {
     }
 }
 
+/// An error answer to the prompt is read by the same table as one to `session/new` when the
+/// adapter names no kind: `-32000` (authentication required) is a lost sign-in, final, and a
+/// code the schema does not define is a final refusal, never a retried session. `-32603` stays
+/// the transient session death, and the adapter's `authentication_failed` kind keeps its own
+/// classification whatever the code.
+#[tokio::test]
+async fn an_error_answer_to_the_prompt_is_read_by_its_code() {
+    let cases = [
+        (
+            json!({"code":-32000,"message":"Authentication required"}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            json!({"code":-32042,"message":"Quota spent"}),
+            "NIKA-1805",
+            "harness refused: Quota spent (jsonrpc -32042)",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error"}),
+            "NIKA-1804",
+            "harness session failed: Internal error (jsonrpc -32603)",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error",
+                "data":{"errorKind":"authentication_failed"}}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            reply(&mut w, &new, json!({"sessionId":"s-prompt"})).await;
+            let prompt = read(&mut r).await.expect("prompt");
+            assert_eq!(prompt["method"], "session/prompt");
+            let line = json!({"jsonrpc":"2.0","id":prompt["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+        })
+        .await
+        .expect_err("the prompt answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code,
+            "{error:?}"
+        );
+        assert_eq!(error.is_transient(), code == "NIKA-1804", "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
 /// An internal error answered to `initialize` is the same session that did not open.
 #[tokio::test]
 async fn an_internal_error_answer_to_initialize_is_transient() {

@@ -26,7 +26,10 @@
   authentication-required code `-32000`) stays NIKA-1803 and final, and
   every other error code (parse error, invalid request, unknown method,
   invalid params, resource not found, or a code ACP does not define) stays
-  NIKA-1805 and final. Trace retention no longer rotates the evidence of
+  NIKA-1805 and final. An error answer to the prompt itself is read by the
+  same codes when the adapter names no kind of its own: a `-32000` there is
+  the lost sign-in, NIKA-1803, and an undefined code a final NIKA-1805,
+  where both were NIKA-1804 and retried; `-32603` stays NIKA-1804. Trace retention no longer rotates the evidence of
   a failure away: the newest failed trace of each workflow is never rotated
   or removed for the size budget, failed traces fill a workflow's kept count
   before successful ones, and the budget removes every successful trace it

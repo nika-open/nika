@@ -1157,14 +1157,17 @@ fn a_key_rung_never_claims_a_checked_key() {
 /// on, it never names it.
 #[test]
 fn the_agent_rung_names_the_host_switch_when_it_is_off() {
-    #[allow(clippy::disallowed_methods)] // the switch's own variable, read as the harness reads it
-    let off = std::env::var_os("NIKA_HARNESS_HOSTS").is_some_and(|v| v.eq_ignore_ascii_case("off"));
+    // The switch as the harness reads it; a build without the harness has no seat to look for.
+    #[cfg(feature = "access-harness")]
+    let off = nika_harness::hosts_switched_off();
+    #[cfg(not(feature = "access-harness"))]
+    let off = false;
     let home = tempfile::tempdir().expect("tmp");
     let choice = collect(Some(home.path()));
     let rung = (choice.rungs.iter())
         .find(|rung| rung.id == "harness")
         .expect("the agent rung");
-    if off && cfg!(feature = "access-harness") {
+    if off {
         assert_eq!(
             rung.reason,
             "not looked for · NIKA_HARNESS_HOSTS=off keeps every host program absent"

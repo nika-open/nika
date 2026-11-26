@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 #[cfg(test)]
 use crate::display::theme::Theme;
-use crate::probe::{self, env_present};
+use crate::probe::env_present;
 
 const TABLE_YAML: &str = include_str!("models.yaml");
 const ALIAS: &str = "nika/gear-one";
@@ -81,9 +81,11 @@ pub(crate) fn featured_pull() -> String {
     resolve_tier(&table(), ram).map_or_else(|| ALIAS.to_owned(), |t| t.pull.clone())
 }
 
-/// Observe this machine and persist the result.
+/// Observe this machine and keep the result under `home` (`.nika/inference-choice.json`):
+/// the caller names the home, so a test keeps it in its own scratch directory. No home, nothing
+/// is kept.
 #[must_use]
-pub(crate) fn collect() -> InferenceChoice {
+pub(crate) fn collect(home: Option<&Path>) -> InferenceChoice {
     let table = table();
     let keys: Vec<String> = table
         .keys
@@ -99,9 +101,22 @@ pub(crate) fn collect() -> InferenceChoice {
         pulled: featured_is_installed(&pull),
         keys,
         harness_in_binary: cfg!(feature = "access-harness"),
+        hosts_off: hosts_switch(),
     });
-    let _ = persist(&choice);
+    let _ = persist(&choice, home);
     choice
+}
+
+/// The variable that keeps every host program absent, when it does in this process.
+fn hosts_switch() -> Option<&'static str> {
+    #[cfg(feature = "access-harness")]
+    {
+        nika_harness::hosts_switched_off().then_some(nika_harness::HOSTS_ENV)
+    }
+    #[cfg(not(feature = "access-harness"))]
+    {
+        None
+    }
 }
 
 struct Machine {
@@ -110,6 +125,8 @@ struct Machine {
     pulled: bool,
     keys: Vec<String>,
     harness_in_binary: bool,
+    /// The host switch, when it keeps every host program absent: no seat was looked for.
+    hosts_off: Option<&'static str>,
 }
 
 fn collect_from(machine: &Machine) -> InferenceChoice {
@@ -139,7 +156,12 @@ fn collect_from(machine: &Machine) -> InferenceChoice {
     let ready_seat = seats
         .iter()
         .find(|s| s.detected && s.authenticated && s.adapter_present);
-    let harness = harness_rung(seats, ready_seat, machine.harness_in_binary);
+    let harness = harness_rung(
+        seats,
+        ready_seat,
+        machine.harness_in_binary,
+        machine.hosts_off,
+    );
     let keys_present = machine.keys.clone();
     let key_row = table
         .keys
@@ -183,7 +205,12 @@ fn collect_from(machine: &Machine) -> InferenceChoice {
     }
 }
 
-fn harness_rung(seats: &[Seat], ready_seat: Option<&Seat>, in_binary: bool) -> Rung {
+fn harness_rung(
+    seats: &[Seat],
+    ready_seat: Option<&Seat>,
+    in_binary: bool,
+    hosts_off: Option<&'static str>,
+) -> Rung {
     let any_detected = seats.iter().any(|s| s.detected);
     // When no seat is ready, name the one the person is CLOSEST to using:
     // the app they are signed into beats one they merely have installed.
@@ -200,6 +227,12 @@ fn harness_rung(seats: &[Seat], ready_seat: Option<&Seat>, in_binary: bool) -> R
         available: any_detected,
         ready: ready_seat.is_some() && in_binary,
         reason: match (ready_seat, in_binary) {
+            // The switch hid every host program: nothing was looked for, so nothing here says
+            // what this computer holds.
+            (None, _) if hosts_off.is_some() => format!(
+                "not looked for · {}=off keeps every host program absent",
+                hosts_off.unwrap_or_default()
+            ),
             (Some(_), true) => {
                 "here · runs on the plan you already pay for · no API key".to_owned()
             }
@@ -482,8 +515,8 @@ pub(crate) fn render_human_at(
     choice.render_human_next(theme, &front_door_next(cwd))
 }
 
-fn persist(choice: &InferenceChoice) -> std::io::Result<()> {
-    let Some(home) = probe::home_dir() else {
+fn persist(choice: &InferenceChoice, home: Option<&Path>) -> std::io::Result<()> {
+    let Some(home) = home else {
         return Ok(());
     };
     let dir = home.join(".nika");

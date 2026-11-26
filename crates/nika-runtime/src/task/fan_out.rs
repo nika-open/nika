@@ -6,6 +6,7 @@
 //! stays in the parent.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use futures_util::StreamExt;
@@ -56,7 +57,8 @@ pub(super) struct FanOutAccum {
     pub(super) recovered_items: Vec<String>,
     pub(super) first_recovered_from: Option<TaskErrorRecord>,
     /// One row per consumed iteration, in input order (#1276 · #1397):
-    /// index · item · status · code · message.
+    /// index · item · status · code · message · child (the trace file a
+    /// child workflow wrote, NIK-385).
     pub(super) items: Vec<Value>,
 }
 
@@ -104,11 +106,15 @@ where
 }
 
 fn consume_iteration(acc: &mut FanOutAccum, index: usize, iter_ran: RanTask) {
+    let attempts: Vec<String> = (iter_ran.retries.iter())
+        .filter_map(|retry| retry.child.as_ref()?.trace_id.clone())
+        .collect();
     acc.retries.extend(iter_ran.retries);
     acc.agent_events.extend(iter_ran.agent_events);
     acc.decisions.extend(iter_ran.decisions);
     let identity = identity_from_note(&iter_ran.note);
-    match iter_ran.result {
+    let child = child_trace(&iter_ran.result);
+    let row = match iter_ran.result {
         RunResult::Success {
             value,
             tokens,
@@ -117,16 +123,12 @@ fn consume_iteration(acc: &mut FanOutAccum, index: usize, iter_ran: RanTask) {
             recovered_from,
             ..
         } => {
-            acc.items.push(item_row(
-                index,
-                &identity,
-                if recovered_from.is_some() {
-                    "recovered"
-                } else {
-                    "ok"
-                },
-                recovered_from.as_ref(),
-            ));
+            let status = if recovered_from.is_some() {
+                "recovered"
+            } else {
+                "ok"
+            };
+            let row = item_row(index, &identity, status, recovered_from.as_ref());
             if let Some(original) = recovered_from {
                 acc.recovered += 1;
                 acc.recovered_items.push(identity);
@@ -136,49 +138,99 @@ fn consume_iteration(acc: &mut FanOutAccum, index: usize, iter_ran: RanTask) {
             }
             acc.outputs.push(value);
             fold_spend(acc, tokens, cost_usd, cost_unpriced);
+            row
         }
         RunResult::SkippedWithError { error, .. } => {
-            acc.items
-                .push(item_row(index, &identity, "recovered", Some(&error)));
+            let row = item_row(index, &identity, "recovered", Some(&error));
             acc.recovered += 1;
             acc.recovered_items.push(identity);
             acc.outputs.push(Value::Null);
             if acc.first_recovered_from.is_none() {
                 acc.first_recovered_from = Some(error);
             }
+            row
         }
         RunResult::Failed { error, .. } => {
-            acc.items
-                .push(item_row(index, &identity, "failed", Some(&error)));
+            let row = item_row(index, &identity, "failed", Some(&error));
             acc.outputs.push(Value::Null);
             acc.failed_items.push(identity);
             if acc.first_error.is_none() {
                 acc.first_error = Some(error);
             }
+            row
         }
         RunResult::OperatorCancelled(stopped) => {
-            acc.items
-                .push(item_row(index, &identity, "cancelled", None));
             acc.outputs.push(Value::Null);
             fold_spend(acc, None, stopped.cost_usd, stopped.cost_unpriced);
             if acc.operator_cancelled.is_none() {
                 acc.operator_cancelled = Some(stopped);
             }
+            item_row(index, &identity, "cancelled", None)
         }
         RunResult::PendingRecovery(pending) => {
-            acc.items.push(item_row(
-                index,
-                &identity,
-                "failed",
-                Some(&pending.render_error),
-            ));
+            let row = item_row(index, &identity, "failed", Some(&pending.render_error));
             acc.outputs.push(Value::Null);
             acc.failed_items.push(identity);
             if acc.first_error.is_none() {
                 acc.first_error = Some(pending.render_error);
             }
+            row
+        }
+    };
+    acc.items
+        .push(with_attempts(with_child(row, child), attempts));
+}
+
+/// The trace file the child workflow of an iteration wrote (spec 14 law 8),
+/// whatever the iteration settled as, a skip or a recovery included: `None`
+/// off an `invoke: workflow:` call, and when its runner kept no trace.
+fn child_trace(result: &RunResult) -> Option<String> {
+    let summary = match result {
+        RunResult::Success { child, .. }
+        | RunResult::Failed { child, .. }
+        | RunResult::SkippedWithError { child, .. } => child.as_deref(),
+        RunResult::OperatorCancelled(stopped) => stopped.child.as_deref(),
+        RunResult::PendingRecovery(pending) => pending.failed.child.as_deref(),
+    };
+    summary.and_then(|row| row.trace_id.clone())
+}
+
+/// The row, naming the trace its iteration's child workflow wrote when there
+/// is one: the per-child record of spec 14 law 8, for a fan-out (NIK-385). A
+/// row that already names one keeps it: the settled result is the authority.
+fn with_child(mut row: Value, child: Option<String>) -> Value {
+    if let (Some(child), Some(object)) = (child, row.as_object_mut()) {
+        object
+            .entry("child")
+            .or_insert_with(|| Value::String(child));
+    }
+    row
+}
+
+/// The row, naming the traces of the earlier attempts of its iteration's retried child call
+/// (`child_attempts`, oldest first), so every attempt's trace lives as long as its root
+/// (NIK-385). A trace the row already names, as `child` or an earlier attempt, is not repeated;
+/// a row with no earlier attempt has no `child_attempts`.
+fn with_attempts(mut row: Value, traces: Vec<String>) -> Value {
+    let Some(object) = row.as_object_mut() else {
+        return row;
+    };
+    let last = object
+        .get("child")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let mut named: Vec<Value> = (object.get("child_attempts").and_then(Value::as_array))
+        .cloned()
+        .unwrap_or_default();
+    for trace in traces {
+        if last.as_deref() != Some(trace.as_str()) && !named.iter().any(|n| *n == trace) {
+            named.push(Value::String(trace));
         }
     }
+    if !named.is_empty() {
+        object.insert("child_attempts".to_owned(), Value::Array(named));
+    }
+    row
 }
 
 fn fold_spend(
@@ -376,39 +428,64 @@ fn item_row(index: usize, identity: &str, status: &str, error: Option<&TaskError
     row
 }
 
-/// One flag per item, raised when its iteration begins (spec 03 · 17).
-pub(super) fn unstarted(total: usize) -> Vec<AtomicBool> {
-    (0..total).map(|_| AtomicBool::new(false)).collect()
+/// What one item's iteration leaves while it runs (spec 03 · 17): whether it
+/// began, and the trace its child workflow writes, told as soon as that trace
+/// opens (NIK-385). A batch that stops drops the iterations still in flight,
+/// their children with them; the row of such an item still names that trace,
+/// so the trace lives as long as its root.
+pub(super) struct ItemMark {
+    began: AtomicBool,
+    child: Arc<crate::child::ChildAnnounce>,
 }
 
-/// Drive one iteration; its FIRST poll marks it begun (building it does not).
-/// The output keeps the item's index: the batch completes out of order.
+/// One mark per item, none begun, each listening for a child of a run at
+/// `run_depth` (the depth its `invoke: workflow:` calls run at, plus one).
+pub(super) fn unstarted(total: usize, run_depth: u32) -> Vec<ItemMark> {
+    (0..total)
+        .map(|_| ItemMark {
+            began: AtomicBool::new(false),
+            child: crate::child::ChildAnnounce::new(run_depth.saturating_add(1)),
+        })
+        .collect()
+}
+
+/// Drive one iteration; its FIRST poll marks it begun (building it does not)
+/// and listens, from then on, for the trace its child workflow opens. The
+/// output keeps the item's index: the batch completes out of order.
 pub(super) async fn started_on_first_poll<F: std::future::Future>(
     index: usize,
-    flag: Option<&AtomicBool>,
+    mark: Option<&ItemMark>,
     iteration: F,
 ) -> (usize, F::Output) {
-    if let Some(flag) = flag {
-        flag.store(true, Relaxed);
-    }
-    (index, iteration.await)
+    let Some(mark) = mark else {
+        return (index, iteration.await);
+    };
+    mark.began.store(true, Relaxed);
+    (index, Arc::clone(&mark.child).listen(iteration).await)
 }
 
 /// The fan-out's item table as ONE compact JSON text (#1276 · #1397): one row
 /// per item, in input order. A kept iteration has its own row; an item the
 /// batch stopped without one (`fail_fast` · the budget) is `cancelled` if it
 /// began, else `never_started`; neither has an output or is a billing verdict
-/// (spec 17). Rendered on the terminal frame as `items`.
-pub(super) fn items_json(rows: Vec<Value>, items: &[Value], started: &[AtomicBool]) -> String {
+/// (spec 17). A row whose iteration's child workflow opened a trace names it
+/// (`child`), the `cancelled` row of an abandoned iteration included, and the
+/// earlier attempts of a retried child call (`child_attempts`). Rendered on
+/// the terminal frame as `items`.
+pub(super) fn items_json(rows: Vec<Value>, items: &[Value], marks: &[ItemMark]) -> String {
     let mut rows = rows.into_iter().peekable();
     let table: Vec<Value> = (items.iter().enumerate())
         .map(|(index, item)| {
-            rows.next_if(|row| row["index"] == index)
+            let mark = marks.get(index);
+            let row = rows
+                .next_if(|row| row["index"] == index)
                 .unwrap_or_else(|| {
-                    let began = started.get(index).is_some_and(|f| f.load(Relaxed));
+                    let began = mark.is_some_and(|m| m.began.load(Relaxed));
                     let status = if began { "cancelled" } else { "never_started" };
                     item_row(index, &item_identity(item), status, None)
-                })
+                });
+            let row = with_child(row, mark.and_then(|m| m.child.trace()));
+            with_attempts(row, mark.map(|m| m.child.traces()).unwrap_or_default())
         })
         .collect();
     serde_json::to_string(&table).unwrap_or_else(|_| "[]".to_owned())
@@ -517,9 +594,9 @@ mod tests {
     /// The table of `alpha · beta · gamma` where `began` items were polled.
     fn table(acc: FanOutAccum, began: &[usize]) -> Vec<Value> {
         let items = ["alpha", "beta", "gamma"].map(Value::from);
-        let started = unstarted(3);
+        let started = unstarted(3, 0);
         for index in began {
-            started[*index].store(true, Relaxed);
+            started[*index].began.store(true, Relaxed);
         }
         serde_json::from_str(&items_json(acc.items, &items, &started)).expect("rows")
     }
@@ -568,6 +645,63 @@ mod tests {
         assert_eq!(
             indexes,
             [0, 1, 2].map(Value::from).iter().collect::<Vec<_>>()
+        );
+    }
+
+    /// The summary a child workflow run leaves its parent (spec 14 law 8).
+    fn summary(trace_id: Option<&str>, ok: bool) -> crate::child::ChildRunSummary {
+        crate::child::ChildRunSummary::new(
+            "./round.nika",
+            ok,
+            (trace_id.map(str::to_owned), Some("head".to_owned()), None),
+        )
+    }
+
+    /// NIK-385 · spec 14 law 8: an iteration that ran a child workflow names
+    /// the trace that child wrote on its row, on success and on failure. A
+    /// plain iteration's row, and one whose runner kept no trace, stay as
+    /// they were.
+    #[tokio::test]
+    async fn an_item_row_names_its_child_trace_exactly_when_one_ran() {
+        let ran_child = |index: usize, item: &str, trace: Option<&str>| {
+            let mut ran = ok_iter(index, item);
+            if let RunResult::Success { child, .. } = &mut ran.result {
+                *child = Some(Box::new(summary(trace, true)));
+            }
+            ran
+        };
+        let mut failed = failed_iter(2, "gamma");
+        if let RunResult::Failed { child, .. } = &mut failed.result {
+            *child = Some(Box::new(summary(
+                Some("2026-11-25T12-08-26Z-c3d4.ndjson"),
+                false,
+            )));
+        }
+        let mut stream = futures_util::stream::iter([
+            (
+                0,
+                ran_child(0, "alpha", Some("2026-11-25T12-08-24Z-a1b2.ndjson")),
+            ),
+            (1, ok_iter(1, "beta")),
+            (2, failed),
+            (3, ran_child(3, "delta", None)),
+        ]);
+        let acc = collect_fan_out(&mut stream, 4, false).await;
+        assert_eq!(
+            acc.items,
+            vec![
+                serde_json::json!({
+                    "child": "2026-11-25T12-08-24Z-a1b2.ndjson",
+                    "index": 0, "item": "alpha", "status": "ok",
+                }),
+                serde_json::json!({"index": 1, "item": "beta", "status": "ok"}),
+                serde_json::json!({
+                    "child": "2026-11-25T12-08-26Z-c3d4.ndjson",
+                    "code": "NIKA-EXEC-001", "index": 2, "item": "gamma",
+                    "message": "for_each item [2] gamma: boom", "status": "failed",
+                }),
+                serde_json::json!({"index": 3, "item": "delta", "status": "ok"}),
+            ]
         );
     }
 
@@ -678,7 +812,7 @@ mod tests {
             Value::String("gamma".into()),
         ];
         let consumed = vec![item_row(0, "alpha", "ok", None)];
-        let text = items_json(consumed, &items, &unstarted(3));
+        let text = items_json(consumed, &items, &unstarted(3, 0));
         let rows: Vec<Value> = serde_json::from_str(&text).expect("a JSON array");
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["status"], "ok");
@@ -701,9 +835,9 @@ mod tests {
             Value::String("beta".into()),
             Value::String("gamma".into()),
         ];
-        let started = unstarted(3);
-        started[0].store(true, Relaxed);
-        started[1].store(true, Relaxed);
+        let started = unstarted(3, 0);
+        started[0].began.store(true, Relaxed);
+        started[1].began.store(true, Relaxed);
         let consumed = vec![item_row(0, "alpha", "failed", Some(&boom("x")))];
         let text = items_json(consumed, &items, &started);
         let rows: Vec<Value> = serde_json::from_str(&text).expect("a JSON array");
@@ -719,16 +853,137 @@ mod tests {
     #[test]
     fn the_started_flag_rises_on_the_first_poll_only() {
         use std::future::Future as _;
-        let flag = AtomicBool::new(false);
+        let marks = unstarted(1, 0);
         let mut iteration = std::pin::pin!(started_on_first_poll(
             0,
-            Some(&flag),
+            marks.first(),
             std::future::pending::<()>()
         ));
-        assert!(!flag.load(Relaxed), "constructed, not polled");
+        assert!(!marks[0].began.load(Relaxed), "constructed, not polled");
         let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(iteration.as_mut().poll(&mut cx).is_pending());
-        assert!(flag.load(Relaxed), "the first poll began it");
+        assert!(marks[0].began.load(Relaxed), "the first poll began it");
+    }
+
+    /// NIK-385 · an iteration the batch abandons while its child workflow runs
+    /// (`fail_fast` drops it in flight) leaves a `cancelled` row that still
+    /// names the trace the child opened, so that trace lives as long as its
+    /// root. A grandchild's trace, told from inside that child, is not the
+    /// item's.
+    #[test]
+    fn an_abandoned_item_row_names_the_trace_its_child_opened() {
+        use std::future::Future as _;
+        let marks = unstarted(3, 0);
+        let mut iteration = std::pin::pin!(started_on_first_poll(0, marks.first(), async {
+            crate::child::announce_trace(1, "2026-11-25T14-02-11Z-9e0f.ndjson");
+            crate::child::announce_trace(2, "2026-11-25T14-02-12Z-7a7a.ndjson");
+            std::future::pending::<()>().await;
+        }));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(iteration.as_mut().poll(&mut cx).is_pending());
+        let items = ["alpha", "beta", "gamma"].map(Value::from);
+        let consumed = vec![item_row(1, "beta", "failed", Some(&boom("x")))];
+        let rows: Vec<Value> =
+            serde_json::from_str(&items_json(consumed, &items, &marks)).expect("rows");
+        assert_eq!(
+            rows[0],
+            serde_json::json!({
+                "child": "2026-11-25T14-02-11Z-9e0f.ndjson",
+                "index": 0, "item": "alpha", "status": "cancelled"
+            })
+        );
+        assert_eq!(
+            rows[2],
+            serde_json::json!({"index": 2, "item": "gamma", "status": "never_started"})
+        );
+    }
+
+    /// NIK-385 review · an iteration abandoned during its retried child call names the trace
+    /// of every attempt: the last one as `child`, the earlier ones, oldest first, as
+    /// `child_attempts`. A trace told twice is named once.
+    #[test]
+    fn an_abandoned_retried_item_row_names_every_attempt() {
+        use std::future::Future as _;
+        let marks = unstarted(1, 0);
+        let mut iteration = std::pin::pin!(started_on_first_poll(0, marks.first(), async {
+            crate::child::announce_trace(1, "attempt-1.ndjson");
+            crate::child::announce_trace(1, "attempt-2.ndjson");
+            crate::child::announce_trace(1, "attempt-2.ndjson");
+            crate::child::announce_trace(1, "attempt-3.ndjson");
+            std::future::pending::<()>().await;
+        }));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(iteration.as_mut().poll(&mut cx).is_pending());
+        let rows: Vec<Value> =
+            serde_json::from_str(&items_json(Vec::new(), &[Value::from("alpha")], &marks))
+                .expect("rows");
+        assert_eq!(
+            rows[0],
+            serde_json::json!({
+                "child": "attempt-3.ndjson",
+                "child_attempts": ["attempt-1.ndjson", "attempt-2.ndjson"],
+                "index": 0, "item": "alpha", "status": "cancelled"
+            })
+        );
+    }
+
+    /// NIK-385 · a child workflow that failed under the
+    /// iteration's `on_error: skip`, or whose failure a `recover:` repaired,
+    /// leaves a `recovered` row that names the child's terminal error code
+    /// and its trace: the parent alone says why the item settled so.
+    #[tokio::test]
+    async fn a_skipped_or_recovered_child_names_its_code_and_its_trace() {
+        let child_failed = |index: usize| {
+            TaskErrorRecord::new(
+                "NIKA-1803",
+                format!("for_each item [{index}] x: child workflow `./round.nika` failed"),
+                false,
+            )
+        };
+        let skipped = ran(
+            "for_each[0]=alpha",
+            RunResult::SkippedWithError {
+                error: child_failed(0),
+                cost_usd: None,
+                cost_unpriced: None,
+                child: Some(Box::new(summary(
+                    Some("2026-11-25T14-10-00Z-5a5a.ndjson"),
+                    false,
+                ))),
+            },
+        );
+        let recovered = ran(
+            "for_each[1]=beta",
+            RunResult::recovered(
+                Value::Null,
+                child_failed(1),
+                (None, None),
+                Some(Box::new(summary(
+                    Some("2026-11-25T14-10-01Z-6b6b.ndjson"),
+                    false,
+                ))),
+            ),
+        );
+        let mut stream = futures_util::stream::iter([(0, skipped), (1, recovered)]);
+        let acc = collect_fan_out(&mut stream, 2, false).await;
+        let rows: Vec<(&Value, &Value, &Value)> = (acc.items.iter())
+            .map(|r| (&r["status"], &r["code"], &r["child"]))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    &Value::from("recovered"),
+                    &Value::from("NIKA-1803"),
+                    &Value::from("2026-11-25T14-10-00Z-5a5a.ndjson")
+                ),
+                (
+                    &Value::from("recovered"),
+                    &Value::from("NIKA-1803"),
+                    &Value::from("2026-11-25T14-10-01Z-6b6b.ndjson")
+                ),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -739,6 +994,7 @@ mod tests {
                 error: boom("for_each item [1] beta: boom"),
                 cost_usd: None,
                 cost_unpriced: None,
+                child: None,
             },
         );
         let ok = ran(

@@ -189,18 +189,22 @@ async fn g2_a_garbage_line_refuses_with_words_never_a_panic() {
     );
 }
 
+/// An internal error answered to the prompt (`-32603`) is a session error carrying the
+/// adapter's message. ACP's `-32000` is authentication required, a lost sign-in told in our
+/// words (`client::start::tests::an_error_answer_to_the_prompt_is_read_by_its_code`).
 #[tokio::test]
 async fn g3_a_jsonrpc_error_response_becomes_a_session_error_with_its_message() {
     let (a, _g) = agent(
         "rpcerr",
         &format!(
             "{HANDSHAKE}\nsend({{\"jsonrpc\":\"2.0\",\"id\":prompt[\"id\"],\
-             \"error\":{{\"code\":-32000,\"message\":\"the agent is out of quota\"}}}})\n"
+             \"error\":{{\"code\":-32603,\"message\":\"the agent is out of quota\"}}}})\n"
         ),
     );
     let (_, _, error) = drain(a).await;
     let e = error.expect("an error response must surface");
     assert!(e.to_string().contains("out of quota"), "{e}");
+    assert!(matches!(e, HarnessError::Session { .. }), "{e:?}");
 }
 
 #[tokio::test]

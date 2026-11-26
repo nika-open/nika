@@ -23,12 +23,12 @@ use std::task::{Context, Poll};
 
 use futures_core::Stream;
 use nika_kernel::ai::harness::{
-    HarnessError, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
+    FollowUpReply, HarnessError, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
     HarnessSelection, ModelProvenance, PermissionDecision, PermissionReply,
 };
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::wire::{
     self, Incoming, PermissionRequestIn, PermissionResult, PromptResult, SessionUpdateParams,
@@ -60,6 +60,8 @@ const ID_INITIALIZE: u64 = 1;
 const ID_SESSION_NEW: u64 = 2;
 const ID_PROMPT: u64 = 3;
 const ID_SESSION_SEAT: u64 = 4;
+/// The one follow-up prompt a request may keep room for (`HarnessRequest::follow_up`).
+const ID_FOLLOW_UP: u64 = 9;
 
 /// Drive ONE delegated run over `reader`/`writer` — the stream is live
 /// immediately; the handshake and session run inside the driver task.
@@ -214,27 +216,74 @@ where
         .await?;
         Milestone::PromptWritten.reached(self.progress.as_ref());
 
-        self.pump(&session.session_id, &request).await
+        let ended = self.pump(&session.session_id, &request, ID_PROMPT).await?;
+        let outcome = self.follow_up(&session.session_id, &request, ended).await?;
+        let _ = self
+            .event_tx
+            .send(Ok(HarnessEvent::Completed {
+                outcome: Box::new(outcome),
+            }))
+            .await;
+        Ok(())
     }
 
-    /// The main pump: route beats until the prompt response closes the
-    /// turn.
+    /// The ONE follow-up the request kept room for (spec 02 §agent · a schema repair): the
+    /// ended turn is handed over with its lane, and a prompt sent on it runs as the session's
+    /// next turn, whose outcome replaces the first. A dropped lane, or a stream no one reads,
+    /// closes the session on the first. The session's model and selection were read before
+    /// the first prompt and stay the outcome's; its images are every image of the session.
+    async fn follow_up(
+        &mut self,
+        session_id: &str,
+        request: &HarnessRequest,
+        ended: HarnessOutcome,
+    ) -> Result<HarnessOutcome, HarnessError> {
+        if !request.follow_up {
+            return Ok(ended);
+        }
+        let (tx, rx) = oneshot::channel();
+        let follow_up = FollowUpReply::new(Box::new(move |prompt| {
+            let _ = tx.send(prompt);
+        }));
+        let beat = HarnessEvent::TurnEnded {
+            outcome: Box::new(ended.clone()),
+            follow_up,
+        };
+        if self.event_tx.send(Ok(beat)).await.is_err() {
+            return Ok(ended);
+        }
+        let Ok(prompt) = rx.await else {
+            return Ok(ended);
+        };
+        let params = prompt::params(session_id, &prompt, &[]);
+        self.send_request(ID_FOLLOW_UP, wire::METHOD_SESSION_PROMPT, &params)
+            .await?;
+        let mut repaired = self.pump(session_id, request, ID_FOLLOW_UP).await?;
+        repaired.observed_model = ended.observed_model;
+        repaired.observed_model_source = ended.observed_model_source;
+        repaired.selection = ended.selection;
+        Ok(repaired)
+    }
+
+    /// The main pump: route beats until the response to the prompt `prompt_id` closes the
+    /// turn, whose outcome it returns.
     async fn pump(
         &mut self,
         session_id: &str,
         request: &HarnessRequest,
-    ) -> Result<(), HarnessError> {
+        prompt_id: u64,
+    ) -> Result<HarnessOutcome, HarnessError> {
         let (ptx, prx) = mpsc::unbounded_channel();
         let mut reply_rx = prx;
         loop {
             tokio::select! {
                 line = read_bounded_line(&mut self.reader, &mut self.pending, self.idle) => {
                     let read = line.map(|line| wire::parse_line(&line));
-                    activity::received(self.progress.as_ref(), &read, session_id, ID_PROMPT);
+                    activity::received(self.progress.as_ref(), &read, session_id, prompt_id);
                     match read?.map_err(|e| HarnessError::Session {
                         reason: e.to_string(),
                     })? {
-                        Incoming::Response { id: ID_PROMPT, result } => {
+                        Incoming::Response { id, result } if id == prompt_id => {
                             // NIK-275: a failed turn the adapter reports is never an answer.
                             if let Some(failure) = wire::turn_failure(&result) {
                                 return Err(failure);
@@ -251,14 +300,12 @@ where
                             }
                             let outcome = self.close_turn(&done, request);
                             activity::completed(self.progress.as_ref());
-                            let _ = self
-                                .event_tx
-                                .send(Ok(HarnessEvent::Completed { outcome: Box::new(outcome) }))
-                                .await;
-                            return Ok(());
+                            return Ok(outcome);
                         }
-                        Incoming::ErrorResponse { message, kind, .. } => {
-                            return Err(answered_error(message, kind.as_deref()));
+                        Incoming::ErrorResponse {
+                            code, message, kind, ..
+                        } => {
+                            return Err(answered_error(code, message, kind.as_deref()));
                         }
                         Incoming::Notification { method, params }
                             if method == wire::METHOD_SESSION_UPDATE =>
@@ -681,13 +728,11 @@ where
                 }
                 Incoming::ErrorResponse {
                     id: got,
+                    code,
                     message,
                     kind,
                 } if got == id => {
-                    return Err(match kind.as_deref() {
-                        Some(SIGN_IN_KIND) => signed_out(),
-                        _ => HarnessError::Refused { reason: message },
-                    });
+                    return Err(request_error(code, message, kind.as_deref()));
                 }
                 Incoming::Notification { method, params }
                     if method == wire::METHOD_SESSION_UPDATE =>
@@ -894,6 +939,10 @@ const PIPE_CLOSED: &str = "transport: the agent closed the pipe mid-run";
 /// The adapter's typed kind of an error that a lost sign-in raises.
 const SIGN_IN_KIND: &str = "authentication_failed";
 
+/// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
+/// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
+const QUOTA_KIND: &str = "usageLimitExceeded";
+
 /// The reason a harness the app no longer signs in for is unavailable: our own words, never the
 /// adapter's (its prose may carry account details).
 pub(crate) const SIGN_IN_EXPIRED: &str = "the app's sign-in has expired or was revoked";
@@ -906,12 +955,45 @@ pub(crate) fn signed_out() -> HarnessError {
     }
 }
 
-/// The failure an error answer to the prompt is: a lost sign-in by the adapter's typed kind,
-/// else a session that ended before a complete answer.
-fn answered_error(message: String, kind: Option<&str>) -> HarnessError {
-    match kind {
-        Some(SIGN_IN_KIND) => signed_out(),
-        _ => HarnessError::Session { reason: message },
+/// The failure an error answer to the prompt is. The adapter's typed kind it knows keeps its
+/// classification: `authentication_failed` is a lost sign-in, whatever the code, and codex-acp's
+/// `usageLimitExceeded` is a final refusal, never the retried `-32603` it rides. Without one
+/// (no kind, or a kind this client does not know), the code decides, by the same table as an
+/// answer to a request before the prompt ([`request_error`]): `-32000` (authentication
+/// required) is a lost sign-in, final; `-32603` (internal error) is a session that ended before
+/// a complete answer, which a retry may heal; every other code, an undefined one or none
+/// included, is the final refusal it is. An unknown code fails closed: it is never retried.
+fn answered_error(code: i64, message: String, kind: Option<&str>) -> HarnessError {
+    request_error(code, message, kind)
+}
+
+/// ACP's `auth_required` error code: authentication is required before the operation (ACP v1
+/// schema, `ErrorCode`, <https://agentclientprotocol.com/protocol/v1/schema>).
+const AUTH_REQUIRED: i64 = -32000;
+
+/// JSON-RPC 2.0's internal error (§5.1), which the ACP v1 schema keeps as `-32603`.
+const INTERNAL_ERROR: i64 = -32603;
+
+/// The failure an error answer to a request before the prompt is (`initialize`, `session/new`,
+/// a model, effort, tier or mode selection), by the code the ACP v1 schema defines for it
+/// (`ErrorCode`, <https://agentclientprotocol.com/protocol/v1/schema>):
+///
+/// - the adapter's typed `authentication_failed` kind, or `-32000` (authentication required):
+///   a lost sign-in, final until the human signs in again;
+/// - `-32603` (internal error): a session that did not open, which a retry may open (codex-acp
+///   answered `session/new` on a loaded machine with it, « workspace routing discovery timed
+///   out »), unless it carries codex-acp's `usageLimitExceeded` kind, an exhausted quota no
+///   retry heals;
+/// - every other code, the request refusals `-32700`, `-32600`, `-32601` and `-32602`,
+///   `-32002` (resource not found) and any code the schema leaves undefined: the final refusal
+///   it is. An unknown code fails closed: it is never retried.
+fn request_error(code: i64, message: String, kind: Option<&str>) -> HarnessError {
+    if kind == Some(SIGN_IN_KIND) || code == AUTH_REQUIRED {
+        return signed_out();
+    }
+    match code {
+        INTERNAL_ERROR if kind != Some(QUOTA_KIND) => HarnessError::Session { reason: message },
+        _ => HarnessError::Refused { reason: message },
     }
 }
 
@@ -1461,6 +1543,121 @@ mod tests {
             matches!(next, Some(Err(HarnessError::Session { .. }))),
             "EOF mid-handshake is a session death, got {next:?}"
         );
+    }
+
+    /// The prompt's answer alone: the turn's text is exactly the chunks sent before it.
+    async fn stop(writer: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, prompt: &Value) {
+        agent_write(
+            writer,
+            &serde_json::json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}),
+        )
+        .await;
+    }
+
+    /// The next beat of `stream`.
+    async fn next_beat(
+        stream: &mut HarnessEventStream,
+    ) -> Option<Result<HarnessEvent, HarnessError>> {
+        std::future::poll_fn(|cx| Pin::new(&mut *stream).poll_next(cx)).await
+    }
+
+    /// NIK-402 · a request that keeps room for a follow-up ends its turn with the lane: the
+    /// follow-up is the SAME session's next `session/prompt` (one session, no replay), and its
+    /// outcome is the terminal one.
+    #[tokio::test]
+    async fn a_follow_up_is_the_same_sessions_next_turn() {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(ours);
+        let (agent_read_half, mut w) = tokio::io::split(theirs);
+        let agent = tokio::spawn(async move {
+            let mut r = TestReader::new(agent_read_half);
+            let prompt = script_handshake(&mut r, &mut w).await;
+            agent_write(&mut w, &chunk(r#"{"a":1}"#)).await;
+            stop(&mut w, &prompt).await;
+            let again = agent_read(&mut r).await;
+            assert_eq!(again["method"], "session/prompt");
+            assert_eq!(again["params"]["sessionId"], "s-test", "the same session");
+            assert_eq!(again["params"]["prompt"][0]["text"], "repair it");
+            assert_ne!(again["id"], prompt["id"]);
+            agent_write(&mut w, &chunk(r#"{"a":1,"b":2}"#)).await;
+            stop(&mut w, &again).await;
+        });
+        let request = HarnessRequest::new("hi", "/tmp").with_follow_up();
+        let mut stream = drive(client_read, client_write, request);
+        let (ended, lane) = loop {
+            match next_beat(&mut stream).await {
+                Some(Ok(HarnessEvent::TurnEnded { outcome, follow_up })) => {
+                    break (outcome, follow_up);
+                }
+                Some(Ok(HarnessEvent::Completed { .. })) => panic!("the lane comes first"),
+                Some(Ok(_)) => {}
+                other => panic!("the turn ends with its lane, got {other:?}"),
+            }
+        };
+        assert_eq!(ended.output, r#"{"a":1}"#);
+        lane.prompt("repair it".to_owned());
+        let completed = loop {
+            match next_beat(&mut stream).await {
+                Some(Ok(HarnessEvent::Completed { outcome })) => break outcome,
+                Some(Ok(HarnessEvent::TurnEnded { .. })) => panic!("one follow-up, never two"),
+                Some(Ok(_)) => {}
+                other => panic!("the follow-up completes, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            completed.output, r#"{"a":1,"b":2}"#,
+            "the follow-up's own text"
+        );
+        assert!(
+            next_beat(&mut stream).await.is_none(),
+            "nothing after the terminal beat"
+        );
+        agent.await.expect("scripted agent");
+    }
+
+    /// A dropped lane closes the session on the ended turn: the same outcome completes and no
+    /// second prompt is written. A request without room for a follow-up never sees the lane.
+    #[tokio::test]
+    async fn a_dropped_lane_completes_the_ended_turn_and_prompts_nothing() {
+        for keeps_room in [true, false] {
+            let (ours, theirs) = tokio::io::duplex(64 * 1024);
+            let (client_read, client_write) = tokio::io::split(ours);
+            let (agent_read, mut w) = tokio::io::split(theirs);
+            let agent = tokio::spawn(async move {
+                let mut r = TestReader::new(agent_read);
+                let prompt = script_handshake(&mut r, &mut w).await;
+                agent_write(&mut w, &chunk("only")).await;
+                stop(&mut w, &prompt).await;
+                let mut rest = String::new();
+                let read = r.read_line(&mut rest).await.expect("read");
+                assert_eq!(
+                    (read, rest.as_str()),
+                    (0, ""),
+                    "no second prompt is written"
+                );
+            });
+            let mut request = HarnessRequest::new("hi", "/tmp");
+            if keeps_room {
+                request = request.with_follow_up();
+            }
+            let mut stream = drive(client_read, client_write, request);
+            let mut lanes = 0;
+            let completed = loop {
+                match next_beat(&mut stream).await {
+                    Some(Ok(HarnessEvent::TurnEnded { follow_up, .. })) => {
+                        lanes += 1;
+                        drop(follow_up);
+                    }
+                    Some(Ok(HarnessEvent::Completed { outcome })) => break outcome,
+                    Some(Ok(_)) => {}
+                    other => panic!("the turn completes, got {other:?}"),
+                }
+            };
+            assert_eq!(completed.output, "only");
+            assert_eq!(lanes, usize::from(keeps_room));
+            drop(stream);
+            agent.await.expect("scripted agent");
+        }
     }
 }
 

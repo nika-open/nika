@@ -265,6 +265,9 @@ mod proven_refusal_tests {
     fn agent_schema_after_a_seat_is_not_a_pin() {
         let err = VerbAgentError::SchemaValidation {
             detail: "missing field".to_owned(),
+            partial_output: String::new(),
+            violations: Vec::new(),
+            unlisted: 0,
             spend: Box::default(),
         };
         assert!(proven_seat_refusal("gemini-cli", &err, None).is_none());

@@ -112,6 +112,8 @@ mod guard;
 mod harness_images;
 #[cfg(feature = "access-harness")]
 pub mod harness_path;
+#[cfg(feature = "access-harness")]
+mod harness_repair;
 mod intrinsic;
 mod io;
 mod media_cap;
@@ -786,11 +788,11 @@ where
         // Try the answer as-is first — no wasted round-trip on a model that
         // already replied with a conforming object (the common path · keeps
         // structured agent tasks single-round-trip when the model complies).
-        let mut detail = match shape::validate_text(&answer, &validator) {
+        let mut rejection = match shape::validate_text(&answer, &validator, schema) {
             Ok(value) => {
                 return Ok(shaped(value, stop_reason, st.turns, st.total_tokens));
             }
-            Err(detail) => detail,
+            Err(rejection) => rejection,
         };
 
         // The answer does not conform yet. Each repair spends a provider
@@ -822,7 +824,7 @@ where
             st.repairs = st.repairs.saturating_add(1);
             st.messages.push(Message::text(
                 Role::User,
-                shape::reask_message(Some(&detail), schema),
+                shape::reask_message(Some(&rejection.detail()), schema),
             ));
             let request = schema_request(model, st.messages.clone(), input, schema, native);
             let response = self
@@ -837,24 +839,22 @@ where
                 )
                 .await?;
             let text = joined_text(&response.content);
-            match shape::validate_text(&text, &validator) {
+            match shape::validate_text(&text, &validator, schema) {
                 Ok(value) => {
                     return Ok(shaped(value, stop_reason, st.turns, st.total_tokens));
                 }
-                Err(d) => {
-                    detail = d;
+                Err(again) => {
+                    rejection = again;
                     partial_output = text;
                     st.messages
                         .push(Message::new(Role::Assistant, response.content));
                 }
             }
         }
-        Err(VerbAgentError::SchemaValidation {
-            detail: st
-                .repair_budget(self.schema_retry_budget)
-                .exhausted_detail(&detail),
-            spend: Box::default(), // decorated at the return seam
-        })
+        // The spend is decorated at the return seam.
+        let detail =
+            (st.repair_budget(self.schema_retry_budget)).exhausted_detail(&rejection.detail());
+        Err(rejection.into_error(detail, partial_output))
     }
 
     /// One Dispatch turn: run the batch, feed results into the
@@ -1670,3 +1670,7 @@ mod tests_selection;
 #[cfg(test)]
 #[cfg(feature = "access-harness")]
 mod tests_harness_images;
+
+#[cfg(test)]
+#[cfg(feature = "access-harness")]
+mod tests_harness_repair;

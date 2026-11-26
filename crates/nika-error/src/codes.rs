@@ -376,10 +376,10 @@ fn access_code_help(num: u16) -> &'static str {
             "The `--access` token is neither an access class (local · api · harness · oauth · mock) nor a known agentic CLI (claude-code · codex · copilot · gemini-cli · grok-build · kimi-code · opencode · qwen-code). `nika doctor` lists every path."
         }
         1803 => {
-            "That agentic CLI is not installed (or this nika was built without adapters), or the app reported that its sign-in expired or was revoked. Install Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Grok Build, Kimi Code, OpenCode or Qwen Code, or sign in again in the app itself (nika never holds its credential), or choose an API key or a local engine instead (`nika doctor --verbose` lists them)."
+            "That agentic CLI is not installed (or this nika was built without adapters), or the app reported that its sign-in expired or was revoked. Install Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Grok Build, Kimi Code, OpenCode or Qwen Code, or sign in again in the app itself (nika never holds its credential), or choose an API key or a local engine instead (`nika doctor --verbose` lists them). A probe of the CLI that started but did not answer in time (a loaded machine) is not this code: it is NIKA-1804, transient, and a task's `retry:` covers it; `NIKA_HARNESS_PROBE_SECS` raises the 30 s probe deadline."
         }
         1804 => {
-            "The harness session died mid-run (process exit or wire breakdown), or the harness reported a failed turn it offers to retry (a 429 rate limit or retry limit, a lost connection, an overloaded service, a provider error it cannot name). Transient: retry, and if it repeats read the adapter's own message and logs. A rejected model arrives as such a provider error, and a retry cannot heal it: choose a model the harness serves."
+            "The harness session died mid-run (process exit or wire breakdown), a probe of the CLI started but did not answer in time (a loaded machine: its `--version`, its profile listings or its `initialize`), or the harness reported a failed turn it offers to retry (a 429 rate limit or retry limit, a lost connection, an overloaded service, a provider error it cannot name). Transient: a task's `retry:` replays it, and if it repeats read the adapter's own message and logs; on a machine that stays loaded, `NIKA_HARNESS_PROBE_SECS` raises the 30 s probe deadline. A rejected model arrives as such a provider error, and a retry cannot heal it: choose a model the harness serves."
         }
         1805 => {
             "The harness refused the request in its own words, or reported a failed turn it offers no retry for (an exhausted quota or budget, a full context, a bad request, a policy denial), or its auth is absent on ITS side. Read its message: wait for the quota, start a new session, fix the request, or sign in to the harness itself — nika never holds its credential."
@@ -1019,6 +1019,27 @@ mod tests {
             unavailable.contains("its sign-in expired or was revoked")
                 && unavailable.contains("sign in again in the app itself"),
             "{unavailable}"
+        );
+    }
+
+    /// NIK-385 · a probe that did not answer in time is the third case a reader of NIKA-1803
+    /// meets: the help names it, sends it to the transient NIKA-1804 that `retry:` covers,
+    /// and names the deadline's knob; NIKA-1804 names the probe among its causes.
+    #[test]
+    fn an_unanswered_probe_is_taught_as_transient_not_unavailable() {
+        let unavailable = access_code_help(1803);
+        assert!(
+            unavailable.contains("did not answer in time")
+                && unavailable
+                    .contains("it is NIKA-1804, transient, and a task's `retry:` covers it")
+                && unavailable.contains("`NIKA_HARNESS_PROBE_SECS` raises the 30 s probe deadline"),
+            "{unavailable}"
+        );
+        let session = access_code_help(1804);
+        assert!(
+            session.contains("a probe of the CLI started but did not answer in time")
+                && session.contains("a task's `retry:` replays it"),
+            "{session}"
         );
     }
 

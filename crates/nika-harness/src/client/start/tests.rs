@@ -174,28 +174,37 @@ async fn a_release_outside_the_pin_is_unavailable_before_any_session() {
     }
 }
 
-/// An adapter that reads `initialize` and never answers is unavailable at the
-/// start bound, well before the five-minute frame deadline.
+/// An adapter that reads `initialize` and never answers is unanswered at the
+/// start bound, well before the five-minute frame deadline: unknown and
+/// transient (a loaded machine), never the absent adapter a retry cannot heal.
 #[tokio::test(start_paused = true)]
-async fn a_silent_adapter_is_unavailable_at_the_start_bound() {
+async fn a_silent_adapter_is_unanswered_and_transient_at_the_start_bound() {
     let started = tokio::time::Instant::now();
-    let reason = unavailable(
-        judged(IDLE, |mut r, w| async move {
-            let init = read(&mut r).await.expect("initialize");
-            assert_eq!(init["method"], "initialize");
-            // Hold the pipe open and say nothing; the client gives up first.
-            assert!(read(&mut r).await.is_none(), "nothing follows");
-            drop(w);
-        })
-        .await,
+    let error = judged(IDLE, |mut r, w| async move {
+        let init = read(&mut r).await.expect("initialize");
+        assert_eq!(init["method"], "initialize");
+        // Hold the pipe open and say nothing; the client gives up first.
+        assert!(read(&mut r).await.is_none(), "nothing follows");
+        drop(w);
+    })
+    .await
+    .expect_err("silent past the start bound");
+    assert!(error.is_transient(), "a plain retry: replays it: {error:?}");
+    assert_eq!(
+        nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+        "NIKA-1804"
     );
+    let HarnessError::Session { reason } = error else {
+        panic!("an unanswered start, got {error:?}")
+    };
     assert_eq!(
         reason,
         "adapter `codex`: the initialize handshake did not answer in 30s"
     );
     let waited = started.elapsed();
     assert!(
-        waited >= super::START_TIMEOUT && waited < super::START_TIMEOUT + Duration::from_secs(1),
+        waited >= super::start_timeout()
+            && waited < super::start_timeout() + Duration::from_secs(1),
         "bounded by the start timeout, not the frame deadline: {waited:?}"
     );
 }
@@ -217,6 +226,206 @@ async fn an_adapter_that_closes_its_pipe_is_unavailable() {
         reason,
         "adapter `codex`: the adapter closed its pipe without answering initialize"
     );
+}
+
+/// An error answer to `session/new` is read like one to the prompt: an internal error
+/// (codex-acp's `-32603` on a loaded machine) is a session that did not open, transient; the
+/// adapter's `authentication_failed` kind is a lost sign-in, final; a refusal it types with a
+/// JSON-RPC request code (`-32602`, a value it rejects) stays the final refusal it is. No
+/// prompt follows any of them.
+#[tokio::test]
+async fn an_error_answer_to_session_new_is_classified_like_one_to_the_prompt() {
+    let busy = json!({"code":-32603,"message":"Internal error",
+        "data":{"details":"workspace routing discovery timed out"}});
+    let expired = json!({"code":-32603,"message":"Internal error",
+        "data":{"errorKind":"authentication_failed"}});
+    let rejected = json!({"code":-32602,"message":"Invalid params"});
+    let cases = [
+        (
+            busy,
+            "NIKA-1804",
+            "harness session failed: Internal error — workspace routing discovery timed out \
+             (jsonrpc -32603)",
+        ),
+        (
+            expired,
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            rejected,
+            "NIKA-1805",
+            "harness refused: Invalid params (jsonrpc -32602)",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            assert_eq!(new["method"], "session/new");
+            let line = json!({"jsonrpc":"2.0","id":new["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+            assert!(
+                read(&mut r).await.is_none(),
+                "no prompt after a failed session/new"
+            );
+        })
+        .await
+        .expect_err("session/new answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code
+        );
+        assert_eq!(error.is_transient(), code == "NIKA-1804", "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
+/// Each ACP error code answered to `session/new` is read by its own meaning, and a code the
+/// schema does not define fails closed: `-32000` (authentication required) is a lost sign-in,
+/// final, like the typed kind; `-32002` (resource not found) and an undefined code are final
+/// refusals, never a retried session.
+#[tokio::test]
+async fn an_auth_required_or_undefined_code_at_session_new_is_final() {
+    let cases = [
+        (
+            json!({"code":-32000,"message":"Authentication required"}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            json!({"code":-32002,"message":"Resource not found"}),
+            "NIKA-1805",
+            "harness refused: Resource not found (jsonrpc -32002)",
+        ),
+        (
+            json!({"code":-32042,"message":"Quota spent"}),
+            "NIKA-1805",
+            "harness refused: Quota spent (jsonrpc -32042)",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            let line = json!({"jsonrpc":"2.0","id":new["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+            assert!(read(&mut r).await.is_none(), "no prompt after it");
+        })
+        .await
+        .expect_err("session/new answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code,
+            "{error:?}"
+        );
+        assert!(!error.is_transient(), "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
+/// An error answer to the prompt is read by the same table as one to `session/new` when the
+/// adapter names no kind: `-32000` (authentication required) is a lost sign-in, final, and a
+/// code the schema does not define is a final refusal, never a retried session. `-32603` stays
+/// the transient session death, and the adapter's `authentication_failed` kind keeps its own
+/// classification whatever the code. codex-acp's `usageLimitExceeded` (its `data.codexErrorInfo`
+/// on the `-32603` it fails the prompt with when the client did not advertise `sessionFailure`)
+/// is the final refusal its typed failure is; a codex kind this client does not know leaves the
+/// code to decide.
+#[tokio::test]
+async fn an_error_answer_to_the_prompt_is_read_by_its_code() {
+    let cases = [
+        (
+            json!({"code":-32000,"message":"Authentication required"}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            json!({"code":-32042,"message":"Quota spent"}),
+            "NIKA-1805",
+            "harness refused: Quota spent (jsonrpc -32042)",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error"}),
+            "NIKA-1804",
+            "harness session failed: Internal error (jsonrpc -32603)",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error",
+                "data":{"errorKind":"authentication_failed"}}),
+            "NIKA-1803",
+            "harness unavailable: the app's sign-in has expired or was revoked",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error","data":{
+                "message":"Usage limits were exceeded","codexErrorInfo":"usageLimitExceeded"}}),
+            "NIKA-1805",
+            "harness refused: Internal error (jsonrpc -32603)",
+        ),
+        (
+            json!({"code":-32603,"message":"Internal error",
+                "data":{"codexErrorInfo":"serverOverloaded"}}),
+            "NIKA-1804",
+            "harness session failed: Internal error (jsonrpc -32603)",
+        ),
+    ];
+    for (answer, code, words) in cases {
+        let error = judged(IDLE, move |mut r, mut w| async move {
+            let init = read(&mut r).await.expect("initialize");
+            let info = json!({"name":"@agentclientprotocol/codex-acp","version":"1.13.1"});
+            reply(&mut w, &init, json!({"protocolVersion":1,"agentInfo":info})).await;
+            let new = read(&mut r).await.expect("session/new");
+            reply(&mut w, &new, json!({"sessionId":"s-prompt"})).await;
+            let prompt = read(&mut r).await.expect("prompt");
+            assert_eq!(prompt["method"], "session/prompt");
+            let line = json!({"jsonrpc":"2.0","id":prompt["id"],"error":answer});
+            let mut bytes = serde_json::to_vec(&line).expect("JSON");
+            bytes.push(b'\n');
+            w.write_all(&bytes).await.expect("write peer");
+            w.flush().await.expect("flush peer");
+        })
+        .await
+        .expect_err("the prompt answered an error");
+        assert_eq!(
+            nika_error::traits::NikaErrorCode::nika_code(&error).to_string(),
+            code,
+            "{error:?}"
+        );
+        assert_eq!(error.is_transient(), code == "NIKA-1804", "{error:?}");
+        assert_eq!(error.to_string(), words);
+    }
+}
+
+/// An internal error answered to `initialize` is the same session that did not open.
+#[tokio::test]
+async fn an_internal_error_answer_to_initialize_is_transient() {
+    let error = judged(IDLE, |mut r, mut w| async move {
+        let init = read(&mut r).await.expect("initialize");
+        let line = json!({"jsonrpc":"2.0","id":init["id"],
+            "error":{"code":-32603,"message":"Internal error"}});
+        let mut bytes = serde_json::to_vec(&line).expect("JSON");
+        bytes.push(b'\n');
+        w.write_all(&bytes).await.expect("write peer");
+        w.flush().await.expect("flush peer");
+        assert!(read(&mut r).await.is_none(), "no session/new after it");
+    })
+    .await
+    .expect_err("initialize answered an error");
+    assert!(error.is_transient(), "{error:?}");
+    let HarnessError::Session { reason } = error else {
+        panic!("a session that did not open, got {error:?}")
+    };
+    assert_eq!(reason, "Internal error (jsonrpc -32603)");
 }
 
 /// A call whose own frame deadline is shorter than the start bound keeps

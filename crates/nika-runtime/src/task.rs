@@ -236,6 +236,9 @@ pub(crate) struct RetryStamp {
     pub attempt: u32,
     pub max_attempts: u32,
     pub delay_ms: u64,
+    /// The child run the failed attempt ran (spec 14 law 8): its trace is cited on the
+    /// retry's frame, so a retried `invoke: workflow:` call cites every attempt (NIK-385).
+    pub child: Option<Box<crate::child::ChildRunSummary>>,
 }
 
 /// The task's terminal result.
@@ -285,6 +288,10 @@ pub(crate) enum RunResult {
         error: TaskErrorRecord,
         cost_usd: Option<f64>,
         cost_unpriced: Option<nika_types::cost::UnpricedReason>,
+        /// The failed child run an `invoke: workflow:` call skipped (spec 14 law 8): the
+        /// frame and the fan-out row cite its trace, so it lives as long as its root
+        /// (NIK-385). `None` off a child call.
+        child: Option<Box<crate::child::ChildRunSummary>>,
     },
     /// Failed after retries with no recovery — with the spend the
     /// billed attempts incurred (already ledger-debited per attempt).
@@ -643,7 +650,7 @@ where
         let started = self.clock.now();
         let (cap, fail_fast) = Self::fan_out_limits(task, items.len());
         let total = items.len();
-        let began = fan_out::unstarted(total);
+        let began = fan_out::unstarted(total, self.run_depth);
         let mut calls = BTreeMap::new(); // each yielded iteration's calls, by index
         let queued_stop = std::sync::atomic::AtomicBool::new(false);
         let mut stream = futures_util::stream::iter(
@@ -929,8 +936,8 @@ where
                             if let Some(u) = &failed.usage {
                                 failed_calls.extend_from_slice(&u.inference_calls);
                             }
-                            let delay = self
-                                .failed_attempt_delay(
+                            let retry = self
+                                .failed_attempt_retry(
                                     task,
                                     failed,
                                     ledger,
@@ -941,12 +948,9 @@ where
                                     &jitter_key,
                                 )
                                 .map_err(|failed| retain_failed_calls(*failed, &failed_calls))?;
-                            retries.push(RetryStamp {
-                                attempt,
-                                max_attempts,
-                                delay_ms: delay,
-                            });
-                            self.clock.sleep(Duration::from_millis(delay)).await;
+                            let delay = Duration::from_millis(retry.delay_ms);
+                            retries.push(retry);
+                            self.clock.sleep(delay).await;
                             attempt += 1;
                         }
                     }
@@ -1500,7 +1504,9 @@ fn apply_on_error(task: &RawTask, scope: &Scope<'_>, failed: FailedOutcome) -> R
     };
     match &on_error.value.action {
         OnErrorAction::Recover(value) => match expr::render_json(&value.value, scope) {
-            Ok(recovered) => RunResult::recovered(recovered, error, cost_usd, cost_unpriced),
+            Ok(recovered) => {
+                RunResult::recovered(recovered, error, (cost_usd, cost_unpriced), child)
+            }
             // A render failure explained ONLY by not-yet-terminal task
             // referents AWAITS them (spec 05 §recover step 3 · a recover
             // ref is not an edge): the settle spine decides the outcome
@@ -1537,6 +1543,7 @@ fn apply_on_error(task: &RawTask, scope: &Scope<'_>, failed: FailedOutcome) -> R
             error,
             cost_usd,
             cost_unpriced,
+            child,
         },
         // #[non_exhaustive] · refuse loudly.
         other => RunResult::Failed {

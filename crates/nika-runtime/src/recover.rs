@@ -474,7 +474,9 @@ fn resolve_parked(
         Some(template) => {
             let render_scope = parked_render_scope(scope, view, &with_ns);
             match expr::render_json(template, &render_scope) {
-                Ok(value) => RunResult::recovered(value, record, cost_usd, cost_unpriced),
+                Ok(value) => {
+                    RunResult::recovered(value, record, (cost_usd, cost_unpriced), child.clone())
+                }
                 Err(err) => RunResult::Failed {
                     error: runtime_error_record(&RuntimeError::from(err)),
                     cost_usd,

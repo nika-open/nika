@@ -283,6 +283,10 @@ pub struct InferVerb<H = nika_providers::NoHttp> {
     /// A lent ACP one-shot transport; `None` spawns the route's adapter.
     #[cfg(feature = "access-harness")]
     acp_transport: Option<acp::AcpTransport>,
+    /// The route adapters this verb spawned, one per route, kept for its run: an adapter
+    /// is proven once per run (NIK-385).
+    #[cfg(feature = "access-harness")]
+    acp_seats: acp::AcpSeats,
 }
 
 impl<H> InferVerb<H> {
@@ -295,6 +299,8 @@ impl<H> InferVerb<H> {
             schema_retry_budget: DEFAULT_SCHEMA_RETRY_BUDGET,
             #[cfg(feature = "access-harness")]
             acp_transport: None,
+            #[cfg(feature = "access-harness")]
+            acp_seats: acp::AcpSeats::default(),
         }
     }
 
@@ -379,12 +385,7 @@ impl<H> InferVerb<H> {
             .with_schema(input.schema.clone())
             .with_timeout(input.timeout)
             .with_effort(effort);
-        let outcome = seat
-            .run(request)
-            .await
-            .map_err(|err| VerbInferError::HarnessAccess {
-                detail: err.to_string(),
-            })?;
+        let outcome = seat.run(request).await.map_err(direct_failure)?;
         debug_assert_eq!(outcome.requested_model, requested_model);
         debug_assert!(outcome.usage_observed);
         let output = match (input.schema.as_ref(), validator.as_ref()) {
@@ -1004,6 +1005,23 @@ fn response_text(response: &InferResponse) -> String {
         })
         .collect::<Vec<_>>()
         .join("")
+}
+
+/// A direct one-shot's failure as the task's: an attestation that did not answer in time is
+/// unknown, never a refusal, so it is the transient session class (`NIKA-1804`) a task's
+/// `retry:` replays (NIK-385); every other failure is the harness access miss it was.
+#[cfg(feature = "access-harness")]
+fn direct_failure(err: nika_harness::InferGradeError) -> VerbInferError {
+    match err {
+        nika_harness::InferGradeError::Unanswered { .. } => VerbInferError::Harness {
+            source: nika_kernel::ai::harness::HarnessError::Session {
+                reason: err.to_string(),
+            },
+        },
+        err => VerbInferError::HarnessAccess {
+            detail: err.to_string(),
+        },
+    }
 }
 
 #[cfg(test)]

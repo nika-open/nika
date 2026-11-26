@@ -1346,7 +1346,8 @@ impl ChildRunner for ServiceExecutionDriver {
             let mut trace = self.child_traces.create();
             let def_hash = sha256_hex(source.as_bytes());
             let mut stamper = RunSeams::of(workflow.run.as_ref().map(|run| &run.value)).stamper();
-            let run = runtime.run(stamper.as_mut(), trace.sink()).await;
+            let mut lane = Announcing::new(&mut *trace, call.depth);
+            let run = runtime.run(stamper.as_mut(), &mut lane).await;
             let (ok, outputs, (cost, unpriced_calls), failure) = child_run_parts(&run);
             let metadata = trace.metadata();
             let trace = Some(ChildRunSummary::new(
@@ -1374,6 +1375,40 @@ impl ChildRunner for ServiceExecutionDriver {
                 paused: None,
             })
         })
+    }
+}
+
+/// A child's trace lane that names its trace to the calling `for_each:`
+/// iteration once its first frame opened it (NIK-385): a batch that drops the
+/// iteration in flight still cites the trace, which then lives as long as its
+/// root. A lane that keeps no trace names nothing.
+struct Announcing<'t> {
+    trace: &'t mut dyn ChildTrace,
+    depth: u32,
+    opened: bool,
+    announce: fn(u32, &str),
+}
+
+impl<'t> Announcing<'t> {
+    fn new(trace: &'t mut dyn ChildTrace, depth: u32) -> Self {
+        Self {
+            trace,
+            depth,
+            opened: false,
+            announce: nika_runtime::child::announce_trace,
+        }
+    }
+}
+
+impl EventSink for Announcing<'_> {
+    fn emit(&mut self, event: Event) {
+        self.trace.sink().emit(event);
+        // A lane opens its trace at the first frame, or never.
+        if !std::mem::replace(&mut self.opened, true)
+            && let Some(trace_id) = self.trace.metadata().trace_id()
+        {
+            (self.announce)(self.depth, trace_id);
+        }
     }
 }
 

@@ -28,7 +28,6 @@ use crate::probe::VersionPin;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_PROBE_BYTES: usize = 64 * 1024;
 
 /// Which one-shot CLI a seat runs.
@@ -135,6 +134,8 @@ impl Cli {
 pub(crate) struct OneShotExec {
     cli: Cli,
     command: PathBuf,
+    /// Whether the host program may start (`NIKA_HARNESS_HOSTS`, read at construction).
+    hosts: crate::hosts::Hosts,
 }
 
 impl OneShotExec {
@@ -142,16 +143,27 @@ impl OneShotExec {
         Self {
             cli,
             command: PathBuf::from(cli.command()),
+            hosts: crate::hosts::Hosts::from_env(),
         }
     }
 
-    /// Against an explicit binary path for the hermetic proof.
+    /// Against an explicit binary path for the hermetic proof: the test starts its own stub,
+    /// named like the CLI, whatever the host switch says.
     #[cfg(test)]
     pub(crate) fn with_command(cli: Cli, command: impl Into<PathBuf>) -> Self {
         Self {
             cli,
             command: command.into(),
+            hosts: crate::hosts::Hosts::Start,
         }
+    }
+
+    /// The host switch before the CLI starts: with hosts off it is absent, refused as a
+    /// binary that cannot be spawned is, and nothing starts.
+    fn admit(&self, what: &str) -> Result<(), InferGradeError> {
+        self.hosts
+            .admit(&self.command)
+            .map_err(|refusal| self.execution(format!("cannot spawn `{what}`: {refusal}")))
     }
 
     pub(crate) const fn cli(&self) -> Cli {
@@ -173,6 +185,7 @@ impl OneShotExec {
     /// Re-attest the binary at spawn: `<command> --version` under the composed env, a null
     /// stdin, a bounded answer and a deadline, judged by version pin AND product token.
     async fn probe_identity(&self) -> Result<(u32, u32), InferGradeError> {
+        self.admit(&format!("{} --version", self.command.display()))?;
         let child = tokio::process::Command::new(&self.command)
             .arg("--version")
             .env_clear()
@@ -188,14 +201,15 @@ impl OneShotExec {
                     self.command.display()
                 ))
             })?;
-        let output = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
+        let output = tokio::time::timeout(crate::probe::deadline(), child.wait_with_output())
             .await
-            .map_err(|_| {
-                refused(format!(
+            .map_err(|_| InferGradeError::Unanswered {
+                seat: self.cli.seat(),
+                detail: format!(
                     "spawn-time attestation of `{}`: `--version` did not answer in {}s",
                     self.command.display(),
-                    PROBE_TIMEOUT.as_secs()
-                ))
+                    crate::probe::deadline().as_secs()
+                ),
             })?
             .map_err(|e| self.execution(format!("version probe wait: {e}")))?;
         if output.stdout.len() > MAX_PROBE_BYTES || output.stderr.len() > MAX_PROBE_BYTES {
@@ -323,6 +337,7 @@ impl OneShotExec {
         let scratch =
             tempfile::tempdir().map_err(|e| self.execution(format!("scratch dir: {e}")))?;
         let (args, stdin_text) = self.argv(&request);
+        self.admit(&self.command.display().to_string())?;
         let mut command = tokio::process::Command::new(&self.command);
         command
             .args(&args)
@@ -813,6 +828,31 @@ mod tests {
         assert!(err.to_string().contains("without any message"), "{err}");
     }
 
+    /// NIK-385 · an attestation that started and did not answer inside the probe deadline is
+    /// unanswered, never a refusal: the clock is paused, so the 30 s pass at once.
+    #[tokio::test(start_paused = true)]
+    async fn an_attestation_past_the_deadline_is_unanswered_not_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "#!/bin/sh\nexec sleep 600\n").expect("script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let err = OneShotExec::with_command(Cli::Claude, &bin)
+            .run(HarnessInferRequest::new("q", "claude-code/default"))
+            .await
+            .expect_err("--version never answers");
+        let InferGradeError::Unanswered { seat, detail } = &err else {
+            panic!("an unanswered attestation, got {err:?}");
+        };
+        assert_eq!(*seat, Cli::Claude.seat());
+        assert_eq!(
+            *detail,
+            format!(
+                "spawn-time attestation of `{}`: `--version` did not answer in 30s",
+                bin.display()
+            )
+        );
+    }
+
     #[tokio::test]
     async fn a_claude_below_the_pin_or_without_its_product_name_never_runs() {
         let (_dir, bin) = scripted("claude", "1.0.9 (Claude Code)", CLAUDE_OK);
@@ -952,5 +992,46 @@ mod tests {
             .collect();
         assert!(joined.iter().any(|a| a == "--available-tools"));
         assert!(joined.iter().any(|a| a == "--no-ask-user"));
+    }
+
+    /// Each one-shot CLI is a host program: with hosts off, a stub under its name that would
+    /// write a marker for any call is refused at the identity probe as a binary that cannot be
+    /// spawned, and never starts. The same stub with hosts started runs.
+    #[tokio::test]
+    async fn a_one_shot_cli_never_starts_while_hosts_are_off() {
+        use nika_error::traits::NikaErrorCode as _;
+        for cli in [Cli::Claude, Cli::Grok, Cli::Copilot] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let bin = dir.path().join(cli.command());
+            std::fs::write(&bin, "#!/bin/sh\n: > \"$0.started\"\n").expect("stub");
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
+            let marker = bin.with_extension("started");
+            let off = OneShotExec {
+                cli,
+                command: bin.clone(),
+                hosts: crate::hosts::Hosts::Off,
+            };
+            let request = || HarnessInferRequest::new("q", "claude-code/default");
+            let error = off.run(request()).await.expect_err("an absent host");
+            let shown = bin.display();
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "infer-grade seat `{}` failed: cannot spawn `{shown} --version`: `{shown}` is \
+                     not started: NIKA_HARNESS_HOSTS=off keeps every host program absent (set \
+                     NIKA_HARNESS_HOSTS=on to start it)",
+                    cli.seat()
+                ),
+                "{cli:?}"
+            );
+            assert_eq!(error.nika_code().to_string(), "NIKA-430");
+            assert!(!marker.exists(), "{cli:?} started under the switch");
+            let started = OneShotExec::with_command(cli, &bin).run(request()).await;
+            assert!(started.is_err(), "the stub prints no version: {started:?}");
+            assert!(
+                marker.exists(),
+                "{cli:?}: the same stub runs when hosts start"
+            );
+        }
     }
 }

@@ -26,6 +26,10 @@ mod harness_confinement;
 mod harness_image_room;
 #[cfg(feature = "access-harness")]
 mod harness_image_values;
+#[cfg(feature = "access-harness")]
+mod harness_retry;
+#[cfg(feature = "access-harness")]
+mod harness_schema_repair;
 mod returns_contract;
 mod route_identity_trace;
 mod seated_receipt;

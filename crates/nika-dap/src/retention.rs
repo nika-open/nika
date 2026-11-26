@@ -11,6 +11,42 @@
 //! and the newest trace of each workflow (the standing resume
 //! candidate).
 //!
+//! A failure outranks a success, so a batch of successful runs never
+//! rotates or budgets the evidence of a failure away:
+//!
+//! - the newest `failed` trace of each workflow is never rotated and
+//!   never removed for the budget; only the age cap ends it;
+//! - rotation keeps a workflow's N finished traces failed ones first,
+//!   newest first within each group;
+//! - the budget removes every other eligible trace, oldest first, before
+//!   it removes a failed one, oldest first;
+//! - a `running` journal whose writer died (its lease is free on this
+//!   host) is a failed run; one whose writer holds its lease, or that this
+//!   host cannot vouch for, is a live run's journal: the budget never
+//!   removes it, and a held lease never ages out.
+//!
+//! A run keeps the child traces it started (spec 14 law 8), so a kept
+//! parent never cites a missing child:
+//!
+//! - a trace another scanned trace cites (a task's `child` row, a skipped
+//!   or recovered task's included, an item row's `child`, a cancelled
+//!   row's included) is a child; following the citations up, cycle-safe,
+//!   reaches its root, a trace nothing scanned cites;
+//! - the caps and the exemptions above judge roots only: a child never
+//!   counts in a workflow's window;
+//! - a child goes only with its root, for the root's reason, and stays
+//!   while its root stays, past the age cap too; a child several roots
+//!   reach goes with the last of them, and a paused child never goes;
+//! - the budget removes a whole run, the root with its children and
+//!   their bytes, at the root's place in its order;
+//! - a child whose parent is gone from disk is an ordinary trace;
+//! - a run in flight cites its children only when its fan-out ends, while
+//!   every `nika run` collects at its start: a root written after a journal
+//!   in the same directory began, whose writer holds its lease, may be one
+//!   of its children, so it is neither rotated nor removed for the budget
+//!   while that run lives, for at most a day after its start. A journal this
+//!   host cannot vouch for, or with no opening frame, holds nothing.
+//!
 //! Collection is FAIL-OPEN end to end: a broken GC must never block a
 //! run. But a SUCCESSFUL collection speaks exactly ONE stderr line —
 //! silent deletion is forbidden (the anti-hidden-magic invariant); the
@@ -24,6 +60,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::liveness::Liveness;
 use crate::store::{self, TraceMeta, TraceState};
 
 /// The `traces.keep` rung, file-side (D-2026-08-11-N5) — discovery
@@ -213,29 +250,46 @@ impl Reason {
 
 /// The pure policy (D1): which traces to collect, and why.
 ///
-/// Exemptions are ABSOLUTE — a `paused` trace and the newest trace of
-/// each workflow are never marked, regardless of any cap. Rotation
-/// applies to finished runs only (completed · failed · cancelled); the
-/// age cap and the budget bound everything eligible (so a torn trace
-/// ages out, while a live run's fresh journal is naturally safe).
+/// The policy judges runs by their roots (see the module doc): a child
+/// trace is marked only with its root, for the root's reason. Exemptions
+/// are ABSOLUTE — a `paused` trace and the newest root of each workflow
+/// are never marked, regardless of any cap. The newest `failed` root of
+/// each workflow is shielded from rotation and the budget, and ages out
+/// like any other root. Rotation applies to finished runs only
+/// (completed · failed · cancelled) and keeps failed ones first. A
+/// running root whose writer died counts as failed. One whose writer
+/// holds its lease, or that this host cannot vouch for (no lease, another
+/// host), is a live journal: the budget never removes it, and a held lease
+/// never ages out, while a torn journal nobody vouches for still does. A
+/// root written after a journal whose writer holds its lease began is
+/// neither rotated nor budgeted while it lives, for at most a day after
+/// that start (it may be a child the run has not cited yet). The budget
+/// reaches a failed root only once nothing else is left to remove.
 #[must_use]
 pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec<(usize, Reason)> {
-    let newest = newest_per_workflow(traces);
+    let runs = Runs::of(traces);
+    let root = |i: usize| runs.is_root(i);
+    let newest = newest_where(traces, root);
     let exempt = |i: usize| traces[i].state == TraceState::Paused || newest.contains(&i);
+    let last_failure = newest_where(traces, |i| root(i) && failed(&traces[i]));
+    let shielded = |i: usize| exempt(i) || last_failure.contains(&i);
+    let held = |i: usize| matches!(traces[i].liveness, Some(Liveness::Alive { .. }));
+    let live_since = live_shield(traces, now);
+    let in_flight = |i: usize| live_since.is_some_and(|since| traces[i].modified > since);
     let mut marked: BTreeMap<usize, Reason> = BTreeMap::new();
 
-    // Rotation — keep the last N finished traces per workflow.
-    for indices in finished_by_workflow(traces).values() {
+    // Rotation — keep the N finished runs per workflow, failed ones first.
+    for indices in finished_by_workflow(traces, root).values() {
         for &i in indices.iter().skip(cfg.keep_last) {
-            if !exempt(i) {
+            if !shielded(i) && !in_flight(i) {
                 marked.insert(i, Reason::Rotated);
             }
         }
     }
 
-    // Age cap — stale traces exit even under N.
+    // Age cap — stale runs exit even under N.
     for (i, trace) in traces.iter().enumerate() {
-        if exempt(i) || marked.contains_key(&i) {
+        if !root(i) || exempt(i) || held(i) || marked.contains_key(&i) {
             continue;
         }
         let age = now.duration_since(trace.modified).unwrap_or_default();
@@ -244,39 +298,135 @@ pub fn plan(traces: &[TraceMeta], cfg: &RetentionConfig, now: SystemTime) -> Vec
         }
     }
 
-    // Budget — remove oldest-first until the project total fits. Exempt
-    // traces count toward usage but are never collected (the budget may
-    // stay unmet by design — fixture: the newest survives even alone
-    // over budget).
+    // Budget — remove whole runs oldest-first until the project total
+    // fits, every other run before a failed one. Exempt runs count toward
+    // usage but are never collected (the budget may stay unmet by design
+    // — fixture: the newest survives even alone over budget).
+    let mut gone: BTreeSet<usize> = (0..traces.len())
+        .filter(|&i| runs.goes(i, traces, &marked).is_some())
+        .collect();
     let mut total: u64 = traces
         .iter()
         .enumerate()
-        .filter(|(i, _)| !marked.contains_key(i))
+        .filter(|(i, _)| !gone.contains(i))
         .map(|(_, t)| t.bytes)
         .sum();
     if total > cfg.budget_bytes {
-        for i in oldest_first(traces) {
+        for i in budget_order(traces, root) {
             if total <= cfg.budget_bytes {
                 break;
             }
-            if exempt(i) || marked.contains_key(&i) {
+            if shielded(i) || live(&traces[i]) || in_flight(i) || marked.contains_key(&i) {
                 continue;
             }
-            total = total.saturating_sub(traces[i].bytes);
             marked.insert(i, Reason::OverBudget);
+            for j in std::iter::once(i).chain(runs.descendants[i].iter().copied()) {
+                if runs.goes(j, traces, &marked).is_some() && gone.insert(j) {
+                    total = total.saturating_sub(traces[j].bytes);
+                }
+            }
         }
     }
 
-    marked.into_iter().collect()
+    (0..traces.len())
+        .filter_map(|i| runs.goes(i, traces, &marked).map(|reason| (i, reason)))
+        .collect()
+}
+
+/// The runs a scan holds (NIK-385): each root with the child traces its
+/// citations reach, at any depth. A trace no scanned trace cites is a
+/// root, and so is a cited one no root reaches (a cycle).
+struct Runs {
+    /// The roots whose citations reach each trace, in index order: empty
+    /// for a root.
+    roots_of: Vec<Vec<usize>>,
+    /// The traces each root's citations reach: empty for a child.
+    descendants: Vec<Vec<usize>>,
+}
+
+impl Runs {
+    fn of(traces: &[TraceMeta]) -> Self {
+        let mut by_name: BTreeMap<&str, usize> = BTreeMap::new();
+        for (i, trace) in traces.iter().enumerate() {
+            by_name.entry(trace.name.as_str()).or_insert(i);
+        }
+        // A cited child that is absent from disk is simply absent.
+        let cites: Vec<Vec<usize>> = traces
+            .iter()
+            .enumerate()
+            .map(|(i, trace)| {
+                trace
+                    .children
+                    .iter()
+                    .filter_map(|name| by_name.get(name.as_str()).copied())
+                    .filter(|&child| child != i)
+                    .collect()
+            })
+            .collect();
+        let mut is_child = vec![false; traces.len()];
+        for &child in cites.iter().flatten() {
+            is_child[child] = true;
+        }
+        let mut runs = Self {
+            roots_of: vec![Vec::new(); traces.len()],
+            descendants: vec![Vec::new(); traces.len()],
+        };
+        for root in (0..traces.len()).filter(|&i| !is_child[i]) {
+            let mut seen = BTreeSet::from([root]);
+            let mut stack = cites[root].clone();
+            while let Some(i) = stack.pop() {
+                if seen.insert(i) {
+                    runs.roots_of[i].push(root);
+                    runs.descendants[root].push(i);
+                    stack.extend(&cites[i]);
+                }
+            }
+        }
+        runs
+    }
+
+    fn is_root(&self, i: usize) -> bool {
+        self.roots_of[i].is_empty()
+    }
+
+    /// Why trace `i` goes once the roots in `marked` go: a root by its own
+    /// mark, a child once every root that reaches it is marked, for the
+    /// first one's reason. A paused child never goes.
+    fn goes(
+        &self,
+        i: usize,
+        traces: &[TraceMeta],
+        marked: &BTreeMap<usize, Reason>,
+    ) -> Option<Reason> {
+        if self.is_root(i) {
+            return marked.get(&i).copied();
+        }
+        if traces[i].state == TraceState::Paused {
+            return None;
+        }
+        let reasons: Option<Vec<Reason>> = self.roots_of[i]
+            .iter()
+            .map(|root| marked.get(root).copied())
+            .collect();
+        reasons?.first().copied()
+    }
 }
 
 /// The newest trace of each workflow (ANY state) — the standing resume
 /// candidate. Tie-break by name so the pick is deterministic. Shared
-/// with `trace ls` (the ★ marker paints exactly this set).
+/// with `trace ls` (the ★ marker paints exactly this set). The policy's
+/// own exemption picks among roots only: a newest child trace goes with
+/// the run that cites it (NIK-385).
 #[must_use]
 pub fn newest_per_workflow(traces: &[TraceMeta]) -> BTreeSet<usize> {
+    newest_where(traces, |_| true)
+}
+
+/// The newest trace of each workflow among the indices `keep` admits, by
+/// the same deterministic pick as [`newest_per_workflow`].
+fn newest_where(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> BTreeSet<usize> {
     let mut newest: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, trace) in traces.iter().enumerate() {
+    for (i, trace) in traces.iter().enumerate().filter(|&(i, _)| keep(i)) {
         let slot = newest.entry(trace.workflow.as_str()).or_insert(i);
         let held = &traces[*slot];
         if (trace.modified, &trace.name) > (held.modified, &held.name) {
@@ -286,27 +436,76 @@ pub fn newest_per_workflow(traces: &[TraceMeta]) -> BTreeSet<usize> {
     newest.into_values().collect()
 }
 
-/// Finished traces per workflow, newest first (the rotation windows).
-fn finished_by_workflow(traces: &[TraceMeta]) -> BTreeMap<&str, Vec<usize>> {
+/// How long a live run shields what was written after it began: a writer that holds its lease
+/// for longer no longer holds back the collection of what it wrote (NIK-385).
+const LIVE_SHIELD: Duration = Duration::from_secs(24 * 3_600);
+
+/// How far before a live run's opening frame its shield starts: a file time a clock step back
+/// put just before that frame still marks a child the run wrote.
+const CLOCK_MARGIN: Duration = Duration::from_secs(60);
+
+/// When the shield of the runs in flight starts: [`CLOCK_MARGIN`] before the earliest start of
+/// a run whose writer holds its lease, begun less than [`LIVE_SHIELD`] ago (a start after `now`,
+/// a clock stepped back, is a run that just began). A live run cites the children it ran only
+/// once its fan-out ends, so every root written since may be one of them (NIK-385). A journal
+/// this host cannot vouch for (no lease, an older engine, another host, a system without leases)
+/// shields nothing.
+fn live_shield(traces: &[TraceMeta], now: SystemTime) -> Option<SystemTime> {
+    (traces.iter())
+        .filter(|t| t.state == TraceState::Running)
+        .filter(|t| matches!(t.liveness, Some(Liveness::Alive { .. })))
+        .filter_map(|t| t.started)
+        .filter(|&started| {
+            now.duration_since(started)
+                .map_or(true, |age| age < LIVE_SHIELD)
+        })
+        .min()
+        .map(|started| started.checked_sub(CLOCK_MARGIN).unwrap_or(started))
+}
+
+/// Whether a trace is a failure, the one state the policy keeps first: a
+/// failed run, or a running journal whose writer died.
+fn failed(trace: &TraceMeta) -> bool {
+    trace.state == TraceState::Failed
+        || (trace.state == TraceState::Running
+            && matches!(trace.liveness, Some(Liveness::Dead { .. })))
+}
+
+/// Whether a trace is a live run's journal: running, its writer holding
+/// its lease or one this host cannot see (no lease, another host). The
+/// budget never removes it.
+fn live(trace: &TraceMeta) -> bool {
+    trace.state == TraceState::Running && !failed(trace)
+}
+
+/// Finished traces per workflow among the indices `keep` admits, failed
+/// ones first, newest first within each group (the rotation windows).
+fn finished_by_workflow(
+    traces: &[TraceMeta],
+    keep: impl Fn(usize) -> bool,
+) -> BTreeMap<&str, Vec<usize>> {
     let mut by_wf: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (i, trace) in traces.iter().enumerate() {
-        if trace.state.is_finished() {
+        if keep(i) && trace.state.is_finished() {
             by_wf.entry(trace.workflow.as_str()).or_default().push(i);
         }
     }
     for indices in by_wf.values_mut() {
         indices.sort_by(|&a, &b| {
-            (traces[b].modified, &traces[b].name).cmp(&(traces[a].modified, &traces[a].name))
+            let (a, b) = (&traces[a], &traces[b]);
+            (!failed(a), b.modified, &b.name).cmp(&(!failed(b), a.modified, &a.name))
         });
     }
     by_wf
 }
 
-/// Every index, oldest first (the budget's removal order).
-fn oldest_first(traces: &[TraceMeta]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..traces.len()).collect();
+/// Every index `keep` admits, oldest first, every other trace before a
+/// failed one (the budget's removal order).
+fn budget_order(traces: &[TraceMeta], keep: impl Fn(usize) -> bool) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..traces.len()).filter(|&i| keep(i)).collect();
     order.sort_by(|&a, &b| {
-        (traces[a].modified, &traces[a].name).cmp(&(traces[b].modified, &traces[b].name))
+        let (a, b) = (&traces[a], &traces[b]);
+        (failed(a), a.modified, &a.name).cmp(&(failed(b), b.modified, &b.name))
     });
     order
 }
@@ -354,14 +553,25 @@ impl GcReport {
 /// at least one trace — the caller MUST speak its line.
 ///
 /// Fail-open per file: a removal that errors (a vanished file · a
-/// permission wall) leaves that trace counted as kept and continues —
-/// never an error, never a veto on the run.
+/// permission wall) leaves that trace counted as kept, with the children
+/// it cites, and continues — never an error, never a veto on the run.
 #[must_use = "a successful collection MUST speak its line (D2) — dropping the report is silent deletion"]
 pub fn collect(dir: &Path, cfg: &RetentionConfig, now: SystemTime) -> Option<GcReport> {
     let traces = store::scan(dir);
-    let marked = plan(&traces, cfg, now);
+    let runs = Runs::of(&traces);
+    // Roots first: a child goes only once every root that cites it went,
+    // so a root whose removal failed keeps its children.
+    let (roots, children): (Vec<_>, Vec<_>) = plan(&traces, cfg, now)
+        .into_iter()
+        .partition(|&(i, _)| runs.is_root(i));
     let mut removed: BTreeMap<usize, Reason> = BTreeMap::new();
-    for (i, reason) in marked {
+    for (i, reason) in roots.into_iter().chain(children) {
+        if runs.roots_of[i]
+            .iter()
+            .any(|root| !removed.contains_key(root))
+        {
+            continue;
+        }
         if std::fs::remove_file(&traces[i].path).is_ok() {
             crate::liveness::remove_lease(&traces[i].path);
             crate::spill::remove_values(&traces[i].path);
@@ -438,6 +648,8 @@ pub fn prune_claims(home: &Path, cfg: &RetentionConfig, now: SystemTime) -> Opti
 
 #[cfg(test)]
 mod tests {
+    mod runs;
+
     use super::*;
     use crate::store::tests::{ndjson, run_events, stage_trace, temp_store};
     use nika_event::EventKind;
@@ -703,6 +915,122 @@ mod tests {
         );
     }
 
+    /// Ten successful runs after a failure keep the failure: on disk,
+    /// through the real scan, the eleventh-newest journal is the failed
+    /// one and it stays, while the one success it outranks rotates.
+    #[test]
+    fn ten_successes_after_a_failure_keep_the_failure() {
+        let dir = temp_store("failure-kept");
+        let ok = ndjson(&run_events("veille", Some(EventKind::WorkflowCompleted)));
+        let failed = ndjson(&run_events("veille", Some(EventKind::WorkflowFailed)));
+        // The oldest success, then the failure, then ten successes.
+        stage_trace(&dir, "run-11.ndjson", &ok, Duration::from_secs(11 * 3_600));
+        stage_trace(
+            &dir,
+            "run-10.ndjson",
+            &failed,
+            Duration::from_secs(10 * 3_600),
+        );
+        for i in 0..10u64 {
+            let name = format!("run-{i:02}.ndjson");
+            stage_trace(&dir, &name, &ok, Duration::from_secs(i * 3_600));
+        }
+        let report = collect(&dir, &RetentionConfig::default(), SystemTime::now())
+            .expect("an over-N history collects");
+        let kept = 9 * ok.len() as u64 + failed.len() as u64;
+        assert_eq!(
+            report,
+            GcReport::new(2, 0, 0, 10, kept),
+            "the failure and the nine newest successes are the ten kept"
+        );
+        assert!(dir.join("run-10.ndjson").exists(), "the failure survives");
+        assert!(
+            !dir.join("run-11.ndjson").exists(),
+            "the oldest success rotates"
+        );
+        assert!(
+            !dir.join("run-09.ndjson").exists(),
+            "the oldest success inside the window yields its place to the failure"
+        );
+        for i in 0..9u64 {
+            assert!(dir.join(format!("run-{i:02}.ndjson")).exists(), "run-{i}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Rotation keeps failed traces before successes, newest first, and
+    /// the newest failure survives a window that holds no room at all.
+    #[test]
+    fn rotation_keeps_failures_first_and_the_newest_failure_always() {
+        let fail = TraceState::Failed;
+        let ok = TraceState::Succeeded;
+        let traces = vec![
+            meta("ok-new.ndjson", "w", ok, 10, 3_600),
+            meta("fail-new.ndjson", "w", fail, 10, 2 * 3_600),
+            meta("ok-mid.ndjson", "w", ok, 10, 3 * 3_600),
+            meta("fail-old.ndjson", "w", fail, 10, 4 * 3_600),
+            meta("ok-old.ndjson", "w", ok, 10, 5 * 3_600),
+        ];
+        let keep = |keep_last| RetentionConfig {
+            keep_last,
+            ..RetentionConfig::default()
+        };
+        assert_eq!(
+            plan(&traces, &keep(2), now()),
+            vec![(2, Reason::Rotated), (4, Reason::Rotated)],
+            "the two failures fill the window; the newest trace is exempt"
+        );
+        assert_eq!(
+            plan(&traces, &keep(4), now()),
+            vec![(4, Reason::Rotated)],
+            "two failures, then the two newest successes"
+        );
+        assert_eq!(
+            plan(&traces, &keep(0), now()),
+            vec![
+                (2, Reason::Rotated),
+                (3, Reason::Rotated),
+                (4, Reason::Rotated)
+            ],
+            "the newest trace and the newest failure survive keep-0"
+        );
+    }
+
+    /// A budget that forces a deletion removes the successes first, even
+    /// a younger one, and reaches a failed trace only after them; the
+    /// newest failure is never removed for the budget.
+    #[test]
+    fn the_budget_removes_successes_before_failures() {
+        let cfg = RetentionConfig::new(10, Duration::from_secs(365 * DAY), 250);
+        let fail = TraceState::Failed;
+        let ok = TraceState::Succeeded;
+        let traces = vec![
+            meta("ok-new.ndjson", "w", ok, 100, DAY),
+            meta("fail-new.ndjson", "w", fail, 100, 2 * DAY),
+            meta("ok-mid.ndjson", "w", ok, 100, 3 * DAY),
+            meta("fail-old.ndjson", "w", fail, 100, 9 * DAY),
+        ];
+        // 400 total → the success at 3d goes before the failure at 9d →
+        // 300 → the older failure → 200 ≤ 250. The newest trace and the
+        // newest failure stay.
+        assert_eq!(
+            plan(&traces, &cfg, now()),
+            vec![(2, Reason::OverBudget), (3, Reason::OverBudget)]
+        );
+        let tight = RetentionConfig::new(10, Duration::from_secs(365 * DAY), 50);
+        assert_eq!(
+            plan(&traces, &tight, now()),
+            vec![(2, Reason::OverBudget), (3, Reason::OverBudget)],
+            "even alone over budget, the newest failure stays beside the newest trace"
+        );
+        let one_room = RetentionConfig::new(10, Duration::from_secs(365 * DAY), 350);
+        assert_eq!(
+            plan(&traces, &one_room, now()),
+            vec![(2, Reason::OverBudget)],
+            "one removal is a success, never the older failure"
+        );
+    }
+
     /// Rotation windows are PER WORKFLOW — eleven runs of `a` never
     /// evict `b`'s only history.
     #[test]
@@ -752,6 +1080,47 @@ mod tests {
         assert!(
             marked.contains(&(2, Reason::Aged)),
             "a torn trace ages out: {marked:?}"
+        );
+    }
+
+    /// NIK-385 review · the budget never removes a live run's journal: a running root whose
+    /// writer holds its lease, or whose writer this host cannot see, stays however tight the
+    /// budget. One whose writer died is a failed run: it goes after every success, and the
+    /// newest failure it is stays. A writer that holds its lease is never aged out either.
+    #[test]
+    fn the_budget_keeps_a_live_journal_and_counts_a_dead_one_as_failed() {
+        let year = Duration::from_secs(365 * DAY);
+        let running = TraceState::Running;
+        let traces = vec![
+            meta("ok-new.ndjson", "w", TraceState::Succeeded, 100, DAY),
+            meta("alive.ndjson", "w", running, 100, 2 * DAY)
+                .with_liveness(Liveness::Alive { pid: 7 }),
+            meta("unknown.ndjson", "w", running, 100, 3 * DAY).with_liveness(Liveness::Unknown),
+            meta("dead.ndjson", "w", running, 100, 9 * DAY)
+                .with_liveness(Liveness::Dead { pid: 8 }),
+            meta("ok-old.ndjson", "w", TraceState::Succeeded, 100, 8 * DAY),
+            meta("fail.ndjson", "w", TraceState::Failed, 100, 10 * DAY),
+        ];
+        assert_eq!(
+            plan(&traces, &RetentionConfig::new(10, year, 550), now()),
+            vec![(4, Reason::OverBudget)],
+            "the success goes first, never the dead journal before it"
+        );
+        assert_eq!(
+            plan(&traces, &RetentionConfig::new(10, year, 1), now()),
+            vec![(4, Reason::OverBudget), (5, Reason::OverBudget)],
+            "the live journals stay, and the dead one is the newest failure"
+        );
+        let held = vec![
+            meta("ok-new.ndjson", "w", TraceState::Succeeded, 100, DAY),
+            meta("alive.ndjson", "w", running, 100, 400 * DAY)
+                .with_liveness(Liveness::Alive { pid: 7 }),
+            meta("torn.ndjson", "w", running, 100, 400 * DAY).with_liveness(Liveness::Unknown),
+        ];
+        assert_eq!(
+            plan(&held, &RetentionConfig::new(10, year, u64::MAX), now()),
+            vec![(2, Reason::Aged)],
+            "a held lease never ages out; a journal nobody can vouch for does"
         );
     }
 

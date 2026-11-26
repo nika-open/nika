@@ -29,7 +29,7 @@
 //! read-back configuration is not an attestation of the answer's author.
 //!
 //! ```text
-//! NIKA_LIVE_ONE_SHOT=claude-code NIKA_LIVE_PREFIX=anthropic \
+//! NIKA_HARNESS_HOSTS=on NIKA_LIVE_ONE_SHOT=claude-code NIKA_LIVE_PREFIX=anthropic \
 //!   NIKA_LIVE_MODEL=anthropic/<offered> NIKA_LIVE_EFFORT=<offered> \
 //!   cargo test -p nika-harness --locked live_acp_one_shot -- --ignored --nocapture
 //! ```
@@ -118,7 +118,7 @@ fn offered(error: &HarnessError) -> Vec<String> {
 /// refused there (its row records the refusal) while it keeps `apply_patch`.
 ///
 /// ```text
-/// NIKA_LIVE_ONE_SHOT=claude-code NIKA_LIVE_MODEL=anthropic/<offered> \
+/// NIKA_HARNESS_HOSTS=on NIKA_LIVE_ONE_SHOT=claude-code NIKA_LIVE_MODEL=anthropic/<offered> \
 ///   cargo test -p nika-harness --locked live_acp_authoring -- --ignored --nocapture
 /// ```
 #[tokio::test]

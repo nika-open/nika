@@ -7,7 +7,7 @@
 //! the whole chain — declaration, seat, verb bridge, kernel seam,
 //! hand-rolled client — back to the child's own ears.
 //!
-//! Three laws, three dialogues:
+//! Three laws, four dialogues:
 //!
 //! 1. inside the workflow's `permits:` grants, the bridge answers
 //!    `allow_once` ITSELF (never `allow_always` · A-5) and the child
@@ -17,11 +17,15 @@
 //!    VERBATIM) and the child reads `cancelled` — fail-closed, zero
 //!    action before a human speaks;
 //! 3. the operator's bound `--answer` verdict decides the re-asked
-//!    question (the resumed run's shape), witnessed as operator-granted.
+//!    question (the resumed run's shape), both ways: `true` is
+//!    witnessed as operator-granted and the child reads its
+//!    `allow_once`, `false` as operator-denied and the child reads its
+//!    own `reject_once`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use nika_harness::seat_from_lookup;
@@ -96,8 +100,15 @@ fn seated_verb(
     >,
     Guard,
 ) {
-    let dir =
-        std::env::temp_dir().join(format!("nika-gate-e2e-{}-{}", std::process::id(), program));
+    // One folder per seated verb: the cases run on parallel threads of one process, and a
+    // folder shared by program name would let one case's `Guard` delete another's script.
+    static SEATED: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "nika-gate-e2e-{}-{}-{}",
+        std::process::id(),
+        program,
+        SEATED.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&dir).expect("tmpdir");
     let script = dir.join("asking_harness.py");
     std::fs::write(&script, ASKING_AGENT).expect("script");
@@ -246,5 +257,45 @@ async fn the_operators_bound_answer_grants_the_reask_once() {
             if why.contains("operator granted")
         )),
         "the grant is witnessed AS the operator's: {events:?}"
+    );
+}
+
+/// 3 · the operator's bound verdict decides both ways: `--answer
+/// <task>=false` refuses the re-asked action. The child reads its own
+/// `reject_once` option selected (a refusal the agent can act on, not a
+/// dropped ask), goes on to end its turn, and the refusal is witnessed
+/// as the operator's, with zero allow.
+#[tokio::test]
+async fn the_operators_bound_refusal_selects_the_agents_reject_once() {
+    let (verb, _guard) = seated_verb("rm");
+    let mut input = AgentInput::new("clean everything");
+    input.gate_answer = Some(serde_json::Value::Bool(false));
+    let observer = VecObserver::default();
+    let out = verb
+        .run_observed(input, &observer)
+        .await
+        .expect("an operator-refused gate still completes the turn");
+    let nika_verb_agent::AgentValue::Text(text) = &out.output else {
+        panic!("text output");
+    };
+    assert_eq!(text, "the engine said: selected:opt-reject");
+    let events = observer.0.lock().expect("lock");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AgentEvent::PermissionJudged { decision: "deny", why, .. }
+            if why.contains("operator denied")
+        )),
+        "the refusal is witnessed AS the operator's: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            AgentEvent::PermissionJudged {
+                decision: "allow",
+                ..
+            }
+        )),
+        "a refused ask is never allowed: {events:?}"
     );
 }

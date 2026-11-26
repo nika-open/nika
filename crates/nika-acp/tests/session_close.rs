@@ -27,7 +27,9 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Agent, ByteStreams, Client};
 use futures_core::Stream as _;
-use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
+use nika_kernel::ai::harness::{
+    HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest, HarnessStopReason,
+};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, DuplexStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -248,7 +250,9 @@ async fn the_engine_sends_no_close_to_an_agent_that_advertises_it() {
         seen,
         vec![
             Seen::Chunk(CHUNK.to_owned()),
-            Seen::Completed(Box::new(HarnessOutcome::new(CHUNK))),
+            Seen::Completed(Box::new(
+                HarnessOutcome::new(CHUNK).with_stop_reason(HarnessStopReason::EndTurn),
+            )),
         ]
     );
     assert_eq!(log.closes(), Vec::<SessionId>::new());

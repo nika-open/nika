@@ -29,7 +29,9 @@ use agent_client_protocol::v1::schema::{
 use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
 use nika_harness::wire;
-use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
+use nika_kernel::ai::harness::{
+    HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest, HarnessStopReason,
+};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, DuplexStream};
 use tokio::sync::Notify;
@@ -261,17 +263,17 @@ fn the_engine_and_the_sdk_name_cancel_alike() {
     );
 }
 
-// documents today's behaviour: the SDK parses the engine's own `session/cancel` frame for the
-// engine's session, and its agent then stops with `cancelled`. The cancel is relayed by this
-// test, not sent by `drive`, so the engine-side reading of that stop is the same as in the
-// `cancelled` case of `turn_stop.rs`: a completed turn whose answer is the partial text.
+// The SDK parses the engine's own `session/cancel` frame for the engine's session, and its agent
+// then stops with `cancelled`. The engine names that stop on the outcome, as in the `cancelled`
+// case of `turn_stop.rs`: plain `drive` hands over the partial text with the stop, and judging it
+// is its caller's part (the agent verb fails such a task).
+// documents today's behaviour: the cancel is relayed by this test, not sent by `drive`.
 // Expected to change: the engine's conversation driver already sends this cancel on Stop
 // (`Driver::cancel` in `crates/nika-harness/src/client/conversation.rs`), and `Turn::end` (same
 // file) ends the turn with `TurnEvent::Ended`: its `end` is the `TurnEnd` value read from the
 // agent's stop, `TurnEnd::Cancelled` here, and the record written beside it carries the word
 // "cancelled" under `end` and the sent cancel as `cancel_sent` under `stop`. This case is to
-// judge that driver instead of the relay once it can run over pipes, and the reading of the
-// stop changes with `turn_stop.rs`.
+// judge that driver instead of the relay once it can run over pipes.
 #[tokio::test]
 async fn a_cancelled_turn_completes_with_the_partial_text() {
     let (engine_out, relay_in) = tokio::io::duplex(64 * 1024);
@@ -305,7 +307,9 @@ async fn a_cancelled_turn_completes_with_the_partial_text() {
         seen,
         vec![
             Seen::Chunk(PARTIAL.to_owned()),
-            Seen::Completed(Box::new(HarnessOutcome::new(PARTIAL))),
+            Seen::Completed(Box::new(
+                HarnessOutcome::new(PARTIAL).with_stop_reason(HarnessStopReason::Cancelled),
+            )),
         ]
     );
 }

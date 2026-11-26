@@ -8,7 +8,7 @@
 //! A tap between the agent and the engine keeps every frame the agent wrote. The first case
 //! asserts both reports in their exact wire shape, and that the engine read that same turn to
 //! its end: the chunk, then a completed outcome carrying the turn's text. The second case pins
-//! what the engine kept of the two reports.
+//! what the engine keeps of the two reports, and where.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -22,7 +22,10 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
-use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
+use nika_kernel::ai::harness::{
+    AdapterReport, HarnessContext, HarnessCostEstimate, HarnessEvent, HarnessEventStream,
+    HarnessOutcome, HarnessRequest, HarnessStopReason, TokenUsage,
+};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, DuplexStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -48,7 +51,7 @@ fn usage_update() -> UsageUpdate {
 
 /// The usage the agent reports with the prompt result.
 fn turn_usage() -> Usage {
-    Usage::new(1_500, 1_000, 500)
+    Usage::new(1_840, 1_000, 500)
         .thought_tokens(120)
         .cached_read_tokens(300)
         .cached_write_tokens(40)
@@ -176,7 +179,7 @@ async fn both_usage_reports_reach_the_engine_and_the_turn_completes() {
     let closed = json!({
         "stopReason": "end_turn",
         "usage": {
-            "totalTokens": 1_500,
+            "totalTokens": 1_840,
             "inputTokens": 1_000,
             "outputTokens": 500,
             "thoughtTokens": 120,
@@ -218,28 +221,39 @@ async fn both_usage_reports_reach_the_engine_and_the_turn_completes() {
     assert_eq!(outcome.output, CHUNK);
 }
 
-// documents today's behaviour: the engine keeps neither usage report. The `usage_update`
-// yields no event and the outcome's `usage` stays empty. Expected to change: the reader of
-// these two shapes must keep them apart. The schema documents the prompt result's `usage` as
-// "Token usage for this turn", although the fields of its `Usage` read "Sum of all token types
-// across session" and "Total input tokens across all turns". The `usage_update` is a "Context
-// window and cost update for a session": `used` is "Tokens currently in context", `size` the
-// "Total context window size in tokens", and `cost` a "Cumulative session cost". The change
-// has to decide whether the token counts are this turn's or the session's, and keep the
-// context window and the cumulative cost apart from this turn's spend.
+// The engine keeps both reports, and keeps them apart. The schema documents the prompt result's
+// `usage` as "Token usage for this turn": its counts become the outcome's `usage`, named as
+// coming from the prompt result, in the engine's convention, where the input counts its cache
+// subsets (ACP counts the input without them, so the 300 cache reads and the 40 cache writes
+// are added back to the 1,000) and the output its reasoning subset. The `usage_update` is a
+// "Context window and cost update for a session": it yields no event, and its context
+// occupancy and its cumulative cost ride the outcome in fields of their own, the cost as the
+// adapter's estimate for the session and never as this turn's spend.
 #[tokio::test]
-async fn the_engine_keeps_neither_usage_report() {
+async fn the_engine_keeps_both_usage_reports_apart() {
     let (seen, _) = metered_turn().await;
+
+    let mut tokens = TokenUsage::new(1_340, 500);
+    tokens.cache_read_tokens = Some(300);
+    tokens.cache_write_tokens = Some(40);
+    tokens.reasoning_tokens = Some(120);
+    tokens.total_tokens = Some(1_840);
+    let cost = HarnessCostEstimate::new(0.0123, "USD");
+    assert!(
+        cost.is_some(),
+        "an amount of zero or more in a currency code is kept"
+    );
+    let mut kept = HarnessOutcome::new(CHUNK).with_stop_reason(HarnessStopReason::EndTurn);
+    kept.usage = Some(tokens);
+    kept.usage_source = Some(AdapterReport::PromptResult);
+    kept.context = Some(HarnessContext::new(1_200, 200_000));
+    kept.cost_estimate = cost;
 
     assert_eq!(
         seen,
         vec![
             Seen::Chunk(CHUNK.to_owned()),
-            Seen::Completed(Box::new(HarnessOutcome::new(CHUNK))),
+            Seen::Completed(Box::new(kept)),
         ]
     );
-    let Some(Seen::Completed(outcome)) = seen.last() else {
-        panic!("the turn completes: {seen:?}");
-    };
-    assert_eq!(outcome.usage, None, "no usage reaches the outcome today");
 }

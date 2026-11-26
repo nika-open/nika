@@ -192,7 +192,9 @@ impl Spelling {
 ///   both carry a version that differs (`claude-opus-4` is not `claude-opus-4-5-20251101`).
 ///
 /// A confirmed spelling without a version is named by any version of its line, and a date only
-/// one side carries is no difference (`claude-opus-4` is `claude-opus-4-20250514`). Any other
+/// one side carries is no difference (`claude-opus-4` is `claude-opus-4-20250514`). Versions
+/// compare without their trailing zero parts, so the `-0` alias names its release
+/// (`claude-opus-4-0` is `claude-opus-4-20250514`, not `claude-opus-4-1-20250805`). Any other
 /// pair is `Unplaced`: an alias the rule cannot read (`opusplan`), an added name word
 /// (`gpt-5.5-codex` against `gpt-5.5`), a reported id without the version the confirmed one
 /// states, or `unrecognized`.
@@ -216,9 +218,19 @@ pub(super) fn verdict(confirmed: &str, reported: &str) -> Verdict {
     match (asked.version.is_empty(), said.version.is_empty()) {
         (true, _) => Verdict::Same,
         (false, true) => Verdict::Unplaced,
-        (false, false) if asked.version == said.version => Verdict::Same,
+        (false, false) if significant(&asked.version) == significant(&said.version) => {
+            Verdict::Same
+        }
         (false, false) => Verdict::Different,
     }
+}
+
+/// `version` without its trailing zero parts: `4.0` is `4`, `4.1` stays `4.1`.
+fn significant(mut version: &[u32]) -> &[u32] {
+    while let Some((&0, rest)) = version.split_last() {
+        version = rest;
+    }
+    version
 }
 
 /// The prefix of a model move in `HarnessSelection::changed_mid_turn`.

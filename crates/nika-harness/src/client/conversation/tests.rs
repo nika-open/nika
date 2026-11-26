@@ -684,11 +684,6 @@ fn told(beats: &[TurnEvent]) -> Told<'_> {
     (tools, decided)
 }
 
-/// codex-acp 1.13.1 never names the MCP call it asks about: it announces the call with the
-/// server and tool Codex routed it to, then asks by the call's id alone (or in Codex's words).
-/// Nika's own `candidate_write` is allowed once either way; an id never announced or no longer
-/// open, a tool Nika does not offer and a command are rejected; each decision is told to the
-/// turn and recorded.
 /// codex-acp failing a prompt on an exhausted quota: the turn fails with the final refusal it
 /// is, in the adapter's own words beside the JSON-RPC code.
 #[tokio::test]
@@ -724,6 +719,11 @@ async fn a_quota_failure_ends_the_turn_in_the_adapters_words() {
     let _ = script.await.expect("the script ends");
 }
 
+/// codex-acp 1.13.1 never names the MCP call it asks about: it announces the call with the
+/// server and tool Codex routed it to, then asks by the call's id alone (or in Codex's words).
+/// Nika's own `candidate_write` is allowed once either way; an id never announced or no longer
+/// open, a tool Nika does not offer and a command are rejected; each decision is told to the
+/// turn and recorded.
 #[tokio::test]
 async fn codex_acp_asks_by_call_id_and_nikas_own_tool_is_allowed_once() {
     let (agent, read, write) = pipe();

@@ -245,6 +245,19 @@ fn a_chunk_without_an_id_stays_in_the_current_message() {
     );
 }
 
+/// A chunk without an id inside a message keeps that message's id: the same id after it
+/// continues the message, it does not start another.
+#[test]
+fn the_same_id_after_a_chunk_without_one_continues_its_message() {
+    let (ledger, text) = ledgered(&[
+        ("Reading the file. ", Some("msg_01")),
+        ("{\"a\": ", Some("msg_02")),
+        ("1", None),
+        ("}", Some("msg_02")),
+    ]);
+    assert_eq!(ledger.last_message(&text).as_deref(), Some("{\"a\": 1}"));
+}
+
 /// A chunk with an id after chunks without one starts a message.
 #[test]
 fn a_chunk_with_an_id_after_chunks_without_one_starts_a_message() {
@@ -528,6 +541,8 @@ fn only_a_demonstrated_difference_is_another_model() {
         ("haiku", "claude-3-5-haiku-20241022", Same),
         ("claude-opus-4-5", "claude-opus-4-5-20251101", Same),
         ("claude-opus-4", "claude-opus-4-20250514", Same),
+        ("claude-sonnet-4-0", "claude-sonnet-4-20250514", Same),
+        ("claude-opus-4-0", "claude-opus-4-20250514", Same),
         ("anthropic/claude-opus-4-5", "claude-opus-4-5", Same),
         ("gpt-5.5", "gpt-5.5", Same),
         ("opus", "claude-sonnet-4-5-20250929", Different),
@@ -539,10 +554,18 @@ fn only_a_demonstrated_difference_is_another_model() {
             Different,
         ),
         ("gpt-5.5", "gpt-5.4", Different),
+        ("claude-opus-4-0", "claude-opus-4-1-20250805", Different),
         ("opus", "claude-opus-4-5-preview", Unplaced),
         ("opusplan", "claude-sonnet-4-5-20250929", Unplaced),
         ("default", "claude-opus-4-5-20251101", Unplaced),
         ("gpt-5.5", "gpt-5.5-codex", Unplaced),
+        // A revision before the date (Vertex) is a name word, so the names differ; only a
+        // revision after the date (Bedrock's `-v1:0`) is set aside.
+        (
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-sonnet-v2@20241022",
+            Unplaced,
+        ),
         ("claude-opus-4-5", "claude-opus", Unplaced),
         ("gpt-4", "gpt-4-0613", Unplaced),
         ("opus", "unrecognized", Unplaced),

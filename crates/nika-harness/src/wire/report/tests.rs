@@ -108,6 +108,31 @@ fn a_usage_update_gives_context_cost_and_the_reported_model() {
     assert_eq!(usage_report(&chunk), None, "only its own kind");
 }
 
+/// A reported cost is kept only as a finite amount of zero or more, with no upper bound; a
+/// negative, infinite or undefined amount (which JSON cannot carry, but a value can) is unknown.
+#[test]
+fn a_cost_is_a_finite_amount_of_zero_or_more() {
+    for amount in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -1.0,
+        -f64::MIN_POSITIVE,
+    ] {
+        assert_eq!(estimate(amount, "USD"), None, "{amount}");
+    }
+    for amount in [0.0, 1e-12, 0.0412, f64::MAX] {
+        assert_eq!(
+            estimate(amount, "USD"),
+            Some(HarnessCostEstimate::new(amount, "USD")),
+            "{amount}"
+        );
+    }
+    let zero = estimate(-0.0, "USD").expect("a negative zero is zero");
+    assert!(zero.amount.is_sign_positive(), "the record never reads -0");
+    assert_eq!(estimate(0.1, "usd"), None, "the currency keeps its shape");
+}
+
 /// A cost that is no amount in a currency (three capital letters) is no estimate; a reported
 /// model that is no plain id is named `unrecognized`, never echoed.
 #[test]

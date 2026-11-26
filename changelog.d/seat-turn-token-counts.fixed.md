@@ -4,7 +4,7 @@
   `tokens_out`, with `usage_source: adapter_prompt_result`), weighed like a
   native turn's, so `max_tokens_total` refuses a repair when the first turn
   reached or passed it, with NIKA-AGENT-002; counts too large to add up, in
-  one turn or across a turn and its repair, are unknown. A seat that reports
-  no counts (Codex sends `usage: null`) leaves `tokens` unknown instead of
-  0, says `usage_source: unreported`, and marks a declared ceiling
-  `token_ceiling: unjudged`.
+  one turn or across a turn and its repair, are unknown. An answer with no
+  counts (Codex sends `usage: null` on a turn that failed) leaves `tokens`
+  unknown instead of 0, says `usage_source: unreported`, and marks a
+  declared ceiling `token_ceiling: unjudged`.

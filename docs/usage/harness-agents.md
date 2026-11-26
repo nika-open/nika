@@ -177,9 +177,9 @@ backend that reports no stop reasons at all completes the task as before.
 
 The task records what the application reported about the turn. The token
 counts of its answer to the prompt ride as `tokens`, `tokens_in` and
-`tokens_out`, with `usage_source: adapter_prompt_result`; an application
-that reports none (Codex answers `usage: null`) leaves `tokens` unknown and
-says `usage_source: unreported`, never 0. The context occupancy of its latest
+`tokens_out`, with `usage_source: adapter_prompt_result`; an answer that
+carries none (Codex sends `usage: null` on a turn that failed) leaves
+`tokens` unknown and says `usage_source: unreported`, never 0. The context occupancy of its latest
 `usage_update` rides as `context_used` and `context_size`. Claude's session
 cost rides as `cost_estimate`: the application's own estimate, cumulative for
 the session, with its currency and `billed: false`. Nika keeps a cost only

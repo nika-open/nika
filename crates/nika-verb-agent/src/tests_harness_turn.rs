@@ -294,9 +294,9 @@ async fn the_recorded_claude_counts_give_the_exact_total_with_provenance() {
     assert_eq!(out.tools_cost_usd, None, "an estimate is never spend");
 }
 
-/// A seat that reported no counts (codex-acp's `usage: null`) leaves the tokens unknown, not
-/// counted, and a declared ceiling unjudged; across a repair, one unknown turn leaves the
-/// session's tokens unknown.
+/// A seat that reported no counts (codex-acp's `usage: null` on a failed turn) leaves the
+/// tokens unknown, not counted, and a declared ceiling unjudged; across a repair, one unknown
+/// turn leaves the session's tokens unknown.
 #[tokio::test]
 async fn no_counts_leave_the_tokens_and_the_ceiling_unknown() {
     let (verb, prompts) = seated(vec![

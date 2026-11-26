@@ -5,7 +5,7 @@
 // this machine is printed (the trace is named relative to the app).
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Nika, NikaOperationError, isNikaRunSucceeded } from '@supernovae-st/nika';
+import { Nika, NikaOperationError, isNikaRunSucceeded } from '@nika-open/nika';
 
 const nika = new Nika({ cwd: process.cwd() });
 const traces = async () => (await fs.readdir('.nika/traces').catch(() => [])).filter(f => f.endsWith('.ndjson')).sort();

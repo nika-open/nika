@@ -9,7 +9,7 @@
 // It prints one JSON document; the token is read from its file and never
 // printed.
 import { readFile } from 'node:fs/promises';
-import { Nika, NikaCompatibilityError, NikaConfigurationError, NikaOperationError } from '@supernovae-st/nika';
+import { Nika, NikaCompatibilityError, NikaConfigurationError, NikaOperationError } from '@nika-open/nika';
 
 const url = process.argv[2];
 if (!url) throw new Error('usage: node remote.mts <url>');

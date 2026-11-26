@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // sdk-doors.mjs · capture what the sdk-doors clip shows, from the PUBLISHED
-// TypeScript package (@supernovae-st/nika on npm) and the engine it bundles.
+// TypeScript package (@nika-open/nika on npm) and the engine it bundles.
 // Every version, verdict, event kind, hash and refusal code the clip draws is
 // read from what this script writes; the clip refuses to render otherwise.
 //
-// Usage · node scripts/media/capture/sdk-doors.mjs [--version 0.123.0] [--keep]
+// Usage · node scripts/media/capture/sdk-doors.mjs [--version 0.125.2] [--keep]
 //   SDK_DOORS_NPM_CACHE reuses an npm cache (the install still comes from the
 //   registry, integrity-checked); --keep leaves the scratch directory.
 // Output · media/raw/sdk-doors-*
@@ -12,7 +12,7 @@
 // In a scratch directory, with a scratch HOME and file custody for keys
 // (NIKA_KEYCHAIN=off), and with an environment built from nothing (no
 // *_API_KEY, *_TOKEN or *SECRET* of the caller reaches a child):
-//   1. npm installs @supernovae-st/nika@<version> from the registry into a
+//   1. npm installs @nika-open/nika@<version> from the registry into a
 //      fresh app; hello.nika and demo.mts are the README's quick start, byte
 //      for byte, from the package npm installed;
 //   2. the package names the engine it resolved (the host payload), and the
@@ -42,8 +42,8 @@ const RAW = path.join(ROOT, 'media/raw');
 const OUT = path.join(RAW, 'sdk-doors');
 const args = process.argv.slice(2);
 const opt = (name, def) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : def);
-const VERSION = opt('version', '0.123.0');
-const PKG = '@supernovae-st/nika';
+const VERSION = opt('version', '0.125.2');
+const PKG = '@nika-open/nika';
 const fail = why => { throw new Error(`sdk-doors capture: ${why}`); };
 
 // a scratch directory (SDK_DOORS_SCRATCH to choose where), removed at the end
@@ -113,7 +113,7 @@ const integrity = JSON.parse(fs.readFileSync(path.join(engine.packageRoot, 'INTE
 const source = JSON.parse(fs.readFileSync(path.join(engine.packageRoot, 'SOURCE.json'), 'utf8'));
 const binSha = sha256(fs.readFileSync(BIN));
 const versions = {
-  package: { name: pkg.name, version: pkg.version, npm_added: added ? +added : null, installed: fs.readdirSync(path.join(APP, 'node_modules/@supernovae-st')).sort() },
+  package: { name: pkg.name, version: pkg.version, npm_added: added ? +added : null, installed: fs.readdirSync(path.join(APP, 'node_modules/@nika-open')).sort() },
   engine: {
     source: 'bundled',
     version_line: versionLine,

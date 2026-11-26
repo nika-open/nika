@@ -176,7 +176,8 @@ mod tests {
     /// not ignored, and `protect_traces` refuses. Once the link is replaced
     /// by a regular file holding the entry, as the refusal says, git ignores
     /// them and `protect_traces` passes. The environment git reads its own
-    /// settings from is the scratch repository's, never the caller's.
+    /// settings from is the scratch repository's, never the caller's, and
+    /// git reads nothing from the test's stdin.
     // disallowed_types: the witness's whole job is asking git itself; the
     // ban guards production effects, not a test arranging the surface
     // under test (the same carve-out as nika-cli-host's git fixture).
@@ -198,19 +199,29 @@ mod tests {
                 .env("HOME", &repo)
                 .env("XDG_CONFIG_HOME", &repo)
                 .env("GIT_CONFIG_NOSYSTEM", "1")
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status()
-                .expect("git is on PATH (CI runners ship it)")
-                .code()
+                .map(|status| status.code())
         };
-        assert_eq!(git(&["init", "-q"]), Some(0));
+        // No git to start (a machine without it): there is no git reading to
+        // compare with, and the unit tests above hold the refusal alone.
+        let Ok(init) = git(&["init", "-q"]) else {
+            std::fs::remove_dir_all(repo).ok();
+            return;
+        };
+        assert_eq!(init, Some(0), "git init");
         let workflows = repo.join("workflows");
         std::fs::create_dir(&workflows).expect("mkdir");
         std::fs::write(repo.join(".gitignore"), ".nika/traces/\n").expect("the project's");
         std::os::unix::fs::symlink("../.gitignore", workflows.join(".gitignore")).expect("link");
         let traces = "workflows/.nika/traces/run.ndjson";
-        assert_eq!(git(&["check-ignore", "-q", traces]), Some(1), "not ignored");
+        assert_eq!(
+            git(&["check-ignore", "-q", traces]).ok(),
+            Some(Some(1)),
+            "not ignored"
+        );
         let error = protect_traces(&workflows).expect_err("git reads no linked .gitignore");
         assert!(error.to_string().ends_with(LINKED), "{error}");
         assert_eq!(
@@ -220,7 +231,11 @@ mod tests {
 
         std::fs::remove_file(workflows.join(".gitignore")).expect("unlink");
         std::fs::write(workflows.join(".gitignore"), ".nika/traces/\n").expect("regular");
-        assert_eq!(git(&["check-ignore", "-q", traces]), Some(0), "ignored");
+        assert_eq!(
+            git(&["check-ignore", "-q", traces]).ok(),
+            Some(Some(0)),
+            "ignored"
+        );
         protect_traces(&workflows).expect("a regular file holding the entry protects");
         std::fs::remove_dir_all(repo).ok();
     }

@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8236
+  classified_files: 8240
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 4978
+    authored: 4982
     authored-pin: 2
     generated: 283
     pinned-copy: 266
@@ -156,13 +156,13 @@ patterns:
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
-  match_count: 881
-  aggregate_sha256: 906c88f81003cf9a73541fcf311f43e766372c2a9ffa1cd9171aae3b87444dd4
+  match_count: 885
+  aggregate_sha256: b1ad139234dc57f04d6bd04c347939225bc2f8e149a2eda33361881f246a3aa7
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
   match_count: 714
-  aggregate_sha256: 436ea0ab226bdcc1730a6169576bc2310befac76127ad5d302c6313df87b47ba
+  aggregate_sha256: 64710f018dfb73cfdb96da0ed8205b7f1f5423a65df800d4db7ff1a49b75373c
   evidence: "the remaining crate surface — Cargo.toml manifests · build.rs · benches · READMEs · hand-curated data catalogs (llm-providers · mcp-servers · embeddings · model-capabilities, probed daily by catalog-verify.yml); the pricing snapshot is excepted in files:"
   note: "scripts/sync-pack.sh is the ONE vendoring lane; the divergent crate-local duplicate was retired"
 - glob: "fuzz/**"
@@ -183,7 +183,7 @@ patterns:
 - glob: "docs/**"
   class: authored
   match_count: 150
-  aggregate_sha256: 87f50da2b6e96ba17e224983a6ddb82ea05269cb4adb85a212992ea727c32d9a
+  aggregate_sha256: 81a3eaac6b3a2354975a14c66d0079107e63b9086b0f2e444f6a52854ef76746
   evidence: "crate-specs · architecture prose · perf notes — no generation markers at file heads"
 - glob: "scripts/**"
   class: authored

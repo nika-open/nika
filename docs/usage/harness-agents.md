@@ -93,7 +93,7 @@ Nika, so `permits:` does not bound it:
 | Seat (measured on) | Its default | Mode Nika holds | Still done without asking |
 |---|---|---|---|
 | `codex` (codex-acp 1.13.1, codex 0.156.1) | `agent`: Codex's own reviewer approves | `read-only`: every approval goes to Nika | reads any file; writes the project, `/tmp`, `$TMPDIR` and its own `~/.codex` (generated images, session logs, state); runs any program inside its own sandbox, and runs its tools through a JavaScript "code mode"; calls its configured MCP tools marked `readOnlyHint: true`, remote ones included, so a Codex MCP approval rarely reaches Nika; opens pages with its hosted web tool, even under `permits: {}`, so untrusted web content reaches the model; starts every configured MCP server when the session begins; applies your global `~/.codex/AGENTS.md` and your Codex plugins. This adapter has no read-only sandbox: **even with no `fs.write` grant, the project stays writable.** Network stays off for its commands unless it asks. |
-| `claude-code` (claude-agent-acp 0.81.1, Claude Code 2.1.280) | your `permissions.defaultMode` (`auto` lets a classifier decide) | `default` ("Manual"): edits and commands ask | reads files in the project; runs commands Claude Code classifies as read-only; fetches documentation hosts it pre-approves. `bypassPermissions` is withheld. |
+| `claude-code` (claude-agent-acp 0.81.1, Claude Code 2.1.280) | your `permissions.defaultMode` (`auto` lets a classifier decide) | `default` ("Manual"): edits and commands ask | reads files in the project; runs commands Claude Code classifies as read-only; fetches documentation hosts it pre-approves; applies a managed Claude Code policy when the machine has one. `bypassPermissions` is withheld, and your own Claude configuration is not loaded (see below). |
 | `gemini-cli` (0.62.0) | `default`, or your `--approval-mode` / settings | `default` | reads files in the project (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches. |
 | `qwen-code`, `kimi-code`, `opencode`, `copilot`, `grok-build` | — | none: no mode is measured, so none is selected; a current mode that visibly approves on its own refuses the run | everything it does without asking. Nika judges only what it asks. |
 
@@ -105,9 +105,63 @@ On every seat:
   opens by itself: Codex keeps its sandboxed commands offline unless they ask,
   while a command Claude Code or Gemini CLI runs has the network the machine
   has.
-- The harness's own configuration still applies: its permission rules, its
-  hooks and the MCP servers it configures act without Nika's judgment unless
-  they ask.
+- On every seat but `claude-code`, the harness's own configuration still
+  applies: its permission rules, its hooks and the MCP servers it configures
+  act without Nika's judgment unless they ask.
+
+A `claude-code` session starts without your Claude configuration. Nika opens
+it with the user, project and local settings files turned off, with no MCP
+server, and with auto memory and claude.ai connectors off. So the session
+loads none of these:
+
+- what `~/.claude/settings.json`, `.claude/settings.json` and
+  `.claude/settings.local.json` carry: permission rules (allow, ask and deny
+  alike), sandbox settings, hooks and `env` entries;
+- `CLAUDE.md` files, the project's auto memory, and the skills, agents and
+  commands kept in a `.claude/` folder;
+- your plugins, with their skills, agents and MCP servers;
+- the MCP servers of `.mcp.json` and of your user settings, and your
+  claude.ai connectors.
+
+The agent keeps its built-in tools, judged by `permits:` through the asks
+described above, and works from the task's `system:` and prompt. A task that
+needs an instruction file says it in its prompt; a task that needs an MCP tool
+calls it from the workflow (`invoke:` with `tool: "mcp:<server>/<tool>"`).
+
+A rule that narrowed what Claude Code may do goes with the rest. A `deny` or
+`ask` rule, or a sandbox setting, written in one of those three files no
+longer applies to the session: a file such a rule kept Claude Code from
+reading is read like any other file of the project, without an ask. A
+restriction that must hold on this seat belongs in a managed policy, which
+still applies.
+
+Three things stay outside Nika's reach on this seat:
+
+- A managed policy, installed on the machine or set by your organization,
+  still applies, with whatever rules, hooks and servers it carries, and so
+  do the plugins built into Claude Code.
+- The global `~/.claude.json` is still read, and Claude Code still saves the
+  session's transcript in its own configuration folder under your home
+  (both move with `CLAUDE_CONFIG_DIR` when you set it).
+- The adapter reads the settings files itself for four values: the mode a
+  session starts in (Nika replaces it with `default`), the model of a task
+  that names none, the models it offers and its default effort.
+
+A task that names no model runs on the one your Claude settings name, or on
+Claude Code's default when they name none. Nika selects that model itself
+before the prompt and reads it back, so the trace records the model the
+session ran on. A session that does not keep that model is refused before
+any prompt is sent. Name a model on the task to choose it in the workflow.
+
+A sign-in, a cloud provider switch, a proxy or a certificate bundle that
+exists only in one of those settings files (an `apiKeyHelper`, or `env`
+entries) is among what the session no longer loads. Sign in to Claude Code
+itself, which keeps that sign-in outside those files. For a proxy or a
+certificate bundle, set `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` or
+`NODE_EXTRA_CA_CERTS` in the environment Nika runs in: Nika hands those four
+to the Claude Code seat (the three proxy names in lower case too). It hands
+over nothing else: no credential, and no cloud provider switch, so the seat
+runs on Claude Code's own sign-in.
 
 If a task must not write anything, or must not read outside the project, do
 not rely on `permits:` alone on a harness seat: run it on an API or local model

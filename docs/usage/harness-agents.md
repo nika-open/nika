@@ -166,7 +166,7 @@ that reports none (Codex answers `usage: null`) leaves `tokens` unknown and
 says `usage_source: unreported`, never 0. The context occupancy of its latest
 `usage_update` rides as `context_used` and `context_size`. Claude's session
 cost rides as `cost_estimate`: the application's own estimate, cumulative for
-the session, with its currency and `billed: false`. It is never `cost_usd`,
+the session, with its ISO 4217 currency code and `billed: false`. It is never `cost_usd`,
 no cost ceiling reads it, and an update that omits it clears it. The model
 Claude reports having answered with is the task's `model_reported` (source
 `adapter_usage_update`) and the selection receipt's `responder`, beside the
@@ -180,8 +180,9 @@ schema, the final message must contain a JSON value that satisfies it, and
 the validated object becomes the output (`message` under `images:`). The
 final message is the turn's last one: a change of `messageId`, or a tool call
 between chunks that carry none, starts a new message, so narration before a
-tool call is not parsed as the answer. The trace keeps the whole text beside
-the value (`seat_transcript`), and one turn may hold 4 MiB of text. A final
+tool call is not parsed as the answer. The trace keeps the turn's text beside
+the value (`seat_transcript`, its first 64 KiB, cut after the run's secrets
+in it are masked), and one turn may hold 4 MiB of text. A final
 message that does not validate gets one repair prompt in the same session,
 which still holds the agent's work: the prompt lists every violation and the
 schema and asks for the final message only, and the trace shows it as an

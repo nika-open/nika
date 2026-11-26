@@ -931,8 +931,9 @@ facts to the terminal: `seat_stop_reason`, `usage_source`
 `tokens` is absent, never 0), `token_ceiling: unjudged` when a declared
 `max_tokens_total` met no counts, `context_used` and `context_size`,
 `cost_estimate` (the adapter's unbilled estimate as JSON, never `cost_usd`) and
-`seat_transcript` (the turn's whole text when the value is its last message),
-masked by the event lane like every frame.
+`seat_transcript` (the turn's whole text when the value is its last message: a
+payload field, so every resolved secret in it is masked whatever its length,
+then cut to its first 64 KiB like a failure's received text).
 
 ## Operator Stop and stopped-call provenance
 

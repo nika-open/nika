@@ -10,9 +10,10 @@
   its repair judge the turn's last message: a change of `messageId`, or a
   tool call between chunks that carry none, starts a new message, so
   narration before a tool call is no longer parsed as the answer. A failure
-  keeps every message of the turn and a success keeps the whole text in
-  the trace (`seat_transcript`); one turn may hold 4 MiB of text. The
-  token counts of the adapter's `session/prompt` result now ride the task
+  keeps every message of the turn and a success keeps the text in the
+  trace (`seat_transcript`, its first 64 KiB, with the run's secrets
+  masked); one turn may hold 4 MiB of text. The token counts of the
+  adapter's `session/prompt` result now ride the task
   (`tokens`, `tokens_in`, `tokens_out`, with `usage_source:
   adapter_prompt_result`), weighed like a native turn's, so
   `max_tokens_total` refuses a repair the first turn already exceeded with
@@ -21,10 +22,10 @@
   and marks a declared ceiling `token_ceiling: unjudged`. The context
   occupancy of the latest `usage_update` rides as `context_used` and
   `context_size`, and Claude's session cost as `cost_estimate`, the
-  adapter's own unbilled estimate with its currency: it never becomes
-  `cost_usd` or reaches a cost ceiling, and an update without a cost clears
-  it. The model Claude reports having answered with is the task's
-  `model_reported` (source `adapter_usage_update`) and the receipt's
+  adapter's own unbilled estimate with its ISO 4217 currency: it never
+  becomes `cost_usd` or reaches a cost ceiling, and an update without a
+  cost clears it. The model Claude reports having answered with is the
+  task's `model_reported` (source `adapter_usage_update`) and the receipt's
   responder, beside the configured model; under an exact selection, a
   reported model that is not the confirmed one refuses the answer with
   NIKA-1805, as a model moved during the turn does. A Codex prompt that

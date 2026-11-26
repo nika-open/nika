@@ -594,21 +594,34 @@ async fn a_native_value_the_option_does_not_list_refuses() {
 }
 
 /// An adapter with no measured speed control cannot honor a tier, whatever
-/// its session advertises: the binding is keyed by its own name.
+/// its session advertises: the binding is keyed by its own name. The Claude
+/// adapter's session first has the model it reports selected and read back (the
+/// task names none); no tier setter and no prompt follow on either.
 #[tokio::test]
 async fn an_adapter_without_a_measured_binding_refuses() {
     for agent in [Some("@agentclientprotocol/claude-agent-acp"), None] {
         let err = dialogue(
             ask(None, None, Some("fast")),
             move |mut r, mut w| async move {
-                let next = open_as(
+                let config = codex("agent", "gpt-5.5", "medium", Some("off"));
+                let mut next = open_as(
                     &mut r,
                     &mut w,
                     agent.map(|name| json!({"name":name,"version":"0.81.1"})),
-                    codex("agent", "gpt-5.5", "medium", Some("off")),
+                    config.clone(),
                 )
                 .await;
-                assert!(next.is_none(), "no setter and no prompt: {next:?}");
+                if agent.is_some() {
+                    let hold = next.expect("the reported model is held first");
+                    assert_eq!(hold["method"], "session/set_config_option");
+                    assert_eq!(
+                        hold["params"],
+                        json!({"sessionId":"s-tier","configId":"model","value":"gpt-5.5"})
+                    );
+                    reply(&mut w, &hold, json!({"configOptions":config})).await;
+                    next = read(&mut r).await;
+                }
+                assert!(next.is_none(), "no tier setter and no prompt: {next:?}");
             },
         )
         .await

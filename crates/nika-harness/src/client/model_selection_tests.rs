@@ -244,3 +244,214 @@ async fn default_and_absent_requests_observe_the_current_choice_without_setting_
         );
     }
 }
+
+const CLAUDE: &str = "@agentclientprotocol/claude-agent-acp";
+
+/// claude-agent-acp's model option as `session/new` and a selection's answer report it.
+fn claude_models(current: Option<&str>) -> Value {
+    let mut option = serde_json::json!({"id":"model","name":"Model","category":"model",
+        "type":"select","options":[{"value":"default","name":"Default"},
+            {"value":"haiku","name":"Haiku"},{"value":"opus","name":"Opus"}]});
+    if let Some(current) = current {
+        option["currentValue"] = Value::String(current.to_owned());
+    }
+    serde_json::json!({"configOptions":[option]})
+}
+
+/// [`offer`] with the adapter naming itself on `initialize` (`None`: it names nothing).
+async fn offer_as(
+    peer: &mut PeerReader,
+    writer: &mut PeerWriter,
+    agent: Option<&str>,
+    mut choices: Value,
+) {
+    let initialize = read(peer).await.expect("initialize");
+    assert_eq!(initialize["method"], "initialize");
+    let mut answer = serde_json::json!({"protocolVersion":1});
+    if let Some(agent) = agent {
+        answer["agentInfo"] = serde_json::json!({"name":agent,"version":"0.81.1"});
+    }
+    reply(writer, &initialize, answer).await;
+    let session = read(peer).await.expect("session/new");
+    assert_eq!(session["method"], "session/new");
+    choices["sessionId"] = Value::String("model-choice".to_owned());
+    reply(writer, &session, choices).await;
+}
+
+/// A task that names no model, on the adapter that reports a session's model apart from its
+/// program: the client selects the reported model and reads it back before the prompt, and
+/// records a hold, never a pin.
+#[tokio::test]
+async fn a_task_that_names_no_model_holds_the_one_a_claude_session_reports() {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let (peer_read, mut peer_write) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut reader = BufReader::new(peer_read);
+        offer_as(
+            &mut reader,
+            &mut peer_write,
+            Some(CLAUDE),
+            claude_models(Some("haiku")),
+        )
+        .await;
+        let hold = read(&mut reader)
+            .await
+            .expect("the hold precedes the prompt");
+        assert_eq!(hold["method"], "session/set_config_option");
+        assert_eq!(
+            hold["params"],
+            serde_json::json!({"sessionId":"model-choice","configId":"model","value":"haiku"})
+        );
+        reply(&mut peer_write, &hold, claude_models(Some("haiku"))).await;
+        end(&mut reader, &mut peer_write).await;
+    });
+    let outcome = result(drive(
+        client_read,
+        client_write,
+        HarnessRequest::new("hello", "/tmp"),
+    ))
+    .await
+    .expect("a kept model lets the turn run");
+    peer.await.expect("scripted peer");
+    assert_eq!(outcome.observed_model.as_deref(), Some("haiku"));
+    assert_eq!(
+        outcome.observed_model_source,
+        Some(ModelProvenance::ConfirmedSelection)
+    );
+    let selection = &outcome.selection;
+    assert_eq!(selection.model_option.as_deref(), Some("model"));
+    assert_eq!(selection.transmitted_model.as_deref(), Some("haiku"));
+    assert!(selection.held_model, "the task named no model: a hold");
+    let mut moved = selection.clone();
+    moved.changed_mid_turn = vec!["model=opus".to_owned()];
+    assert!(
+        moved.moved_refusal().is_none(),
+        "a held model that moves stays a fact"
+    );
+}
+
+/// A session that answers the hold with another model than the one it reported is refused
+/// before any prompt, with both models named.
+#[tokio::test]
+async fn a_claude_session_that_does_not_keep_its_reported_model_is_refused() {
+    for answered in [Some("default"), None] {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(ours);
+        let (peer_read, mut peer_write) = tokio::io::split(theirs);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(peer_read);
+            offer_as(
+                &mut reader,
+                &mut peer_write,
+                Some(CLAUDE),
+                claude_models(Some("haiku")),
+            )
+            .await;
+            let hold = read(&mut reader).await.expect("the hold");
+            assert_eq!(hold["params"]["value"], "haiku");
+            reply(&mut peer_write, &hold, claude_models(answered)).await;
+            assert!(read(&mut reader).await.is_none(), "no prompt is sent");
+        });
+        let error = result(drive(
+            client_read,
+            client_write,
+            HarnessRequest::new("hello", "/tmp"),
+        ))
+        .await
+        .expect_err("a model that is not kept refuses");
+        peer.await.expect("scripted peer sees EOF");
+        let reported = answered.map_or_else(|| "none".to_owned(), |m| format!("`{m}`"));
+        match error {
+            HarnessError::Selection { reason } => {
+                assert!(reason.contains("it reported (`haiku`)"), "{reason}");
+                assert!(
+                    reason.contains(&format!("it reports {reported};")),
+                    "{reason}"
+                );
+                assert!(reason.contains("no prompt was sent"), "{reason}");
+            }
+            other => panic!("expected a selection refusal, got {other}"),
+        }
+    }
+}
+
+/// Nothing is sent where the hold has no ground: another adapter, an adapter that names
+/// nothing, or a model option that states no current value. The prompt follows `session/new`
+/// and the record stays what the session stated.
+#[tokio::test]
+async fn no_hold_is_sent_to_another_adapter_or_without_a_reported_model() {
+    let codex = nika_types::access::HarnessBoundary::CODEX_ACP.agents[0];
+    for (agent, current) in [
+        (Some(codex), Some("haiku")),
+        (None, Some("haiku")),
+        (Some(CLAUDE), None),
+    ] {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(ours);
+        let (peer_read, mut peer_write) = tokio::io::split(theirs);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(peer_read);
+            offer_as(&mut reader, &mut peer_write, agent, claude_models(current)).await;
+            end(&mut reader, &mut peer_write).await;
+        });
+        let outcome = result(drive(
+            client_read,
+            client_write,
+            HarnessRequest::new("hello", "/tmp"),
+        ))
+        .await
+        .expect("the turn runs on the session's own model");
+        peer.await.expect("scripted peer");
+        assert_eq!(outcome.observed_model.as_deref(), current, "{agent:?}");
+        assert_eq!(
+            outcome.observed_model_source,
+            current.map(|_| ModelProvenance::SessionConfig),
+            "{agent:?}"
+        );
+        assert_eq!(outcome.selection.transmitted_model, None, "{agent:?}");
+        assert_eq!(outcome.selection.model_option, None, "{agent:?}");
+        assert!(!outcome.selection.held_model, "{agent:?}");
+    }
+}
+
+/// A model the task names is selected as before on the same adapter, and is a pin: the
+/// record carries no hold, so its move refuses.
+#[tokio::test]
+async fn a_named_model_on_a_claude_session_is_a_pin_not_a_hold() {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let (peer_read, mut peer_write) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut reader = BufReader::new(peer_read);
+        offer_as(
+            &mut reader,
+            &mut peer_write,
+            Some(CLAUDE),
+            claude_models(Some("haiku")),
+        )
+        .await;
+        let select = read(&mut reader).await.expect("the named model");
+        assert_eq!(select["method"], "session/set_config_option");
+        assert_eq!(select["params"]["value"], "opus");
+        reply(&mut peer_write, &select, claude_models(Some("opus"))).await;
+        end(&mut reader, &mut peer_write).await;
+    });
+    let outcome = result(drive(
+        client_read,
+        client_write,
+        HarnessRequest::new("hello", "/tmp").with_requested_model("anthropic/opus".to_owned()),
+    ))
+    .await
+    .expect("an offered model is selected");
+    peer.await.expect("scripted peer");
+    assert_eq!(outcome.observed_model.as_deref(), Some("opus"));
+    assert_eq!(outcome.selection.transmitted_model.as_deref(), Some("opus"));
+    assert!(!outcome.selection.held_model, "a named model is a pin");
+    let mut moved = outcome.selection.clone();
+    moved.changed_mid_turn = vec!["model=haiku".to_owned()];
+    assert!(
+        moved.moved_refusal().is_some(),
+        "a pinned model that moves refuses"
+    );
+}

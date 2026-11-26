@@ -1701,4 +1701,4 @@ mod media_bound_tests;
 mod model_selection_tests;
 
 #[cfg(test)]
-mod refusal_tests;
+pub(crate) mod refusal_tests;

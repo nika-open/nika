@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! The agent path's answer to a permission request: a refusal selects the harness's one-time
-//! refusal, so the agent goes on without the tool; a refusal the harness offers no way to give
-//! is `cancelled`; an ask the engine dropped unanswered is `cancelled` whatever is offered.
+//! The agent path's answer to a permission request: a refusal selects the harness's first
+//! one-time refusal, after which the harness decides whether the agent goes on; a refusal the
+//! harness offers no way to give is `cancelled`; an ask the engine dropped unanswered is
+//! `cancelled` whatever is offered.
 
 use super::*;
 use serde_json::json;
@@ -32,18 +33,19 @@ async fn receive(reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStr
     serde_json::from_str(line.trim_end()).expect("the client writes JSON")
 }
 
-/// One turn whose agent asks once, offering `options`, then says `then` and ends `end_turn`,
-/// while the engine answers `decision` (`None`: the reply is dropped unanswered). What the
-/// agent heard, and the outcome the turn completed with.
-async fn asked(
+/// The title of the one tool call the scripted agent asks about.
+pub(crate) const ASKED: &str = "Remove the build folder";
+
+/// The scripted agent of one turn, on the far end of a duplex pipe: it answers the handshake,
+/// asks once about [`ASKED`] offering `options`, then says `then` and ends `end_turn`. It
+/// returns the outcome it heard for its ask.
+pub(crate) fn one_ask(
+    agent: tokio::io::DuplexStream,
     options: Value,
-    mut decision: Option<PermissionDecision>,
     then: &'static str,
-) -> (Value, Option<HarnessOutcome>) {
-    let (ours, theirs) = tokio::io::duplex(64 * 1024);
-    let (client_read, client_write) = tokio::io::split(ours);
-    let (agent_read, mut agent_write) = tokio::io::split(theirs);
-    let agent = tokio::spawn(async move {
+) -> tokio::task::JoinHandle<Value> {
+    let (agent_read, mut agent_write) = tokio::io::split(agent);
+    tokio::spawn(async move {
         let mut reader = BufReader::new(agent_read);
         let init = receive(&mut reader).await;
         let ready = json!({"protocolVersion": 1, "agentCapabilities": {}});
@@ -61,7 +63,7 @@ async fn asked(
         let prompt = receive(&mut reader).await;
         assert_eq!(prompt["method"], "session/prompt");
         let ask = json!({"sessionId": "s-refusal", "options": options,
-            "toolCall": {"title": "Remove the build folder", "kind": "delete"}});
+            "toolCall": {"title": ASKED, "kind": "delete"}});
         send(
             &mut agent_write,
             &json!({"jsonrpc": "2.0", "id": "ask-1",
@@ -83,7 +85,20 @@ async fn asked(
         )
         .await;
         answer["result"]["outcome"].clone()
-    });
+    })
+}
+
+/// One turn whose agent asks once, offering `options`, then says `then` and ends `end_turn`,
+/// while the engine answers `decision` (`None`: the reply is dropped unanswered). What the
+/// agent heard, and the outcome the turn completed with.
+async fn asked(
+    options: Value,
+    mut decision: Option<PermissionDecision>,
+    then: &'static str,
+) -> (Value, Option<HarnessOutcome>) {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let agent = one_ask(theirs, options, then);
     let mut stream = drive(
         client_read,
         client_write,
@@ -107,8 +122,8 @@ async fn asked(
     (agent.await.expect("the scripted agent ends"), outcome)
 }
 
-/// A refusal selects the one-time refusal, never the remembered one listed before it, and the
-/// agent that hears it goes on: its turn ends `end_turn` and completes with its text.
+/// A refusal selects the one-time refusal, never the remembered one listed before it, and a
+/// scripted agent that goes on after it ends its turn `end_turn`, completed with its text.
 #[tokio::test]
 async fn a_refusal_selects_reject_once_and_the_agent_goes_on() {
     let went_on = "I left the build folder in place.";
@@ -132,6 +147,36 @@ async fn a_refusal_with_no_reject_once_offered_answers_cancelled() {
         let (heard, _) = asked(options.clone(), Some(PermissionDecision::Deny), "ok").await;
         assert_eq!(heard, json!({"outcome": "cancelled"}), "{options}");
     }
+}
+
+/// Two one-time refusals in codex-acp 1.13.1's order for a command, as read in its source
+/// (`decline`, "continue without running it", then `cancel`, "tell Codex what to do
+/// differently"): the first is selected, by its own id.
+#[tokio::test]
+async fn of_two_one_time_refusals_the_first_is_selected() {
+    let options = json!([
+        {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
+        {"optionId": "allow_for_session",
+            "name": "Yes, and don't ask again for this command in this session",
+            "kind": "allow_always"},
+        {"optionId": "decline", "name": "No, continue without running it", "kind": "reject_once"},
+        {"optionId": "cancel", "name": "No, and tell Codex what to do differently",
+            "kind": "reject_once"}
+    ]);
+    let (heard, _) = asked(options, Some(PermissionDecision::Deny), "ok").await;
+    assert_eq!(heard, json!({"outcome": "selected", "optionId": "decline"}));
+}
+
+/// A kind the protocol does not define is no refusal: beside no `reject_once`, a refusal
+/// answers `cancelled`, never the unknown option.
+#[tokio::test]
+async fn an_unknown_kind_beside_no_reject_once_answers_cancelled() {
+    let options = json!([
+        {"optionId": "yes-once", "name": "Allow", "kind": "allow_once"},
+        {"optionId": "later", "name": "Ask me later", "kind": "reject_later"}
+    ]);
+    let (heard, _) = asked(options, Some(PermissionDecision::Deny), "ok").await;
+    assert_eq!(heard, json!({"outcome": "cancelled"}));
 }
 
 /// An ask the engine dropped unanswered is `cancelled` even when a one-time refusal is

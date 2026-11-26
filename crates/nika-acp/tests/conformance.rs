@@ -22,7 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, SessionId,
     SessionNotification, SessionUpdate, StopReason, TextContent,
@@ -44,7 +44,7 @@ fn spawn_sdk_agent(
         let seen_new = Arc::clone(&seen);
         let seen_prompt = Arc::clone(&seen);
         let _ = Agent
-            .builder()
+            .v1()
             .name("sdk-conformance-judge")
             .on_receive_request(
                 async move |initialize: InitializeRequest, responder, _connection| {

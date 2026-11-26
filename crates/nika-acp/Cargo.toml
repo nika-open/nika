@@ -23,12 +23,27 @@ publish       = false
 # Empty on purpose: this crate IS its own workspace (own lockfile ·
 # own feature graph · zero unification with the diamond).
 
-[dependencies]
-agent-client-protocol = "2.0.0"   # wire v1 (SDK 2.x) · pin per spec §2
+[dependencies.agent-client-protocol]
+# Wire v1 through the SDK's `v1` module (SDK 5.x) · pin per spec §2. No default features exist
+# and none is needed: the SDK-facing cases connect over in-process pipes, never through the
+# SDK's process or stdio support.
+# An exact pin, on purpose. The judge turns on a draft feature, and the SDK says everything behind
+# an `unstable_*` feature may change in a 5.x minor release. The `=` also keeps the line out of
+# `scripts/release/wave-sweep.sh`, which rewrites every bare `version = "x.y.z"` in a crate
+# manifest to the workspace version.
+version  = "=5.6.1"
+# One draft feature, for one reason: `unstable_end_turn_token_usage` gives the prompt result
+# its `usage` field, which the turn usage cases write (tests/turn_usage.rs). Every other
+# shape the cases use (stop reasons, `usage_update`, `session/cancel`, `session/close`,
+# `fs/read_text_file`) is stable v1. The SDK itself always turns on the schema's
+# `unstable_proxy_chains`; no case depends on it.
+features = ["unstable_end_turn_token_usage"]
 
 [dev-dependencies]
 # The mock + conformance tests only — the lib carries no runtime of its own yet.
-tokio        = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# `io-util` (duplex pipes, line reads) and `sync` (the agents' wake signals) are named here,
+# not borrowed from another crate's feature set.
+tokio        = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "sync", "time"] }
 futures-core = "0.3"
 tokio-util   = { version = "0.7", features = ["compat"] }
 nika-kernel  = { path = "../nika-kernel" }

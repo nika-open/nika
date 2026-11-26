@@ -19,6 +19,12 @@
 //!   only writable root, there is no network, and every approval request reaches the client,
 //!   which the completion profile always denies.
 //!
+//! The proof reads the layers the adapter's Codex home and this machine hold (the user's, the
+//! system's and the managed ones, which [`config_stamp`] also watches), listed from Nika's own
+//! working directory. A trusted project's own `.codex/config.toml` in the session's directory
+//! is neither read nor watched, so a server it defines is not among those the profile disables
+//! (NIK-418).
+//!
 //! An MCP tool approval reaches the client only through Codex's MCP elicitation route
 //! ([`APPROVAL_FEATURE`]). With that feature off, Codex asks through `request_user_input`
 //! instead, which codex-acp answers itself with no answer (Nika advertises no form

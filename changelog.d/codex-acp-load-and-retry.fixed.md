@@ -20,7 +20,9 @@
   that can add or enable an MCP server changes: the user's `config.toml`,
   `/etc/codex/config.toml`, `managed_config.toml`, `requirements.toml` and,
   on macOS, the `com.openai.codex` managed preferences; so an MCP server
-  defined during the run is disabled too). An error
+  defined during the run is disabled too). The proof does not read a
+  trusted project's own `.codex/config.toml` in the session's directory: a
+  server defined there is not among those the profile disables. An error
   answer to `initialize`, `session/new` or a model, effort, tier or mode
   selection is now read like an error answer to the prompt: Codex answering
   `session/new` with an internal error (`-32603`, "workspace routing

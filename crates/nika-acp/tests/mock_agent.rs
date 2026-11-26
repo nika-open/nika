@@ -4,10 +4,11 @@
 //! The mock ACP agent — the load-bearing instrument (spec §5 · B1).
 //!
 //! A deterministic scripted agent speaking wire v1 from the AGENT role
-//! of the SAME official SDK the production client drives — conformance
-//! by construction. Wired in-process over `Channel::duplex()` (better
-//! than the spec's helper-bin sketch: zero spawn · zero network · zero
-//! OS surface in CI). Instrument law: the mock is proven by scripting
+//! of the official SDK. The production client is hand-written and
+//! drives no SDK; `conformance.rs` has the SDK judge it. Wired
+//! in-process over `Channel::duplex()` (better than the spec's
+//! helper-bin sketch: zero spawn · zero network · zero OS surface in
+//! CI). Instrument law: the mock is proven by scripting
 //! a KNOWN dialogue and asserting every beat, BEFORE any production
 //! consumer trusts it.
 

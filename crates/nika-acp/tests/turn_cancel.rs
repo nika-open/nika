@@ -4,12 +4,14 @@
 //! `session/cancel` and the `cancelled` stop, judged by the official SDK.
 //!
 //! The engine's one-turn client (`nika_harness::drive`) never sends `session/cancel` itself:
-//! only its conversation driver does, and that driver opens only on a spawned adapter. So the
-//! cases here take two routes. One drops the engine's event stream mid-turn and counts what
-//! the agent heard. The other relays the engine's own cancel frame, rendered by
-//! `nika_harness::wire` exactly as the conversation driver renders it, into the turn, and the
-//! SDK agent answers it with a `cancelled` stop. The agent runs the prompt in a task of its own
-//! (`cx.spawn`), because a handler blocks the SDK's dispatch loop and the cancel must get in.
+//! only its conversation driver does, and that driver opens only on a spawned adapter
+//! (`SpawnedHarness::converse`). So the cases here take two routes. One relays the engine's
+//! own cancel frame, rendered by `nika_harness::wire` exactly as the conversation driver
+//! renders it, into a `drive` turn: the SDK agent parses it and answers with a `cancelled`
+//! stop. The other drops the engine's event stream mid-turn, then has the agent ask the client
+//! something only a client still reading its pipe can answer, and counts the cancels the agent
+//! heard. The agent runs the prompt in a task of its own (`cx.spawn`), because a handler blocks
+//! the SDK's dispatch loop and the cancel must get in.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -21,7 +23,8 @@ use std::time::Duration;
 use agent_client_protocol::v1::schema::{
     AGENT_METHOD_NAMES, AgentCapabilities, CancelNotification, ContentBlock, ContentChunk,
     InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
+    PromptResponse, ReadTextFileRequest, SessionId, SessionNotification, SessionUpdate, StopReason,
+    TextContent,
 };
 use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
@@ -35,6 +38,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt 
 const SESSION: &str = "sdk-cancel";
 /// What the agent says before it is stopped.
 const PARTIAL: &str = "half an answer";
+/// The file the agent asks the client to read after the drop. The engine offers no file reads,
+/// so it refuses the request without opening anything.
+const PROBE: &str = "/nonexistent/judge-probe.txt";
+/// The engine's refusal of that request, as the agent reads it: JSON-RPC `Method not found`
+/// and the engine's own words.
+const REFUSED: &str = "-32601: `fs/read_text_file` is not offered by this client";
 /// A safety net only: every case ends in milliseconds when the engine behaves.
 const LIMIT: Duration = Duration::from_secs(30);
 
@@ -63,6 +72,8 @@ struct Ears {
     cancels: Mutex<Vec<SessionId>>,
     /// How many prompts reached the agent.
     prompts: AtomicUsize,
+    /// What the client answered to the agent's `fs/read_text_file` request, in order.
+    answers: Mutex<Vec<String>>,
     /// Raised by the agent's cancel handler.
     cancelled: Notify,
     /// Raised by the test.
@@ -76,6 +87,22 @@ impl Ears {
             .expect("the cancel log is never poisoned")
             .clone()
     }
+
+    fn answers(&self) -> Vec<String> {
+        self.answers
+            .lock()
+            .expect("the answer log is never poisoned")
+            .clone()
+    }
+}
+
+/// How the agent reads the client's answer to its request: the error code and message the
+/// client wrote, or what it served.
+fn answer_of<T: std::fmt::Debug>(asked: Result<T, agent_client_protocol::Error>) -> String {
+    match asked {
+        Ok(served) => format!("served: {served:?}"),
+        Err(error) => format!("{}: {}", i32::from(error.code), error.message),
+    }
 }
 
 fn chunk(session_id: SessionId, text: &str) -> SessionNotification {
@@ -87,7 +114,8 @@ fn chunk(session_id: SessionId, text: &str) -> SessionNotification {
     )
 }
 
-/// The SDK agent: speaks `PARTIAL`, then ends its turn the way `ending` says.
+/// The SDK agent: speaks `PARTIAL`, then ends its turn the way `ending` says. On release it
+/// first asks the client to read `PROBE`, twice and one after the other, and logs each answer.
 async fn serve(sdk_in: DuplexStream, sdk_out: DuplexStream, ears: Arc<Ears>, ending: Ending) {
     let ears_on_cancel = Arc::clone(&ears);
     let ears_on_prompt = ears;
@@ -115,7 +143,8 @@ async fn serve(sdk_in: DuplexStream, sdk_out: DuplexStream, ears: Arc<Ears>, end
                 let ears = Arc::clone(&ears_on_prompt);
                 let speaker = connection.clone();
                 connection.spawn(async move {
-                    speaker.send_notification(chunk(prompt.session_id, PARTIAL))?;
+                    let session_id = prompt.session_id;
+                    speaker.send_notification(chunk(session_id.clone(), PARTIAL))?;
                     let stop = match ending {
                         Ending::OnCancel => {
                             ears.cancelled.notified().await;
@@ -123,6 +152,24 @@ async fn serve(sdk_in: DuplexStream, sdk_out: DuplexStream, ears: Arc<Ears>, end
                         }
                         Ending::OnRelease => {
                             ears.release.notified().await;
+                            // Only a client still reading its pipe can answer these; at the
+                            // end of the connection the SDK fails a request instead. The
+                            // second is asked once the first is answered, after the engine
+                            // has also tried to report its first refusal to the dropped stream.
+                            for _ in 0..2 {
+                                let asked = speaker
+                                    .send_request(ReadTextFileRequest::new(
+                                        session_id.clone(),
+                                        PROBE,
+                                    ))
+                                    .block_task()
+                                    .await;
+                                let answer = answer_of(asked);
+                                ears.answers
+                                    .lock()
+                                    .expect("the answer log is never poisoned")
+                                    .push(answer);
+                            }
                             StopReason::EndTurn
                         }
                     };
@@ -214,9 +261,15 @@ fn the_engine_and_the_sdk_name_cancel_alike() {
     );
 }
 
-// documents today's behaviour: after a `session/cancel` the engine reads the `cancelled` stop
-// as a completed turn whose answer is the partial text. Expected to change: the outcome carries
-// `cancelled` and the agent verb fails the task, keeping the partial text.
+// documents today's behaviour: the SDK parses the engine's own `session/cancel` frame for the
+// engine's session, and its agent then stops with `cancelled`. The cancel is relayed by this
+// test, not sent by `drive`, so the engine-side reading of that stop is the same as in the
+// `cancelled` case of `turn_stop.rs`: a completed turn whose answer is the partial text.
+// Expected to change: the engine's conversation driver already sends this cancel on Stop
+// (`Driver::cancel` in `crates/nika-harness/src/client/conversation.rs`), and the turn's `end`
+// record (`Turn::end`, same file) carries the agent's answer as `TurnEnd::Cancelled` and the
+// sent cancel as `cancel_sent`. This case is to judge that driver instead of the relay once it
+// can run over pipes, and the reading of the stop changes with `turn_stop.rs`.
 #[tokio::test]
 async fn a_cancelled_turn_completes_with_the_partial_text() {
     let (engine_out, relay_in) = tokio::io::duplex(64 * 1024);
@@ -255,9 +308,13 @@ async fn a_cancelled_turn_completes_with_the_partial_text() {
     );
 }
 
-// documents today's behaviour: dropping the engine's event stream mid-turn sends no
-// `session/cancel`; the agent's turn runs on to its own end. Expected to change: dropping a
-// turn sends `session/cancel` for its session and waits, bounded, for the `cancelled` stop.
+// documents today's behaviour: over bare `drive` on pipes, dropping the event stream mid-turn
+// sends no `session/cancel`, and the driver reads on until the turn ends: it still answers the
+// agent's requests after the drop. The spawned path differs: dropping its stream kills the
+// adapter (`kill_on_drop`, and its whole process group under a completion profile), so a
+// shipped turn does not run on. Expected to change: a drop sends `session/cancel` for its
+// session and waits, bounded, for the `cancelled` stop, and that cancel has to coexist with
+// the spawned path's kill on drop.
 #[tokio::test]
 async fn dropping_the_stream_mid_turn_sends_no_cancel() {
     let (engine_out, sdk_in) = tokio::io::duplex(64 * 1024);
@@ -284,5 +341,10 @@ async fn dropping_the_stream_mid_turn_sends_no_cancel() {
         .expect("the agent task does not panic");
 
     assert_eq!(ears.prompts.load(Ordering::SeqCst), 1);
+    // The driver read on after the drop: it refused both requests in its own words. A client
+    // that hung up at the drop would leave the first request failed by the end of the
+    // connection, with another code and message; one that stopped at its first failed report
+    // to the dropped stream would leave the second one failed.
+    assert_eq!(ears.answers(), vec![REFUSED.to_owned(), REFUSED.to_owned()]);
     assert_eq!(ears.cancels(), Vec::<SessionId>::new());
 }

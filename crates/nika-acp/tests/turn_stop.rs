@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
-//! Every wire v1 stop reason, read by the engine's own client.
+//! Every wire v1 stop reason, read by the engine's own one-turn client.
 //!
 //! The official SDK plays the agent: one text chunk, then a `session/prompt` result that ends
 //! the turn with one stop reason. The engine's `nika_harness::drive` plays the client over
-//! in-process pipes, as in `conformance.rs`. Each case pins what the engine yields for that
-//! stop reason today, whole outcome included, so a change to what the engine keeps from a stop
-//! reason shows here first.
+//! in-process pipes, as in `conformance.rs`, with no completion profile. Each case pins what
+//! plain `drive` yields for that stop reason today, whole outcome included, so a change to
+//! what it keeps from a stop reason shows here first. Two other engine paths already read the
+//! stop and are not driven here: under a one-shot completion profile the client refuses any
+//! stop other than `end_turn`, and the conversation driver maps the five stop reasons to its
+//! `TurnEnd`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -21,6 +24,7 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
+use nika_harness::TurnEnd;
 use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
 use serde_json::json;
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
@@ -184,28 +188,25 @@ async fn cancelled_completes_like_end_turn() {
     );
 }
 
-/// The five cases above send these exact words: the SDK's names for the stop reasons, which
-/// the engine reads as plain strings.
+/// The five cases above send these exact words. The SDK writes each stop reason as its wire
+/// word, and the engine's own name for the same end (`TurnEnd::as_str`, the word its
+/// conversation driver records) is that same word, value by value.
 #[test]
-fn the_sdk_names_the_five_stop_reasons_on_the_wire() {
-    let names: Vec<serde_json::Value> = [
-        StopReason::EndTurn,
-        StopReason::Refusal,
-        StopReason::MaxTokens,
-        StopReason::MaxTurnRequests,
-        StopReason::Cancelled,
-    ]
-    .iter()
-    .map(|stop| serde_json::to_value(stop).expect("a stop reason serializes"))
-    .collect();
-    assert_eq!(
-        names,
-        vec![
-            json!("end_turn"),
-            json!("refusal"),
-            json!("max_tokens"),
-            json!("max_turn_requests"),
-            json!("cancelled"),
-        ]
-    );
+fn the_sdk_and_the_engine_name_the_five_stop_reasons_alike() {
+    let ends = [
+        (StopReason::EndTurn, TurnEnd::EndTurn, "end_turn"),
+        (StopReason::Refusal, TurnEnd::Refusal, "refusal"),
+        (StopReason::MaxTokens, TurnEnd::MaxTokens, "max_tokens"),
+        (
+            StopReason::MaxTurnRequests,
+            TurnEnd::MaxTurnRequests,
+            "max_turn_requests",
+        ),
+        (StopReason::Cancelled, TurnEnd::Cancelled, "cancelled"),
+    ];
+    for (sdk, engine, word) in ends {
+        let written = serde_json::to_value(sdk).expect("a stop reason serializes");
+        assert_eq!(written, json!(word), "the SDK's {sdk:?}");
+        assert_eq!(engine.as_str(), word, "the engine's {engine:?}");
+    }
 }

@@ -214,7 +214,8 @@ callable is a tool under `invoke:`, and the engine ships its own
   `guard_off` on stderr with exit 1: Claude Code shows it as a hook
   error notice, Cursor logs it, Codex records that the hook failed. The
   warning comes back after the binary has been found and lost again (a
-  marker under `${XDG_STATE_HOME:-~/.local/state}/nika/`). Meanwhile no
+  marker under `${XDG_STATE_HOME:-~/.local/state}/nika/`, or under the
+  temporary folder when that one cannot hold it). Meanwhile no
   run is judged: a `nika run` started by an absolute path outside a
   project is not checked by this hook. A hook set to block on failure
   (Claude Code `onFailure: "block"`, Cursor `failClosed`) turns the

@@ -52,7 +52,9 @@
 #
 # The warning shows once until nika is found again: a marker under
 # ${XDG_STATE_HOME:-~/.local/state}/nika/ is written when warning and
-# removed the next time the hook finds the binary.
+# removed the next time the hook finds the binary. When that folder cannot
+# be named (no HOME) or cannot hold the marker, the marker is a folder of
+# the user's own under the temporary folder instead.
 
 # >>> nika-clean-path: every kit hook and helper opens with this same block,
 # before it starts any other program (a test keeps the copies identical).
@@ -153,12 +155,32 @@ refuse() {
   exit 2
 }
 
+# The judge's answer, and the warning's marker when the state folder cannot
+# hold it, go under TMPDIR when it names an absolute folder, else under
+# /tmp: a relative one would put them in the folder the hook runs in, the
+# open project (the same test as XDG_STATE_HOME's below).
+tmp_root="${TMPDIR:-}"
+case "$tmp_root" in
+  /*) ;;
+  *) tmp_root=/tmp ;;
+esac
+# The folder named in a refusal, printable characters only and bounded.
+tmp_shown="${tmp_root//[^[:print:]]/?}"
+tmp_shown="${tmp_shown:0:200}"
+
 state="${XDG_STATE_HOME:-}"
 case "$state" in
   /*) ;;
   *) state="${HOME:+$HOME/.local/state}" ;;
 esac
 warned="${state:+$state/nika/guard-off.warned}"
+# The fallback marker is a folder: mkdir never follows a link planted at its
+# name, and the marker counts only as a real folder this user owns.
+warned_tmp="$tmp_root/nika-guard-off.$UID.warned"
+warned_before() {
+  { [ -n "$warned" ] && [ -e "$warned" ]; } \
+    || { [ -d "$warned_tmp" ] && [ ! -L "$warned_tmp" ] && [ -O "$warned_tmp" ]; }
+}
 
 # nika_project <dir>: print the marker that makes <dir> or an ancestor a
 # Nika project. Returns 1 when none does, 2 when <dir> does not resolve.
@@ -200,14 +222,15 @@ without_binary() {
   if [ -z "$located" ]; then
     refuse "the nika binary is not on PATH, and the hook could not resolve the directory it runs in, so it cannot rule out a Nika project: it refuses every shell command until its judge is back. $restore"
   fi
-  if [ -n "$warned" ] && [ -e "$warned" ]; then
+  if warned_before; then
     # Already warned: the no-opinion answer the engine gives a command
     # that is not a nika run, in every dialect.
     printf '{}\n'
     exit 0
   fi
-  if [ -n "$warned" ]; then
-    mkdir -p "${warned%/*}" 2>/dev/null && : >>"$warned" 2>/dev/null
+  if ! { [ -n "$warned" ] && mkdir -p "${warned%/*}" 2>/dev/null \
+    && : >>"$warned" 2>/dev/null; }; then
+    mkdir "$warned_tmp" 2>/dev/null
   fi
   printf 'guard_off: the nika binary is not on PATH, so the nika guard is off: shell commands run, and a nika run started meanwhile is not checked before it starts. This folder is not a Nika project (no nika.yaml or .nika/ here or above); inside one, the hook refuses every shell command until nika is back. %s This warning shows once until nika is found again.\n' "$restore" >&2
   exit 1
@@ -219,6 +242,9 @@ if bin="$(nika_on_path)"; then
   # The binary is back: the next time it goes missing, warn again.
   if [ -n "$warned" ] && [ -e "$warned" ]; then
     rm -f "$warned" 2>/dev/null
+  fi
+  if [ -d "$warned_tmp" ] && [ ! -L "$warned_tmp" ]; then
+    rmdir "$warned_tmp" 2>/dev/null
   fi
 else
   without_binary
@@ -244,18 +270,7 @@ broken() {
 # writes; Cursor reads `timeout` in seconds). No `timeout` binary (macOS
 # ships none) and nothing newer than bash 3.2 (macOS /bin/bash).
 deadline=20
-# The judge's answer goes to a new folder under TMPDIR when it names an
-# absolute folder, else under /tmp: a relative one would put it in the
-# folder the hook runs in, the open project (the same test as
-# XDG_STATE_HOME's above).
-tmp_root="${TMPDIR:-}"
-case "$tmp_root" in
-  /*) ;;
-  *) tmp_root=/tmp ;;
-esac
-# The folder named in a refusal, printable characters only and bounded.
-tmp_shown="${tmp_root//[^[:print:]]/?}"
-tmp_shown="${tmp_shown:0:200}"
+# The judge's answer goes to a new folder under tmp_root (above).
 scratch="$(mktemp -d "$tmp_root/nika-guard.XXXXXX" 2>/dev/null)" \
   || refuse "the hook could not make a temporary folder for the judge's answer, so it cannot hold nika guard to its deadline: it refuses every shell command until it can. Check that $tmp_shown is writable, then retry."
 # However the hook ends, the judge's group and the watcher end with it: a

@@ -2,9 +2,11 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! The run never renders a secret into a task's `model:` or an `exec:`'s `cwd:`.
+//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:` or a media
+//! builtin's `args.model` (an `agent:`'s `images.save:` is pinned on a harness seat, in the
+//! crate's `harness_image_values` tests).
 //!
-//! `nika check` refuses both (`NIKA-SEC-006`), and the run refuses a dirty report, so every run
+//! `nika check` refuses each (`NIKA-SEC-006`), and the run refuses a dirty report, so every run
 //! below holds the report an older check gave for the same bytes: one that did not judge these
 //! fields and passed them clean. On that report the run refuses the task itself, before it
 //! renders the field: no provider request, no spawn, no inference call, no ledger line. The
@@ -100,9 +102,11 @@ struct Ran {
     cell: Arc<LiveInspect>,
 }
 
-/// The seams of one run: the provider's HTTP seam and the shell.
+/// The seams of one run: the provider's HTTP seam, the agent verb's provider and the shell. An
+/// `agent:` calls its provider, never the HTTP seam, so a refused agent leaves both untouched.
 struct Seams {
     wire: Arc<Wire>,
+    agent: Arc<MockProvider>,
     shell: MockShell,
 }
 
@@ -110,6 +114,7 @@ impl Seams {
     fn new(shell: MockShell) -> Self {
         Self {
             wire: Arc::new(Wire::default()),
+            agent: Arc::new(MockProvider::new("mock")),
             shell,
         }
     }
@@ -132,7 +137,7 @@ async fn run_on(
         Arc::clone(&invoke),
         InferVerb::new(Arc::new(registry), "mock/echo"),
         AgentVerb::new(
-            Arc::new(MockProvider::new("mock")),
+            Arc::clone(&seams.agent),
             invoke,
             Arc::new(MockToolDefinitionProvider::new()),
             "mock/echo",
@@ -467,6 +472,11 @@ async fn every_way_a_secret_reaches_a_model_is_refused_at_run() {
             *seams.wire.models.lock().expect("models"),
             Vec::<String>::new()
         );
+        assert_eq!(
+            seams.agent.captured_requests().len(),
+            0,
+            "no request reaches the agent's provider: {verb} {with} {model}"
+        );
     }
 }
 
@@ -755,4 +765,48 @@ tasks:
         rendered[0], rendered[1],
         "the input renders as the literal does"
     );
+}
+
+/// A media builtin's `args.model` is the model the tool calls, and it names the file the tool
+/// saves: a secret there, under the rule that lets it reach the tool, is refused before the call,
+/// and nothing the run writes carries it (a lowercase value, as the saved file's name would).
+#[tokio::test]
+async fn a_secret_in_a_media_model_is_refused_before_the_call() {
+    for (tool, text) in [
+        ("nika:tts_generate", "text"),
+        ("nika:image_generate", "prompt"),
+    ] {
+        let yaml = format!(
+            r#"nika: secret-tool-model
+secrets:
+  k: {{ source: env, key: MY_K, egress: [{{ to: "{tool}" }}] }}
+permits:
+  tools: ["{tool}"]
+  fs: {{ write: ["./out/**"] }}
+tasks:
+  say:
+    invoke: {{ tool: "{tool}", args: {{ provider: mock, model: "${{{{ secrets.k }}}}", {text}: hi, output_dir: "./out" }} }}
+"#
+        );
+        let seams = Seams::new(MockShell::new());
+        let ran = run_on_a_stale_report(&yaml, &["say"], &[("k", "canary-q7z")], &seams).await;
+        assert!(!ran.outcome.ok, "{tool}");
+        assert_eq!(
+            error_of(&ran, "say"),
+            (
+                "NIKA-SEC-006".to_owned(),
+                "refused before the task ran: a secret reaches the `args.model:` of task `say` \
+                 (secrets.k → args.model @ say), and the run renders no secret there · name the \
+                 model there, or read it from `inputs:` or `const:`"
+                    .to_owned()
+            ),
+            "{tool}"
+        );
+        assert_eq!(kinds_of(&ran.events, "say"), REFUSED_FRAMES, "{tool}");
+        assert_eq!(
+            places_carrying(&ran, "canary-q7z"),
+            Vec::<String>::new(),
+            "{tool}"
+        );
+    }
 }

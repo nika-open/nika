@@ -293,12 +293,12 @@ fn a_flow_stopped_at_its_bound_fails_closed() {
     );
 }
 
-/// Every `model:` route as `(task, trace)`, in task order.
+/// Every route as `(task, trace)`, in task order.
 fn route_rows(wf: &RawWorkflow, f: &FlowFacts) -> Vec<(String, String)> {
     (0..wf.tasks.len())
         .flat_map(|i| {
             f.route_taints(i)
-                .map(move |trace| (wf.tasks[i].value.id.value.clone(), trace.render()))
+                .map(move |(_, trace)| (wf.tasks[i].value.id.value.clone(), trace.render()))
         })
         .collect()
 }
@@ -320,6 +320,27 @@ fn a_flow_stopped_at_its_bound_fails_closed_on_routes() {
                  settling: judged as if every declared secret reached this task → model @ slot"
                 .to_owned()
         )]
+    );
+}
+
+/// Stopped at its bound, the flow fails closed on each route of a task on its own: an agent's
+/// `model:` and its `images.save:`, and a media builtin's `args.model`, each a row in
+/// [`Route`] order. Settled, none carries a secret.
+#[test]
+fn a_flow_stopped_at_its_bound_fails_closed_on_every_route_of_a_task() {
+    let y = "nika: w\nsecrets:\n  api_key: { source: env, key: K }\ninputs:\n  m: { type: string, required: false, default: mock/echo }\ntasks:\n  draw:\n    with: { m: \"${{ inputs.m }}\", n: \"${{ inputs.m }}\" }\n    agent: { prompt: hi, model: \"${{ with.m }}\", images: { save: \"./out/${{ with.n }}.png\" } }\n  say:\n    with: { m: \"${{ inputs.m }}\" }\n    invoke: { tool: \"nika:tts_generate\", args: { model: \"${{ with.m }}\", text: hi } }\n";
+    let (wf, settled, _) = facts_within(y, sweep_bound);
+    assert_eq!(route_rows(&wf, &settled), Vec::<(String, String)>::new());
+    let (wf, stopped, _) = facts_within(y, |_, _| 0);
+    let stop = "secrets.api_key → the secret flow stopped at its sweep bound (0) before settling: \
+                judged as if every declared secret reached this task";
+    assert_eq!(
+        route_rows(&wf, &stopped),
+        [
+            ("draw".to_owned(), format!("{stop} → model @ draw")),
+            ("draw".to_owned(), format!("{stop} → images.save @ draw")),
+            ("say".to_owned(), format!("{stop} → args.model @ say")),
+        ]
     );
 }
 

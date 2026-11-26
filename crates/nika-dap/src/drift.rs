@@ -102,7 +102,8 @@ use nika_schema::expression::{
     NamespaceRef, expr_refs, parse_expression, scan_templates, single_brace_reference_heads,
 };
 use nika_schema::raw::{
-    ForEachValue, RawAction, RawCommand, RawInferAction, RawInvokeAction, RawWorkflow, VisionInput,
+    ForEachValue, RawAction, RawAgentAction, RawCommand, RawInferAction, RawInvokeAction,
+    RawWorkflow, VisionInput,
 };
 use nika_schema::types::{ExecPermit, FsPermits, OnErrorAction, Permits, WhenGate};
 
@@ -322,6 +323,11 @@ impl UsedNames {
                 for s in [&a.system, &a.model].into_iter().flatten() {
                     self.eat(&s.value);
                 }
+                // The run renders `images.save` with the same scope as the prompt, so a
+                // name read only there is used.
+                if let Some(save) = a.images.as_ref().and_then(|i| i.value.save.as_ref()) {
+                    self.eat(&save.value);
+                }
             }
             _ => {}
         }
@@ -486,6 +492,7 @@ impl BodyUsage {
                 } else {
                     self.has_agent_whitelist = true;
                 }
+                self.eat_image_writes(a);
             }
             RawAction::Infer(a) => self.eat_vision_reads(a),
             // A future verb joins deliberately (the forward-compat
@@ -513,6 +520,25 @@ impl BodyUsage {
             } else if tok.starts_with("${{") {
                 offer(&mut self.hosts, None);
             }
+        }
+    }
+
+    /// `agent.images.save` (spec 02 §Harness images): the engine writes the first image there
+    /// and each later one at its `-n` sibling, every path judged against `permits.fs.write`,
+    /// so a grant covering any of them is a USE, never `declared-but-unused` advice that would
+    /// order the removal of a write the run requires (the check fits all of them,
+    /// [`nika_types::access::harness_image_paths`]). A templated path poisons the set (no
+    /// claim).
+    fn eat_image_writes(&mut self, a: &RawAgentAction) {
+        let Some(save) = a.images.as_ref().and_then(|i| i.value.save.as_ref()) else {
+            return;
+        };
+        if save.value.contains("${{") {
+            offer(&mut self.writes, None);
+            return;
+        }
+        for path in nika_types::access::harness_image_paths(&save.value) {
+            offer(&mut self.writes, Some(path));
         }
     }
 
@@ -1317,6 +1343,81 @@ mod tests {
             !rendered
                 .iter()
                 .any(|a| a.contains("`permits.fs.read` entry")),
+            "{rendered:?}"
+        );
+    }
+
+    /// Spec 02 §Harness images · a secret read only by `agent.images.save` is referenced:
+    /// 0.125.1 advised `secrets.k` "is declared but never referenced — remove the declaration",
+    /// which would leave the save path's reference unresolved.
+    #[test]
+    fn a_secret_read_only_by_images_save_is_referenced() {
+        let advice = drifted(
+            "nika: w\nsecrets:\n  k: { source: env, key: K }\ntasks:\n  draw:\n    agent:\n      \
+             prompt: \"draw\"\n      images:\n        save: \"./out/${{ secrets.k }}.png\"\n",
+        );
+        assert!(
+            !advice
+                .iter()
+                .any(|a| a.contains("`secrets.k` is declared but never referenced")),
+            "{advice:?}"
+        );
+        let unread = drifted(
+            "nika: w\nsecrets:\n  k: { source: env, key: K }\ntasks:\n  draw:\n    agent:\n      \
+             prompt: \"draw\"\n      images:\n        save: \"./out/hero.png\"\n",
+        );
+        assert!(
+            unread
+                .iter()
+                .any(|a| a.contains("`secrets.k` is declared but never referenced")),
+            "a secret nothing reads is still unused: {unread:?}"
+        );
+    }
+
+    /// Spec 02 §Harness images · `agent.images.save` is a write: the grant that covers a literal
+    /// path is used (0.125.1 advised "`permits.fs.write` entry `./out/**` matches no path the
+    /// body writes — remove the entry", which would refuse the run's write), an entry no image
+    /// reaches is still dead, and a rendered path hides the write set (no claim).
+    #[test]
+    fn an_images_save_path_uses_the_write_grant_that_covers_it() {
+        let advice = drifted(
+            "nika: w\npermits:\n  fs: { write: [\"./out/**\", \"./other/**\"] }\ntasks:\n  draw:\n    \
+             agent:\n      prompt: \"draw\"\n      images:\n        save: \"./out/hero.png\"\n",
+        );
+        assert!(
+            !advice
+                .iter()
+                .any(|a| a.contains("`permits.fs.write` entry `./out/**`")),
+            "{advice:?}"
+        );
+        assert!(
+            advice
+                .iter()
+                .any(|a| a.contains("`permits.fs.write` entry `./other/**`")),
+            "{advice:?}"
+        );
+        // A grant that only an image after the first reaches is a use too: the check fits every
+        // sibling, so removing it would refuse the save at check.
+        let siblings = drifted(
+            "nika: w\npermits:\n  fs: { write: [\"./out/hero.png\", \"./out/hero-*.png\"] }\ntasks:\n  \
+             draw:\n    agent:\n      prompt: \"draw\"\n      images:\n        save: \
+             \"./out/hero.png\"\n",
+        );
+        assert!(
+            !siblings
+                .iter()
+                .any(|a| a.contains("`permits.fs.write` entry")),
+            "{siblings:?}"
+        );
+        let rendered = drifted(
+            "nika: w\ninputs:\n  name: { type: string, required: true }\npermits:\n  fs: { write: \
+             [\"./out/**\"] }\ntasks:\n  draw:\n    agent:\n      prompt: \"draw\"\n      images:\n        \
+             save: \"./out/${{ inputs.name }}.png\"\n",
+        );
+        assert!(
+            !rendered
+                .iter()
+                .any(|a| a.contains("`permits.fs.write` entry")),
             "{rendered:?}"
         );
     }

@@ -195,8 +195,8 @@ where
         let cleanup_scope =
             (bags.scope(&records)).with_task_context(None, None, None, scope.permits());
         let mut receipts = Vec::new();
-        // A cleanup is a task: a secret in its `model:` or `cwd:` refuses it
-        // before anything renders, journaled like any cleanup failure.
+        // A cleanup is a task: a secret in one of its routes refuses it before
+        // anything renders, journaled like any cleanup failure.
         let routes = super::SecretRoutes::of(wf);
         for (index, cleanup) in cleanups {
             if let Some(refused) = routes.refusal(&cleanup.id.value) {

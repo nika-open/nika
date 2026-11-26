@@ -578,6 +578,37 @@ mod tests {
         );
     }
 
+    /// An `agent:`'s `images.save:` is part of its effect: its output names
+    /// each saved path, so a path the caller or untrusted content picks
+    /// labels that output as a prompt reading it would, and a path the author
+    /// names leaves it trusted.
+    #[test]
+    fn an_image_save_path_labels_the_agent_output_it_names() {
+        let agent = |save: &str| {
+            parse_task(&format!(
+                "{HEAD}  draw:\n    agent: {{ prompt: \"draw\", images: {{ save: \"{save}\" }} }}\n"
+            ))
+        };
+        let recs = records(vec![settled("dl", Integrity::untrusted("dl"))]);
+        for (save, label) in [
+            (
+                "./out/${{ inputs.name }}.png",
+                Integrity::untrusted("inputs.name"),
+            ),
+            (
+                "./out/${{ tasks.dl.output }}.png",
+                Integrity::untrusted("dl"),
+            ),
+            ("./out/hero.png", Integrity::trusted()),
+        ] {
+            assert_eq!(
+                task_integrity(&agent(save), &recs, &NO_GROUPS),
+                label,
+                "{save}"
+            );
+        }
+    }
+
     #[test]
     fn an_infer_never_launders_taint_but_a_clean_prompt_stays_trusted() {
         // RS-06 · « un LLM n'élève jamais l'intégrité »: the model output

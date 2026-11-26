@@ -398,6 +398,7 @@ pub nika_check::LeakReason::DerivedDestination
 pub nika_check::LeakReason::HostMismatch
 pub nika_check::LeakReason::HostMismatch::actual: alloc::string::String
 pub nika_check::LeakReason::HostMismatch::declared: alloc::string::String
+pub nika_check::LeakReason::ImageSavePath
 pub nika_check::LeakReason::ModelRoute
 pub nika_check::LeakReason::NoEgress
 pub nika_check::LeakReason::SelfShapeBroken

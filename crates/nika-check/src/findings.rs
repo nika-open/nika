@@ -154,11 +154,21 @@ fn leak_fix(l: &SecretLeak) -> String {
             l.secret
         ),
         R::ModelRoute => format!(
-            "fix: a model is a route, not a secret, and no `egress:` rule clears `secrets.{}` in `model:` — name the model there, or read it from `inputs:` or `const:` (`model: \"${{{{ inputs.model }}}}\"`)",
-            l.secret
+            "fix: a model is a route, not a secret, and no `egress:` rule clears `secrets.{}` in `{}:` — name the model there, or read it from `inputs:` or `const:` (`model: \"${{{{ inputs.model }}}}\"`)",
+            l.secret,
+            // A media builtin's model is an argument of its call.
+            if l.sink == "invoke.args.model" {
+                "args.model"
+            } else {
+                "model"
+            }
         ),
         R::WorkingDirectory => format!(
             "fix: a working directory is a path, not a secret, and no `egress:` rule clears `secrets.{}` in `cwd:` — name the directory there, or read it from `inputs:` or `const:` (`cwd: \"${{{{ inputs.dir }}}}\"`)",
+            l.secret
+        ),
+        R::ImageSavePath => format!(
+            "fix: an image's path is a path, not a secret, and no `egress:` rule clears `secrets.{}` in `images.save:` — name the path there, or read it from `inputs:` or `const:` (`save: \"./out/${{{{ inputs.name }}}}.png\"`)",
             l.secret
         ),
     }

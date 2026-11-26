@@ -359,7 +359,8 @@ where
         if let Some(finish) = gate_finish(task, id.clone(), records) {
             return finish;
         }
-        // NIKA-SEC-006 · a secret in `model:`/`cwd:` refuses it before any render.
+        // NIKA-SEC-006 · a secret in a route (`model:`, `cwd:`, `images.save:`, a
+        // media builtin's `args.model`) refuses it before any render.
         if let Some(finish) = secret_route::refused_finish(&id, task, resume_ctx.secret_routes()) {
             return finish;
         }

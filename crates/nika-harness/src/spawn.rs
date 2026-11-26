@@ -652,8 +652,8 @@ impl SpawnedHarness {
     ///
     /// The binary cannot spawn, prints no version, or sits outside the
     /// pin — every case an [`HarnessError::Unavailable`] naming the
-    /// adapter. A probe that started and did not answer inside
-    /// [`crate::probe::deadline`] is the transient [`HarnessError::Session`].
+    /// adapter. A probe that started and did not answer inside the probe
+    /// deadline (`NIKA_HARNESS_PROBE_SECS`) is the transient [`HarnessError::Session`].
     pub async fn probe_version(&self) -> Result<Option<(u32, u32)>, HarnessError> {
         if self.adapter.probe_via_handshake {
             let seen = self.probe_handshake().await?;

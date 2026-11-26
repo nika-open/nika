@@ -1078,6 +1078,7 @@ pub nika_kernel_ai::harness::HarnessSelection::configured_model_source: core::op
 pub nika_kernel_ai::harness::HarnessSelection::configured_service_tier: core::option::Option<alloc::string::String>
 pub nika_kernel_ai::harness::HarnessSelection::configured_service_tier_source: core::option::Option<nika_kernel_ai::harness::ModelProvenance>
 pub nika_kernel_ai::harness::HarnessSelection::effort_option: core::option::Option<alloc::string::String>
+pub nika_kernel_ai::harness::HarnessSelection::held_model: bool
 pub nika_kernel_ai::harness::HarnessSelection::model_option: core::option::Option<alloc::string::String>
 pub nika_kernel_ai::harness::HarnessSelection::offered_service_tier: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub nika_kernel_ai::harness::HarnessSelection::service_tier_option: core::option::Option<alloc::string::String>

@@ -547,6 +547,10 @@ pub struct HarnessSelection {
     pub configured_model: Option<String>,
     /// How `configured_model` was learned.
     pub configured_model_source: Option<ModelProvenance>,
+    /// The client selected the model the session itself reported, because the task named
+    /// none (a hold, not a pin): `transmitted_model` is that value, and a move of the model
+    /// during the turn stays a fact of the receipt, never a refusal.
+    pub held_model: bool,
     /// The session's own reasoning option id the effort was sent through (`reasoning_effort` ·
     /// `effort` …), as advertised for the selected model.
     pub effort_option: Option<String>,
@@ -579,14 +583,16 @@ impl HarnessSelection {
     /// The refusal an EXACT selection owes an answer during which the agent moved a model, an
     /// effort or a service tier the client had applied (`fallback: none` — the answer was not
     /// produced under it). `None` when nothing applied moved: a move of a dimension nobody
-    /// set stays a fact of the receipt, never a refusal.
+    /// set, or of a model the client only held, stays a fact of the receipt, never a refusal.
     #[must_use]
     pub fn moved_refusal(&self) -> Option<HarnessError> {
         let moved: Vec<&str> = self
             .changed_mid_turn
             .iter()
             .filter(|change| {
-                (change.starts_with("model=") && self.transmitted_model.is_some())
+                (change.starts_with("model=")
+                    && self.transmitted_model.is_some()
+                    && !self.held_model)
                     || (change.starts_with("effort=") && self.transmitted_effort.is_some())
                     || (change.starts_with("service_tier=")
                         && self.transmitted_service_tier.is_some())
@@ -854,6 +860,28 @@ mod tests {
         let both = reason(&selection);
         assert!(both.contains("model=sonnet · effort=low"), "{both}");
         assert!(both.contains("an explicit selection is exact"), "{both}");
+    }
+
+    /// A model the client only held, because the task named none, is not a pin: its move
+    /// stays a receipt fact, and the same move of a model that was asked for refuses.
+    #[test]
+    fn a_move_of_a_held_model_stays_a_fact() {
+        let mut selection = HarnessSelection {
+            transmitted_model: Some("haiku".into()),
+            held_model: true,
+            changed_mid_turn: vec!["model=sonnet".into()],
+            ..HarnessSelection::default()
+        };
+        assert!(selection.moved_refusal().is_none(), "a hold is not a pin");
+        selection.held_model = false;
+        let reason = match selection.moved_refusal() {
+            Some(HarnessError::Selection { reason }) => reason,
+            _ => String::new(),
+        };
+        assert!(
+            reason.contains("model=sonnet"),
+            "a pinned model that moved refuses: {reason:?}"
+        );
     }
 
     /// A service tier is an applied dimension like the others: its move refuses the answer

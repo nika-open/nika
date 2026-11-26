@@ -12,12 +12,13 @@
 //! consumer trusts it.
 
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, SessionId,
     SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use agent_client_protocol::{Agent, Channel, Client, ConnectionTo};
+use agent_client_protocol::{Agent, Channel, Client};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -26,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn spawn_mock_agent(channel: Channel) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let _ = Agent
-            .builder()
+            .v1()
             .name("nika-mock-agent")
             .on_receive_request(
                 async move |initialize: InitializeRequest, responder, _connection| {
@@ -71,7 +72,7 @@ async fn the_instrument_speaks_a_known_dialogue() {
     let updates_in_handler = Arc::clone(&updates);
 
     let outcome: Result<StopReason, agent_client_protocol::Error> = Client
-        .builder()
+        .v1()
         .name("nika-test-client")
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {

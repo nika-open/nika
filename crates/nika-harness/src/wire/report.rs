@@ -52,7 +52,8 @@ pub(crate) fn prompt_usage(result: &Value) -> Option<TokenUsage> {
 pub(crate) struct UsageReport {
     /// `used` and `size`, when both are counts.
     pub(crate) context: Option<HarnessContext>,
-    /// `cost`, when [`estimate`] keeps its `amount` and `currency`.
+    /// `cost`, when [`HarnessCostEstimate::new`] keeps its `amount` and `currency`: anything
+    /// else is unknown.
     pub(crate) cost: Option<HarnessCostEstimate>,
     /// claude-agent-acp's `_meta["_claude/model"]`: an id, or `unrecognized` when the report
     /// names one that is no plain model id.
@@ -70,7 +71,7 @@ pub(crate) fn usage_report(update: &Value) -> Option<UsageReport> {
         .map(|(used, size)| HarnessContext::new(used, size));
     let cost = update.get("cost").and_then(|cost| {
         let amount = cost.get("amount")?.as_f64()?;
-        estimate(amount, cost.get("currency")?.as_str()?)
+        HarnessCostEstimate::new(amount, cost.get("currency")?.as_str()?)
     });
     let model = update
         .pointer("/_meta/_claude~1model")
@@ -81,16 +82,6 @@ pub(crate) fn usage_report(update: &Value) -> Option<UsageReport> {
         cost,
         model,
     })
-}
-
-/// The cost an adapter reported, where it enters Nika: kept when `amount` is a finite number of
-/// zero or more (a negative zero reads as zero) and `currency` has the shape of a currency
-/// code, three ASCII capital letters (`USD`), since it rides the record. Anything else is
-/// unknown. No upper bound is set: the amount stays the adapter's own claim.
-fn estimate(amount: f64, currency: &str) -> Option<HarnessCostEstimate> {
-    let code = currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase());
-    (amount.is_finite() && amount >= 0.0 && code)
-        .then(|| HarnessCostEstimate::new(amount.abs(), currency))
 }
 
 /// A model id an adapter reported, kept only as a plain id (ASCII letters, digits and

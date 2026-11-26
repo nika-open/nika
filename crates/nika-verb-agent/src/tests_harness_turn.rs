@@ -278,7 +278,8 @@ async fn the_recorded_claude_counts_give_the_exact_total_with_provenance() {
     counts.total_tokens = Some(3);
     let mut turn = reported(ended("ok", "end_turn"), counts);
     turn.context = Some(HarnessContext::new(3, 200_000));
-    turn.cost_estimate = Some(HarnessCostEstimate::new(0.0123, "USD"));
+    turn.cost_estimate = HarnessCostEstimate::new(0.0123, "USD");
+    assert!(turn.cost_estimate.is_some());
     let (verb, _) = seated(vec![(turn, false)]);
     let mut input = AgentInput::new("hi");
     input.max_tokens_total = Some(100);
@@ -289,10 +290,7 @@ async fn the_recorded_claude_counts_give_the_exact_total_with_provenance() {
     assert_eq!(seat.usage_source, Some("adapter_prompt_result"));
     assert_eq!(seat.token_ceiling, None, "judged on real counts");
     assert_eq!(seat.context, Some(HarnessContext::new(3, 200_000)));
-    assert_eq!(
-        seat.cost_estimate,
-        Some(HarnessCostEstimate::new(0.0123, "USD"))
-    );
+    assert_eq!(seat.cost_estimate, HarnessCostEstimate::new(0.0123, "USD"));
     assert_eq!(out.tools_cost_usd, None, "an estimate is never spend");
 }
 

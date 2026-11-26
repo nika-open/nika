@@ -798,10 +798,10 @@ pub fn nika_kernel_ai::harness::HarnessContext::from(t: T) -> T
 impl<T> nika_error::traits::AsAny for nika_kernel_ai::harness::HarnessContext where T: 'static
 pub fn nika_kernel_ai::harness::HarnessContext::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub struct nika_kernel_ai::harness::HarnessCostEstimate
-pub nika_kernel_ai::harness::HarnessCostEstimate::amount: f64
-pub nika_kernel_ai::harness::HarnessCostEstimate::currency: alloc::string::String
 impl nika_kernel_ai::harness::HarnessCostEstimate
-pub fn nika_kernel_ai::harness::HarnessCostEstimate::new(amount: f64, currency: impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn nika_kernel_ai::harness::HarnessCostEstimate::amount(&self) -> f64
+pub fn nika_kernel_ai::harness::HarnessCostEstimate::currency(&self) -> &str
+pub fn nika_kernel_ai::harness::HarnessCostEstimate::new(amount: f64, currency: impl core::convert::Into<alloc::string::String>) -> core::option::Option<Self>
 pub fn nika_kernel_ai::harness::HarnessCostEstimate::to_json(&self) -> serde_json::value::Value
 impl core::clone::Clone for nika_kernel_ai::harness::HarnessCostEstimate
 pub fn nika_kernel_ai::harness::HarnessCostEstimate::clone(&self) -> nika_kernel_ai::harness::HarnessCostEstimate

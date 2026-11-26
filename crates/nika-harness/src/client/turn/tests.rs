@@ -326,8 +326,9 @@ async fn the_recorded_claude_frames_give_counts_context_cost_and_model() {
     assert_eq!(outcome.context, Some(HarnessContext::new(3, 200_000)));
     assert_eq!(
         outcome.cost_estimate,
-        Some(HarnessCostEstimate::new(0.0123, "USD"))
+        HarnessCostEstimate::new(0.0123, "USD")
     );
+    assert!(outcome.cost_estimate.is_some());
     assert_eq!(
         outcome.observed_model.as_deref(),
         Some("claude-opus-4-5-20251101")

@@ -121,24 +121,43 @@ impl HarnessContext {
 /// The adapter's own estimate of the session's cumulative cost, as its last `usage_update` gave
 /// it (`cost: {amount, currency}`). Never billed spend: the engine prices nothing from it and
 /// no cost ceiling reads it. An update without a cost clears it, so an old value is never shown
-/// as current.
+/// as current. Only what [`Self::new`] keeps can be held, and it is read, never changed.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct HarnessCostEstimate {
-    /// The amount, in `currency`.
-    pub amount: f64,
-    /// The currency of `amount` as the adapter named it: three capital letters (`USD`).
-    pub currency: String,
+    amount: f64,
+    currency: String,
 }
 
 impl HarnessCostEstimate {
-    /// Construct (INV-019).
+    /// The estimate of `amount` in `currency` (INV-019), kept when `amount` is a finite number
+    /// of zero or more (a negative zero reads as zero) and `currency` has the shape of a
+    /// currency code, three ASCII capital letters (`USD`), since it rides the record; `None`
+    /// otherwise. No upper bound is set: the amount stays the adapter's own claim.
     #[must_use]
-    pub fn new(amount: f64, currency: impl Into<String>) -> Self {
-        Self {
-            amount,
-            currency: currency.into(),
+    pub fn new(amount: f64, currency: impl Into<String>) -> Option<Self> {
+        let currency = currency.into();
+        let code = currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase());
+        if amount.is_finite() && amount >= 0.0 && code {
+            Some(Self {
+                amount: amount.abs(),
+                currency,
+            })
+        } else {
+            None
         }
+    }
+
+    /// The amount, in [`Self::currency`]: finite, zero or more.
+    #[must_use]
+    pub const fn amount(&self) -> f64 {
+        self.amount
+    }
+
+    /// The currency of [`Self::amount`] as the adapter named it: three capital letters (`USD`).
+    #[must_use]
+    pub fn currency(&self) -> &str {
+        &self.currency
     }
 
     /// The record's form: the estimate, its unit, its report, its scope, and that it was not
@@ -196,9 +215,42 @@ mod tests {
             serde_json::json!({"used": 53_000, "size": 200_000, "source": "adapter_usage_update"})
         );
         assert_eq!(
-            HarnessCostEstimate::new(0.045, "USD").to_json(),
-            serde_json::json!({"amount": 0.045, "currency": "USD",
-                "source": "adapter_usage_update", "scope": "session", "billed": false})
+            HarnessCostEstimate::new(0.045, "USD").map(|cost| cost.to_json()),
+            Some(serde_json::json!({"amount": 0.045, "currency": "USD",
+                "source": "adapter_usage_update", "scope": "session", "billed": false}))
+        );
+    }
+
+    /// An estimate holds only a finite amount of zero or more in a currency of three capital
+    /// ASCII letters: anything else is refused at construction, and a negative zero reads as
+    /// zero, so no caller can record a value the wire would have dropped.
+    #[test]
+    fn a_cost_estimate_holds_only_a_finite_amount_of_zero_or_more_in_a_currency_code() {
+        for amount in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.0,
+            -f64::MIN_POSITIVE,
+        ] {
+            assert_eq!(HarnessCostEstimate::new(amount, "USD"), None, "{amount}");
+        }
+        for currency in ["usd", "Usd", "US D", "USDT", "US", "", "827", "\u{c9}U"] {
+            assert_eq!(
+                HarnessCostEstimate::new(0.1, currency),
+                None,
+                "{currency:?}"
+            );
+        }
+        for amount in [0.0, 1e-12, 0.0412, f64::MAX] {
+            let kept = HarnessCostEstimate::new(amount, "EUR").expect("an estimate");
+            assert_eq!(kept.amount().to_bits(), amount.to_bits(), "{amount}");
+            assert_eq!(kept.currency(), "EUR");
+        }
+        let zero = HarnessCostEstimate::new(-0.0, "USD").expect("a negative zero is zero");
+        assert!(
+            zero.amount().is_sign_positive(),
+            "the record never reads -0"
         );
     }
 }

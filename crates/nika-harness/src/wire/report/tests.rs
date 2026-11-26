@@ -92,7 +92,7 @@ fn a_usage_update_gives_context_cost_and_the_reported_model() {
         "_meta": {"_claude/origin": "user", "_claude/model": "claude-opus-4-5-20251101"}});
     let report = usage_report(&claude).expect("a usage update");
     assert_eq!(report.context, Some(HarnessContext::new(12_873, 200_000)));
-    assert_eq!(report.cost, Some(HarnessCostEstimate::new(0.0412, "USD")));
+    assert_eq!(report.cost, HarnessCostEstimate::new(0.0412, "USD"));
     assert_eq!(report.model.as_deref(), Some("claude-opus-4-5-20251101"));
     let codex = json!({"sessionUpdate": "usage_update", "used": 53_000, "size": 200_000});
     assert_eq!(
@@ -108,29 +108,29 @@ fn a_usage_update_gives_context_cost_and_the_reported_model() {
     assert_eq!(usage_report(&chunk), None, "only its own kind");
 }
 
-/// A reported cost is kept only as a finite amount of zero or more, with no upper bound; a
-/// negative, infinite or undefined amount (which JSON cannot carry, but a value can) is unknown.
+/// A reported cost is the kernel's estimate, held to its one check (finite, zero or more, a
+/// currency code) with no upper bound; a negative zero on the wire reads as zero.
 #[test]
-fn a_cost_is_a_finite_amount_of_zero_or_more() {
-    for amount in [
-        f64::NAN,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        -1.0,
-        -f64::MIN_POSITIVE,
-    ] {
-        assert_eq!(estimate(amount, "USD"), None, "{amount}");
-    }
+fn a_reported_cost_is_kept_by_the_estimates_own_check() {
+    let update = |amount: f64| {
+        json!({"sessionUpdate": "usage_update", "used": 1, "size": 2,
+            "cost": {"amount": amount, "currency": "USD"}})
+    };
     for amount in [0.0, 1e-12, 0.0412, f64::MAX] {
+        let report = usage_report(&update(amount)).expect("an update");
         assert_eq!(
-            estimate(amount, "USD"),
-            Some(HarnessCostEstimate::new(amount, "USD")),
+            report.cost,
+            HarnessCostEstimate::new(amount, "USD"),
             "{amount}"
         );
+        assert!(report.cost.is_some(), "{amount}");
     }
-    let zero = estimate(-0.0, "USD").expect("a negative zero is zero");
-    assert!(zero.amount.is_sign_positive(), "the record never reads -0");
-    assert_eq!(estimate(0.1, "usd"), None, "the currency keeps its shape");
+    let zero = usage_report(&update(-0.0)).expect("an update");
+    let zero = zero.cost.expect("a negative zero is zero");
+    assert!(
+        zero.amount().is_sign_positive(),
+        "the record never reads -0"
+    );
 }
 
 /// A cost that is no amount in a currency (three capital letters) is no estimate; a reported
@@ -156,7 +156,8 @@ fn a_misshaped_cost_is_dropped_and_a_hostile_model_is_never_echoed() {
     }
     let euros =
         usage_report(&update(json!({"amount": 3, "currency": "EUR"}), "m")).expect("an update");
-    assert_eq!(euros.cost, Some(HarnessCostEstimate::new(3.0, "EUR")));
+    assert_eq!(euros.cost, HarnessCostEstimate::new(3.0, "EUR"));
+    assert!(euros.cost.is_some());
     for hostile in [
         "",
         "opus\u{1b}[2J",

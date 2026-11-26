@@ -32,6 +32,9 @@ struct Turn {
     usage: Option<(u64, u64)>,
     open: bool,
     fail: bool,
+    /// The agent moved the effort the client applied during this turn (`effort=high` over a
+    /// sent `low`).
+    moved: bool,
 }
 
 fn open(text: &'static str) -> Turn {
@@ -40,6 +43,7 @@ fn open(text: &'static str) -> Turn {
         usage: None,
         open: true,
         fail: false,
+        moved: false,
     }
 }
 
@@ -49,6 +53,7 @@ fn closed(text: &'static str) -> Turn {
         usage: None,
         open: false,
         fail: false,
+        moved: false,
     }
 }
 
@@ -59,6 +64,7 @@ fn dies() -> Turn {
         usage: None,
         open: false,
         fail: true,
+        moved: false,
     }
 }
 
@@ -99,6 +105,10 @@ impl futures_core::Stream for Playback {
         outcome.usage = turn
             .usage
             .map(|(input, output)| TokenUsage::new(input, output));
+        if turn.moved {
+            outcome.selection.transmitted_effort = Some("low".to_owned());
+            outcome.selection.changed_mid_turn = vec!["effort=high".to_owned()];
+        }
         let outcome = Box::new(outcome);
         if !turn.open {
             return Poll::Ready(Some(Ok(HarnessEvent::Completed { outcome })));
@@ -392,4 +402,38 @@ async fn a_repair_turn_that_fails_keeps_the_first_message() {
             "the one repair went out"
         );
     }
+}
+
+/// NIK-385 review · a repair turn the agent answered after moving the effort an exact
+/// declaration applied is refused, as any such answer is, but the refusal no longer loses the
+/// first turn's work: the task fails `NIKA-INFER-002` with the first message at
+/// `partial_output`, the selection refusal named as the repair's cause.
+#[tokio::test]
+async fn a_repair_turn_refused_for_a_moved_selection_keeps_the_first_message() {
+    let first = r#"{"note": "seven minutes of research"}"#;
+    let repaired = Turn {
+        moved: true,
+        ..closed(r#"{"title": "t", "summary": "s", "tags": []}"#)
+    };
+    let (verb, script) = seated(vec![open(first), repaired]);
+    let declared = nika_types::access::AccessRequirement::new()
+        .with_via(Some("codex".into()))
+        .with_protocol(Some(nika_types::access::AccessProtocol::Acp))
+        .with_fallback(Some(nika_types::access::AccessFallback::None))
+        .with_effort(Some("low".into()));
+    let input = typed().with_requirement(Some(&declared));
+    let err = verb.run(input).await.expect_err("the repair was refused");
+    assert_eq!(err.spec_code(), "NIKA-INFER-002", "{err:?}");
+    assert!(
+        err.to_string().contains("the repair turn failed:")
+            && err.to_string().contains("effort=high"),
+        "{err}"
+    );
+    let details = VerbAgentError::details_of(&err).expect("details");
+    assert_eq!(details["partial_output"], first);
+    assert_eq!(
+        script.prompts.lock().unwrap().len(),
+        1,
+        "the one repair went out"
+    );
 }

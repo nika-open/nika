@@ -170,13 +170,14 @@ pub(crate) async fn run_on_harness(
                 }
             }
             Some(Ok(HarnessEvent::TurnEnded { outcome, follow_up })) => {
-                let ended = turn_output(*outcome, &input, typed)?;
+                let ended = turn_output(*outcome, &input, typed).map_err(|e| repair.refused(e))?;
                 if let Some(output) = repair.ended(ended, follow_up, observer)? {
                     return Ok(HarnessRun::new(output, received, reported_only));
                 }
             }
             Some(Ok(HarnessEvent::Completed { outcome })) => {
-                let output = repair.completed(turn_output(*outcome, &input, typed)?)?;
+                let turn = turn_output(*outcome, &input, typed).map_err(|e| repair.refused(e))?;
+                let output = repair.completed(turn)?;
                 return Ok(HarnessRun::new(output, received, reported_only));
             }
             Some(Ok(_)) => {

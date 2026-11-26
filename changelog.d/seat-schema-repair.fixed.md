@@ -11,7 +11,8 @@
   `max_tokens`/token cap does not limit the single repair turn. A repaired
   message that misses again, a session the application closed with its
   final message, or a repair turn that
-  never answers (the application exits, errors or goes silent) fails
+  never answers (the application exits, errors or goes silent) or that an
+  exact selection refuses (the agent moved the model, effort or tier) fails
   NIKA-INFER-002 with the first message kept, and
   `task_failed` now carries the rejected message (`partial_output`) and
   every violation (up to 32, then a count). A violation no longer copies the

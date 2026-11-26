@@ -107,6 +107,13 @@ impl<'a> SchemaRepair<'a> {
         Some(rejection.into_error(detail, text.clone()))
     }
 
+    /// A turn refused on its own outcome (an exact selection the agent moved during it): once
+    /// the repair prompt went out, the refusal is the repair's failure and the first turn's
+    /// message is kept ([`Self::repair_failed`]); before it, the refusal stands as it is.
+    pub(crate) fn refused(&self, refusal: VerbAgentError) -> VerbAgentError {
+        self.repair_failed(&refusal).unwrap_or(refusal)
+    }
+
     /// The session's terminal turn: the first one of a session that closed on it, or the
     /// repair turn. Its final message is validated; a miss is `NIKA-INFER-002` with the
     /// message and every violation it holds.

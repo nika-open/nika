@@ -454,6 +454,7 @@ impl core::fmt::Display for nika_harness::infer::InferGradeError
 pub fn nika_harness::infer::InferGradeError::fmt(&self, __formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl miette::protocol::Diagnostic for nika_harness::infer::InferGradeError
 impl nika_error::traits::NikaErrorCode for nika_harness::infer::InferGradeError
+pub fn nika_harness::infer::InferGradeError::is_transient(&self) -> bool
 pub fn nika_harness::infer::InferGradeError::nika_code(&self) -> nika_error::codes::NikaCode
 impl<D> owo_colors::OwoColorize for nika_harness::infer::InferGradeError
 impl<T, U> core::convert::Into<U> for nika_harness::infer::InferGradeError where U: core::convert::From<T>
@@ -1929,6 +1930,7 @@ impl core::fmt::Display for nika_harness::infer::InferGradeError
 pub fn nika_harness::infer::InferGradeError::fmt(&self, __formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl miette::protocol::Diagnostic for nika_harness::infer::InferGradeError
 impl nika_error::traits::NikaErrorCode for nika_harness::infer::InferGradeError
+pub fn nika_harness::infer::InferGradeError::is_transient(&self) -> bool
 pub fn nika_harness::infer::InferGradeError::nika_code(&self) -> nika_error::codes::NikaCode
 impl<D> owo_colors::OwoColorize for nika_harness::infer::InferGradeError
 impl<T, U> core::convert::Into<U> for nika_harness::infer::InferGradeError where U: core::convert::From<T>

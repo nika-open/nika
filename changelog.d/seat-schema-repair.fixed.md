@@ -25,7 +25,8 @@
   "title")`), a path segment the schema does not declare reads `*`, and
   each violation keeps at most 256 bytes.
   The trace keeps the first 64 KiB of the message, cut only after the run's
-  secrets in it are masked; `on_error:` reads the message whole.
+  secrets in it are masked; `on_error:` reads the message whole, with those
+  secrets masked as in every failed task's record.
   NIKA-AGENT-001 and NIKA-AGENT-002 keep their
   `partial_output` too, as spec 02 says. `on_codes: [NIKA-INFER-002]` in a
   `retry:` block replays the task on a new session. `nika explain` no

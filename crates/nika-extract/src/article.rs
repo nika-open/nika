@@ -368,14 +368,15 @@ mod tests {
     /// map's per-process iteration order: the same page yielded two
     /// different articles from one process to the next (WCXB dev 0545 ·
     /// 40 runs → 30/10 through the public 0.118.7 door · dev 0847 three
-    /// variants). The pinned `dom_smoothie` rev keeps candidates in their
+    /// variants). `dom_smoothie` 0.18.1 and later keep candidates in their
     /// first-scored order (readability.js parity), so two equal-score
     /// candidates settle on the FIRST one in document order, in every
     /// process. Two blocks of identical shape under different parents
     /// (plain `<div>` wrappers, which readability never scores on their
     /// own, each beside a heading so the only-child climb never lifts the
-    /// candidate): only the first may own the article. Without the pin
-    /// this assertion is a coin flip; with it, it holds in every process.
+    /// candidate): only the first may own the article. On 0.18.0 this
+    /// assertion is a coin flip; from 0.18.1 it holds in every process,
+    /// which is why the workspace requires at least that release.
     #[test]
     fn stage2_equal_score_candidates_settle_on_the_first_in_document_order() {
         let block = |marker: &str| {

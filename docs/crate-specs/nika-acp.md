@@ -224,6 +224,12 @@ or `current_mode_update` away from the held mode ends the session. The table is
   the runtime never hands it to an attempt `retry:` replays, whose ask pauses ·
   `permit_checked escalate`, journaled before the `workflow_paused` frame although
   the paused task never settles; the human gate is never answered by the engine;
+- a bound answer `false` refuses its ask → the harness's `reject_once` when it
+  offers one, so the agent goes on without the action (`reject_always` NEVER), else
+  `cancelled`, the protocol's word for a client calling the turn off, so the turn
+  may end `cancelled` and fail `NIKA-INFER-001` · `permit_checked deny`. The rule
+  is the conversation path's (`nika_harness::conversation::answer`). An ask left
+  unanswered (the pause, a session torn down) hears `cancelled` whatever it offers;
 - the paths an ask names are anchored on the session root (root-relative inside
   it, the vocabulary `permits.fs` is authored in; absolute outside it), and each
   path's physical identity is judged too (`nika_harness::client::anchor`): the raw

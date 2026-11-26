@@ -450,7 +450,9 @@ context occupancy, the adapter's unbilled cost estimate, the last message a
 `schema:` judges and, once that message validated, the turn's whole text. A
 turn that did not end fails before its value is judged: `max_tokens` is
 `FinalCut` (`NIKA-AGENT-006`), and `refusal`, `max_turn_requests`, `cancelled`
-(the agent path never sends `session/cancel`, so the harness cut the turn) and
+(the agent path never sends `session/cancel` and refuses a request with the
+harness's `reject_once`, so the harness called the turn off, or the turn
+stopped on a request Nika could only cancel because no refusal was offered) and
 an unknown stop word are `HarnessStopped` (`NIKA-463`, wire `NIKA-INFER-001`),
 each with the text received at `partial_output` and no token counts. A turn's
 counts weigh like a native turn's (fresh input and output), by checked

@@ -49,6 +49,11 @@ every such task as a `[harness]` hint (`nika explain harness`).
   session, and your answer decides its first ask outside the grants, once for
   the task: an attempt that `retry:` replays never reuses it, so an ask outside
   the grants there pauses again.
+- An answer of `false` refuses the request with the harness's own one-time
+  refusal ("reject once"), never "reject always": the agent hears no and can go
+  on without the action. A harness that offers no one-time refusal is answered
+  `cancelled`, the protocol's word for calling the turn off, so the turn may end
+  there and fail `NIKA-INFER-001`.
 - Paths are judged in your project's terms (`./out/**` matches the absolute path
   the harness names) and where the operating system will land: each path is
   walked from the root, component by component, through every symlink (a
@@ -156,8 +161,9 @@ A turn ends the task only when the application says it finished
 `NIKA-AGENT-006`. A refusal (`refusal`), the application's own limit of model
 requests for the turn (`max_turn_requests`), a cancelled turn (`cancelled`)
 and a stop word Nika does not know fail `NIKA-INFER-001` with the reason
-named. Nika never cancels the turn of a task, so a turn that ends `cancelled`
-was cut by the application, and the task does not complete. Either way the
+named. A turn ends `cancelled` when the application called it off, or when it
+stopped on a request Nika could only cancel because the application offered
+no way to refuse it and go on; the task does not complete. Either way the
 text received is kept at `partial_output`, masked like every failed record,
 and the failure records no token counts, even when the application reported
 some. An ACP answer must name its stop reason: one that names none is

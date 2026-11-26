@@ -6,7 +6,8 @@
 //! `payload.error.details.partial_output` (`payload.recovered_from.details.partial_output` once
 //! `on_error:` recovered the task). The task record keeps it whole with the run's secrets
 //! masked (the runtime masks every failed dispatch's record), for `on_error:` and
-//! `${{ tasks.X.error }}`; the frame keeps its first [`RECEIVED_KEPT`] bytes.
+//! `${{ tasks.X.error }}`; the frame keeps its first [`RECEIVED_KEPT`] bytes. A seat turn's
+//! whole text, which a success frame carries at `seat_transcript`, is cut the same way.
 //!
 //! The cut runs in [`RedactingSink`](super::RedactingSink) after the scrub, never before it: the
 //! scrub replaces whole secret values, and a cut that split one first would leave a prefix the
@@ -56,6 +57,12 @@ pub(crate) fn bounded_outcome(outcome: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// A received text a frame carries in a field of its own (a seat turn's whole text,
+/// `seat_transcript`) cut to [`RECEIVED_KEPT`] bytes the same way, or `None` when it fits.
+pub(crate) fn bounded_text(text: &str) -> Option<String> {
+    (text.len() > RECEIVED_KEPT).then(|| head(text, RECEIVED_KEPT))
 }
 
 /// A character a cut may land on without splitting a token.
@@ -109,6 +116,26 @@ mod tests {
         assert_eq!(
             head("word another-long-token", 12),
             "word…[truncated · kept 4 of 23 bytes]"
+        );
+    }
+
+    /// A seat turn's text in its own field is cut like a failure's received text, and kept
+    /// whole when it fits.
+    #[test]
+    fn a_long_seat_transcript_is_cut_on_a_delimiter() {
+        let fits = "word ".repeat(10);
+        assert_eq!(bounded_text(&fits), None);
+        let long = "word ".repeat(RECEIVED_KEPT / 5 + 10);
+        let cut = bounded_text(&long).expect("past the cap");
+        // 65 536 ≡ 1 (mod 5): the last space before the cap is two bytes before it.
+        let kept = RECEIVED_KEPT - 2;
+        assert_eq!(
+            cut,
+            format!(
+                "{}…[truncated · kept {kept} of {} bytes]",
+                &long[..kept],
+                long.len()
+            )
         );
     }
 

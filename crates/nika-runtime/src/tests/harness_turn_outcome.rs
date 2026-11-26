@@ -27,6 +27,15 @@ use super::*;
 /// A key the scripted seat repeats in its narration: no frame may carry it.
 const SECRET: &str = "sk-live-7c3a9e1f5b2d";
 
+/// A secret shorter than the bound under which only the payload fields are scrubbed.
+const SHORT: &str = "zq7Kx9";
+
+/// `text` with both secrets masked.
+fn masked(text: &str) -> String {
+    text.replace(SECRET, secret::REDACTED)
+        .replace(SHORT, secret::REDACTED)
+}
+
 const SESSION: &str = "s-1";
 
 /// One prompt's answer: the updates the seat sends, then the prompt's result.
@@ -96,7 +105,7 @@ impl DynAgentBackend for Seat {
     }
 }
 
-/// The run's one secret resolves to [`SECRET`].
+/// The run's secrets resolve to [`SECRET`] and [`SHORT`].
 struct Resolver;
 
 impl WorkflowSecretResolver for Resolver {
@@ -107,6 +116,7 @@ impl WorkflowSecretResolver for Resolver {
     ) -> Result<String, SecretResolveError> {
         match name {
             "tok" => Ok(SECRET.to_owned()),
+            "otp" => Ok(SHORT.to_owned()),
             _ => Err(SecretResolveError {
                 name: name.to_owned(),
                 reason: "absent".to_owned(),
@@ -120,7 +130,7 @@ impl WorkflowSecretResolver for Resolver {
 async fn run_seat(extra: &str, answer: Answer) -> (RunOutcome, Vec<Event>) {
     let yaml = format!(
         "nika: seat-turn-outcome\nmodel: mock/echo\npermits: {{}}\nsecrets:\n  tok: {{ source: \
-         env, key: NIKA_TOK }}\ntasks:\n  ask:\n    agent:\n      prompt: \"research the \
+         env, key: NIKA_TOK }}\n  otp: {{ source: env, key: NIKA_OTP }}\ntasks:\n  ask:\n    agent:\n      prompt: \"research the \
          anchoring bias\"\n{extra}"
     );
     let wf = nika_schema::parse(
@@ -183,6 +193,11 @@ fn no_frame_carries_the_secret(events: &[Event]) {
     for event in events {
         let line = serde_json::to_string(event).expect("event");
         assert!(!line.contains(SECRET), "{:?} carries the key", event.kind);
+        assert!(
+            !line.contains(SHORT),
+            "{:?} carries the short secret",
+            event.kind
+        );
     }
 }
 
@@ -195,7 +210,7 @@ const SCHEMA: &str = "      schema: { type: object, required: [title, tags], pro
 /// source, the context, and the cost as the adapter's estimate beside no `cost_usd`.
 #[tokio::test]
 async fn a_seat_turn_records_its_text_counts_context_and_estimate() {
-    let narration = format!("I read the notes (token {SECRET}) first. ");
+    let narration = format!("I read the notes (token {SECRET}, code {SHORT}) first. ");
     let answer = r#"{"title": "Anchoring", "tags": []}"#;
     let frames = vec![
         text(&narration),
@@ -251,7 +266,7 @@ async fn a_seat_turn_records_its_text_counts_context_and_estimate() {
     );
     assert_eq!(
         done.str_field("seat_transcript"),
-        Some(format!("{}{answer}", narration.replace(SECRET, secret::REDACTED)).as_str())
+        Some(format!("{}{answer}", masked(&narration)).as_str())
     );
     no_frame_carries_the_secret(&events);
 }
@@ -281,7 +296,7 @@ async fn a_seat_turn_without_counts_leaves_the_tokens_unknown() {
 /// record with the key masked.
 #[tokio::test]
 async fn a_refused_seat_turn_fails_with_its_reason_and_the_masked_text() {
-    let said = format!("I looked at {SECRET} and I can't help with that.");
+    let said = format!("I looked at {SECRET} and {SHORT}, and I can't help with that.");
     let (outcome, events) =
         run_seat("", (vec![text(&said)], json!({"stopReason":"refusal"}))).await;
     assert!(!outcome.ok);
@@ -297,10 +312,8 @@ async fn a_refused_seat_turn_fails_with_its_reason_and_the_masked_text() {
     );
     assert_eq!(
         error.details.as_ref().map(|d| Value::Object(d.clone())),
-        Some(
-            json!({"partial_output": said.replace(SECRET, secret::REDACTED),
-            "stop_reason": "refusal"})
-        )
+        Some(json!({"partial_output": masked(&said),
+            "stop_reason": "refusal"}))
     );
     let _ = terminal(&events, EventKind::TaskFailed);
     no_frame_carries_the_secret(&events);

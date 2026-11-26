@@ -25,12 +25,6 @@ use tokio::io::AsyncReadExt;
 
 use crate::authoring::acp::{Deadline, Door, OneShot, Opened};
 
-/// The env floor a spawned adapter always receives — the variables a
-/// CLI needs to run at all, none of them a secret channel.
-/// How long a version probe may take before the adapter is called
-/// unavailable — a `--version` is a millisecond operation; ten seconds
-/// is already generous for a cold npx resolve.
-const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Combined stdout + stderr retained by an identity probe. Public version and
 /// help surfaces are tiny; anything larger is ambiguity or a hostile wrapper.
 const PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
@@ -137,6 +131,8 @@ fn take_probe_pipes(
     Ok((stdout, stderr))
 }
 
+/// The env floor a spawned adapter always receives — the variables a
+/// CLI needs to run at all, none of them a secret channel.
 const ENV_FLOOR: [&str; 7] = ["HOME", "PATH", "TERM", "LANG", "LC_ALL", "USER", "TMPDIR"];
 
 /// Credential-shaped NAME fragments — a suffix list is not enough:
@@ -392,9 +388,69 @@ pub struct SpawnedHarness {
     /// The audited one-shot completion profile this seat serves, if any:
     /// isolated scratch cwd, admitted identity, strict options, judged beats.
     completion: Option<crate::authoring::acp::OneShot>,
+    /// Whether a host program may start (`NIKA_HARNESS_HOSTS`, read at construction).
+    hosts: crate::hosts::Hosts,
+    /// What this seat's first good proof established, shared by its clones (NIK-385).
+    proven: Proven,
+}
+
+/// The environment a proven profile runs with, as `(name, value)` pairs.
+type ProvenEnv = Vec<(String, String)>;
+
+/// The first good proof of a seat (its identity probes and, under the Codex completion
+/// profile, the environment that carries the proven profile), kept for every later session
+/// of the same seat. The seat lives as long as its run (one per composed runtime, one per
+/// `infer:` verb for an ACP one-shot), so a run probes an adapter once: on a loaded machine
+/// each probe is a chance to miss the deadline. A failed or unanswered proof is never kept,
+/// and the next session proves again. Under the Codex profile the proof is kept with the
+/// configuration it was proven against ([`ConfigStamp`]): a session that finds another Codex
+/// home or a configuration file changed since proves again, so an MCP server defined during
+/// the run is disabled like the others.
+///
+/// One proof runs at a time per seat: sessions that start together wait for the one in
+/// flight and reuse what it kept, or prove in turn when it failed or was cancelled (the
+/// lock is released with the proving future).
+///
+/// [`ConfigStamp`]: crate::authoring::acp::codex::ConfigStamp
+#[derive(Clone, Default)]
+struct Proven(std::sync::Arc<std::panic::AssertUnwindSafe<tokio::sync::Mutex<Option<Kept>>>>);
+// Unwind safety holds: the kept proof's one write is a whole assignment after the probes, so
+// a panic while proving leaves the earlier value (or none), never a half-kept proof.
+
+/// One kept proof and what it was proven against (`None` outside the Codex profile).
+struct Kept {
+    against: Option<crate::authoring::acp::codex::ConfigStamp>,
+    env: ProvenEnv,
+}
+
+impl Kept {
+    /// The kept environment, when it was proven against the configuration `now` reads.
+    fn serves(&self, now: Option<&crate::authoring::acp::codex::ConfigStamp>) -> Option<ProvenEnv> {
+        (self.against.as_ref() == now).then(|| self.env.clone())
+    }
+}
+
+impl std::fmt::Debug for Proven {
+    // The kept environment carries the profile's configuration: only whether one is kept
+    // (`None` while a proof is in flight).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kept = self.0.try_lock().ok().map(|kept| kept.is_some());
+        f.debug_tuple("Proven").field(&kept).finish()
+    }
 }
 
 impl SpawnedHarness {
+    /// The host switch where a program of this adapter would start: with hosts off, a host
+    /// program is absent, refused as a missing binary is, and nothing starts.
+    fn admit(&self, program: &str) -> Result<(), HarnessError> {
+        let refused = |refusal: String| HarnessError::Unavailable {
+            reason: format!("adapter `{}`: {refusal}", self.adapter.id),
+        };
+        self.hosts
+            .admit(std::path::Path::new(program))
+            .map_err(refused)
+    }
+
     async fn run_bounded_probe(
         &self,
         args: &[String],
@@ -412,6 +468,7 @@ impl SpawnedHarness {
         args: &[String],
         purpose: &str,
     ) -> Result<ProbeOutput, HarnessError> {
+        self.admit(command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let command_line = format!("{command} {}", args.join(" "));
@@ -433,18 +490,17 @@ impl SpawnedHarness {
             })?;
         let group = child.id();
         let (stdout, stderr) = take_probe_pipes(&mut child, &self.adapter.id, purpose)?;
-        let deadline = tokio::time::Instant::now() + PROBE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + crate::probe::deadline();
         let captured = tokio::time::timeout_at(deadline, read_probe_streams(stdout, stderr)).await;
         let (stdout, stderr) = match captured {
+            // Started but silent past the deadline: unknown and transient (a loaded machine),
+            // never the absent binary the spawn failure above is.
             Err(_) => {
                 stop_probe(&mut child).await;
-                return Err(HarnessError::Unavailable {
-                    reason: format!(
-                        "adapter `{}`: {purpose} `{command_line}` did not answer in {}s",
-                        self.adapter.id,
-                        PROBE_TIMEOUT.as_secs()
-                    ),
-                });
+                return Err(crate::probe::unanswered(&format!(
+                    "adapter `{}`: {purpose} `{command_line}`",
+                    self.adapter.id
+                )));
             }
             Ok(Err(ProbeReadError::Overflow)) => {
                 stop_probe(&mut child).await;
@@ -484,11 +540,11 @@ impl SpawnedHarness {
             }
             Err(_) => {
                 stop_probe(&mut child).await;
-                return Err(HarnessError::Unavailable {
+                return Err(HarnessError::Session {
                     reason: format!(
                         "adapter `{}`: {purpose} `{command_line}` did not exit in {}s",
                         self.adapter.id,
-                        PROBE_TIMEOUT.as_secs()
+                        crate::probe::deadline().as_secs()
                     ),
                 });
             }
@@ -500,13 +556,25 @@ impl SpawnedHarness {
         })
     }
 
-    /// Construct (INV-019).
+    /// Construct (INV-019). `NIKA_HARNESS_HOSTS=off` read here keeps every host program of
+    /// this seat absent: its probes and sessions refuse as for a missing binary.
     #[must_use]
     pub fn new(adapter: HarnessAdapter) -> Self {
         Self {
             adapter,
             completion: None,
+            hosts: crate::hosts::Hosts::from_env(),
+            proven: Proven::default(),
         }
+    }
+
+    /// The same seat under an explicit host switch: a test that starts its own stub under a
+    /// host's name, or that proves the switch starts nothing, says so here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_hosts(mut self, hosts: crate::hosts::Hosts) -> Self {
+        self.hosts = hosts;
+        self
     }
 
     /// Serve one audited one-shot `role` under this adapter's completion profile.
@@ -528,6 +596,8 @@ impl SpawnedHarness {
                 }
             })?;
         self.completion = Some(OneShot { role, profile });
+        // Another profile proves other facts: nothing an earlier proof kept carries over.
+        self.proven = Proven::default();
         Ok(self)
     }
 
@@ -540,6 +610,7 @@ impl SpawnedHarness {
         group: bool,
         profile_env: &[(String, String)],
     ) -> Result<tokio::process::Child, HarnessError> {
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let mut cmd = tokio::process::Command::new(&self.adapter.command);
@@ -581,7 +652,8 @@ impl SpawnedHarness {
     ///
     /// The binary cannot spawn, prints no version, or sits outside the
     /// pin — every case an [`HarnessError::Unavailable`] naming the
-    /// adapter.
+    /// adapter. A probe that started and did not answer inside the probe
+    /// deadline (`NIKA_HARNESS_PROBE_SECS`) is the transient [`HarnessError::Session`].
     pub async fn probe_version(&self) -> Result<Option<(u32, u32)>, HarnessError> {
         if self.adapter.probe_via_handshake {
             let seen = self.probe_handshake().await?;
@@ -618,6 +690,8 @@ impl SpawnedHarness {
         nika: Option<(&str, serde_json::Value)>,
     ) -> Result<Vec<(String, String)>, HarnessError> {
         use crate::authoring::acp::codex;
+        // The bundled codex is found from the adapter's own name: an absent host has none.
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let binary = codex::bundled_codex(&self.adapter.command, &env)
@@ -732,11 +806,13 @@ impl SpawnedHarness {
     /// `initialize`, and judge the agent's self-report — `agentInfo.name`
     /// must be this adapter's id (identity, not assumption) and
     /// `agentInfo.version` must sit inside the pin when the row declares
-    /// one. Deadlined like every probe (a cold npx resolve gets 30s; a
-    /// hung agent is `Unavailable`, never a hang). The child is killed
-    /// before any `session/new` — an initialize answer is free of side
-    /// effects by construction.
+    /// one. Deadlined like every probe ([`crate::probe::deadline`]: a cold npx resolve fits;
+    /// a silent agent is unanswered and transient, never a hang and never an absent adapter).
+    /// The child
+    /// is killed before any `session/new` — an initialize answer is free of side effects by
+    /// construction.
     async fn probe_handshake(&self) -> Result<Option<(u32, u32)>, HarnessError> {
+        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
         let mut cmd = tokio::process::Command::new(&self.adapter.command);
@@ -748,15 +824,12 @@ impl SpawnedHarness {
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .process_group(0);
-        let handshake = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            handshake::roundtrip(cmd),
-        );
-        let answered = handshake.await.map_err(|_| HarnessError::Unavailable {
-            reason: format!(
-                "adapter `{}`: the initialize handshake did not answer in 30s",
+        let handshake = tokio::time::timeout(crate::probe::deadline(), handshake::roundtrip(cmd));
+        let answered = handshake.await.map_err(|_| {
+            crate::probe::unanswered(&format!(
+                "adapter `{}`: the initialize handshake",
                 self.adapter.id
-            ),
+            ))
         })??;
         let result = answered.get("result").unwrap_or(&serde_json::Value::Null);
         self.adapter.judge_handshake(result)
@@ -773,6 +846,14 @@ impl SpawnedHarness {
     }
 }
 
+/// A call whose deadline passed before its adapter started: nothing was spawned.
+fn deadline_passed() -> HarnessError {
+    HarnessError::Session {
+        reason: "the call deadline passed before the adapter started; nothing was spawned"
+            .to_owned(),
+    }
+}
+
 impl SpawnedHarness {
     /// Open one session stream and return it with the transport bound it was given. Each frame
     /// read and each write is bounded by [`crate::IDLE_TIMEOUT_SECS`], or, for a `call` (its
@@ -784,17 +865,15 @@ impl SpawnedHarness {
         request: HarnessRequest,
         call: Option<(Deadline, crate::authoring::acp::Progress)>,
     ) -> Result<(HarnessEventStream, std::time::Duration), HarnessError> {
-        let passed = || HarnessError::Session {
-            reason: "the call deadline passed before the adapter started; nothing was spawned"
-                .to_owned(),
-        };
         let spent = || (call.as_ref()).is_some_and(|(deadline, marks)| deadline.expired(marks));
         if spent() {
-            return Err(passed());
+            return Err(deadline_passed());
         }
-        let (start, profile_env) = self.prove().await?;
+        let (start, profile_env) = self
+            .prove_against(self.config_stamp(), call.as_ref())
+            .await?;
         if spent() {
-            return Err(passed());
+            return Err(deadline_passed());
         }
         let generic = std::time::Duration::from_secs(crate::IDLE_TIMEOUT_SECS);
         let idle = (call.as_ref()).map_or(generic, |(deadline, _)| deadline.allowance());
@@ -819,22 +898,61 @@ impl SpawnedHarness {
     /// first time only to ask and be killed; the judge is returned for that session. Every
     /// other row keeps its version probe. Then the Codex completion profile, proven on the
     /// exact binary: the environment that carries it is returned.
+    ///
+    /// The first good proof is kept for the seat's later sessions ([`Proven`]), under the
+    /// Codex profile while its configuration is unchanged; a handshake row's identity is
+    /// still judged on each session's own `initialize`.
     async fn prove(
         &self,
     ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
-        let start = if self.adapter.probe_via_handshake {
+        self.prove_against(self.config_stamp(), None).await
+    }
+
+    /// What the Codex profile's proof is proven against now: the configuration the adapter's
+    /// environment resolves. `None` outside the Codex profile.
+    fn config_stamp(&self) -> Option<crate::authoring::acp::codex::ConfigStamp> {
+        let codex = (self.completion)
+            .is_some_and(|one_shot| one_shot.profile == crate::authoring::acp::Profile::Codex);
+        codex.then(|| {
+            let parent: BTreeMap<String, String> = std::env::vars().collect();
+            let env = compose_env(&parent, &self.adapter.passthrough_env);
+            crate::authoring::acp::codex::config_stamp(&env)
+        })
+    }
+
+    /// [`Self::prove`] against the configuration stamp `now`, read before any probe: a
+    /// configuration written while the proof runs is proven again by the next session. The
+    /// seat's proof is held for the whole proof ([`Proven`]): one proof at a time. A `call`
+    /// whose deadline passed while it waited for another session's proof, which kept nothing,
+    /// runs no proof of its own: it spawns nothing, probe included.
+    async fn prove_against(
+        &self,
+        now: Option<crate::authoring::acp::codex::ConfigStamp>,
+        call: Option<&(Deadline, crate::authoring::acp::Progress)>,
+    ) -> Result<(Option<crate::client::StartJudge>, Vec<(String, String)>), HarnessError> {
+        let start = (self.adapter.probe_via_handshake).then(|| self.start_judge());
+        let mut kept = self.proven.0.lock().await;
+        if let Some(profile_env) = kept.as_ref().and_then(|kept| kept.serves(now.as_ref())) {
+            return Ok((start, profile_env));
+        }
+        if call.is_some_and(|(deadline, marks)| deadline.expired(marks)) {
+            return Err(deadline_passed());
+        }
+        if self.adapter.probe_via_handshake {
             self.probe_command_shape().await?;
-            Some(self.start_judge())
         } else {
             self.probe_version().await?;
-            None
-        };
+        }
         let profile_env = match self.completion {
             Some(one_shot) if one_shot.profile == crate::authoring::acp::Profile::Codex => {
                 self.codex_profile_env(None).await?
             }
             _ => Vec::new(),
         };
+        *kept = Some(Kept {
+            against: now,
+            env: profile_env.clone(),
+        });
         Ok((start, profile_env))
     }
 
@@ -1489,3 +1607,12 @@ mod offer_tests;
 #[cfg(test)]
 #[cfg(unix)]
 mod codex_profile_tests;
+
+#[cfg(test)]
+#[cfg(unix)]
+mod hosts_tests;
+
+/// The probe deadline: unanswered is transient, unstartable is final.
+#[cfg(test)]
+#[cfg(unix)]
+mod deadline_tests;

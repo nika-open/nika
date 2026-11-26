@@ -15,7 +15,8 @@
 //! no model, and an answer is not an attestation.
 //!
 //! ```text
-//! NIKA_LIVE_ACP=codex NIKA_LIVE_MODEL=openai/<offered> NIKA_LIVE_EFFORT=<offered> \
+//! NIKA_HARNESS_HOSTS=on \
+//!   NIKA_LIVE_ACP=codex NIKA_LIVE_MODEL=openai/<offered> NIKA_LIVE_EFFORT=<offered> \
 //!   cargo test -p nika-harness --locked live_acp -- --ignored --nocapture
 //! ```
 

@@ -464,7 +464,7 @@ fn replay_veto_debits_the_attempt_and_preserves_its_failure() {
     let mut total_cost = Some(0.125);
     let mut unpriced = None;
     let runtime = fetch_runtime(&MockHttp::new());
-    let result = runtime.failed_attempt_delay(
+    let result = runtime.failed_attempt_retry(
         &wf.tasks[0].value,
         failed,
         &ledger,

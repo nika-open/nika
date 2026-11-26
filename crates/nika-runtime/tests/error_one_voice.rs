@@ -92,6 +92,9 @@ async fn a_provider_408_speaks_one_code_on_both_verbs() {
     // final-message schema gate is the class `NIKA-INFER-002` names.
     let agent_schema = VerbAgentError::SchemaValidation {
         detail: "missing field".to_owned(),
+        partial_output: String::new(),
+        violations: Vec::new(),
+        unlisted: 0,
         spend: Box::default(),
     };
     assert_eq!(agent_schema.spec_code(), "NIKA-INFER-002");

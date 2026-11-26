@@ -63,7 +63,7 @@ nika-pack        = { path = "../nika-pack", version = "0.125.2" }          # err
 bytes            = { workspace = true }   # canned HttpResponse bodies (the F1 capturing http seam)
 insta            = { workspace = true }
 proptest         = { workspace = true }
-tokio            = { workspace = true }
+tokio            = { workspace = true, features = ["test-util"] }   # a paused clock: a probe deadline passes at once
 sha2             = { workspace = true }   # the digest those received bytes must keep
 
 [package.metadata.lore]

@@ -16,7 +16,7 @@
 //! spending their own subscription.
 //!
 //! ```text
-//! NIKA_LIVE_CONVERSATION=claude-code [NIKA_LIVE_MODEL=<offered>] \
+//! NIKA_HARNESS_HOSTS=on NIKA_LIVE_CONVERSATION=claude-code [NIKA_LIVE_MODEL=<offered>] \
 //!   cargo test -p nika-session --locked --test acp_led_live -- --ignored --nocapture
 //! ```
 //!

@@ -178,3 +178,45 @@ fn timed_out_login_is_unknown_not_warn() {
     assert_eq!(json["summary"]["fail"], 0);
     assert_eq!(json["findings"][0]["level"], "unknown");
 }
+
+/// NIK-385 review · with the host switch off (Cargo sets it for every process it starts), no
+/// runtime reads « not installed »: each says it was not looked for and names the switch.
+/// With the switch on, none names it. One finding for each runtime the registry lists, in its
+/// order, whatever that list holds (`NIKA_HARNESS_DISABLE` shortens it).
+#[cfg(feature = "access-harness")]
+#[test]
+fn a_runtime_the_host_switch_hides_says_it_was_not_looked_for() {
+    let off = nika_harness::hosts_switched_off();
+    let ids: Vec<String> = (nika_harness::registry()
+        .expect("the registry loads")
+        .into_iter())
+    .map(|row| row.adapter.id)
+    .collect();
+    assert!(!ids.is_empty(), "the registry lists no runtime");
+    let findings = super::harness_findings();
+    assert_eq!(findings.len(), ids.len(), "{findings:?}");
+    for (finding, id) in findings.iter().zip(&ids) {
+        assert!(
+            finding.detail.starts_with(&format!("{id} — ")),
+            "{id}: {}",
+            finding.detail
+        );
+    }
+    for finding in findings {
+        let named = finding
+            .detail
+            .contains("not looked for: NIKA_HARNESS_HOSTS=off keeps every host program absent");
+        assert_eq!(named, off, "{}", finding.detail);
+        if off {
+            assert!(
+                !finding.detail.contains("not installed"),
+                "{}",
+                finding.detail
+            );
+            assert!(
+                matches!(finding.level, super::Level::Unknown),
+                "{finding:?}"
+            );
+        }
+    }
+}

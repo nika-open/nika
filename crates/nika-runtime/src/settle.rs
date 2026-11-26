@@ -287,7 +287,8 @@ fn with_named(mut record: TaskRecord, named: BTreeMap<String, Value>) -> TaskRec
 /// the terminal frame · the result record (spec §3.9). A SUCCESS with a
 /// resume stamp carries the ADR-099 identity + output on its
 /// `task_completed` frame (additive trace fields · the checkpoint).
-/// The attempt history, one `TaskRetrying` frame per retry — split from
+/// The attempt history, one `TaskRetrying` frame per retry, each naming
+/// the child run its failed attempt ran (`child`) — split from
 /// [`settle_ran`] at the 100-line cap (the block is self-contained: it
 /// reads only the retry ledger and touches no record state).
 fn emit_retry_history(
@@ -297,17 +298,15 @@ fn emit_retry_history(
     sink: &mut dyn EventSink,
 ) {
     for r in retries {
-        emit(
-            stamper,
-            sink,
-            EventKind::TaskRetrying,
-            &[
-                ("task", s(id)),
-                ("attempt", i(i64::from(r.attempt))),
-                ("max_attempts", i(i64::from(r.max_attempts))),
-                ("delay_ms", i(i64::try_from(r.delay_ms).unwrap_or(i64::MAX))),
-            ],
-        );
+        let mut fields = vec![
+            ("task", s(id)),
+            ("attempt", i(i64::from(r.attempt))),
+            ("max_attempts", i(i64::from(r.max_attempts))),
+            ("delay_ms", i(i64::try_from(r.delay_ms).unwrap_or(i64::MAX))),
+        ];
+        // The failed attempt's child run, cited like a terminal's (NIK-385).
+        emit_task::push_child_field(&mut fields, r.child.as_deref());
+        emit(stamper, sink, EventKind::TaskRetrying, &fields);
     }
 }
 
@@ -437,11 +436,12 @@ fn settle_ran_terminal(
             error,
             cost_usd,
             cost_unpriced,
+            child,
         } => settle_skip_with_error(
             id,
             error,
             (cost_usd, cost_unpriced),
-            run.evidence.as_ref(),
+            (run.evidence.as_ref(), child.as_deref()),
             record,
             stamper,
             sink,
@@ -773,7 +773,10 @@ fn settle_skip_with_error(
     id: &str,
     error: TaskErrorRecord,
     spend: (Option<f64>, Option<nika_types::cost::UnpricedReason>),
-    evidence: Option<&crate::dispatch::commit::CommitEvidence>,
+    (evidence, child): (
+        Option<&crate::dispatch::commit::CommitEvidence>,
+        Option<&child::ChildRunSummary>,
+    ),
     record: &mut TaskRecord,
     stamper: &mut dyn Stamper,
     sink: &mut dyn EventSink,
@@ -788,6 +791,9 @@ fn settle_skip_with_error(
         ("detail", s(&detail)),
     ];
     push_spend_fields(&mut fields, spend.0, spend.1);
+    // spec 14 law 8 · the failed child an `on_error: skip` passed over rides
+    // the same typed `child` row, so its trace lives as long as its root.
+    emit_task::push_child_field(&mut fields, child);
     // F-P6 · a skipped divergence refusal keeps its finding (never a warn).
     push_commit_fields(&mut fields, evidence);
     fields.push(("outcome", s(&record::outcome_json(record))));

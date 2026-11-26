@@ -189,6 +189,9 @@ fn canon_row(code: &str, door: Door) -> Option<String> {
 /// is the run's to judge — and Marta « stopped running check at all »).
 /// A teaching surface must never promise more than the judge checked.
 fn closer_line(code: &str) -> &'static str {
+    if let Some(closer) = run_verdict_closer(code) {
+        return closer;
+    }
     match code {
         // The boundary refusals: check judges the LITERAL shape (a
         // written path · a `const:`-resolved arg); a computed path (a
@@ -248,6 +251,54 @@ fn closer_line(code: &str) -> &'static str {
         }
         _ => "`nika check` catches this before a run ever starts.",
     }
+}
+
+/// The closer of a class check cannot raise, or raises only in part (NIK-402): the run's
+/// verdict, never « `nika check` catches this ».
+fn run_verdict_closer(code: &str) -> Option<&'static str> {
+    let closer = match code {
+        // NIK-402: a schema verdict exists only once an answer does. Check reads the
+        // schema's shape; the answer is the run's, after the engine's own repairs.
+        "NIKA-INFER-002" => {
+            "a RUN verdict: `nika check` reads the `schema:` itself, never an answer, so it \
+             cannot catch this. The engine repairs a miss before it fails (a re-ask up to \
+             the repair budget, or one repair prompt in the same session for an `agent:` \
+             on a seat), and `error.details` keep the rejected answer (`partial_output`) \
+             and every violation; \
+             `on_codes: [NIKA-INFER-002]` in a `retry:` block asks for a fresh attempt."
+        }
+        // thinking.rs: check names a catalog-known reasoning seat under a tiny cap.
+        "NIKA-INFER-004" => {
+            "`nika check` catches a `max_tokens` cap too small for a catalog-known \
+             reasoning seat before a run; a blank answer under any other cap is the RUN's \
+             verdict."
+        }
+        // schema_typing.rs: check refuses a `for_each` over a declared non-array.
+        "NIKA-VAR-006" => {
+            "`nika check` catches a `for_each` over a constant or an input declared as a \
+             non-array before a run; every other type error at evaluation is the RUN's \
+             verdict."
+        }
+        // The classes only a run raises (NIK-402): a budget, a timeout, a cancellation,
+        // a spawn, a tool call, a decision, a value at evaluation.
+        "NIKA-INFER-005" | "NIKA-EXEC-002" | "NIKA-AGENT-001" | "NIKA-AGENT-002"
+        | "NIKA-AGENT-005" | "NIKA-AGENT-006" | "NIKA-AGENT-007" | "NIKA-SEC-002"
+        | "NIKA-SEC-003" | "NIKA-SEC-010" | "NIKA-SEC-011" | "NIKA-TIMEOUT-001"
+        | "NIKA-CANCEL-001" | "NIKA-MCP-001" | "NIKA-MCP-002" | "NIKA-DECIDE-001"
+        | "NIKA-DECIDE-002" | "NIKA-TYPE-101" | "NIKA-VAR-002" | "NIKA-VAR-004"
+        | "NIKA-VAR-009" => {
+            "a RUN verdict: this engine raises it while the workflow runs, and a clean \
+             `nika check` does not rule it out."
+        }
+        // Rows the spec reserves or defines that this engine does not raise yet.
+        "NIKA-PARSE-004" | "NIKA-TYPE-005" | "NIKA-VAR-007" | "NIKA-PORT-001" | "NIKA-PORT-002"
+        | "NIKA-ASSERT-001" | "NIKA-LOCK-001" => {
+            "this engine raises it neither at check nor at run yet: the spec reserves or \
+             defines the row ahead of the engine."
+        }
+        _ => return None,
+    };
+    Some(closer)
 }
 
 /// The MCP pin family `nika-mcp` mints (`PinError` · `pin.rs`) and the canon table does not
@@ -786,6 +837,108 @@ mod tests {
             "the honest split is taught:\n{}",
             exec.text
         );
+    }
+
+    /// NIK-402 · a code check cannot raise never closes on « `nika check` catches this »:
+    /// INFER-002 is taught as a run verdict with its repair and its retry, the run-only and
+    /// partly-checked classes say what check does catch, and an unraised row says so. Every
+    /// other canon row keeps the strong closer.
+    #[test]
+    fn a_code_check_cannot_raise_is_taught_as_the_runs() {
+        let schema = run("NIKA-INFER-002");
+        assert_eq!(schema.code, exit::OK);
+        assert!(
+            schema.text.contains(
+                "— a RUN verdict: `nika check` reads the `schema:` itself, never an answer"
+            ) && schema
+                .text
+                .contains("`on_codes: [NIKA-INFER-002]` in a `retry:` block")
+                && schema
+                    .text
+                    .contains("(`partial_output`) and every violation"),
+            "{}",
+            schema.text
+        );
+        let run_only = [
+            "NIKA-INFER-005",
+            "NIKA-EXEC-002",
+            "NIKA-AGENT-001",
+            "NIKA-AGENT-002",
+            "NIKA-AGENT-005",
+            "NIKA-AGENT-006",
+            "NIKA-AGENT-007",
+            "NIKA-SEC-002",
+            "NIKA-SEC-003",
+            "NIKA-SEC-010",
+            "NIKA-SEC-011",
+            "NIKA-TIMEOUT-001",
+            "NIKA-CANCEL-001",
+            "NIKA-MCP-001",
+            "NIKA-MCP-002",
+            "NIKA-DECIDE-001",
+            "NIKA-DECIDE-002",
+            "NIKA-TYPE-101",
+            "NIKA-VAR-002",
+            "NIKA-VAR-004",
+            "NIKA-VAR-009",
+        ];
+        let unraised = [
+            "NIKA-PARSE-004",
+            "NIKA-TYPE-005",
+            "NIKA-VAR-007",
+            "NIKA-PORT-001",
+            "NIKA-PORT-002",
+            "NIKA-ASSERT-001",
+            "NIKA-LOCK-001",
+        ];
+        for (codes, closer) in [
+            (
+                &run_only[..],
+                "a RUN verdict: this engine raises it while the workflow runs, and a clean \
+                 `nika check` does not rule it out.",
+            ),
+            (
+                &unraised[..],
+                "this engine raises it neither at check nor at run yet: the spec reserves or \
+                 defines the row ahead of the engine.",
+            ),
+        ] {
+            for code in codes {
+                let out = run(code);
+                assert_eq!(out.code, exit::OK, "{code} is a canon row");
+                assert!(
+                    out.text.ends_with(&format!("{code} — {closer}\n")),
+                    "{code}:\n{}",
+                    out.text
+                );
+            }
+        }
+        for (code, partial) in [
+            (
+                "NIKA-INFER-004",
+                "a blank answer under any other cap is the RUN's verdict.",
+            ),
+            (
+                "NIKA-VAR-006",
+                "every other type error at evaluation is the RUN's verdict.",
+            ),
+        ] {
+            let out = run(code);
+            assert!(
+                out.text.ends_with(&format!("{partial}\n"))
+                    && !out.text.contains("catches this before a run ever starts"),
+                "{code}:\n{}",
+                out.text
+            );
+        }
+        // Every row these lists name is still in the canon: a renamed code fails here.
+        let rows = nika_pack::error_codes();
+        for code in run_only.iter().chain(&unraised).chain(&["NIKA-INFER-002"]) {
+            assert!(
+                rows.iter().any(|row| row.code == *code),
+                "{code} left the canon"
+            );
+        }
     }
 
     /// V7-2 (wave-3 · 4 personas · Priya BLOCKER): the closing claim is

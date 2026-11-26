@@ -6,9 +6,11 @@
 //!
 //! `ls` renders the store's facts: age · size · workflow · terminal
 //! state (`completed`/`failed`/`paused`) · the resume-candidate marker
-//! (`★` — the newest trace of each workflow · exactly the set the GC
-//! exemption protects). Where the retention policy DECIDES, this verb
-//! SHOWS — one scan, one truth, two consumers.
+//! (`★` — the newest trace of each workflow). The GC exemption judges
+//! root runs only (NIK-385): a starred root is never collected, while a
+//! starred child trace stays as long as its root and goes with it. Where
+//! the retention policy DECIDES, this verb SHOWS — one scan, two
+//! consumers.
 //!
 //! `rm` is the explicit removal lever the opportunistic GC never
 //! reaches: one trace by name · `--older-than <dur>` · `--all`. The
@@ -157,7 +159,8 @@ pub fn ls(theme: Theme) -> VerbOutput {
 /// `nika trace ls --json` — the store's facts as one JSON document
 /// (#1247): every trace with its name, path, workflow, terminal state, the
 /// awaiting task when paused, size, mtime, and whether it is the newest of
-/// its workflow (the resume candidate the retention never collects).
+/// its workflow (the resume candidate). Retention never collects a newest
+/// root; a newest child trace a run cites goes with that run (NIK-385).
 #[must_use]
 pub fn ls_json() -> VerbOutput {
     ls_json_in(Path::new(store::TRACE_DIR))

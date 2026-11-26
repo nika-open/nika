@@ -153,9 +153,26 @@ halftone:
 
 A `schema:` on such a task is validated by Nika: the prompt carries the
 schema, the final message must contain a JSON value that satisfies it, and
-the validated object becomes the output (`message` under `images:`). There is
-no repair turn on a seat, because a new session would replay the agent's
-work; a final message that does not validate fails `NIKA-INFER-002`.
+the validated object becomes the output (`message` under `images:`). A final
+message that does not validate gets one repair prompt in the same session,
+which still holds the agent's work: the prompt lists every violation and the
+schema and asks for the final message only, and the trace shows it as an
+`agent_nudge` with reason `schema_repair`. The repair is one more prompt on
+your subscription and must fit the task's `max_tokens_total`. A repaired
+message that still does not validate, a session the application closed
+with its final message, or a repair turn that never answers (the
+application exits, answers with an error or goes silent), fails
+`NIKA-INFER-002`; the failure's `details` keep
+the rejected message (`partial_output`) and its violations, each worded
+without the value it judged or a key the message holds (an unexpected key
+is counted against the names the schema allows, a path segment the schema
+does not declare reads `*`) and at most 256 bytes long. An `on_error:`
+recovery reads the whole message, its secrets masked as in every failed
+task's record;
+the trace keeps its first 64 KiB, cut after the run's secrets in it are
+masked. A
+new session never replays the work: `on_codes: [NIKA-INFER-002]` in a
+`retry:` block is the way to ask for a fresh attempt.
 
 An `infer:` task over ACP (`run.access.protocol: acp`) runs one tool-free
 turn. It carries:

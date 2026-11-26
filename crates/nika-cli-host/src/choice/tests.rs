@@ -19,6 +19,7 @@ fn machine(
         pulled,
         keys: keys.iter().map(|s| (*s).to_owned()).collect(),
         harness_in_binary: harness,
+        hosts_off: None,
     }
 }
 
@@ -1095,6 +1096,45 @@ mod cascade_oracle {
     }
 }
 
+/// Every file under `dir`, sorted.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read_dir") {
+        let path = entry.expect("entry").path();
+        if path.is_dir() {
+            files.extend(files_under(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files
+}
+
+/// NIK-406 · a lib test rewrote the person's real `~/.nika/inference-choice.json`:
+/// `collect` kept the choice under the process home. It keeps it under the home its caller
+/// names, as that one file holding the choice it returned, and with no home it keeps nothing:
+/// the process home, where the choice used to land, is left as it was.
+#[test]
+fn the_seat_choice_is_kept_under_the_named_home_and_nowhere_else() {
+    let home = tempfile::tempdir().expect("tmp");
+    let choice = collect(Some(home.path()));
+    let kept = home.path().join(".nika").join("inference-choice.json");
+    assert_eq!(files_under(home.path()), vec![kept.clone()]);
+    let body: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&kept).expect("read")).expect("JSON");
+    assert_eq!(body, serde_json::to_value(&choice).expect("value"));
+
+    let fallback = crate::probe::home_dir().map(|h| h.join(".nika").join("inference-choice.json"));
+    let stamp = || {
+        let meta = std::fs::metadata(fallback.as_ref()?).ok()?;
+        Some((meta.len(), meta.modified().ok()))
+    };
+    let before = stamp();
+    let _ = collect(None);
+    assert_eq!(stamp(), before, "no home, nothing kept: {fallback:?}");
+}
+
 /// #1619 · nothing on this path dials the vendor, so the key rung says the
 /// variable is set and stops there: « ready now » promised a key no one had
 /// checked, and a revoked key answered 401 on the first paid call.
@@ -1110,4 +1150,33 @@ fn a_key_rung_never_claims_a_checked_key() {
     assert!(rung.reason.contains("OPENAI_API_KEY"), "{}", rung.reason);
     assert!(rung.reason.contains("billed per run"), "{}", rung.reason);
     assert!(rung.reason.contains("not checked"), "{}", rung.reason);
+}
+
+/// NIK-385 review · with the host switch off, welcome's agent rung says no seat was looked for
+/// and names the switch, instead of reading as if none were on this computer. With the switch
+/// on, it never names it.
+#[test]
+fn the_agent_rung_names_the_host_switch_when_it_is_off() {
+    // The switch as the harness reads it; a build without the harness has no seat to look for.
+    #[cfg(feature = "access-harness")]
+    let off = nika_harness::hosts_switched_off();
+    #[cfg(not(feature = "access-harness"))]
+    let off = false;
+    let home = tempfile::tempdir().expect("tmp");
+    let choice = collect(Some(home.path()));
+    let rung = (choice.rungs.iter())
+        .find(|rung| rung.id == "harness")
+        .expect("the agent rung");
+    if off {
+        assert_eq!(
+            rung.reason,
+            "not looked for · NIKA_HARNESS_HOSTS=off keeps every host program absent"
+        );
+    } else {
+        assert!(
+            !rung.reason.contains("NIKA_HARNESS_HOSTS"),
+            "{}",
+            rung.reason
+        );
+    }
 }

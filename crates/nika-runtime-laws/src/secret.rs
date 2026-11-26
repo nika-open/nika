@@ -20,6 +20,8 @@ pub use nika_secret::{REDACTED, resolve_secrets};
 
 use crate::stamp::EventSink;
 
+mod received;
+
 /// Below this length a needle scrubs ONLY the payload fields: a
 /// handful of characters rides inside hashes · ids · ordinary words
 /// and a frame-wide scrub would mangle the journal.
@@ -49,11 +51,16 @@ const PAYLOAD_FIELDS: [&str; 7] = [
 /// sink seam is wrapped and every event's string fields are scrubbed
 /// (needles under `WIDE_SCRUB_MIN` · the `PAYLOAD_FIELDS` only)
 /// before any lane (journal · `--json` · the live fold) sees them.
+///
+/// The same seat cuts the received text a failure keeps (NIK-402 · the
+/// `received` module) to its first 64 KiB, on every run and only AFTER
+/// the scrub: a cut that split a secret first would leave a prefix the
+/// scrub no longer matches.
 pub struct RedactingSink<'a> {
     /// The lane this scrub rides (the run verb's whole tee in production).
     inner: &'a mut dyn EventSink,
     /// (raw · json-escaped) needle pairs, deduped — empty on the common
-    /// no-secrets run, where emit is a zero-cost forward. The escaped
+    /// no-secrets run, where emit scrubs nothing. The escaped
     /// form catches the value INSIDE a payload that carries serialized
     /// JSON text (the `outcome`/`output` fields), where it appears
     /// escaped.
@@ -96,6 +103,10 @@ impl<'a> RedactingSink<'a> {
     /// Item tables contain both content and protocol vocabulary. Scrub
     /// identities and messages as values so a short needle cannot rewrite
     /// indexes, statuses, keys or the JSON grammar that closes a page set.
+    /// `child` and `child_attempts` stay as written: they hold trace ids the
+    /// runner issues (a journal's file name, never a rendered value), and the
+    /// trace reader resolves each as a file in the trace directory, so a
+    /// short needle that happens to occur inside one must not rewrite it.
     fn scrub_items<'t>(&self, text: &'t str) -> Cow<'t, str> {
         let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(text) else {
             return Cow::Owned(REDACTED.to_owned());
@@ -292,6 +303,16 @@ impl EventSink for RedactingSink<'_> {
                         *text = scrubbed;
                     }
                 }
+            }
+        }
+        // After the scrub, on every run (NIK-402): a received text is cut
+        // only once each secret in it is masked whole.
+        for kv in &mut event.fields {
+            if kv.key == "outcome"
+                && let FieldValue::String(text) = &mut kv.value
+                && let Some(bounded) = received::bounded_outcome(text)
+            {
+                *text = bounded;
             }
         }
         self.inner.emit(event);
@@ -524,6 +545,39 @@ mod tests {
                 assert_eq!(events[0].kind, kind);
                 assert_eq!(events[0].fields[1].value, FieldValue::Int(0));
             }
+        }
+    }
+
+    /// An item row's `child` and `child_attempts` are trace ids the runner issues, read back as
+    /// file names in the trace directory: a short secret that also occurs inside one leaves the
+    /// id as written, while the row's `item` and `message` are masked.
+    #[test]
+    fn a_child_trace_id_stays_while_the_item_and_message_are_masked() {
+        let secret = "cbf5";
+        let child = "2026-11-26T06-27-34Z-cbf5.ndjson";
+        let attempt = "2026-11-26T06-27-30Z-cbf5.ndjson";
+        let items = serde_json::json!([{
+            "index": 0, "item": secret, "status": "failed", "code": "NIKA-TEST-001",
+            "message": format!("{secret} refused"), "child": child, "child_attempts": [attempt]
+        }])
+        .to_string();
+        for kind in [EventKind::TaskCompleted, EventKind::TaskItems] {
+            let events = scrubbed(secret, item_event(kind, &items));
+            let rows: Value = serde_json::from_str(field_text(&events[0], "items"))
+                .expect("the table stays JSON");
+            assert!(
+                rows[0]["child"] == child,
+                "the child trace id was rewritten"
+            );
+            assert!(
+                rows[0]["child_attempts"] == serde_json::json!([attempt]),
+                "an attempt's trace id was rewritten"
+            );
+            assert!(rows[0]["item"] == REDACTED, "item content was not masked");
+            assert!(
+                rows[0]["message"] == format!("{REDACTED} refused"),
+                "item message was not masked"
+            );
         }
     }
 

@@ -74,6 +74,13 @@ bash scripts/hygiene/check-all.sh
 bash scripts/refresh-status.sh
 ```
 
+No test starts a real host program. `.cargo/config.toml` sets
+`NIKA_HARNESS_HOSTS=off` for every process Cargo starts, so `codex`, `claude`,
+`gemini` and the other harness programs read as absent and never run. Set
+`NIKA_HARNESS_HOSTS=on` only for a live suite or a `cargo run` that must reach
+them. A test that calls `env_clear()` and then hands a real PATH back to a
+child process must set `NIKA_HARNESS_HOSTS=off` on that child itself.
+
 ### Useful extras
 
 ```bash

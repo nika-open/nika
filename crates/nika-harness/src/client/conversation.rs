@@ -361,9 +361,16 @@ where
                     done.end(&result).await;
                 }
             }
-            Incoming::ErrorResponse { id, message, kind } if current == Some(id) => {
+            Incoming::ErrorResponse {
+                id,
+                code,
+                message,
+                kind,
+            } if current == Some(id) => {
                 if let Some(failed) = turn.take() {
-                    failed.fail(answered_error(message, kind.as_deref())).await;
+                    failed
+                        .fail(answered_error(code, message, kind.as_deref()))
+                        .await;
                 }
             }
             Incoming::Notification { method, params } if method == wire::METHOD_SESSION_UPDATE => {

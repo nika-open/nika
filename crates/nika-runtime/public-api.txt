@@ -395,6 +395,7 @@ pub type nika_runtime::child::ChildRunSummary::Output = T
 pub const nika_runtime::child::MAX_RUN_DEPTH: u32
 pub trait nika_runtime::child::ChildRunner: core::marker::Send + core::marker::Sync
 pub fn nika_runtime::child::ChildRunner::run_child<'a>(&'a self, call: nika_runtime::child::ChildCall) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<nika_runtime::child::ChildOutcome, nika_runtime::child::ChildRunRefusal>> + 'a)>>
+pub fn nika_runtime::child::announce_trace(depth: u32, trace_id: &str)
 pub mod nika_runtime::compose
 pub use nika_runtime::compose::ComposeError
 pub use nika_runtime::compose::apply_sandbox_policy

@@ -998,6 +998,7 @@ pub const NIKA_1802: NikaCode = NikaCode {
 /// absent, ACP speaker missing, this nika was built without adapters,
 /// or the app's sign-in expired. Dummy-readable: install the CLI or sign
 /// in again in the app, or choose an API key or a local engine instead.
+/// A probe that started and did not answer in time is NIKA-1804, never this.
 pub const NIKA_1803: NikaCode = NikaCode {
     num: 1803,
     category: Category::Access,
@@ -1005,8 +1006,9 @@ pub const NIKA_1803: NikaCode = NikaCode {
     slug: "access-harness-unavailable",
 };
 /// NIKA-1804: The harness session died mid-run (process exit · wire
-/// breakdown), or the harness reported a failed turn it offers to retry
-/// — the one TRANSIENT row of the family.
+/// breakdown), a probe of the CLI did not answer inside the probe deadline,
+/// or the harness reported a failed turn it offers to retry — the one
+/// TRANSIENT row of the family.
 pub const NIKA_1804: NikaCode = NikaCode {
     num: 1804,
     category: Category::Access,

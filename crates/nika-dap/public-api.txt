@@ -5324,6 +5324,58 @@ impl<T> tracing::instrument::Instrument for nika_dap::store::TraceState
 impl<T> tracing::instrument::WithSubscriber for nika_dap::store::TraceState
 impl<T> typenum::type_operators::Same for nika_dap::store::TraceState
 pub type nika_dap::store::TraceState::Output = T
+#[non_exhaustive] pub struct nika_dap::store::CitedChild
+pub nika_dap::store::CitedChild::index: core::option::Option<u64>
+pub nika_dap::store::CitedChild::task: alloc::string::String
+pub nika_dap::store::CitedChild::trace_id: alloc::string::String
+impl nika_dap::store::CitedChild
+pub const fn nika_dap::store::CitedChild::new(trace_id: alloc::string::String, task: alloc::string::String, index: core::option::Option<u64>) -> Self
+impl core::clone::Clone for nika_dap::store::CitedChild
+pub fn nika_dap::store::CitedChild::clone(&self) -> nika_dap::store::CitedChild
+impl core::cmp::Eq for nika_dap::store::CitedChild
+impl core::cmp::PartialEq for nika_dap::store::CitedChild
+pub fn nika_dap::store::CitedChild::eq(&self, other: &nika_dap::store::CitedChild) -> bool
+impl core::fmt::Debug for nika_dap::store::CitedChild
+pub fn nika_dap::store::CitedChild::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_dap::store::CitedChild
+impl<D> owo_colors::OwoColorize for nika_dap::store::CitedChild
+impl<Q, K> equivalent::Equivalent<K> for nika_dap::store::CitedChild where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::equivalent(&self, key: &K) -> bool
+impl<Q, K> hashbrown::Equivalent<K> for nika_dap::store::CitedChild where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::equivalent(&self, key: &K) -> bool
+impl<T, U> core::convert::Into<U> for nika_dap::store::CitedChild where U: core::convert::From<T>
+pub fn nika_dap::store::CitedChild::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_dap::store::CitedChild where U: core::convert::Into<T>
+pub type nika_dap::store::CitedChild::Error = core::convert::Infallible
+pub fn nika_dap::store::CitedChild::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_dap::store::CitedChild where U: core::convert::TryFrom<T>
+pub type nika_dap::store::CitedChild::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_dap::store::CitedChild::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_dap::store::CitedChild where T: core::clone::Clone
+pub type nika_dap::store::CitedChild::Owned = T
+pub fn nika_dap::store::CitedChild::clone_into(&self, target: &mut T)
+pub fn nika_dap::store::CitedChild::to_owned(&self) -> T
+impl<T> core::any::Any for nika_dap::store::CitedChild where T: 'static + ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_dap::store::CitedChild where T: ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_dap::store::CitedChild where T: ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_dap::store::CitedChild where T: core::clone::Clone
+pub unsafe fn nika_dap::store::CitedChild::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_dap::store::CitedChild
+pub fn nika_dap::store::CitedChild::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_dap::store::CitedChild where T: core::clone::Clone
+pub fn nika_dap::store::CitedChild::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_dap::store::CitedChild where T: 'static
+pub fn nika_dap::store::CitedChild::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> tower_http::follow_redirect::policy::PolicyExt for nika_dap::store::CitedChild where T: ?core::marker::Sized
+pub fn nika_dap::store::CitedChild::and<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn nika_dap::store::CitedChild::or<P, B, E>(self, other: P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: core::marker::Sized + tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for nika_dap::store::CitedChild
+impl<T> tracing::instrument::WithSubscriber for nika_dap::store::CitedChild
+impl<T> typenum::type_operators::Same for nika_dap::store::CitedChild
+pub type nika_dap::store::CitedChild::Output = T
 #[non_exhaustive] pub struct nika_dap::store::Doubt
 pub nika_dap::store::Doubt::path: std::path::PathBuf
 pub nika_dap::store::Doubt::why: nika_dap::store::DoubtWhy
@@ -5536,6 +5588,7 @@ pub type nika_dap::store::TraceMeta::Output = T
 pub const nika_dap::store::ORIGINALS_DIR: &str
 pub const nika_dap::store::QUARANTINE_DIR: &str
 pub const nika_dap::store::TRACE_DIR: &str
+pub fn nika_dap::store::cited_children(events: &[nika_event::event::Event]) -> alloc::vec::Vec<nika_dap::store::CitedChild>
 pub fn nika_dap::store::fold_facts(events: &[nika_event::event::Event]) -> (alloc::string::String, nika_dap::store::TraceState, core::option::Option<alloc::string::String>)
 pub fn nika_dap::store::latest_in(dir: &std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub fn nika_dap::store::locate_trace(dir: &std::path::Path, execution: &str, trace: &str) -> core::option::Option<std::path::PathBuf>

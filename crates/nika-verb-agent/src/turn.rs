@@ -235,12 +235,19 @@ pub(crate) fn classify_explicit_done(
         Err(VerbAgentError::SchemaValidation { detail, .. }) if repairs.left() > 0 => {
             Ok(ExplicitDone::Repair { detail })
         }
-        Err(VerbAgentError::SchemaValidation { detail, spend }) => {
-            Err(VerbAgentError::SchemaValidation {
-                detail: repairs.exhausted_detail(&detail),
-                spend,
-            })
-        }
+        Err(VerbAgentError::SchemaValidation {
+            detail,
+            partial_output,
+            violations,
+            unlisted,
+            spend,
+        }) => Err(VerbAgentError::SchemaValidation {
+            detail: repairs.exhausted_detail(&detail),
+            partial_output,
+            violations,
+            unlisted,
+            spend,
+        }),
         Err(err) => Err(err),
     }
 }

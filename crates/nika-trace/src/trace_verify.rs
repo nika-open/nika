@@ -68,6 +68,7 @@ mod captured;
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod captured_tests;
+mod children;
 mod door;
 mod json;
 pub use captured::{JOURNAL_BOUND, verify_captured};
@@ -339,6 +340,8 @@ fn tiered(
     }
     let mut out = headline_prose(headline, events, head);
     let mut lines = ladder_lines(raw, &report);
+    // NIK-385 · a child trace this run cites that is gone: said, not judged.
+    lines.extend(children::missing_child_lines(trace, raw));
     let code = match report.exit {
         tier::TierExit::Ok => super::exit::OK,
         tier::TierExit::File => super::exit::FILE,
@@ -453,6 +456,7 @@ mod tests {
     use nika_event::source_id::sha256_hex;
 
     mod evidence;
+    mod missing_children;
 
     /// Build a chained journal the way the sink does (the nika-dap
     /// chain-test idiom).

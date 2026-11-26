@@ -1013,7 +1013,8 @@ fn with_cascade(raw: String) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return raw;
     };
-    v["cascade"] = crate::choice::doctor_cascade_json(&crate::choice::collect());
+    let home = crate::probe::home_dir();
+    v["cascade"] = crate::choice::doctor_cascade_json(&crate::choice::collect(home.as_deref()));
     format!("{v:#}")
 }
 
@@ -1468,6 +1469,9 @@ pub(crate) fn harness_findings() -> Vec<Finding> {
 
 #[cfg(feature = "access-harness")]
 fn harness_finding(row: &nika_harness::AdapterProbeRow) -> Finding {
+    if row.hosts_off && row.version.is_none() {
+        return hosts_off_finding(&row.id);
+    }
     let unknown = row.login.and_then(nika_harness::LoginCheck::unknown_words);
     harness_finding_from_parts(
         &row.id,
@@ -1477,6 +1481,25 @@ fn harness_finding(row: &nika_harness::AdapterProbeRow) -> Finding {
         row.product_present,
         unknown.as_deref(),
     )
+}
+
+/// A runtime the host switch kept absent: not looked for, which says nothing about whether it
+/// is installed.
+#[cfg(feature = "access-harness")]
+fn hosts_off_finding(id: &str) -> Finding {
+    let display = nika_types::access::HarnessRuntime::lookup(id).map_or(id, |rt| rt.display);
+    let switch = nika_harness::HOSTS_ENV;
+    Finding {
+        level: Level::Unknown,
+        label: "runtime".to_owned(),
+        detail: format!(
+            "{id} — {display} · not looked for: {switch}=off keeps every host program absent · \
+             `--access {id}`"
+        ),
+        fix: Some(format!(
+            "unset {switch} (or set it to on) to look for {display}"
+        )),
+    }
 }
 
 #[cfg(feature = "access-harness")]

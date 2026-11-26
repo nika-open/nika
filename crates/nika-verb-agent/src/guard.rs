@@ -225,6 +225,12 @@ pub(crate) fn nudge_text(reason: NudgeReason, period: u32) -> String {
              cause, then either fix the arguments, choose a different tool, or \
              finish now with your best answer."
             .to_owned(),
+        // The loop guard never yields this reason: a seat's schema repair sends its own
+        // prompt, with every violation and the schema (`harness_repair::repair_prompt`).
+        NudgeReason::SchemaRepair => "[schema-repair] Your final message did not satisfy \
+             the required output schema. Do not redo the work: reply with ONLY your final \
+             message, a JSON value that satisfies the task schema."
+            .to_owned(),
     }
 }
 

@@ -74,25 +74,18 @@ pub(crate) struct HarnessRun {
     pub(crate) reported_only: usize,
 }
 
-/// The final message against the task `schema:` (spec 02 §agent): the extracted value, or
-/// NIKA-464 (wire `NIKA-INFER-002`). A seat gets no repair turn: a new session would replay
-/// the agent's work, so the miss fails the task with what was answered.
-pub(crate) fn validated(
-    output: &AgentValue,
-    validator: &jsonschema::Validator,
-) -> Result<AgentValue, VerbAgentError> {
-    let AgentValue::Text(text) = output else {
-        return Ok(output.clone());
-    };
-    crate::shape::validate_text(text, validator)
-        .map(AgentValue::Structured)
-        .map_err(|detail| VerbAgentError::SchemaValidation {
-            detail: format!(
-                "{detail} (a seat's final message is validated without a repair turn: a new \
-                 session would replay the agent's work)"
-            ),
-            spend: Box::default(),
-        })
+impl HarnessRun {
+    pub(crate) fn new(
+        output: AgentOutput,
+        received: Vec<ReceivedImage>,
+        reported_only: usize,
+    ) -> Self {
+        Self {
+            output,
+            received,
+            reported_only,
+        }
+    }
 }
 
 /// Every received image's path is judged against the declared `permits.fs.write` before the

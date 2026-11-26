@@ -21,6 +21,7 @@
 
 use nika_kernel::ai::harness::HarnessError;
 
+use crate::hosts::Hosts;
 use crate::registry::{AdapterRow, AuthProbe, DirectoryAuthProbe};
 use crate::spawn::{SpawnedHarness, compose_env};
 
@@ -51,12 +52,60 @@ pub struct AdapterProbeRow {
     /// check that did not answer in time is unknown, never signed out
     /// ([`LoginCheck`]). `None` for a home-file row.
     pub login: Option<LoginCheck>,
+    /// The host switch was off ([`crate::HOSTS_ENV`]): the adapter was not looked for, so an
+    /// absent version or product says nothing about this machine.
+    pub hosts_off: bool,
 }
 
 /// How long a seat's own login command may take before its answer is unknown.
 /// Valid checks were measured at 12 s and 25.8 s, beyond the former 10 s, which
 /// read a signed-in seat as signed out.
 const LOGIN_CHECK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The probe deadline when [`DEADLINE_ENV`] does not set one.
+pub(crate) const DEFAULT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The machine's own probe deadline, in whole seconds from 1 to [`MAX_DEADLINE_SECS`]. A
+/// deadline is a fact of the machine (its load), not of a project or a workflow: it changes
+/// no check verdict and no workflow's meaning, and every entry (a run, a session, the
+/// language server) reads it without a flag to thread. A value outside the range is ignored.
+pub(crate) const DEADLINE_ENV: &str = "NIKA_HARNESS_PROBE_SECS";
+
+/// The longest probe deadline [`DEADLINE_ENV`] may set: ten minutes.
+const MAX_DEADLINE_SECS: u64 = 600;
+
+/// How long an identity or profile probe of a seat may take before its answer is unknown: a
+/// `--version`, a command-shape help page, the Codex profile listings, a direct one-shot's
+/// attestation and the `initialize` handshake share it. On a loaded machine (load 27 to 41 on
+/// 12 cores) the Codex listing answered in 1.4 to 3.8 s and sometimes past the former 10 s.
+/// A probe that misses it is unanswered, never absent: [`HarnessError::Session`], the
+/// transient class the idle deadline already speaks, so a task's plain `retry:` replays it; a
+/// binary that cannot start stays [`HarnessError::Unavailable`]. [`DEFAULT_DEADLINE`] unless
+/// [`DEADLINE_ENV`] sets it; read once per process.
+pub(crate) fn deadline() -> std::time::Duration {
+    static DEADLINE: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+    *DEADLINE.get_or_init(|| {
+        #[allow(clippy::disallowed_methods)] // the deadline's own boundary, as the host switch's
+        let set = std::env::var(DEADLINE_ENV).ok();
+        deadline_from(set.as_deref())
+    })
+}
+
+/// The deadline [`DEADLINE_ENV`]'s value sets: whole seconds from 1 to [`MAX_DEADLINE_SECS`],
+/// or [`DEFAULT_DEADLINE`] for an unset, malformed or out-of-range value.
+pub(crate) fn deadline_from(set: Option<&str>) -> std::time::Duration {
+    set.and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|secs| (1..=MAX_DEADLINE_SECS).contains(secs))
+        .map_or(DEFAULT_DEADLINE, std::time::Duration::from_secs)
+}
+
+/// The failure a probe that did not answer inside [`deadline`] leaves (`what` names the probe
+/// and the adapter): unknown and transient, never « not installed ».
+pub(crate) fn unanswered(what: &str) -> HarnessError {
+    HarnessError::Session {
+        reason: format!("{what} did not answer in {}s", deadline().as_secs()),
+    }
+}
 
 /// What a seat's own login command answered, read from its exit code alone
 /// (never a credential read). Only an answer is a verdict: a check that did
@@ -157,7 +206,8 @@ pub struct PresenceFact {
     /// ACP speaker on PATH (`claude-agent-acp`).
     pub acp_present: bool,
     /// [`AuthProbe::HomeFile`] witness, or the login command's exit
-    /// code for Command auth — SIGNED IN, never merely installed.
+    /// code for Command auth — SIGNED IN, never merely installed. A row the host switch
+    /// hides is `false` without its home being read: it was not looked for.
     pub configured: bool,
     /// What the login command answered, when one ran (a Command-auth row whose
     /// product is present): `configured` is true only for
@@ -183,13 +233,30 @@ pub(crate) fn presence_facts_with(
     rows: Vec<AdapterRow>,
     probe: &(dyn Fn(&AuthProbe, &[String]) -> LoginCheck + Sync),
 ) -> Vec<PresenceFact> {
+    #[allow(clippy::disallowed_methods)] // PATH walk · presence only
+    let path = std::env::var_os("PATH");
+    presence_facts_under(rows, probe, Hosts::from_env(), path.as_deref(), &|row| {
+        probe_auth_home_sync(&row.auth, row.directory_auth)
+    })
+}
+
+/// [`presence_facts_with`] with the host switch, the `PATH` and the home-file reader injected.
+/// A row whose product the switch keeps absent ([`crate::hosts`]) is not looked for at all: its
+/// home file is not read either, so a sign-in file in a person's home never turns an absent
+/// host into a detected seat, and no test reports the seats its developer's home is signed in
+/// to.
+fn presence_facts_under(
+    rows: Vec<AdapterRow>,
+    probe: &(dyn Fn(&AuthProbe, &[String]) -> LoginCheck + Sync),
+    hosts: Hosts,
+    path: Option<&std::ffi::OsStr>,
+    home_file: &dyn Fn(&AdapterRow) -> Option<bool>,
+) -> Vec<PresenceFact> {
     let presence: Vec<(bool, bool)> = rows
         .iter()
         .map(|row| {
-            let rt = nika_types::access::HarnessRuntime::lookup(&row.adapter.id);
-            let detect = rt.map_or(row.adapter.command.as_str(), |r| r.detect_bin);
-            let acp = rt.map_or(row.adapter.command.as_str(), |r| r.acp_bin);
-            (binary_on_path(detect), binary_on_path(acp))
+            let (detect, acp) = host_bins(row);
+            (binary_in(path, detect, hosts), binary_in(path, acp, hosts))
         })
         .collect();
     // The login commands of the present products answer CONCURRENTLY
@@ -218,7 +285,7 @@ pub(crate) fn presence_facts_with(
         .map(|((row, (product_present, acp_present)), login)| {
             let configured = match row.auth {
                 AuthProbe::HomeFile(_) => {
-                    probe_auth_home_sync(&row.auth, row.directory_auth).unwrap_or(false)
+                    !product_hidden(&row, hosts) && home_file(&row).unwrap_or(false)
                 }
                 // An unknown sign-in (no answer in time · the command itself
                 // failed to run) does not admit the seat: fail closed, while
@@ -235,6 +302,22 @@ pub(crate) fn presence_facts_with(
             }
         })
         .collect()
+}
+
+/// The product and ACP program names of a row: the shipped runtime's, else the adapter's own.
+fn host_bins(row: &AdapterRow) -> (&str, &str) {
+    let rt = nika_types::access::HarnessRuntime::lookup(&row.adapter.id);
+    let own = row.adapter.command.as_str();
+    (
+        rt.map_or(own, |r| r.detect_bin),
+        rt.map_or(own, |r| r.acp_bin),
+    )
+}
+
+/// Whether the host switch keeps this row's product absent ([`crate::hosts`]). The switch knows
+/// a host by its program name, so a row that names none (a test's own stub) is never hidden.
+fn product_hidden(row: &AdapterRow, hosts: Hosts) -> bool {
+    hosts.admit(std::path::Path::new(host_bins(row).0)).is_err()
 }
 
 /// The login/identity probe for a sync caller — [`login_check`] on a
@@ -308,6 +391,7 @@ pub fn probe_adapters_sync(rows: Vec<AdapterRow>) -> Vec<AdapterProbeRow> {
                 note: "could not start the probe runtime".to_owned(),
                 product_present: false,
                 login: None,
+                hosts_off: crate::hosts_switched_off(),
             })
             .collect();
     };
@@ -327,10 +411,12 @@ async fn probe_one(row: AdapterRow) -> AdapterProbeRow {
     };
     let authenticated = match login {
         Some(login) => login.signed_in(),
+        // A row the switch hides is not looked for: its home file is not read either, and
+        // its sign-in stays unknown, never signed out.
+        None if product_hidden(&row, Hosts::from_env()) => None,
         None => probe_auth(&row.auth, row.directory_auth, passthrough).await,
     };
-    let detect = nika_types::access::HarnessRuntime::lookup(&row.adapter.id)
-        .map_or(row.adapter.command.as_str(), |rt| rt.detect_bin);
+    let detect = host_bins(&row).0;
     AdapterProbeRow {
         id: row.adapter.id.clone(),
         version,
@@ -339,13 +425,21 @@ async fn probe_one(row: AdapterRow) -> AdapterProbeRow {
         note,
         product_present: binary_on_path(detect),
         login,
+        hosts_off: crate::hosts_switched_off(),
     }
 }
 
 fn binary_on_path(name: &str) -> bool {
     #[allow(clippy::disallowed_methods)] // PATH walk · presence only
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
+    let path = std::env::var_os("PATH");
+    binary_in(path.as_deref(), name, Hosts::from_env())
+}
+
+/// Whether `name` is a file in a directory of `path`. A host program is never found while the
+/// host switch is off ([`crate::hosts`]); the row says so ([`AdapterProbeRow::hosts_off`]).
+fn binary_in(path: Option<&std::ffi::OsStr>, name: &str, hosts: Hosts) -> bool {
+    hosts.admit(std::path::Path::new(name)).is_ok()
+        && path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(name).is_file()))
 }
 
 /// The auth surface probe — an exit code or a presence bit, bounded
@@ -404,20 +498,34 @@ async fn probe_auth_with(
 /// The login command's answer under this process's environment, composed as the ACP spawn's.
 async fn login_of(command: &str, args: &[&str], passthrough: &[String]) -> LoginCheck {
     let parent: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-    login_check(command, args, &parent, passthrough, LOGIN_CHECK_DEADLINE).await
+    let hosts = Hosts::from_env();
+    login_check(
+        command,
+        args,
+        &parent,
+        passthrough,
+        LOGIN_CHECK_DEADLINE,
+        hosts,
+    )
+    .await
 }
 
 /// One login command run within `deadline`, its exit code the whole verdict: a check that
 /// does not answer in time is killed and stays unknown, never signed out. The command uses the
 /// same declared account roots and credential filter as the ACP spawn; the injected parent keeps
-/// process tests isolated.
+/// process tests isolated. A host's login command does not start while the host switch is off
+/// ([`crate::hosts`]): it reads as a command that could not run, never as signed out.
 async fn login_check(
     command: &str,
     args: &[&str],
     parent: &std::collections::BTreeMap<String, String>,
     passthrough: &[String],
     deadline: std::time::Duration,
+    hosts: Hosts,
 ) -> LoginCheck {
+    if hosts.admit(std::path::Path::new(command)).is_err() {
+        return LoginCheck::Unreadable;
+    }
     let env = compose_env(parent, passthrough);
     let child = tokio::process::Command::new(command)
         .args(args)
@@ -686,6 +794,21 @@ pub fn judge_version(
 mod tests {
     use super::*;
 
+    /// NIK-385 · one probe deadline for every probe: 30 s unless the machine sets whole
+    /// seconds from 1 to 600 in `NIKA_HARNESS_PROBE_SECS`; any other value keeps the default.
+    #[test]
+    fn the_probe_deadline_is_thirty_seconds_unless_the_machine_sets_it() {
+        let secs = |set: Option<&str>| deadline_from(set).as_secs();
+        assert_eq!(DEADLINE_ENV, "NIKA_HARNESS_PROBE_SECS");
+        assert_eq!(secs(None), 30);
+        assert_eq!(secs(Some("90")), 90);
+        assert_eq!(secs(Some(" 45 ")), 45);
+        assert_eq!((secs(Some("1")), secs(Some("600"))), (1, 600));
+        for ignored in ["0", "601", "-5", "1.5", "30s", ""] {
+            assert_eq!(secs(Some(ignored)), 30, "{ignored:?}");
+        }
+    }
+
     /// A Command-auth row is configured ONLY by its login command's
     /// answer (the S18 shape of 0.118.7: an installed codex was a
     /// « ready » seat and outranked a ready key): the probe is consulted
@@ -779,7 +902,15 @@ mod tests {
             let passthrough = &row.adapter.passthrough_env;
             let args = ["-c", script];
             assert_eq!(
-                login_check("/bin/sh", &args, &parent, passthrough, LOGIN_CHECK_DEADLINE).await,
+                login_check(
+                    "/bin/sh",
+                    &args,
+                    &parent,
+                    passthrough,
+                    LOGIN_CHECK_DEADLINE,
+                    Hosts::Off
+                )
+                .await,
                 LoginCheck::SignedIn,
                 "{id} must select its own account, without keys or the other seat root"
             );
@@ -817,7 +948,17 @@ mod tests {
         let parent = std::collections::BTreeMap::new();
         let check = |script: &'static str, deadline: std::time::Duration| {
             let parent = &parent;
-            async move { login_check("/bin/sh", &["-c", script], parent, &[], deadline).await }
+            async move {
+                login_check(
+                    "/bin/sh",
+                    &["-c", script],
+                    parent,
+                    &[],
+                    deadline,
+                    Hosts::Off,
+                )
+                .await
+            }
         };
         let second = std::time::Duration::from_secs(5);
         let slow = check("sleep 0.3; exit 0", second).await;
@@ -837,7 +978,15 @@ mod tests {
             "cut at its deadline, not awaited"
         );
         assert_eq!(hung.signed_in(), None, "unknown, never signed out");
-        let absent = login_check("/nonexistent/nika-login", &[], &parent, &[], second).await;
+        let absent = login_check(
+            "/nonexistent/nika-login",
+            &[],
+            &parent,
+            &[],
+            second,
+            Hosts::Off,
+        )
+        .await;
         assert_eq!(absent, LoginCheck::Unreadable);
         assert_eq!(LOGIN_CHECK_DEADLINE, std::time::Duration::from_secs(30));
         let production = LoginCheck::Unanswered {
@@ -849,6 +998,37 @@ mod tests {
             Some("the login check did not answer within 30 s")
         );
         assert_eq!(LoginCheck::SignedOut.unknown_words(), None);
+    }
+
+    /// A fake `codex` on a temporary PATH, which writes a marker when it runs: with hosts off,
+    /// presence does not find it and its login check reads as a command that could not run,
+    /// never as signed out, and the marker is never written. With hosts started, the same PATH
+    /// finds it and the same check runs it: the witness that it would have started.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fake_codex_on_the_path_never_starts_while_hosts_are_off() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex = dir.path().join("codex");
+        std::fs::write(&codex, "#!/bin/sh\n: > \"$0.started\"\nexit 0\n").expect("fake codex");
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let marker = codex.with_extension("started");
+        let path = dir.path().as_os_str();
+        let parent = std::collections::BTreeMap::from([(
+            "PATH".to_owned(),
+            dir.path().to_string_lossy().into_owned(),
+        )]);
+        let deadline = std::time::Duration::from_secs(5);
+        let args = ["login", "status"];
+        assert!(!binary_in(Some(path), "codex", Hosts::Off), "absent");
+        let off = login_check("codex", &args, &parent, &[], deadline, Hosts::Off).await;
+        assert_eq!(off, LoginCheck::Unreadable);
+        assert_eq!(off.signed_in(), None, "unknown, never signed out");
+        assert!(!marker.exists(), "no host started under the switch");
+        assert!(binary_in(Some(path), "codex", Hosts::Start), "found");
+        let on = login_check("codex", &args, &parent, &[], deadline, Hosts::Start).await;
+        assert_eq!(on, LoginCheck::SignedIn);
+        assert!(marker.exists(), "the same fake runs when hosts start");
     }
 
     #[test]
@@ -905,6 +1085,7 @@ mod tests {
             note: String::new(),
             product_present: false,
             login: None,
+            hosts_off: false,
         };
         assert!(row(Some((1, 0))).usable());
         assert!(
@@ -1403,5 +1584,88 @@ mod tests {
             out.iter().map(|r| r.authenticated).collect::<Vec<_>>(),
             vec![Some(false), Some(false)]
         );
+    }
+
+    /// The shipped rows a home file signs in.
+    fn home_file_rows() -> Vec<AdapterRow> {
+        let rows: Vec<AdapterRow> = crate::registry_with(&|_| None)
+            .expect("registry loads")
+            .into_iter()
+            .filter(|row| matches!(row.auth, AuthProbe::HomeFile(_)))
+            .collect();
+        assert!(rows.len() >= 2, "rows signed in by a home file: {rows:?}");
+        rows
+    }
+
+    /// While the host switch is off, a shipped row is not looked for at all: the sign-in file
+    /// a person's home holds is not read, so it never makes an absent host a detected seat and
+    /// no result depends on the machine the test runs on. With the switch on, the same file
+    /// signs the row in. A row that names no host program is never hidden.
+    #[test]
+    fn a_home_file_does_not_sign_in_a_row_the_host_switch_hides() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let read = AtomicUsize::new(0);
+        let present = |_: &AdapterRow| {
+            read.fetch_add(1, Ordering::SeqCst);
+            Some(true)
+        };
+        let never = |_: &AuthProbe, _: &[String]| LoginCheck::Unreadable;
+
+        let off = presence_facts_under(home_file_rows(), &never, Hosts::Off, None, &present);
+        for fact in &off {
+            assert!(
+                !fact.configured && !fact.product_present && !fact.acp_present,
+                "{fact:?}"
+            );
+        }
+        assert_eq!(
+            read.load(Ordering::SeqCst),
+            0,
+            "a hidden row's home is not read"
+        );
+
+        let on = presence_facts_under(home_file_rows(), &never, Hosts::Start, None, &present);
+        assert_eq!(on.len(), off.len());
+        for fact in &on {
+            assert!(fact.configured && !fact.product_present, "{fact:?}");
+        }
+        assert_eq!(read.load(Ordering::SeqCst), on.len(), "one read per row");
+
+        let stub = crate::registry::AdapterRow {
+            adapter: crate::HarnessAdapter::new("stub-seat", "false").expect("fine"),
+            serves: &["mock"],
+            auth: AuthProbe::HomeFile(".any"),
+            directory_auth: None,
+            package: "test-only",
+        };
+        assert!(
+            !product_hidden(&stub, Hosts::Off),
+            "`false` is no host program"
+        );
+        let kept = presence_facts_under(vec![stub], &never, Hosts::Off, None, &present);
+        assert!(kept[0].configured, "{kept:?}");
+    }
+
+    /// The doctor's probe leaves the sign-in of a hidden row unknown: its home file is not
+    /// read, and unknown is never signed out. Under Cargo the switch is off
+    /// (`.cargo/config.toml`). A live run turns it on and starts real hosts: this test starts
+    /// none, so it pins nothing there.
+    #[tokio::test]
+    async fn the_probe_leaves_the_sign_in_of_a_row_the_host_switch_hides_unknown() {
+        if !crate::hosts_switched_off() {
+            return;
+        }
+        for row in home_file_rows() {
+            let id = row.adapter.id.clone();
+            let probed = probe_one(row).await;
+            assert_eq!(
+                probed.authenticated, None,
+                "{id}: not read, never signed out"
+            );
+            assert!(
+                probed.hosts_off && !probed.product_present && probed.version.is_none(),
+                "{id}: {probed:?}"
+            );
+        }
     }
 }

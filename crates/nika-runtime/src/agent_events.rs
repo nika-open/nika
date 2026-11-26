@@ -340,6 +340,7 @@ fn reason_slug(reason: NudgeReason) -> &'static str {
     match reason {
         NudgeReason::RepeatedActions => "repeated_actions",
         NudgeReason::ErrorStreak => "error_streak",
+        NudgeReason::SchemaRepair => "schema_repair",
         // `#[non_exhaustive]` upstream — a future reason keeps a stable
         // fallback rather than breaking the runtime build.
         _ => "other",

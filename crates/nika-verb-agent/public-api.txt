@@ -163,7 +163,10 @@ pub nika_verb_agent::errors::VerbAgentError::OperatorStopped::call: core::option
 pub nika_verb_agent::errors::VerbAgentError::OperatorStopped::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
 pub nika_verb_agent::errors::VerbAgentError::SchemaValidation
 pub nika_verb_agent::errors::VerbAgentError::SchemaValidation::detail: alloc::string::String
+pub nika_verb_agent::errors::VerbAgentError::SchemaValidation::partial_output: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::SchemaValidation::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::errors::VerbAgentError::SchemaValidation::unlisted: usize
+pub nika_verb_agent::errors::VerbAgentError::SchemaValidation::violations: alloc::vec::Vec<alloc::string::String>
 pub nika_verb_agent::errors::VerbAgentError::SecurityBoundary
 pub nika_verb_agent::errors::VerbAgentError::SecurityBoundary::code: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::SecurityBoundary::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
@@ -319,6 +322,7 @@ pub fn nika_verb_agent::observe::AgentEvent::as_any(&self) -> &(dyn core::any::A
 #[non_exhaustive] pub enum nika_verb_agent::observe::NudgeReason
 pub nika_verb_agent::observe::NudgeReason::ErrorStreak
 pub nika_verb_agent::observe::NudgeReason::RepeatedActions
+pub nika_verb_agent::observe::NudgeReason::SchemaRepair
 impl core::clone::Clone for nika_verb_agent::observe::NudgeReason
 pub fn nika_verb_agent::observe::NudgeReason::clone(&self) -> nika_verb_agent::observe::NudgeReason
 impl core::cmp::Eq for nika_verb_agent::observe::NudgeReason
@@ -676,6 +680,7 @@ pub fn nika_verb_agent::AgentValue::as_any(&self) -> &(dyn core::any::Any + 'sta
 #[non_exhaustive] pub enum nika_verb_agent::NudgeReason
 pub nika_verb_agent::NudgeReason::ErrorStreak
 pub nika_verb_agent::NudgeReason::RepeatedActions
+pub nika_verb_agent::NudgeReason::SchemaRepair
 impl core::clone::Clone for nika_verb_agent::observe::NudgeReason
 pub fn nika_verb_agent::observe::NudgeReason::clone(&self) -> nika_verb_agent::observe::NudgeReason
 impl core::cmp::Eq for nika_verb_agent::observe::NudgeReason
@@ -811,7 +816,10 @@ pub nika_verb_agent::VerbAgentError::OperatorStopped::call: core::option::Option
 pub nika_verb_agent::VerbAgentError::OperatorStopped::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
 pub nika_verb_agent::VerbAgentError::SchemaValidation
 pub nika_verb_agent::VerbAgentError::SchemaValidation::detail: alloc::string::String
+pub nika_verb_agent::VerbAgentError::SchemaValidation::partial_output: alloc::string::String
 pub nika_verb_agent::VerbAgentError::SchemaValidation::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::VerbAgentError::SchemaValidation::unlisted: usize
+pub nika_verb_agent::VerbAgentError::SchemaValidation::violations: alloc::vec::Vec<alloc::string::String>
 pub nika_verb_agent::VerbAgentError::SecurityBoundary
 pub nika_verb_agent::VerbAgentError::SecurityBoundary::code: alloc::string::String
 pub nika_verb_agent::VerbAgentError::SecurityBoundary::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>

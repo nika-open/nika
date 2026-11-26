@@ -5,13 +5,14 @@
 //! context and cost its adapter reported, the model it reported having answered with, and the
 //! last message a `schema:` judges.
 //!
-//! - `end_turn` completes, and so do `cancelled`, whose meaning is unchanged, and a backend
-//!   that reports no stop reason. `max_tokens` is a cut final message (`NIKA-AGENT-006`).
-//!   `refusal`, `max_turn_requests` and a word this engine does not know fail the task
-//!   (`NIKA-INFER-001`) with the text received.
+//! - `end_turn` completes, and so does a backend that reports no stop reason. `max_tokens` is a
+//!   cut final message (`NIKA-AGENT-006`). `refusal`, `max_turn_requests`, `cancelled` and a
+//!   word this engine does not know fail the task (`NIKA-INFER-001`) with the text received:
+//!   this path never sends `session/cancel`, so a turn that ends `cancelled` was cut by the
+//!   harness, not finished.
 //! - The counts are the adapter's (`adapter_prompt_result`); the budget weighs them as it
-//!   weighs a native turn. No counts is unknown: the task's tokens stay unknown, and a
-//!   declared `max_tokens_total` reads `unjudged`.
+//!   weighs a native turn. No counts, or counts whose weight overflows a count, is unknown: the
+//!   task's tokens stay unknown, and a declared `max_tokens_total` reads `unjudged`.
 //! - The configured model, the transmitted one and the requested one are the selection's; the
 //!   model the adapter reported for its answer is the responder, with its own evidence.
 
@@ -28,7 +29,7 @@ const UNNAMED_REPORT: &str = "harness_reported";
 pub(crate) fn stopped(outcome: &HarnessOutcome) -> Option<VerbAgentError> {
     let stop = outcome.stop_reason.as_ref()?;
     match stop {
-        HarnessStopReason::EndTurn | HarnessStopReason::Cancelled => None,
+        HarnessStopReason::EndTurn => None,
         HarnessStopReason::MaxTokens => Some(VerbAgentError::FinalCut {
             partial_output: outcome.output.clone(),
             stop_reason: stop.as_str().to_owned(),
@@ -68,10 +69,16 @@ pub(crate) fn unjudged(input: &AgentInput, usage_source: Option<&str>) -> Option
         .then_some(SeatReport::CEILING_UNJUDGED)
 }
 
-/// The budget weight of the counts the seat reported; 0 when it reported none, which the seat
-/// report marks unknown rather than counted.
-pub(crate) fn weight_of(usage: Option<&TokenUsage>) -> u64 {
-    usage.map_or(0, crate::turn::budget_weight)
+/// The budget weight of the counts the seat reported, fresh input and output as a native
+/// turn's ([`crate::turn::budget_weight`]), by checked arithmetic: `None` when the seat reported
+/// none, when its cache reads exceed its input, or when the sum overflows a count. Unknown,
+/// never a saturated number the ceiling would under-count.
+pub(crate) fn weight_of(usage: Option<&TokenUsage>) -> Option<u64> {
+    let usage = usage?;
+    usage
+        .input_tokens
+        .checked_sub(usage.cache_read_tokens.unwrap_or(0))?
+        .checked_add(usage.output_tokens)
 }
 
 /// The model the session confirmed and how, kept apart from the one the adapter reported for

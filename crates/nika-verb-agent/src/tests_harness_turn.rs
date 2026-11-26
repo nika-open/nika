@@ -2,9 +2,10 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
 //! A seat's turn as the task reads it: a turn that did not end is not completed and names its
-//! reason; the schema judges the last message and the record keeps the whole text; the counts
-//! the adapter reported meet the token ceiling, and no counts leave the tokens and the ceiling
-//! unknown; the model the adapter reported stands apart from the configured one.
+//! reason, on the first turn as on a repair; the schema judges the last message and the record
+//! keeps the whole text; the counts the adapter reported meet the token ceiling, and no counts,
+//! or counts that overflow, leave the tokens and the ceiling unknown; the model the adapter
+//! reported stands apart from the configured one.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -126,15 +127,17 @@ fn typed() -> AgentInput {
     input
 }
 
-/// A turn stopped by a refusal, by the harness's own request limit, by the output cap or by
-/// a word this engine does not know is not completed: each fails with its reason named and
-/// the text received at `partial_output`. `end_turn` and `cancelled` complete.
+/// A turn stopped by a refusal, by the harness's own request limit, by a cancellation Nika
+/// never sent, by the output cap or by a word this engine does not know is not completed: each
+/// fails with its reason named and the text received at `partial_output`. `end_turn`
+/// completes, and so does a backend that reports no stop reason.
 #[tokio::test]
 async fn a_turn_that_did_not_end_is_not_completed_and_names_its_reason() {
     let said = "I read the config. I can't help with that.";
     for (stop, code, kept) in [
         ("refusal", "NIKA-INFER-001", "refusal"),
         ("max_turn_requests", "NIKA-INFER-001", "max_turn_requests"),
+        ("cancelled", "NIKA-INFER-001", "cancelled"),
         ("max_tokens", "NIKA-AGENT-006", "max_tokens"),
         ("paused", "NIKA-INFER-001", "paused"),
         ("Pause Now!", "NIKA-INFER-001", "unrecognized"),
@@ -156,13 +159,46 @@ async fn a_turn_that_did_not_end_is_not_completed_and_names_its_reason() {
             "{stop}"
         );
     }
-    for stop in ["end_turn", "cancelled"] {
-        let (verb, _) = seated(vec![(ended(said, stop), false)]);
-        let out = verb.run(AgentInput::new("talk")).await.expect("completed");
-        assert_eq!(out.output, AgentValue::Text(said.to_owned()));
+    let (verb, _) = seated(vec![(ended(said, "end_turn"), false)]);
+    let out = verb.run(AgentInput::new("talk")).await.expect("completed");
+    assert_eq!(out.output, AgentValue::Text(said.to_owned()));
+    assert_eq!(
+        out.seat.expect("a seat report").stop_reason.as_deref(),
+        Some("end_turn")
+    );
+    let (verb, _) = seated(vec![(HarnessOutcome::new(said), false)]);
+    let out = verb.run(AgentInput::new("talk")).await.expect("completed");
+    assert_eq!(out.output, AgentValue::Text(said.to_owned()));
+    assert_eq!(out.seat.expect("a seat report").stop_reason, None);
+}
+
+/// A repair turn that ends on a refusal or at the output cap fails the repair: the task fails
+/// `NIKA-INFER-002` with the first turn's message and its violations, the repair turn's stop
+/// named as its failure.
+#[tokio::test]
+async fn a_repair_turn_that_stops_keeps_the_first_turns_message() {
+    let first = r#"{"title": "Anchoring"}"#;
+    for stop in ["refusal", "max_tokens"] {
+        let (verb, prompts) = seated(vec![
+            (ended(first, "end_turn"), true),
+            (ended("I can't continue with that.", stop), false),
+        ]);
+        let err = verb.run(typed()).await.expect_err("the repair stopped");
+        assert_eq!(err.spec_code(), "NIKA-INFER-002", "{stop}");
         assert_eq!(
-            out.seat.expect("a seat report").stop_reason.as_deref(),
-            Some(stop)
+            prompts.lock().unwrap().len(),
+            1,
+            "{stop}: the repair went out"
+        );
+        assert_eq!(
+            VerbAgentError::details_of(&err),
+            Some(json!({"partial_output": first,
+                "violations": ["\"tags\" is a required property"]})),
+            "{stop}"
+        );
+        assert!(
+            err.to_string().contains(&format!("stop reason `{stop}`")),
+            "{stop}: {err}"
         );
     }
 }
@@ -298,6 +334,32 @@ async fn no_counts_leave_the_tokens_and_the_ceiling_unknown() {
         (0, 0, 0),
         "never one turn's counts as the session's"
     );
+}
+
+/// Counts whose weight cannot be computed are unknown, never a saturated number: an input of
+/// 100 beside cache reads near the top of a count (the subtraction would leave almost nothing),
+/// and an output near the top (the sum would overflow).
+#[tokio::test]
+async fn counts_that_cannot_be_weighed_are_unknown() {
+    let mut split = TokenUsage::new(100, 5);
+    split.cache_read_tokens = Some(u64::MAX - 50);
+    for counts in [split, TokenUsage::new(100, u64::MAX - 10)] {
+        let (verb, _) = seated(vec![(reported(ended("ok", "end_turn"), counts), false)]);
+        let mut input = AgentInput::new("hi");
+        input.max_tokens_total = Some(1_000);
+        let out = verb.run(input).await.expect("completed");
+        let seat = out.seat.expect("a seat report");
+        assert_eq!(seat.usage_source, None);
+        assert_eq!(seat.token_ceiling, Some("unjudged"));
+        assert_eq!(
+            (
+                out.total_tokens,
+                out.usage.input_tokens,
+                out.usage.output_tokens
+            ),
+            (0, 0, 0)
+        );
+    }
 }
 
 fn declared() -> AccessRequirement {

@@ -17,8 +17,8 @@
 //! - The repair prompt lists every violation the validator found and the schema, and asks
 //!   for the final message only. It is witnessed as `agent_nudge` (reason `schema_repair`).
 //! - The schema judges the turn's last message: narration before a tool call is not the
-//!   answer. A failure keeps every message of the turn at `partial_output`, and a success
-//!   keeps the whole text beside its value (`seat.transcript`).
+//!   answer. A failure keeps every message of the turn at `partial_output`, and a success of
+//!   several messages keeps the whole text beside its value (`seat.transcript`).
 //! - The repair is one more request, so it must fit the task's cumulative token budget, like
 //!   the native loop's re-ask: a budget the counts the seat reported already meet refuses it
 //!   with `NIKA-AGENT-002` and the rejected turn's text. A seat that reported no counts leaves

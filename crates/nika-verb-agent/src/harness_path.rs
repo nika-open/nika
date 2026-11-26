@@ -424,13 +424,14 @@ fn turn_output(
 
 /// The terminal beat → the pre-shaped honest `AgentOutput` (extracted
 /// under the fn-length law): the tokens are the counts the adapter reported, weighed like a
-/// native turn's, and unknown when it reported none (`seat.usage_source`) · `model_resolved`
+/// native turn's, and unknown when it reported none or their weight overflows a count
+/// (`seat.usage_source`) · `model_resolved`
 /// stays None (it is the requested name and a pricing key) · the model the harness REPORTED
 /// rides as `model_reported` with its provenance, and the selection keeps the configured
 /// model apart from the one the adapter reported for its answer: nothing here is "served"
 /// (A-2/A-7).
 fn completed_output(
-    outcome: nika_kernel::ai::harness::HarnessOutcome,
+    mut outcome: nika_kernel::ai::harness::HarnessOutcome,
     input: &AgentInput,
 ) -> AgentOutput {
     use nika_kernel::ai::harness::ModelProvenance;
@@ -448,12 +449,18 @@ fn completed_output(
             ModelProvenance::AdapterUsageUpdate.as_str(),
         )
     });
+    let weight = crate::harness_turn::weight_of(outcome.usage.as_ref());
+    if weight.is_none() {
+        // Counts that cannot be weighed are no counts: unknown, never a saturated number.
+        outcome.usage = None;
+        outcome.usage_source = None;
+    }
     let seat = crate::harness_turn::report(&outcome, input);
     let mut out = AgentOutput::new(
         AgentValue::Text(outcome.output),
         AgentStopReason::Completed,
         1,
-        crate::harness_turn::weight_of(outcome.usage.as_ref()),
+        weight.unwrap_or(0),
     );
     if let Some(usage) = outcome.usage {
         out.usage = usage;

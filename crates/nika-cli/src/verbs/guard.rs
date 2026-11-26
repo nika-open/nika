@@ -1005,7 +1005,11 @@ fn red_reason(display: &str, report: &nika_check::CheckReport) -> String {
 
 /// The dialect sniff: the PARSED JSON decides — a top-level
 /// `hook_event_name` string is Claude Code's (Codex emits it
-/// verbatim), absent from Cursor's. The raw substring is only the
+/// verbatim). It was absent from the Cursor payloads this was written
+/// against; Cursor's hooks documentation, read on 2026-11-26, lists it
+/// among the base fields every hook receives
+/// (<https://cursor.com/docs/hooks>), so such a payload is answered in
+/// the Claude Code shape. The raw substring is only the
 /// fallback for a payload that is not JSON at all (a MALFORMED Claude
 /// payload still degrades into the Claude shape). Sniffing the raw
 /// bytes first would let the COMMAND text spoof the envelope (audit

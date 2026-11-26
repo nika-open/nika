@@ -185,8 +185,11 @@ callable is a tool under `invoke:`, and the engine ships its own
   stderr. Cursor blocks on exit 2 but documents no message from it; it
   sends the agent the `agent_message` of a `"permission": "deny"` answer
   on exit 0 (<https://cursor.com/docs/hooks>). So under Cursor
-  (`CURSOR_VERSION` set) the hook passes on a verdict in Cursor's own
-  dialect as its answer, with exit 0, and blocks any other deny by exit
+  (`CURSOR_VERSION` set) the hook passes on Cursor's own deny, exactly as
+  nika guard writes it (one flat object holding `permission` once, with
+  `deny`, beside at most one `agent_message` and one `user_message`, and
+  no other key; a word written with an escape never counts as one of
+  these), as its answer, with exit 0, and blocks any other deny by exit
   2. A deny in one host's JSON is never handed to another: Claude Code
   finds no decision in Cursor's `"permission":"deny"` and runs the
   command. nika guard answers in Cursor's dialect only for a payload

@@ -16,7 +16,9 @@
   `AGENTS.md`. A `.gitignore` that is a link is neither read nor
   written, and its row says to replace it with a regular file holding
   the entries: git does not read a `.gitignore` that is a link, whatever
-  the file it points at holds, where `init` used to add them there.
+  the file it points at holds (git 2.32.0
+  [release notes](https://github.com/git/git/blob/master/Documentation/RelNotes/2.32.0.adoc)),
+  where `init` used to add them there.
   `nika compile`, which adds the same entry beside a workflow it writes,
   now refuses with exit 3, before it writes, when that `.gitignore` is a
   link, for the same reason, or not a regular file, where it used to

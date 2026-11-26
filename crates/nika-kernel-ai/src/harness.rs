@@ -27,6 +27,9 @@ use futures_core::Stream;
 
 pub use nika_error::token_usage::TokenUsage;
 
+mod turn;
+pub use turn::{AdapterReport, HarnessContext, HarnessCostEstimate, HarnessStopReason};
+
 /// One agentic run delegated to a harness — the narrow-waist request
 /// (`#[non_exhaustive]` · P3/P4 dimensions join additively).
 #[derive(Debug, Clone, PartialEq)]
@@ -445,17 +448,32 @@ impl HarnessEscalation {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct HarnessOutcome {
-    /// The agent's final message text.
+    /// Every message of the turn, in arrival order: its whole text, for the record.
     pub output: String,
+    /// The turn's last message when it held more than one (narration, a tool call, then the
+    /// answer); `None` when the whole text is one message. Read it through
+    /// [`Self::last_message`].
+    pub last_message: Option<String>,
+    /// How the turn ended, as the agent said it. `None`: the backend reports no stop reason,
+    /// which its caller reads as a completed turn.
+    pub stop_reason: Option<HarnessStopReason>,
     /// Token usage WHEN the harness reports it — `None` stays none
     /// (`usage_evidence` `harness-reported` or absent · never estimated
     /// here · A-7).
     pub usage: Option<TokenUsage>,
+    /// Which adapter report `usage` came from; `None` with `usage`.
+    pub usage_source: Option<AdapterReport>,
+    /// The session's context occupancy as the adapter last reported it, when it did.
+    pub context: Option<HarnessContext>,
+    /// The adapter's own estimate of the session's cumulative cost, when its last report
+    /// carried one: never billed spend.
+    pub cost_estimate: Option<HarnessCostEstimate>,
     /// The model identity the harness REPORTED, when observable —
     /// recorded beside `requested_model`, never reconciled silently.
     pub observed_model: Option<String>,
-    /// How `observed_model` was learned. `None` = unspecified, which is never
-    /// treated as a response attestation.
+    /// How `observed_model` was learned. `None` = unspecified. Only
+    /// [`ModelProvenance::AdapterUsageUpdate`] is the adapter's report of the model that
+    /// answered; the others name the session's configured model.
     pub observed_model_source: Option<ModelProvenance>,
     /// Images received during this turn; paths are peer claims, never opened here.
     pub images: Vec<HarnessImage>,
@@ -470,7 +488,12 @@ impl HarnessOutcome {
     pub fn new(output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
+            last_message: None,
+            stop_reason: None,
             usage: None,
+            usage_source: None,
+            context: None,
+            cost_estimate: None,
             observed_model: None,
             observed_model_source: None,
             images: Vec::new(),
@@ -478,10 +501,23 @@ impl HarnessOutcome {
         }
     }
 
+    /// The turn's last message: the one a final answer is judged on.
+    #[must_use]
+    pub fn last_message(&self) -> &str {
+        self.last_message.as_deref().unwrap_or(&self.output)
+    }
+
     /// Attach harness-reported usage.
     #[must_use]
     pub fn with_usage(mut self, usage: TokenUsage) -> Self {
         self.usage = Some(usage);
+        self
+    }
+
+    /// Attach the stop reason the agent gave.
+    #[must_use]
+    pub fn with_stop_reason(mut self, stop_reason: HarnessStopReason) -> Self {
+        self.stop_reason = Some(stop_reason);
         self
     }
 
@@ -504,6 +540,13 @@ pub struct HarnessSelection {
     pub model_option: Option<String>,
     /// The model value sent (`session/set_config_option` value · legacy `modelId`).
     pub transmitted_model: Option<String>,
+    /// The session's model as it reported it before the prompt: the read-back of a selection,
+    /// the accepted request, or the session's own configuration when nothing was sent. Kept
+    /// apart from a model the adapter later reports having answered with
+    /// (`HarnessOutcome::observed_model`).
+    pub configured_model: Option<String>,
+    /// How `configured_model` was learned.
+    pub configured_model_source: Option<ModelProvenance>,
     /// The session's own reasoning option id the effort was sent through (`reasoning_effort` ·
     /// `effort` …), as advertised for the selected model.
     pub effort_option: Option<String>,
@@ -560,8 +603,9 @@ impl HarnessSelection {
     }
 }
 
-/// Where a harness-reported model identity comes from. None of these is an
-/// attestation that a response was produced by that model.
+/// Where a harness-reported model identity comes from. The first three name the session's
+/// configured model, never the model that answered; only [`Self::AdapterUsageUpdate`] is the
+/// adapter's report of that model, still its word and not the provider's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ModelProvenance {
@@ -571,6 +615,9 @@ pub enum ModelProvenance {
     ConfirmedSelection,
     /// A model id the harness accepted without echoing a current value.
     AcceptedRequest,
+    /// The model the adapter reported for its last answer in a `usage_update`
+    /// (claude-agent-acp: `_meta["_claude/model"]`, the model its provider named).
+    AdapterUsageUpdate,
 }
 
 impl ModelProvenance {
@@ -581,6 +628,7 @@ impl ModelProvenance {
             Self::SessionConfig => "session_config",
             Self::ConfirmedSelection => "confirmed_selection",
             Self::AcceptedRequest => "accepted_request",
+            Self::AdapterUsageUpdate => "adapter_usage_update",
         }
     }
 }
@@ -894,6 +942,28 @@ mod tests {
         assert_eq!(o.output, "done");
         assert!(o.usage.is_none());
         assert!(o.observed_model.is_none());
+        // No stop reason, no report, no estimate: unknown, never a completion or a zero.
+        assert!(o.stop_reason.is_none() && o.usage_source.is_none());
+        assert!(o.context.is_none() && o.cost_estimate.is_none());
+        assert!(o.selection.configured_model.is_none());
+    }
+
+    /// One message is the whole text; a turn of several is judged on its last one while the
+    /// whole text stays the record's.
+    #[test]
+    fn the_last_message_is_the_whole_text_unless_the_turn_held_several() {
+        let one = HarnessOutcome::new("{\"a\":1}");
+        assert_eq!(one.last_message(), "{\"a\":1}");
+        let mut several = HarnessOutcome::new("I will read it.{\"a\":1}")
+            .with_stop_reason(HarnessStopReason::EndTurn);
+        several.last_message = Some("{\"a\":1}".to_owned());
+        assert_eq!(several.last_message(), "{\"a\":1}");
+        assert_eq!(several.output, "I will read it.{\"a\":1}");
+        assert_eq!(several.stop_reason, Some(HarnessStopReason::EndTurn));
+        assert_eq!(
+            ModelProvenance::AdapterUsageUpdate.as_str(),
+            "adapter_usage_update"
+        );
     }
 
     #[test]

@@ -939,6 +939,10 @@ const PIPE_CLOSED: &str = "transport: the agent closed the pipe mid-run";
 /// The adapter's typed kind of an error that a lost sign-in raises.
 const SIGN_IN_KIND: &str = "authentication_failed";
 
+/// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
+/// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
+const QUOTA_KIND: &str = "usageLimitExceeded";
+
 /// The reason a harness the app no longer signs in for is unavailable: our own words, never the
 /// adapter's (its prose may carry account details).
 pub(crate) const SIGN_IN_EXPIRED: &str = "the app's sign-in has expired or was revoked";
@@ -952,7 +956,8 @@ pub(crate) fn signed_out() -> HarnessError {
 }
 
 /// The failure an error answer to the prompt is. The adapter's typed kind it knows keeps its
-/// classification: `authentication_failed` is a lost sign-in, whatever the code. Without one
+/// classification: `authentication_failed` is a lost sign-in, whatever the code, and codex-acp's
+/// `usageLimitExceeded` is a final refusal, never the retried `-32603` it rides. Without one
 /// (no kind, or a kind this client does not know), the code decides, by the same table as an
 /// answer to a request before the prompt ([`request_error`]): `-32000` (authentication
 /// required) is a lost sign-in, final; `-32603` (internal error) is a session that ended before
@@ -977,7 +982,8 @@ const INTERNAL_ERROR: i64 = -32603;
 ///   a lost sign-in, final until the human signs in again;
 /// - `-32603` (internal error): a session that did not open, which a retry may open (codex-acp
 ///   answered `session/new` on a loaded machine with it, « workspace routing discovery timed
-///   out »);
+///   out »), unless it carries codex-acp's `usageLimitExceeded` kind, an exhausted quota no
+///   retry heals;
 /// - every other code, the request refusals `-32700`, `-32600`, `-32601` and `-32602`,
 ///   `-32002` (resource not found) and any code the schema leaves undefined: the final refusal
 ///   it is. An unknown code fails closed: it is never retried.
@@ -986,7 +992,7 @@ fn request_error(code: i64, message: String, kind: Option<&str>) -> HarnessError
         return signed_out();
     }
     match code {
-        INTERNAL_ERROR => HarnessError::Session { reason: message },
+        INTERNAL_ERROR if kind != Some(QUOTA_KIND) => HarnessError::Session { reason: message },
         _ => HarnessError::Refused { reason: message },
     }
 }

@@ -134,7 +134,8 @@ pub enum Incoming {
         /// The error's `message` (code folded in for the teaching line).
         message: String,
         /// The adapter's own typed kind of the error (`error.data.errorKind`, for example
-        /// `authentication_failed`), when it names one: a closed word, never its prose.
+        /// `authentication_failed`, else codex-acp's `error.data.codexErrorInfo`, for example
+        /// `usageLimitExceeded`), when it names one: a closed word, never its prose.
         kind: Option<String>,
     },
     /// A request FROM the agent (`id` + `method` — permission asks).
@@ -203,9 +204,13 @@ pub fn parse_line(line: &str) -> Result<Incoming, WireError> {
                     }
                     _ => format!("{msg} (jsonrpc {code})"),
                 };
-                let kind = (err.get("data").and_then(|d| d.get("errorKind")))
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
+                // codex-acp names its kind under `codexErrorInfo`: a word, or an object for an
+                // upstream HTTP failure, which names none.
+                let kind = err.get("data").and_then(|d| {
+                    (d.get("errorKind").and_then(Value::as_str))
+                        .or_else(|| d.get("codexErrorInfo").and_then(Value::as_str))
+                        .map(str::to_owned)
+                });
                 Ok(Incoming::ErrorResponse {
                     id,
                     code,
@@ -973,6 +978,30 @@ mod tests {
         let Ok(Incoming::ErrorResponse { code: 0, .. }) = unnamed else {
             panic!("an error naming no code reads as code 0: {unnamed:?}");
         };
+    }
+
+    /// codex-acp names its kind under `data.codexErrorInfo` (the `-32603` it fails a prompt with
+    /// on an exhausted usage quota, when the client did not advertise `sessionFailure`): the
+    /// kind rides when it is a word, an object (an upstream HTTP failure) names none, and
+    /// `errorKind` comes first.
+    #[test]
+    fn a_codex_error_kind_rides_from_its_own_key() {
+        let kind_of = |data: &str| {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":6,"error":{{"code":-32603,"message":"Internal error","data":{data}}}}}"#
+            );
+            match parse_line(&line) {
+                Ok(Incoming::ErrorResponse { kind, .. }) => kind,
+                other => panic!("an id+error line is an error response: {other:?}"),
+            }
+        };
+        let quota =
+            r#"{"message":"Usage limits were exceeded","codexErrorInfo":"usageLimitExceeded"}"#;
+        assert_eq!(kind_of(quota).as_deref(), Some("usageLimitExceeded"));
+        let http = r#"{"codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":503}}}"#;
+        assert_eq!(kind_of(http), None);
+        let both = r#"{"errorKind":"authentication_failed","codexErrorInfo":"usageLimitExceeded"}"#;
+        assert_eq!(kind_of(both).as_deref(), Some("authentication_failed"));
     }
 
     #[test]

@@ -34,8 +34,11 @@
   NIKA-1805 and final. An error answer to the prompt itself is read by the
   same codes when the adapter names no kind of its own: a `-32000` there is
   the lost sign-in, NIKA-1803, and an undefined code a final NIKA-1805,
-  where both were NIKA-1804 and retried; `-32603` stays NIKA-1804. Trace retention no longer rotates the evidence of
-  a failure away: the newest failed trace of each workflow is never rotated
+  where both were NIKA-1804 and retried; `-32603` stays NIKA-1804, except
+  when Codex names it an exhausted usage quota (`usageLimitExceeded`): that
+  is a final NIKA-1805, as Codex's typed turn failure already reported it.
+  Trace retention no longer rotates the evidence of a failure away: the
+  newest failed trace of each workflow is never rotated
   or removed for the size budget, failed traces fill a workflow's kept count
   before successful ones, and the budget removes every successful trace it
   may before a failed one (since 0.99.0, ten successful runs rotated a

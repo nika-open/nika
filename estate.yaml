@@ -157,12 +157,12 @@ patterns:
 - glob: "crates/**/tests/**"
   class: authored
   match_count: 885
-  aggregate_sha256: b1ad139234dc57f04d6bd04c347939225bc2f8e149a2eda33361881f246a3aa7
+  aggregate_sha256: 3f1f261ab2a20e2bbd76ecffb82c534d3702aba9f666312e9ddb239bf6265be1
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
   match_count: 714
-  aggregate_sha256: 64710f018dfb73cfdb96da0ed8205b7f1f5423a65df800d4db7ff1a49b75373c
+  aggregate_sha256: 8e4107f74ab2672b592bbe68705f806ddbf56d66dd767141a0b215858fbb7e60
   evidence: "the remaining crate surface — Cargo.toml manifests · build.rs · benches · READMEs · hand-curated data catalogs (llm-providers · mcp-servers · embeddings · model-capabilities, probed daily by catalog-verify.yml); the pricing snapshot is excepted in files:"
   note: "scripts/sync-pack.sh is the ONE vendoring lane; the divergent crate-local duplicate was retired"
 - glob: "fuzz/**"
@@ -183,7 +183,7 @@ patterns:
 - glob: "docs/**"
   class: authored
   match_count: 150
-  aggregate_sha256: 81a3eaac6b3a2354975a14c66d0079107e63b9086b0f2e444f6a52854ef76746
+  aggregate_sha256: 9647e8a121c943ba7672d446bd69fd1e2e70a4122823951cc5eb3b970ccc3a92
   evidence: "crate-specs · architecture prose · perf notes — no generation markers at file heads"
 - glob: "scripts/**"
   class: authored

@@ -4,7 +4,8 @@
 //! The received text a failure keeps in the trace (NIK-402): a final message the task `schema:`
 //! rejected, or the last text of an exhausted budget, rides a terminal frame's `outcome` at
 //! `payload.error.details.partial_output` (`payload.recovered_from.details.partial_output` once
-//! `on_error:` recovered the task). The task record keeps it whole, for `on_error:` and
+//! `on_error:` recovered the task). The task record keeps it whole with the run's secrets
+//! masked (the runtime masks every failed dispatch's record), for `on_error:` and
 //! `${{ tasks.X.error }}`; the frame keeps its first [`RECEIVED_KEPT`] bytes.
 //!
 //! The cut runs in [`RedactingSink`](super::RedactingSink) after the scrub, never before it: the

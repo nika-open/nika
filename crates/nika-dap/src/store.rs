@@ -920,6 +920,38 @@ pub(crate) mod tests {
         );
     }
 
+    /// NIK-385 review · the same law the other way round: an item row that names an attempt with
+    /// its item, then a frame that cites it again without one. The later citation adds nothing
+    /// and takes nothing: the item stays, at the place the row first cited it.
+    #[test]
+    fn a_citation_without_its_item_keeps_the_item_already_cited() {
+        let rows =
+            r#"[{"child":"a-2.ndjson","child_attempts":["a-1.ndjson"],"index":4,"status":"ok"}]"#;
+        let retried = r#"{"target":"./kid.nika","trace_id":"a-1.ndjson","outcome":"failure"}"#;
+        let with = |frame: Event, key: &str, text: &str| {
+            frame.with_field(KeyValue::new(key, Value::String(text.to_owned())))
+        };
+        let events = vec![
+            with(event(EventKind::TaskItems, "task", "fan", 1), "items", rows),
+            with(
+                event(EventKind::TaskRetrying, "task", "fan", 2),
+                "child",
+                retried,
+            ),
+        ];
+        let cited: Vec<(String, Option<u64>)> = cited_children(&events)
+            .into_iter()
+            .map(|c| (c.trace_id, c.index))
+            .collect();
+        assert_eq!(
+            cited,
+            [
+                ("a-1.ndjson".to_owned(), Some(4)),
+                ("a-2.ndjson".to_owned(), Some(4)),
+            ]
+        );
+    }
+
     /// NIK-385 review · a cited name is exactly one normal path component on
     /// every platform: a drive or stream prefix (`C:x`, `x:`), a parent or
     /// current directory, a separator of either kind, an absolute path or a

@@ -1,8 +1,12 @@
 <p align="center">
   <a href="https://nika.sh">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://nika.sh/brand/nika-logo-dark.svg">
-      <img src="https://nika.sh/brand/nika-logo-light.svg" alt="Nika" width="220">
+      <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-dark.png?v=62f31fd68dd2">
+      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-light.png?v=2870c7b49bcc">
+      <source media="(prefers-color-scheme: dark)" type="image/webp" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-dark.webp?v=be751f014251">
+      <source type="image/webp" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-light.webp?v=f3798b791a97">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-dark.gif?v=f29aa99df4bc">
+      <img src="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/hero-light.gif?v=13dcae797ce2" alt="Nika. Say it once. Keep it as a file. A request to an assistant becomes the file social-repurpose.nika; the file is inspected before anything runs, its five steps run in three waves, and the record of the run is verified." width="100%">
     </picture>
   </a>
 </p>
@@ -30,17 +34,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg" alt="AGPL-3.0-or-later"></a>
 </p>
 
-<p align="center">
-  <a href="media/gifs/first-session.optimized.gif">
-    <img src="media/gifs/first-session.optimized.gif" alt="Nika's Session in four moments: a sentence typed in plain words, a checked workflow file saved only after yes, one run under a $0.25 ceiling that keeps the two paid rows, and /proof with its chain, permit checks and what it does not prove" width="960">
-  </a>
-</p>
-<p align="center"><sub>
-  “Read ./data/orders.csv, keep only the rows whose status is paid, and write them to ./out/paid.csv.”<br>
-  One sentence becomes a checked file; <code>yes</code> saves it, <code>run it</code> keeps the two paid rows, and
-  <code>/proof</code> shows what the run recorded. The real Session of nika 0.123.0, restyled; no AI model is involved.
-</sub></p>
-
 ## What is Nika?
 
 Nika turns repeatable AI work into a small file you keep. Say what you
@@ -56,9 +49,18 @@ tamper-evident record you can verify. One Rust binary with a terminal
 Session and a command line, plus a TypeScript SDK for your applications;
 local-first and fully open source (AGPL-3.0).
 
-| 1 · Say it | 2 · Check it | 3 · Run it | 4 · Prove it |
-|:---:|:---:|:---:|:---:|
-| Describe the job; Nika writes a `.nika` file (or `nika compile` from a skeleton) | `nika check` audits it before any model is called | `nika run` with the model you choose | `nika trace verify` checks the run's record |
+<p align="center">
+  <a href="#see-it-in-four-steps">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-dark.png?v=a902acbdbf87">
+      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-light.png?v=05e5016a63bc">
+      <source media="(prefers-color-scheme: dark)" type="image/webp" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-dark.webp?v=7b9d488d638d">
+      <source type="image/webp" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-light.webp?v=32b71a46d5d5">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-dark.gif?v=0b643240acde">
+      <img src="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/steps-light.gif?v=5397c9ff64fd" alt="The four moves of a Nika workflow. Say it: nika compile hello hello.nika. Check it: nika check hello.nika. Run it: nika run hello.nika. Prove it: nika trace verify." width="100%">
+    </picture>
+  </a>
+</p>
 
 <p align="center">
   <a href="#see-it-in-four-steps"><b>See it</b></a> ·
@@ -337,6 +339,16 @@ and the result of its check. **Nothing has run yet.** Type `yes` to save
 the file, then `run it`. `out/paid.csv` gets the header and the two paid
 rows, and `/proof` shows what the run's record proves, and what it does
 not.
+
+<p align="center">
+  <a href="media/gifs/first-session.optimized.gif">
+    <img src="media/gifs/first-session.optimized.gif" alt="Nika's Session in four moments: a sentence typed in plain words, a checked workflow file saved only after yes, one run under a $0.25 ceiling that keeps the two paid rows, and /proof with its chain, permit checks and what it does not prove" width="960">
+  </a>
+</p>
+<p align="center"><sub>
+  One sentence becomes a checked file; <code>yes</code> saves it, <code>run it</code> keeps the two paid rows, and
+  <code>/proof</code> shows what the run recorded. The real Session of nika 0.123.0, restyled; no AI model is involved.
+</sub></p>
 
 > [!TIP]
 > Nika works only inside the folder you start it in. `/show` prints the
@@ -646,6 +658,13 @@ judgement.
 
 <!-- city:map -->
 ## 🦋 The Nika family
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/family-dark.png?v=4cfc8ec611de">
+    <img src="https://raw.githubusercontent.com/nika-open/.github/main/profile/assets/family-light.png?v=dfedffa46450" alt="The repositories of Nika. The language and its engine: nika-spec and nika. From the tools you already use: nika-plugins, nika-vscode, nika-client and gh-nika. On every pull request, and beyond: nika-action, nika-actions-starter, nika-registry, homebrew-tap, nika-estate and nika-docs." width="100%">
+  </picture>
+</p>
 
 | | Repository | What it gives you |
 |---|---|---|

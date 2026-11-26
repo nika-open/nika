@@ -47,18 +47,97 @@ fn the_profile_disables_builtins_disk_settings_and_other_mcp_before_query() {
     }
 }
 
+/// The exact bytes the two closed profiles send (a one-shot, a conversation): building them
+/// another way must not move one of them. Object keys serialize sorted, since the engine never
+/// enables `serde_json`'s `preserve_order`.
+#[test]
+fn the_closed_profiles_send_these_exact_bytes() {
+    assert_eq!(
+        profile().to_string(),
+        concat!(
+            r#"{"claudeCode":{"options":{"agents":{},"allowDangerouslySkipPermissions":false,"#,
+            r#""maxTurns":1,"mcpServers":{},"persistSession":false,"plugins":[],"#,
+            r#""settingSources":[],"skills":[],"strictMcpConfig":true,"#,
+            r#""thinking":{"display":"summarized","type":"adaptive"},"tools":[]}}}"#
+        )
+    );
+    assert_eq!(
+        conversation_profile().to_string(),
+        concat!(
+            r#"{"claudeCode":{"options":{"agents":{},"allowDangerouslySkipPermissions":false,"#,
+            r#""mcpServers":{},"persistSession":false,"plugins":[],"#,
+            r#""settingSources":[],"skills":[],"strictMcpConfig":true,"#,
+            r#""thinking":{"display":"summarized","type":"adaptive"},"tools":[]}}}"#
+        )
+    );
+}
+
+/// What an agent session on the Claude Code seat sends with `session/new`: the shared closed
+/// surface (no settings file, strict MCP naming no server, no plugin, skill or custom agent,
+/// the bypass mode withheld), auto memory and claude.ai connectors turned off in the session's
+/// environment, and its thinking shown. It keeps its built-in tools and its own loop: no
+/// `tools`, no `maxTurns`, and no `persistSession`, which this session does not decide.
+#[test]
+fn a_claude_code_agent_session_loads_nothing_of_the_users_configuration() {
+    let meta = agent_meta("claude-code").expect("a Claude Code agent session sends options");
+    assert_eq!(
+        meta,
+        json!({"claudeCode": {"options": {
+            "settingSources": [], "strictMcpConfig": true, "mcpServers": {},
+            "plugins": [], "skills": [], "agents": {},
+            "allowDangerouslySkipPermissions": false,
+            "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+            "thinking": {"type": "adaptive", "display": "summarized"}}}})
+    );
+    assert_eq!(
+        meta.to_string(),
+        concat!(
+            r#"{"claudeCode":{"options":{"agents":{},"allowDangerouslySkipPermissions":false,"#,
+            r#""env":{"CLAUDE_CODE_DISABLE_AUTO_MEMORY":"1","#,
+            r#""ENABLE_CLAUDEAI_MCP_SERVERS":"false"},"mcpServers":{},"plugins":[],"#,
+            r#""settingSources":[],"skills":[],"strictMcpConfig":true,"#,
+            r#""thinking":{"display":"summarized","type":"adaptive"}}}}"#
+        )
+    );
+    let options = meta["claudeCode"]["options"]
+        .as_object()
+        .expect("an object of options");
+    for kept_to_the_agent in ["tools", "maxTurns", "persistSession"] {
+        assert!(
+            !options.contains_key(kept_to_the_agent),
+            "{kept_to_the_agent} must not be sent to an agent session"
+        );
+    }
+    // The three profiles share every key of the closed surface, with the same value.
+    for other in [profile(), conversation_profile()] {
+        for key in [
+            "settingSources",
+            "strictMcpConfig",
+            "mcpServers",
+            "plugins",
+            "skills",
+            "agents",
+            "allowDangerouslySkipPermissions",
+        ] {
+            assert_eq!(other["claudeCode"]["options"][key], options[key], "{key}");
+        }
+        // The two switches belong to the agent session alone: the closed profiles are unchanged.
+        assert!(other["claudeCode"]["options"].get("env").is_none());
+    }
+}
+
 /// Every Claude Code session asks to see its thinking, whatever its role: the audited one-shot
-/// profile carries summarized adaptive thinking beside its own options, an agent session that
-/// beside the withheld bypass mode (NIK-266). A thinking option already named is kept as given, a meta of another shape is left as
-/// it is, and Codex or any other adapter sends no options at all.
+/// profile and an agent session both carry summarized adaptive thinking beside their own
+/// options. A thinking option already named is kept as given, a meta of another shape is left
+/// as it is, and Codex or any other adapter sends no options at all.
 #[test]
 fn every_claude_code_session_asks_to_see_its_thinking() {
     let shown = json!({"type": "adaptive", "display": "summarized"});
     assert_eq!(profile()["claudeCode"]["options"]["thinking"], shown);
     assert_eq!(claude().session_meta(), Some(profile()));
-    let agent = json!({"claudeCode": {"options": {
-        "allowDangerouslySkipPermissions": false, "thinking": shown.clone()}}});
-    assert_eq!(agent_meta("claude-code"), Some(agent));
+    let agent = agent_meta("claude-code").expect("a Claude Code agent session sends options");
+    assert_eq!(agent["claudeCode"]["options"]["thinking"], shown);
     let codex = OneShot {
         role: Completion::Infer,
         profile: Profile::Codex,
@@ -223,6 +302,83 @@ async fn admitted_wire_carries_strict_options_and_keeps_the_whole_answer() {
         .await
         .unwrap()
         .unwrap();
+}
+
+/// On the wire, an agent session (no one-shot profile) carries its seat's options in
+/// `session/new`'s `_meta`: on the Claude Code seat, the closed surface that loads nothing of
+/// the user's configuration, with no `tools`, turn limit or persistence choice; on a seat that
+/// sends none, no `_meta` key at all.
+#[tokio::test]
+async fn an_agent_session_opens_with_its_seats_options_on_the_wire() {
+    for seat in ["claude-code", "codex"] {
+        let meta = agent_meta(seat);
+        let (ours, theirs) = tokio::io::duplex(65536);
+        let (r, w) = tokio::io::split(ours);
+        let (r2, mut w2) = tokio::io::split(theirs);
+        let peer = tokio::spawn(async move {
+            let mut r2 = BufReader::new(r2);
+            let init = read(&mut r2).await;
+            write(
+                &mut w2,
+                json!({"jsonrpc":"2.0","id":init["id"],"result":identity()}),
+            )
+            .await;
+            let new = read(&mut r2).await;
+            assert_eq!(new["method"], "session/new");
+            write(
+                &mut w2,
+                json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s"}}),
+            )
+            .await;
+            let prompt = read(&mut r2).await;
+            assert_eq!(prompt["method"], "session/prompt");
+            write(
+                &mut w2,
+                json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}),
+            )
+            .await;
+            new
+        });
+        let mut stream = crate::client::drive_profile(
+            r,
+            w,
+            HarnessRequest::new("go", "/tmp"),
+            Duration::from_secs(1),
+            None,
+            None,
+            meta,
+            None,
+        );
+        let mut completed = false;
+        while let Some(event) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
+        {
+            if matches!(event.unwrap(), HarnessEvent::Completed { .. }) {
+                completed = true;
+                break;
+            }
+        }
+        assert!(completed, "{seat}: the turn completes");
+        let new = tokio::time::timeout(Duration::from_secs(1), peer)
+            .await
+            .unwrap()
+            .unwrap();
+        let sent = new["params"].get("_meta");
+        if seat == "claude-code" {
+            assert_eq!(
+                sent,
+                Some(&json!({"claudeCode": {"options": {
+                    "settingSources": [], "strictMcpConfig": true, "mcpServers": {},
+                    "plugins": [], "skills": [], "agents": {},
+                    "allowDangerouslySkipPermissions": false,
+                    "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                            "ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+                    "thinking": {"type": "adaptive", "display": "summarized"}}}})),
+                "{seat}"
+            );
+        } else {
+            assert_eq!(sent, None, "{seat} sends no options");
+        }
+    }
 }
 
 async fn refuses_after_prompt(mode: &str) {

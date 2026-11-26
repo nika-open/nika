@@ -340,8 +340,8 @@ async fn an_auth_required_or_undefined_code_at_session_new_is_final() {
 /// the transient session death, and the adapter's `authentication_failed` kind keeps its own
 /// classification whatever the code. codex-acp's `usageLimitExceeded` (its `data.codexErrorInfo`
 /// on the `-32603` it fails the prompt with when the client did not advertise `sessionFailure`)
-/// is the final refusal its typed failure is; a codex kind this client does not know leaves the
-/// code to decide.
+/// is the final refusal its typed failure is, in the adapter's own words; a codex kind this
+/// client does not know leaves the code to decide.
 #[tokio::test]
 async fn an_error_answer_to_the_prompt_is_read_by_its_code() {
     let cases = [
@@ -370,7 +370,7 @@ async fn an_error_answer_to_the_prompt_is_read_by_its_code() {
             json!({"code":-32603,"message":"Internal error","data":{
                 "message":"Usage limits were exceeded","codexErrorInfo":"usageLimitExceeded"}}),
             "NIKA-1805",
-            "harness refused: Internal error (jsonrpc -32603)",
+            "harness refused: Internal error — Usage limits were exceeded (jsonrpc -32603)",
         ),
         (
             json!({"code":-32603,"message":"Internal error",

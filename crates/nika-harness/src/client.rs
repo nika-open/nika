@@ -24,7 +24,8 @@ use std::task::{Context, Poll};
 use futures_core::Stream;
 use nika_kernel::ai::harness::{
     FollowUpReply, HarnessError, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
-    HarnessSelection, ModelProvenance, PermissionDecision, PermissionReply,
+    HarnessSelection, HarnessStopReason, ModelProvenance, PermissionDecision, PermissionReply,
+    TokenUsage,
 };
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -132,6 +133,7 @@ where
             agent_name: None,
             agent_version: None,
             confined: None,
+            turn: turn::TurnLedger::default(),
         };
         if let Err(e) = driver.run(request).await {
             activity::failed(driver.progress.as_ref());
@@ -189,6 +191,9 @@ struct Driver<R, W> {
     /// The mode the session was confined to before the prompt (NIK-266): held for the whole
     /// turn, a reported change away from it ends the session.
     confined: Option<String>,
+    /// The agent path's turn facts beyond its text: message boundaries, usage reports and the
+    /// model the adapter reports having answered with (`turn.rs`).
+    turn: turn::TurnLedger,
 }
 
 impl<R, W> Driver<R, W>
@@ -230,8 +235,9 @@ where
     /// The ONE follow-up the request kept room for (spec 02 §agent · a schema repair): the
     /// ended turn is handed over with its lane, and a prompt sent on it runs as the session's
     /// next turn, whose outcome replaces the first. A dropped lane, or a stream no one reads,
-    /// closes the session on the first. The session's model and selection were read before
-    /// the first prompt and stay the outcome's; its images are every image of the session.
+    /// closes the session on the first. The session's configured model and selection were read
+    /// before the first prompt and stay every turn's, with what the route moved during either
+    /// turn; its images are every image of the session.
     async fn follow_up(
         &mut self,
         session_id: &str,
@@ -258,11 +264,7 @@ where
         let params = prompt::params(session_id, &prompt, &[]);
         self.send_request(ID_FOLLOW_UP, wire::METHOD_SESSION_PROMPT, &params)
             .await?;
-        let mut repaired = self.pump(session_id, request, ID_FOLLOW_UP).await?;
-        repaired.observed_model = ended.observed_model;
-        repaired.observed_model_source = ended.observed_model_source;
-        repaired.selection = ended.selection;
-        Ok(repaired)
+        self.pump(session_id, request, ID_FOLLOW_UP).await
     }
 
     /// The main pump: route beats until the response to the prompt `prompt_id` closes the
@@ -288,6 +290,7 @@ where
                             if let Some(failure) = wire::turn_failure(&result) {
                                 return Err(failure);
                             }
+                            let usage = wire::prompt_usage(&result);
                             let done: PromptResult = parse_payload(result, "session/prompt")?;
                             self.media.check_stop(&done.stop_reason)?;
                             if let Some(completion) = self.completion
@@ -298,7 +301,7 @@ where
                                     completion.label()
                                 )));
                             }
-                            let outcome = self.close_turn(&done, request);
+                            let outcome = self.close_turn(&done, usage);
                             activity::completed(self.progress.as_ref());
                             return Ok(outcome);
                         }
@@ -378,6 +381,9 @@ where
                 }))
                 .await;
         }
+        if self.completion.is_none() {
+            self.agent_report(&update.update);
+        }
         if let Some(text) = wire::agent_chunk_text(&update.update) {
             if let Some(completion) = self.completion
                 && self.output.len().saturating_add(text.len()) > crate::authoring::acp::MAX_ANSWER
@@ -386,6 +392,9 @@ where
                     "{} answer exceeded its byte limit",
                     completion.label()
                 )));
+            }
+            if self.completion.is_none() {
+                self.agent_text(&update.update, &text)?;
             }
             self.output.push_str(&text);
             let _ = self
@@ -484,17 +493,26 @@ where
         Ok(())
     }
 
-    fn close_turn(&mut self, done: &PromptResult, request: &HarnessRequest) -> HarnessOutcome {
-        let mut outcome = HarnessOutcome::new(std::mem::take(&mut self.output));
-        // The requested model is recorded by the CALLER's receipt; the
-        // observed identity is absent on wire v1 (no seat) — absent
-        // stays absent (A-7), never copied from the request.
-        let _ = request;
-        let _ = &done.stop_reason;
-        outcome.observed_model = self.observed_model.take();
-        outcome.observed_model_source = self.observed_source.take();
+    /// The turn's outcome: its whole text, how it ended, the session's images, its selection
+    /// and its configured model, which stay the session's for a follow-up turn. The requested
+    /// model is recorded by the CALLER's receipt, never copied from the request (A-7). On the
+    /// agent path the ledger adds the last message, the reported counts, context, cost and
+    /// model (`turn.rs`); a one-shot profile reads none of them.
+    fn close_turn(&mut self, done: &PromptResult, usage: Option<TokenUsage>) -> HarnessOutcome {
+        let mut outcome = HarnessOutcome::new(std::mem::take(&mut self.output))
+            .with_stop_reason(HarnessStopReason::parse(&done.stop_reason));
+        outcome.observed_model.clone_from(&self.observed_model);
+        outcome.observed_model_source = self.observed_source;
         outcome.images = self.media.images();
-        outcome.selection = std::mem::take(&mut self.selection);
+        outcome.selection = self.selection.clone();
+        outcome
+            .selection
+            .configured_model
+            .clone_from(&self.observed_model);
+        outcome.selection.configured_model_source = self.observed_source;
+        if self.completion.is_none() {
+            self.close_agent_turn(&mut outcome, usage);
+        }
         outcome
     }
 
@@ -811,6 +829,10 @@ pub(crate) mod conversation;
 /// prompts receives.
 mod prompt;
 
+/// An agent turn's facts beyond its text: where its last message starts, what the adapter
+/// reports about its tokens, context, cost and model.
+mod turn;
+
 /// The engine's verdict → the wire outcome. `AllowOnce` selects the
 /// agent's `allow_once` option; `allow_always` is NEVER selected even
 /// when it is the only allow (A-5 — the ask then cancels, fail-closed).
@@ -939,9 +961,10 @@ const PIPE_CLOSED: &str = "transport: the agent closed the pipe mid-run";
 /// The adapter's typed kind of an error that a lost sign-in raises.
 const SIGN_IN_KIND: &str = "authentication_failed";
 
-/// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
-/// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
-const QUOTA_KIND: &str = "usageLimitExceeded";
+// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
+// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
+// Its error line carries the adapter's own words for it (`wire::parse_line`).
+use wire::QUOTA_KIND;
 
 /// The reason a harness the app no longer signs in for is unavailable: our own words, never the
 /// adapter's (its prose may carry account details).

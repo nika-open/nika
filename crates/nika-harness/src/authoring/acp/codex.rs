@@ -212,16 +212,25 @@ pub(crate) fn judge_conversation(listing: &[u8], name: &str) -> Result<(), Strin
 }
 
 /// What a proven profile was proven against: the Codex home the adapter resolves
-/// (`CODEX_HOME`, else `$HOME/.codex`) and a stat of its configuration file there
-/// (`config.toml`: device, inode, size and modification time, or its absence). The profile
-/// disables the MCP servers that configuration defined at proof time, so a kept proof holds
-/// only while this stamp is unchanged; another home, or a configuration written, replaced or
-/// removed since, is proven again.
+/// (`CODEX_HOME`, else `$HOME/.codex`) and a stat (device, inode, size and modification time,
+/// or its absence) of each configuration layer that can add or enable an MCP server
+/// ([`layer_files`]). The profile disables the MCP servers those layers defined at proof time,
+/// so a kept proof holds only while this stamp is unchanged; another home, or a layer written,
+/// replaced or removed since, is proven again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigStamp {
     home: Option<PathBuf>,
-    file: Option<FileStamp>,
+    layers: Vec<(PathBuf, Option<FileStamp>)>,
 }
+
+/// Codex's system configuration directory on Unix.
+const SYSTEM_DIR: &str = "/etc/codex";
+
+/// Where macOS keeps the managed preferences a device profile pushes.
+const MANAGED_PREFERENCES: &str = "/Library/Managed Preferences";
+
+/// The managed preferences file of Codex's `com.openai.codex` domain.
+const PREFERENCES_FILE: &str = "com.openai.codex.plist";
 
 /// The identity and the last write of one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,16 +260,85 @@ impl FileStamp {
 }
 
 /// The [`ConfigStamp`] of the adapter environment `env` (the composed child environment:
-/// what the adapter's codex itself resolves). An unreadable configuration reads as absent.
+/// what the adapter's codex itself resolves), on this machine. An unreadable layer reads as
+/// absent.
 pub(crate) fn config_stamp(env: &BTreeMap<String, String>) -> ConfigStamp {
+    let preferences = cfg!(target_os = "macos").then(|| Path::new(MANAGED_PREFERENCES));
+    config_stamp_in(env, Path::new(SYSTEM_DIR), preferences)
+}
+
+/// [`config_stamp`] with the machine's roots given: Codex's `system` directory and the
+/// managed `preferences` directory, if this system has one.
+pub(crate) fn config_stamp_in(
+    env: &BTreeMap<String, String>,
+    system: &Path,
+    preferences: Option<&Path>,
+) -> ConfigStamp {
     let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
     let home = set("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| set("HOME").map(|home| Path::new(home).join(".codex")));
-    let file = (home.as_ref())
-        .and_then(|home| std::fs::metadata(home.join("config.toml")).ok())
-        .map(|meta| FileStamp::of(&meta));
-    ConfigStamp { home, file }
+    let layers = layer_files(home.as_deref(), env, system, preferences)
+        .into_iter()
+        .map(|path| {
+            let file = std::fs::metadata(&path)
+                .ok()
+                .map(|meta| FileStamp::of(&meta));
+            (path, file)
+        })
+        .collect();
+    ConfigStamp { home, layers }
+}
+
+/// The configuration layers that can add or enable an MCP server, besides the profile's own
+/// `-c` overrides, as Codex documents them: its configuration precedence
+/// (<https://learn.chatgpt.com/docs/config-file/config-basic#configuration-precedence>) and its
+/// managed configuration (<https://learn.chatgpt.com/docs/enterprise/managed-configuration>):
+/// - the user's `config.toml` in the Codex `home`;
+/// - the system `config.toml` (`/etc/codex/config.toml` on Unix);
+/// - the managed defaults, `managed_config.toml` (`/etc/codex/managed_config.toml` on Unix,
+///   `managed_config.toml` in the Codex home elsewhere), which override the user's file;
+/// - `requirements.toml` (`/etc/codex/requirements.toml` on Unix,
+///   `%ProgramData%\OpenAI\Codex\requirements.toml` on Windows), whose `mcp_servers`
+///   allowlist decides which defined servers the client enables;
+/// - on macOS, the managed preferences of the `com.openai.codex` domain (`config_toml_base64`,
+///   `requirements_toml_base64`), in the device-wide file and in each user's.
+///
+/// Not stamped: a profile file (`<home>/<name>.config.toml`) loads only under `--profile`,
+/// which the adapter's argv never passes, and since Codex 0.134.0 no `config.toml` key selects
+/// one (<https://learn.chatgpt.com/docs/config-file/config-advanced#profiles>); cloud-managed
+/// defaults and requirements come from a signed cache whose place on disk the documentation
+/// does not give; a trusted project's `.codex/config.toml` belongs to a session's directory,
+/// not to the seat.
+fn layer_files(
+    home: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    system: &Path,
+    preferences: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = home
+        .map(|home| home.join("config.toml"))
+        .into_iter()
+        .collect();
+    if cfg!(unix) {
+        let names = ["config.toml", "managed_config.toml", "requirements.toml"];
+        files.extend(names.map(|name| system.join(name)));
+    } else {
+        files.extend(home.map(|home| home.join("managed_config.toml")));
+        let data = env.get("PROGRAMDATA").filter(|value| !value.is_empty());
+        files.extend(data.map(|data| Path::new(data).join("OpenAI/Codex/requirements.toml")));
+    }
+    if let Some(preferences) = preferences {
+        files.push(preferences.join(PREFERENCES_FILE));
+        let mut users: Vec<PathBuf> = (std::fs::read_dir(preferences).into_iter().flatten())
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join(PREFERENCES_FILE))
+            .filter(|path| path.is_file())
+            .collect();
+        users.sort();
+        files.extend(users);
+    }
+    files
 }
 
 /// The codex binary the adapter bundles, next to its own entry point in the npm package

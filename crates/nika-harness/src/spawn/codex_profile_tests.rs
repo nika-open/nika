@@ -198,3 +198,45 @@ fn the_stamp_reads_codex_home_before_the_home_default() {
         "an untouched one reads the same"
     );
 }
+
+/// NIK-385 review · every machine layer that can add or enable an MCP server is stamped, so a
+/// kept proof is proven again once one is written: the system `config.toml`, the managed
+/// defaults `managed_config.toml`, `requirements.toml` (its `mcp_servers` allowlist enables
+/// servers), and the `com.openai.codex` managed preferences, device-wide and per user. The
+/// machine roots are temporary directories standing in for `/etc/codex` and macOS's managed
+/// preferences.
+#[test]
+fn every_layer_that_can_add_a_server_is_stamped() {
+    let dir = tempfile::tempdir().expect("dir");
+    let (home, system, preferences) = (
+        dir.path().join("codex-home"),
+        dir.path().join("etc-codex"),
+        dir.path().join("managed-preferences"),
+    );
+    for made in [&home, &system, &preferences] {
+        std::fs::create_dir_all(made).expect("root");
+    }
+    let env = BTreeMap::from([("CODEX_HOME".to_owned(), home.to_string_lossy().into_owned())]);
+    let stamp = || codex::config_stamp_in(&env, &system, Some(&preferences));
+    let server = "[mcp_servers.added]\ncommand = \"x\"\n";
+    let user = preferences.join("someone");
+    std::fs::create_dir_all(&user).expect("user preferences");
+    for layer in [
+        system.join("config.toml"),
+        system.join("managed_config.toml"),
+        system.join("requirements.toml"),
+        preferences.join("com.openai.codex.plist"),
+        user.join("com.openai.codex.plist"),
+    ] {
+        let before = stamp();
+        std::fs::write(&layer, server).expect("layer");
+        assert_ne!(before, stamp(), "{} is stamped", layer.display());
+    }
+    let settled = stamp();
+    std::fs::write(home.join("work.config.toml"), server).expect("profile file");
+    assert_eq!(
+        settled,
+        stamp(),
+        "a profile file loads only under --profile, which the adapter never passes"
+    );
+}

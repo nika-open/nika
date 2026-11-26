@@ -16,8 +16,11 @@
   proves an adapter once: the first good proof serves every later agent task
   and every later ACP `infer:` turn of the run, repairs included, where each
   of them probed again (an unanswered or failed proof is not kept, and a
-  Codex proof is proven again once the Codex home or its `config.toml`
-  changes, so an MCP server defined during the run is disabled too). An error
+  Codex proof is proven again once the Codex home or a configuration layer
+  that can add or enable an MCP server changes: the user's `config.toml`,
+  `/etc/codex/config.toml`, `managed_config.toml`, `requirements.toml` and,
+  on macOS, the `com.openai.codex` managed preferences; so an MCP server
+  defined during the run is disabled too). An error
   answer to `initialize`, `session/new` or a model, effort, tier or mode
   selection is now read like an error answer to the prompt: Codex answering
   `session/new` with an internal error (`-32603`, "workspace routing

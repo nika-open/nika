@@ -203,7 +203,8 @@ done
 
 # The run guard reads its judge's verdict back with head and checks it with
 # awk: a planted head that prints an allow, with a planted awk that passes
-# anything, never replaces the judge's deny.
+# anything, never replaces the judge's deny, which the hook blocks by its
+# own exit 2 with the verdict on stderr.
 F="$root/f"
 mkdir -p "$F/bin"
 cat >"$F/bin/head" <<'EOF'
@@ -216,12 +217,14 @@ printf 'nika: flow\ntasks: {}\n' >"$F/flow.nika"
 for kit in real bare; do
   script="$KIT/scripts/guard-run.sh"
   [ "$kit" = bare ] && script="$root/bare/scripts/guard-run.sh"
+  rc=0
   (cd "$F" && printf '{"command":"nika run flow.nika","cwd":"%s"}' "$F" | env -i HOME="$root/home" \
     TMPDIR="$root/tmp" XDG_STATE_HOME="$root/state" PATH="bin:$root/clean:/usr/bin:/bin" "$script") \
-    >"$root/out" 2>"$root/err"
+    >"$root/out" 2>"$root/err" || rc=$?
   if [ "$kit" = real ]; then
-    grep -q STUB-DENY "$root/out" && ! grep -q FORGED "$root/out" && ok=yes || ok=no
-    check "guard-run · a planted head and awk cannot replace the judge's deny" "$ok" "out=$(head -c 300 "$root/out")"
+    [ "$rc" = 2 ] && [ ! -s "$root/out" ] && grep -q STUB-DENY "$root/err" \
+      && ! grep -q FORGED "$root/out" "$root/err" && ok=yes || ok=no
+    check "guard-run · a planted head and awk cannot replace the judge's deny" "$ok" "rc=$rc out=$(head -c 300 "$root/out") err=$(head -c 300 "$root/err")"
   else
     grep -q FORGED "$root/out" && ok=yes || ok=no
     check "guard-run · control: without the block the planted head's allow comes out" "$ok" "out=$(head -c 300 "$root/out")"

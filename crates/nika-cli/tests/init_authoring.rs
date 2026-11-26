@@ -151,13 +151,34 @@ fn claude_hooks_execute_from_a_nested_directory_and_preserve_user_settings() {
         command("PreToolUse"),
         &serde_json::json!({"hook_event_name": "PreToolUse", "tool_input": {"command": "nika run dirty.nika"}, "cwd": project}),
     );
-    assert!(
-        guard.status.success(),
-        "adapter carries the JSON verdict: {}",
+    // A deny is the hook's own exit 2, the refusal every host reads alike:
+    // the verdict rides stderr, ahead of the fixed guard_denied line, so the
+    // findings still reach the agent.
+    assert_eq!(
+        guard.status.code(),
+        Some(2),
+        "the hook blocks the deny: {}",
         transcript(&guard)
     );
-    let verdict: serde_json::Value = serde_json::from_slice(&guard.stdout).expect("guard envelope");
+    assert!(guard.stdout.is_empty(), "{}", transcript(&guard));
+    let refusal = String::from_utf8(guard.stderr.clone()).expect("utf8 stderr");
+    let (verdict, fixed) = refusal
+        .trim_end()
+        .rsplit_once('\n')
+        .expect("the verdict, then the fixed line");
+    assert_eq!(
+        fixed,
+        "guard_denied: nika guard denied this nika run; the verdict above says why. Repair what it names, then retry."
+    );
+    let verdict: serde_json::Value = serde_json::from_str(verdict).expect("guard envelope");
     assert_eq!(verdict["hookSpecificOutput"]["permissionDecision"], "deny");
+    assert!(
+        verdict["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason")
+            .contains("NIKA-SEC-004"),
+        "{refusal}"
+    );
 
     let own_settings = b"{\"env\":{\"TEAM_SETTING\":\"preserved\"}}\n";
     std::fs::write(&settings_path, own_settings).expect("user configuration");

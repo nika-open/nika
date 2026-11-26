@@ -175,9 +175,26 @@ callable is a tool under `invoke:`, and the engine ships its own
   JSON object whose strings close and whose members hold strings or
   objects (checked with `awk`, which the PATH must hold), and, when the
   judge exits 2, a deny. Anything else (an answer cut short, a second
-  line, a banner) is refused like a broken binary. Every end of the hook
-  but the verdict's own exit 0, a signal or an unforeseen failure
-  included, is the blocking exit 2.
+  line, a banner) is refused like a broken binary. A verdict that denies
+  is answered the way its host documents a block whose reason reaches
+  the agent (read 2026-11-26). Claude Code takes a blocking hook's
+  stderr on exit 2 as the block's message
+  (<https://code.claude.com/docs/en/hooks>), and Codex takes exit 2 with
+  the blocking reason on stderr (<https://learn.chatgpt.com/docs/hooks>):
+  there the hook exits 2 with the verdict and a `guard_denied` line on
+  stderr. Cursor blocks on exit 2 but documents no message from it; it
+  sends the agent the `agent_message` of a `"permission": "deny"` answer
+  on exit 0 (<https://cursor.com/docs/hooks>). So under Cursor
+  (`CURSOR_VERSION` set) the hook passes on a verdict in Cursor's own
+  dialect as its answer, with exit 0, and blocks any other deny by exit
+  2. A deny in one host's JSON is never handed to another: Claude Code
+  finds no decision in Cursor's `"permission":"deny"` and runs the
+  command. nika guard answers in Cursor's dialect only for a payload
+  without `hook_event_name`, which Cursor's payload carries, so today a
+  deny on Cursor is blocked by exit 2 and its reason is not documented to
+  reach the agent. Every end of the hook but a passed-on verdict's exit
+  0, a caught signal or an unforeseen failure included, is the blocking
+  exit 2.
   A judge that has not answered within 20 s is ended, with every
   process it started, and the command is refused the same way (a host
   that times a hook out would let the command through; the kit's
@@ -185,8 +202,8 @@ callable is a tool under `invoke:`, and the engine ships its own
   only a regular workflow file of at most 4 MiB; a pipe, a folder or a
   larger file named by `nika run` is refused, never waited on.
   The other deny is a run on a file with
-  live check findings — the denial carries the findings, so the agent
-  repairs and re-checks by itself.
+  live check findings: the denial carries the findings, for the agent to
+  repair and re-check wherever its host hands the reason over (above).
 - **When the `nika` binary is missing from the editor PATH**, the shim
   decides from where the hook runs, never from the payload. Inside a
   Nika project — a `nika.yaml` or a `.nika/` store in the host's project

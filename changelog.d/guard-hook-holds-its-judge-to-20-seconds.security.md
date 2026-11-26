@@ -9,8 +9,8 @@
   line that ends, holding one JSON object, and on the judge's exit 2 only
   a deny: an answer cut short, a second line, a banner or anything else
   is refused the same way, on success included. Any other end of the
-  hook, a signal or an unexpected failure included, is the blocking exit
-  2, and ends the judge with it. The Claude Code and Cursor wiring of the
-  plugin and of `nika init` give the hook a 30-second timeout, above that
-  deadline. A very large workflow can take longer than 20 seconds to
-  judge, and is then refused.
+  hook, a caught signal or an unexpected failure included, is the
+  blocking exit 2, and ends the judge with it. The Claude Code and
+  Cursor wiring of the plugin and of `nika init` give the hook a
+  30-second timeout, above that deadline. A very large workflow can take
+  longer than 20 seconds to judge, and is then refused.

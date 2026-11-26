@@ -2,7 +2,10 @@
 # guard-run is a transport adapter: the engine alone decodes the host
 # payload, judges shell commands and renders the two hook dialects.
 # Cursor uses {command, cwd}; Claude Code/Codex use
-# {hook_event_name, tool_input:{command}, cwd}.
+# {hook_event_name, tool_input:{command}, cwd}. A verdict that denies is
+# answered the way its host documents a deny whose reason reaches the
+# agent: Cursor's own answer passed on under Cursor, the hook's exit 2
+# with the verdict on stderr everywhere else (see denied below).
 #
 # Comfort hooks may degrade quietly. This execution guard cannot infer
 # NotOurs from raw substrings when its sole judge is unavailable: JSON
@@ -131,6 +134,14 @@ nika_on_path() {
 }
 # <<< nika-clean-path
 
+# A signal that would end the hook is caught from here on, before anything
+# else runs, and ends it with the blocking exit 2: bash 3.2 runs the EXIT
+# trap of a shell an uncaught signal ends with a status of 0, then dies of
+# the signal (128 + its number), which every host reads as a non-blocking
+# error. These are the signals a host, a timer or a resource limit sends
+# to end a process; KILL and STOP cannot be caught.
+trap 'exit 2' HUP INT QUIT TERM PIPE ALRM USR1 USR2 XCPU XFSZ VTALRM PROF
+
 set -uo pipefail
 
 restore='Put nika back on the editor PATH (brew install nika-open/tap/nika, other paths: nika.sh) and restart the session.'
@@ -233,11 +244,19 @@ broken() {
 # writes; Cursor reads `timeout` in seconds). No `timeout` binary (macOS
 # ships none) and nothing newer than bash 3.2 (macOS /bin/bash).
 deadline=20
+# The judge's answer goes to a new folder under TMPDIR when it names an
+# absolute folder, else under /tmp: a relative one would put it in the
+# folder the hook runs in, the open project (the same test as
+# XDG_STATE_HOME's above).
+tmp_root="${TMPDIR:-}"
+case "$tmp_root" in
+  /*) ;;
+  *) tmp_root=/tmp ;;
+esac
 # The folder named in a refusal, printable characters only and bounded.
-tmp_shown="${TMPDIR:-/tmp}"
-tmp_shown="${tmp_shown//[^[:print:]]/?}"
+tmp_shown="${tmp_root//[^[:print:]]/?}"
 tmp_shown="${tmp_shown:0:200}"
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/nika-guard.XXXXXX" 2>/dev/null)" \
+scratch="$(mktemp -d "$tmp_root/nika-guard.XXXXXX" 2>/dev/null)" \
   || refuse "the hook could not make a temporary folder for the judge's answer, so it cannot hold nika guard to its deadline: it refuses every shell command until it can. Check that $tmp_shown is writable, then retry."
 # However the hook ends, the judge's group and the watcher end with it: a
 # host that stops the hook (a signal to its process group) would otherwise
@@ -245,10 +264,8 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/nika-guard.XXXXXX" 2>/dev/null)" \
 # From here on every end but the verdict's own exit 0 is the blocking exit
 # 2: the trap keeps the status the hook ended with and turns any other one
 # into 2 (an unforeseen failure exits 1, which every host reads as a
-# non-blocking error). A signal that would end the hook is caught and ends
-# it with 2 as well: bash 3.2 runs the EXIT trap of a shell an uncaught
-# signal ends with a status of 0, then dies of the signal (128 + its
-# number, again a non-blocking error).
+# non-blocking error). A caught signal ends it with 2 as well (the trap
+# set after the PATH block).
 judge=""
 watch=""
 # shellcheck disable=SC2329 # run by the EXIT trap below
@@ -260,7 +277,6 @@ finish() {
   [ "$st" -eq 0 ] || exit 2
 }
 trap finish EXIT
-trap 'exit 2' HUP INT TERM PIPE ALRM USR1 USR2
 
 # Stdin goes directly to the engine's bounded reader, never into an
 # unbounded shell variable. 0/2 carry a judged verdict; 3 is unavailable.
@@ -342,9 +358,11 @@ esac
 # long answer far too slowly): with each escape set aside, every string
 # must close, and every member must hold a string or an object, the only
 # values nika guard writes. On exit 2 the judge denied, so the answer must
-# deny: a member "permission" or "permissionDecision" whose value is
-# "deny", the deny of either dialect. This is not a JSON parser: it checks
-# that shape and nothing more.
+# deny: a member "permission" (Cursor's) or "permissionDecision" (Claude
+# Code's and Codex's) whose value is "deny" (awk exit 2 when it does not).
+# An answer that denies, on any exit, is awk's exit 3, or 4 when it is
+# Cursor's own deny: one flat object whose "permission" is "deny". This is
+# not a JSON parser: it checks that shape and nothing more.
 # shellcheck disable=SC2016 # an awk program, not shell text
 verdict_awk='{
   t = $0
@@ -355,7 +373,8 @@ verdict_awk='{
     if (between ~ /[^{}:,]/) exit 1
     word = substr(t, RSTART + 1, RLENGTH - 2)
     if (word == "deny") letter = "d"
-    else if (word == "permission" || word == "permissionDecision") letter = "p"
+    else if (word == "permission") letter = "c"
+    else if (word == "permissionDecision") letter = "p"
     else letter = "s"
     shape = shape between letter
     t = substr(t, RSTART + RLENGTH)
@@ -363,19 +382,50 @@ verdict_awk='{
   if (t ~ /[^{}:,]/) exit 1
   shape = shape t
   folded = shape
-  while (gsub(/[{]([spd]:[spdo](,[spd]:[spdo])*)?[}]/, "o", folded) > 0) {
+  while (gsub(/[{]([spdc]:[spdco](,[spdc]:[spdco])*)?[}]/, "o", folded) > 0) {
   }
   if (folded != "o") exit 1
-  if (code == 2 && shape !~ /[{,]p:d[,}]/) exit 2
+  denies = shape ~ /[{,][pc]:d[,}]/
+  if (code == 2 && !denies) exit 2
+  if (denies && shape ~ /^[{][^{}]*[}]$/ && shape ~ /[{,]c:d[,}]/) exit 4
+  if (denies) exit 3
 }'
+# The judge denied. Each host documents its own way to block a command and
+# hand the agent the reason (read 2026-11-26):
+#   - Claude Code: exit 2 blocks, and "the message that comes with the
+#     block is your hook's stderr". https://code.claude.com/docs/en/hooks
+#   - Codex: exit 2 with "the blocking reason" on stderr denies the call.
+#     https://learn.chatgpt.com/docs/hooks
+#   - Cursor: exit 2 blocks ("equivalent to returning permission: deny"),
+#     but no message from it is documented; the agent is sent the
+#     agent_message of a permission "deny" answer on exit 0.
+#     https://cursor.com/docs/hooks
+# So under Cursor (which sets CURSOR_VERSION for every hook) Cursor's own
+# deny is passed on as the answer, with exit 0. Every other deny blocks by
+# the hook's exit 2, with the verdict on stderr ahead of a fixed line: a
+# deny passed on as JSON is read only by the host whose dialect it speaks
+# (Claude Code given Cursor's {"permission":"deny"} finds no decision in it
+# and runs the command), and exit 2 is the block all three read alike.
+# nika guard answers in Cursor's dialect only for a payload without
+# hook_event_name; under Cursor, a deny in the other dialect is blocked by
+# exit 2, and what reaches the agent then is not documented.
+denied() {
+  printf '%s\n' "$out" >&2
+  printf 'guard_denied: nika guard denied this nika run; the verdict above says why. Repair what it names, then retry.\n' >&2
+  exit 2
+}
 shape_rc=0
 printf '%s\n' "$out" | awk -v code="$rc" "$verdict_awk" 2>/dev/null || shape_rc=$?
 case "$shape_rc" in
   0) ;;
   1) broken "exit $rc, an answer that is not a verdict" ;;
   2) broken "exit 2, an answer that does not deny" ;;
+  3) denied ;;
+  4) [ -n "${CURSOR_VERSION:-}" ] || denied ;;
   *) refuse "the hook could not read nika guard's answer (awk exit $shape_rc), so it refuses every shell command until it can: it reads the answer with awk, which the PATH must hold." ;;
 esac
 
-printf '%s\n' "$out"
+# The verdict is the host's answer (an allow, no opinion, or Cursor's own
+# deny under Cursor): one that cannot be written is none.
+printf '%s\n' "$out" || exit 2
 exit 0

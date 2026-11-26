@@ -145,11 +145,11 @@ check "both slow judges did start (two pids each)" "$ok" "pids: $(tr '\n' ' ' <"
 
 # A host that stops the hook: TERM to the shim alone, then to its whole
 # group. The judge sits in a group of its own, so only the shim's own exit
-# path can end it; the shim still exits with the blocking code. USR1 and
-# PIPE stand for the other signals that end a shell: on bash 3.2 one the
-# hook did not catch would end it with 128 + its number, which hosts read
-# as a non-blocking error.
-for signal in TERM -TERM USR1 PIPE; do
+# path can end it; the shim still exits with the blocking code. Then each
+# other signal a host, a timer or a resource limit sends to end a process:
+# on bash 3.2 one the hook did not catch would end it with 128 + its
+# number, which hosts read as a non-blocking error.
+for signal in TERM -TERM USR1 PIPE HUP INT QUIT ALRM USR2 XCPU XFSZ VTALRM PROF; do
   name="stopped${signal}"
   shim "$name" "$root/slow" "$claude" "$root/tmp" "$signal"
   rc="$(cat "$root/$name.rc")"
@@ -167,6 +167,26 @@ for signal in TERM -TERM USR1 PIPE; do
   [ "$(left "$judge_group")" = 0 ] && [ "$(left "$(cat "$root/$name.pgid")")" = 0 ] && ok=yes || ok=no
   check "$signal · no process of the hook's or the judge's group is left" "$ok" "judge group $(left "$judge_group"), hook group $(left "$(cat "$root/$name.pgid")")"
 done
+
+# The signal trap is the first command after the clean-PATH block, so no
+# step of the hook runs before it: read from the hook itself, then shown
+# with a copy that signals itself right before the next step after it.
+trap_line="trap 'exit 2' HUP INT QUIT TERM PIPE ALRM USR1 USR2 XCPU XFSZ VTALRM PROF"
+first="$(awk 'found && $0 !~ /^(#|$)/ { print; exit } /^# <<< nika-clean-path$/ { found = 1 }' "$SHIM")"
+[ "$first" = "$trap_line" ] && ok=yes || ok=no
+check "the signal trap is the first command after the PATH block" "$ok" "first command: $first"
+[ "$(grep -c "^trap 'exit 2'" "$SHIM")" = 1 ] && ok=yes || ok=no
+check "the hook sets that signal trap once" "$ok" "$(grep -c "^trap 'exit 2'" "$SHIM") trap lines"
+SHIM_REAL="$SHIM"
+SHIM="$root/early.sh"
+awk '/^set -uo pipefail$/ { print "kill -USR1 $$" } { print }' "$SHIM_REAL" >"$SHIM"
+[ "$(grep -c '^kill -USR1 \$\$$' "$SHIM")" = 1 ] && ok=yes || ok=no
+check "the early copy signals itself before its first step" "$ok" "no set -uo pipefail line to precede"
+shim early "$root/fast" "$claude"
+SHIM="$SHIM_REAL"
+rc="$(cat "$root/early.rc")"
+[ "$rc" = 2 ] && [ ! -s "$root/early.out" ] && ok=yes || ok=no
+check "a signal right after the PATH block ends the hook with the blocking exit" "$ok" "rc=$rc stdout=$(cat "$root/early.out")"
 
 # An unforeseen failure once the judge has started: a copy of the hook with
 # `exit 1` right after the judge starts. The trap ends the judge and turns
@@ -209,6 +229,35 @@ err="$(cat "$root/notmp.err")"
 want='guard_unavailable: the hook could not make a temporary folder'
 [ "$rc" = 2 ] && [ ! -s "$root/notmp.out" ] && [ "${err#"$want"}" != "$err" ] && ok=yes || ok=no
 check "no temporary folder: refused, the judge is never called" "$ok" "rc=$rc stderr=$err"
+
+# A relative TMPDIR names a folder of the one the hook runs in, the open
+# project: the hook keeps the judge's answer under /tmp instead. The judge
+# looks for the hook's folder in the project while it runs.
+mkdir -p "$root/proj/tmp" "$root/peek"
+cat >"$root/peek/nika" <<EOF
+#!/bin/sh
+/bin/cat >/dev/null
+/bin/ls -d "\$PWD"/tmp/nika-guard.* >>"$root/peek.seen" 2>/dev/null
+printf '{}\\n'
+EOF
+chmod +x "$root/peek/nika"
+: >"$root/peek.seen"
+(cd "$root/proj" && shim reltmp "$root/peek" "$claude" tmp)
+rc="$(cat "$root/reltmp.rc")"
+[ "$rc" = 0 ] && [ "$(cat "$root/reltmp.out")" = '{}' ] && ok=yes || ok=no
+check "a relative TMPDIR: the judge is still called and its verdict passed on" "$ok" "rc=$rc stdout=$(cat "$root/reltmp.out") stderr=$(cat "$root/reltmp.err")"
+leftover="$(find "$root/proj/tmp" -mindepth 1)"
+[ ! -s "$root/peek.seen" ] && [ -z "$leftover" ] && ok=yes || ok=no
+check "a relative TMPDIR: nothing of the hook's goes in the project" "$ok" "seen: $(cat "$root/peek.seen") left: $leftover"
+
+# A verdict the hook cannot write is no answer: with its stdout closed, an
+# allow the judge gave ends the hook with the blocking exit, not 0.
+printf '%s' "$claude" >"$root/closed.in"
+closed_rc=0
+env -i PATH="$root/fast:/usr/bin:/bin" HOME="$root/home" XDG_STATE_HOME="$root/state" \
+  TMPDIR="$root/tmp" /bin/bash "$SHIM" <"$root/closed.in" >&- 2>"$root/closed.err" || closed_rc=$?
+[ "$closed_rc" = 2 ] && ok=yes || ok=no
+check "a verdict that cannot be written ends the hook with the blocking exit" "$ok" "rc=$closed_rc stderr=$(cat "$root/closed.err")"
 
 # The folder a refusal names comes from the environment: it is shown with
 # printable characters only, on one line.

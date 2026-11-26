@@ -132,6 +132,15 @@ without an explicit operator decision.
    git tag v<NEXT> && git push origin v<NEXT>
    ```
 
+   The tag push runs the lefthook pre-push gate again, on the tagged commit:
+   the whole lib test suite, clippy, the hygiene board and the ratchets (about
+   20 minutes on a warm target for 0.125.1). Only a deletion-only push skips
+   it. Let it finish: it is the last proof on the exact commit users will
+   download, and the tag reaches the remote only after it. Export the lane's
+   `CARGO_TARGET_DIR` first, so it reuses the warm build instead of the shared
+   one, and raise `HYGIENE_VECTOR_TIMEOUT_SECS` when the machine is loaded: a
+   vector that times out fails the gate like a real red.
+
    Nothing else. `workflow_dispatch` can replay an existing tag. Dispatch it
    from the current workflow on `main`, while the `tag` input identifies the
    immutable source tag:

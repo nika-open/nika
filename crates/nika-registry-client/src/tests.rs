@@ -1055,3 +1055,36 @@ fn the_two_readers_agree_on_every_version() {
         );
     }
 }
+
+/// The cache lands through a new temporary file: a link waiting at the
+/// pid-shaped temporary name of earlier releases keeps pointing at its
+/// outside file, which keeps its bytes, and the cached artifact is a
+/// regular file with the fetched bytes.
+#[cfg(unix)]
+#[test]
+fn a_cache_write_never_writes_through_a_link_at_the_old_temporary_name() {
+    let dir = tempfile::tempdir().expect("cache dir");
+    let outside = tempfile::tempdir().expect("outside dir");
+    let victim = outside.path().join("rc");
+    std::fs::write(&victim, "export KEEP=1\n").expect("outside file");
+    let artifact = dir.path().join("0.1.0.nika");
+    let planted = artifact.with_extension(format!("tmp-{}", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &planted).expect("planted link");
+    write_atomic(&artifact, BODY).expect("cached");
+    assert_eq!(
+        std::fs::read_to_string(&victim).expect("outside file"),
+        "export KEEP=1\n"
+    );
+    assert_eq!(std::fs::read_link(&planted).expect("still a link"), victim);
+    let meta = std::fs::symlink_metadata(&artifact).expect("artifact");
+    assert!(meta.file_type().is_file());
+    assert_eq!(std::fs::read(&artifact).expect("artifact"), BODY);
+    assert_eq!(std::fs::read_dir(dir.path()).expect("list").count(), 2);
+    // A new cached file gets the mode `std::fs::write` gives a new file.
+    use std::os::unix::fs::PermissionsExt as _;
+    let reference = outside.path().join("reference");
+    std::fs::write(&reference, "x").expect("reference");
+    let mode =
+        |p: &std::path::Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777;
+    assert_eq!(mode(&artifact), mode(&reference));
+}

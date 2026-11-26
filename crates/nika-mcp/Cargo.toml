@@ -38,6 +38,7 @@ nika-session-change = { path = "../nika-session-change", version = "0.125.1" }
 # lives at the L3 composition root (#888 · the ONE `select_command_sandbox`);
 # the mechanism crates stay the L1 pure mechanisms. L4→L3/L0.5/L1, strictly
 # downward (the nika-cli precedent).
+nika-fs     = { path = "../nika-fs", version = "0.125.1" }                  # the pin lockfile lands through `replace_file` (a new random temporary, never a link) · L4→L1
 nika-kernel = { path = "../nika-kernel", version = "0.125.1" }              # the CommandSandbox seam · SandboxSpec · the NetPolicy tri-state · DANGEROUS_ENV_VARS
 nika-runtime = { path = "../nika-runtime", version = "0.125.1" }            # the ONE sandbox selection (#888 · L4→L3 — already transitive via nika-onboard, now explicit)
 nika-sandbox-seatbelt = { path = "../nika-sandbox-seatbelt", version = "0.125.1" }  # the macOS jail (sandbox-exec)

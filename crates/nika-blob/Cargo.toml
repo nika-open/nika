@@ -12,6 +12,7 @@ publish                = false  # Internal L1 effect crate (not a standalone cra
 
 [dependencies]
 nika-kernel = { path = "../nika-kernel", version = "0.125.1" }
+nika-fs     = { path = "../nika-fs", version = "0.125.1" }   # a blob lands through `replace_file` (a new random temporary, never a link) · L1→L1 lateral
 bytes       = { workspace = true }   # kernel put/get payloads
 blake3      = { workspace = true }   # content-addressed hashing (the CAS key)
 # tokio::fs is the production storage backend; rides the workspace base
@@ -19,7 +20,6 @@ blake3      = { workspace = true }   # content-addressed hashing (the CAS key)
 tokio       = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
-nika-fs = { path = "../nika-fs", version = "0.125.1" }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio    = { workspace = true, features = ["rt", "macros", "fs"] }

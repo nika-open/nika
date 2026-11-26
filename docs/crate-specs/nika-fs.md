@@ -117,6 +117,47 @@ These helpers are not containment for a root joined to an untrusted relative
 path: use `OwnedDir::open_relative` below the held root for those descendants.
 The existing `OwnedDir::open` component rules are unchanged.
 
+### Resolving a path beneath a folder
+
+`resolve_beneath(folder, path)` walks `path`, plain names only, from `folder`
+down the way the system resolves it, one name at a time: every link is read
+with `read_link` and its target walked in turn, at most `MAX_LINKS` (32). The
+walk may stand inside the folder or in one of the folders above it (as they
+really are, or as an absolute `folder` spells them), and nowhere else. A way
+that leaves, even one that comes back in the way a one-call `canonicalize`
+would accept, is `Escape::Outside` at the link that leads out; a link to
+nothing is `Escape::Dangling`, never a place to create. The answer is the real
+place with no link left in it (`Beneath::There`), or the real folder and the
+missing names below it (`Beneath::Missing`), so a caller that writes there
+follows no link again. It is a mechanism: `nika init` and `nika wire` decide
+what an escape means. It looks by path; a folder inside swapped for a link
+after the walk is not seen.
+
+### Replacing a whole file
+
+`replace_file(path, body, mode, durability)` stages a whole file and publishes
+it by rename: a new temporary beside `path`, created with `O_CREAT | O_EXCL` (it
+never opens an entry already there and never follows a link at that name), its
+mode set at creation or through the open file before any byte, the bytes written
+through that file, then one `rename` over `path`; any failure removes the
+temporary. `O_EXCL` is the guarantee: the temporary's name is random and hard to
+guess, which keeps collisions rare, but that is not promised. `ReplaceMode::New(bits)`
+gives a new file's mode under the umask, `KeepOr(bits)` keeps a replaced regular
+file's permission bits (never a set-id bit), `Exactly(bits)` sets them.
+`Durability::Unsynced` adds no sync, `Data` runs `sync_data` and `All` runs
+`sync_all` before the rename; each caller keeps the durability it had before it
+moved to this stage. A link at `path` is replaced, never written through;
+whether a link there or a linked folder on the way may be followed is the
+caller's decision, taken before the call, and a folder swapped between that
+decision and the rename is not stopped.
+
+The writers on this stage: `TokioFs::write` (`nika:write`, unsynced), the blob
+store (unsynced), `nika check --fix` through `nika-migrate`'s own std copy of
+the stage (L0 may not depend on this crate; unsynced), the MCP pin lockfile, the
+anchor sidecar, the OpenTelemetry export, the registry cache and the session
+intelligence preference (all unsynced), the values kept beside a journal
+(`sync_data`), `nika init` (unsynced) and `nika wire` (`sync_all`).
+
 ### Exclusive publication and backend migration
 
 `write_new(path, contents)` publishes a complete file only if the destination
@@ -198,11 +239,15 @@ backend itself grants no permits.
 ### Diamond upgrades vs brouillon (CRAFT · ADR-001)
 
 1. **Atomic write** — brouillon used bare `tokio::fs::write` (partial
-   writes observable). Diamond writes to `.nika-tmp.{pid}.{counter}` (or `..nika-tmp.{pid}.{counter}` for a single-dot-prefixed destination, keeping staging distinct under case folding)
-   beside the destination then `rename`s (POSIX atomicity) · parents
-   auto-created (parity) · error path cleans the temp best-effort ·
-   no `fsync` at this layer (documented · durability is a policy/engine
-   concern).
+   writes observable). Diamond writes to a new file `.nika-tmp.<random>` (or `..nika-tmp.<random>` for a single-dot-prefixed destination, keeping staging distinct under case folding),
+   created exclusively so it never opens an existing entry or follows a link at that name,
+   beside the destination then `rename`s (POSIX atomicity); `<random>` is 16 hex digits of a
+   randomly keyed hash of a per-process counter, never the pid (hard to guess, not
+   promised: `O_EXCL` is the guarantee) · `replace_file` is the same stage with a chosen
+   mode and a chosen durability, for the engine writers listed under "Replacing a whole
+   file" · parents auto-created (parity) · error path cleans the temp best-effort ·
+   `FsWrite::write` adds no `fsync` (durability is a policy/engine concern); `replace_file`
+   syncs only when its caller asks.
 2. **4-trait ISP split** — brouillon implemented 2 fat traits
    (`FsRead`+`FsWrite` with metadata/glob mixed in); Diamond follows the
    kernel split (read/write/meta/list).

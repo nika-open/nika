@@ -7,6 +7,8 @@
 //! Split out of `guard.rs` at the 1500-LOC file wall (2026-07-31 · the
 //! tests.rs sibling convention).
 
+use std::time::{Duration, Instant};
+
 use super::*;
 
 const GOOD: &str =
@@ -1026,6 +1028,133 @@ fn infrastructure_failure_is_a_visible_guard_unavailable() {
     );
 }
 
+/// Judge `nika run <d>/<name>` on the Cursor wire in a thread and wait at
+/// most `secs`: `None` means the judge was still waiting on the file. A
+/// thread, so a judge that blocks fails this test instead of hanging it.
+// disallowed_methods: `std::thread::spawn` — a bounded wait on a blocking
+// read needs a second thread; no runtime is involved (the cwd.rs precedent).
+#[allow(clippy::disallowed_methods)]
+fn judge_within(dir: &Path, name: &str, secs: u64) -> Option<(VerbOutput, Duration)> {
+    let d = dir.display().to_string();
+    let payload = format!(r#"{{"command":"nika run {d}/{name}","cwd":"{d}"}}"#);
+    let input = parse_payload(&payload).expect("payload parses");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = Instant::now();
+    std::thread::spawn(move || {
+        let out = evaluate(&input, false, plain());
+        tx.send((out, started.elapsed())).ok();
+    });
+    rx.recv_timeout(Duration::from_secs(secs)).ok()
+}
+
+/// The exact Cursor-wire refusal of an unreadable workflow.
+fn refused_read(dir: &Path, name: &str, why: &str) -> String {
+    let d = dir.display();
+    format!(
+        "guard_unavailable: cannot read {d}/{name}: {why} — the guard never claims a check on bytes it cannot see"
+    )
+}
+
+/// A FIFO named as the workflow (directly or through a link) is refused
+/// at once, unopened: a reader that opened it would wait for a writer
+/// forever, and a host that times its hook out lets the command run.
+#[cfg(unix)]
+#[test]
+fn a_fifo_named_as_the_workflow_is_refused_without_waiting() {
+    let dir = tempfile::tempdir().expect("dir");
+    let fifo = dir.path().join("pipe.nika");
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).expect("mkfifo");
+    std::os::unix::fs::symlink(&fifo, dir.path().join("link.nika")).expect("link");
+    for name in ["pipe.nika", "link.nika"] {
+        let (out, took) =
+            judge_within(dir.path(), name, 5).expect("the guard answers without waiting");
+        assert!(took < Duration::from_secs(2), "{name}: {took:?}");
+        assert_eq!(out.code, exit::ENV, "{name}: {}", out.text);
+        let v: serde_json::Value = serde_json::from_str(&out.text).expect("json");
+        assert_eq!(v["permission"], "deny", "{name}");
+        assert_eq!(
+            v["agent_message"],
+            refused_read(dir.path(), name, "not a regular file"),
+            "{name}"
+        );
+    }
+}
+
+/// The open itself never waits: a path swapped for a FIFO after the kind
+/// was read opens at once, and the opened handle says it is no file.
+#[cfg(unix)]
+#[test]
+fn the_workflow_open_never_waits_on_a_fifo() {
+    use std::os::unix::fs::FileTypeExt as _;
+    let dir = tempfile::tempdir().expect("dir");
+    let fifo = dir.path().join("pipe.nika");
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).expect("mkfifo");
+    let started = Instant::now();
+    let file = open_without_waiting(&fifo).expect("a FIFO opens without a writer");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let meta = file.metadata().expect("fstat");
+    assert!(!meta.is_file() && meta.file_type().is_fifo(), "{meta:?}");
+}
+
+/// A workflow over 4 MiB is refused unread, one of exactly 4 MiB is
+/// judged, and a directory is no workflow either.
+#[test]
+fn a_workflow_over_4_mib_is_refused() {
+    let budget = usize::try_from(MAX_WORKFLOW).expect("4 MiB fits");
+    let padded = |len: usize| {
+        let mut body = GOOD.to_owned();
+        let line = format!("#{}\n", "x".repeat(1022));
+        while body.len() + line.len() <= len {
+            body.push_str(&line);
+        }
+        match len - body.len() {
+            0 => {}
+            1 => body.push('\n'),
+            n => {
+                body.push('#');
+                body.push_str(&"x".repeat(n - 2));
+                body.push('\n');
+            }
+        }
+        body
+    };
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("huge.nika"), padded(budget + 1)).expect("huge");
+    std::fs::write(dir.path().join("full.nika"), padded(budget)).expect("full");
+    std::fs::create_dir(dir.path().join("folder.nika")).expect("folder");
+    assert_eq!(
+        std::fs::metadata(dir.path().join("full.nika"))
+            .expect("full")
+            .len(),
+        MAX_WORKFLOW
+    );
+
+    let (out, _) = judge_within(dir.path(), "huge.nika", 30).expect("answered");
+    assert_eq!(out.code, exit::ENV, "{}", out.text);
+    let v: serde_json::Value = serde_json::from_str(&out.text).expect("json");
+    assert_eq!(v["permission"], "deny");
+    assert_eq!(
+        v["agent_message"],
+        refused_read(
+            dir.path(),
+            "huge.nika",
+            "over 4 MiB, more than the guard reads"
+        )
+    );
+
+    let (out, _) = judge_within(dir.path(), "folder.nika", 30).expect("answered");
+    assert_eq!(out.code, exit::ENV, "{}", out.text);
+    let v: serde_json::Value = serde_json::from_str(&out.text).expect("json");
+    assert_eq!(
+        v["agent_message"],
+        refused_read(dir.path(), "folder.nika", "not a regular file")
+    );
+
+    let (out, _) = judge_within(dir.path(), "full.nika", 60).expect("answered");
+    assert_eq!(out.code, exit::OK, "4 MiB exactly is judged: {}", out.text);
+    assert_eq!(out.text, r#"{"permission":"allow"}"#);
+}
+
 /// The human reading names the verdict and the why.
 #[test]
 fn human_mode_reads_plainly() {
@@ -1094,14 +1223,15 @@ fn run_shim(dir: &Path, payload: &str, extra_env: &[(&str, &str)]) -> (String, S
     )
 }
 
-/// A stub `nika` on PATH: captures its stdin, parrots `STUB_OUT`,
-/// exits `STUB_RC` — the shim's plumbing is tested against the real
-/// bytes without needing the compiled binary in a --lib test.
+/// A stub `nika` on PATH: captures its stdin, parrots `STUB_OUT` on one
+/// line that ends, as `nika guard` prints it (the hook refuses an answer
+/// cut short), exits `STUB_RC` — the shim's plumbing is tested against
+/// the real bytes without needing the compiled binary in a --lib test.
 fn stub_nika(dir: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt as _;
     let bin = dir.join("bin");
     std::fs::create_dir(&bin).expect("bin dir");
-    let stub = "#!/usr/bin/env bash\ncat > \"$CAPTURE\"\nprintf '%s' \"$STUB_OUT\"\nexit \"${STUB_RC:-0}\"\n";
+    let stub = "#!/usr/bin/env bash\ncat > \"$CAPTURE\"\nprintf '%s\\n' \"$STUB_OUT\"\nexit \"${STUB_RC:-0}\"\n";
     let path = bin.join("nika");
     std::fs::write(&path, stub).expect("stub written");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))

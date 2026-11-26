@@ -11,6 +11,7 @@ homepage.workspace     = true
 publish                = false  # Internal L2 service crate (size-cap descent from nika-cli · D-2026-07-09-N1).
 
 [dependencies]
+nika-fs     = { path = "../nika-fs", version = "0.125.1" }       # the cache lands through `replace_file` (a new random temporary, never a link) · L2→L1
 nika-kernel = { path = "../nika-kernel", version = "0.125.1" }   # HttpGetDyn seam — the ONE injected effect
 nika-vocab  = { path = "../nika-vocab", version = "0.125.1" }    # the project file (registry.floor — the NEP-0016 gate's project rung, max-composed · D-2026-08-11-N5)
 serde       = { workspace = true }

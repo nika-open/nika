@@ -99,7 +99,9 @@ impl UserIntelligencePreference {
 
     /// Persist the choice under `home` (creates `~/.nika/`), atomically: the whole file is
     /// written beside it then renamed over it, so a reader meets the previous choice or this
-    /// one, never part of either.
+    /// one, never part of either. The file beside it is always a new one
+    /// (`nika_fs::replace_file`), so an entry already there is never written through; the
+    /// mode a new file gets and the absence of a sync are what they were.
     ///
     /// # Errors
     ///
@@ -111,17 +113,12 @@ impl UserIntelligencePreference {
             .ok_or_else(|| std::io::Error::other("the preference path has no directory"))?;
         std::fs::create_dir_all(dir)?;
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        let staged = dir.join(format!(
-            ".session-intelligence.json.{}.tmp",
-            std::process::id()
-        ));
-        if let Err(error) =
-            std::fs::write(&staged, text).and_then(|()| std::fs::rename(&staged, &path))
-        {
-            let _ = std::fs::remove_file(&staged);
-            return Err(error);
-        }
-        Ok(())
+        nika_fs::replace_file(
+            &path,
+            text.as_bytes(),
+            nika_fs::ReplaceMode::New(0o666),
+            nika_fs::Durability::Unsynced,
+        )
     }
 }
 
@@ -1174,6 +1171,40 @@ mod tests {
             .expect("an earlier file");
         let earlier = UserIntelligencePreference::load(home.path()).expect("loaded");
         assert_eq!(earlier.decision, None);
+    }
+
+    /// A link at the staged name earlier releases used never receives the choice, and a new
+    /// preference file gets the mode `std::fs::write` gives a new file.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_never_writes_through_a_planted_staged_name_and_keeps_the_new_file_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let home = tempfile::tempdir().expect("home");
+        let dir = home.path().join(".nika");
+        std::fs::create_dir_all(&dir).expect("the directory");
+        let outside = home.path().join("rc");
+        std::fs::write(&outside, "export KEEP=1\n").expect("outside");
+        let old = dir.join(format!(
+            ".session-intelligence.json.{}.tmp",
+            std::process::id()
+        ));
+        std::os::unix::fs::symlink(&outside, &old).expect("plant");
+        let pref = UserIntelligencePreference::new(IntelligenceKind::None, None);
+        pref.save(home.path()).expect("saved");
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside"),
+            "export KEEP=1\n"
+        );
+        assert_eq!(std::fs::read_link(&old).expect("still a link"), outside);
+        let path = UserIntelligencePreference::path_under(home.path());
+        assert_eq!(
+            UserIntelligencePreference::load(home.path()).expect("loaded"),
+            pref
+        );
+        let reference = home.path().join("reference");
+        std::fs::write(&reference, "x").expect("reference");
+        let mode = |p: &Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777;
+        assert_eq!(mode(&path), mode(&reference));
     }
 
     /// An explicit choice this machine cannot serve is refused with its

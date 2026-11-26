@@ -398,10 +398,11 @@ const CURSOR_DELEGATION: &str = include_str!(concat!(
 ));
 
 /// `.cursor/hooks-nika/*.sh` — the three seatbelts from the kit. The session
-/// hook's one provenance slot is stamped by `apply_briefs`; all other script
-/// bytes are preserved. The scripts sniff their dialect from stdin and self-silence
-/// outside nika contexts, so carrying them project-side is safe by the
-/// same proof that ships them in the plugin.
+/// hook's provenance slot and the edit hook's resolver line are stamped by
+/// `crate::hook_copies::scaffold_body`; all other script bytes are preserved. The scripts
+/// sniff their dialect from stdin and self-silence outside nika contexts,
+/// so carrying them project-side is safe by the same proof that ships them
+/// in the plugin.
 const HOOK_SESSION_CONTEXT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../.agents/plugins/nika/scripts/session-context.sh"
@@ -436,16 +437,23 @@ const KIT_CODEX_MANIFEST: &str = include_str!(concat!(
     "/../../.agents/plugins/nika/.codex-plugin/plugin.json"
 ));
 
+// Cursor requires `version`, runs project hooks from the project root, and
+// lets a command through when a hook crashes, times out or exits with
+// anything but 2 unless the hook sets `failClosed`. None of these does: a
+// hook that cannot start (no /bin/bash) lets the command through, as on
+// Claude Code and Codex, and the run guard refuses by its own exit 2.
+// https://cursor.com/docs/hooks (read 2026-11-26)
 const CURSOR_HOOKS_JSON: &str = r#"{
+  "version": 1,
   "hooks": {
     "sessionStart": [
-      { "command": "./.cursor/hooks-nika/session-context.sh" }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/session-context.sh" }
     ],
     "afterFileEdit": [
-      { "command": "./.cursor/hooks-nika/check-on-edit.sh" }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/check-on-edit.sh" }
     ],
     "beforeShellExecution": [
-      { "command": "./.cursor/hooks-nika/guard-run.sh" }
+      { "command": "/bin/bash -p ./.cursor/hooks-nika/guard-run.sh", "timeout": 30 }
     ]
   }
 }
@@ -453,16 +461,19 @@ const CURSOR_HOOKS_JSON: &str = r#"{
 
 // Project-root anchoring also works after an agent changes directory.
 // https://code.claude.com/docs/en/hooks-guide
+// Both wirings start each script with `/bin/bash -p`, as the kit's
+// manifests do: the host's PATH never picks the interpreter, and bash
+// takes no function, BASH_ENV or SHELLOPTS from the environment.
 const CLAUDE_SETTINGS_JSON: &str = r#"{
   "hooks": {
     "SessionStart": [{ "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/session-context.sh" }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/session-context.sh" }
     ] }],
     "PreToolUse": [{ "matcher": "Bash", "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh" }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh", "timeout": 30 }
     ] }],
     "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit", "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/check-on-edit.sh" }
+      { "type": "command", "command": "/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/check-on-edit.sh" }
     ] }]
   }
 }
@@ -1217,7 +1228,8 @@ mod tests {
 
     /// Every command in the project hooks wiring resolves to a script the
     /// SAME scaffold writes — a hooks.json naming a path init does not
-    /// create would be a dead seatbelt on every fresh repo.
+    /// create would be a dead seatbelt on every fresh repo — and starts it
+    /// with `/bin/bash -p`, never through the host's PATH.
     #[test]
     fn project_hooks_point_at_scaffolded_scripts() {
         let paths: Vec<&str> = targets().iter().map(|(p, _)| *p).collect();
@@ -1228,13 +1240,67 @@ mod tests {
         for (event, entries) in hooks {
             for entry in entries.as_array().expect("entry array") {
                 let cmd = entry["command"].as_str().expect("command string");
-                let rel = cmd.strip_prefix("./").unwrap_or(cmd);
+                let rel = cmd
+                    .strip_prefix("/bin/bash -p ./")
+                    .unwrap_or_else(|| panic!("{event}: {cmd} is not started by /bin/bash -p"));
                 assert!(
                     paths.contains(&rel),
                     "{event} points at {rel}, which the scaffold never writes"
                 );
             }
         }
+    }
+
+    /// A host that times a hook out lets the command through, so both
+    /// wirings give the guard hook a timeout above the deadline the hook
+    /// holds its judge to, read from the script itself: Claude Code's and
+    /// Cursor's (`timeout`, in seconds, for each).
+    #[test]
+    fn the_guard_hook_timeout_is_above_its_judge_deadline() {
+        let deadline: u64 = HOOK_GUARD_RUN
+            .lines()
+            .find_map(|line| line.strip_prefix("deadline="))
+            .expect("the hook's deadline line")
+            .parse()
+            .expect("a whole number of seconds");
+        let guard_of = |hooks: Vec<&serde_json::Value>| -> u64 {
+            let guard: Vec<&&serde_json::Value> = hooks
+                .iter()
+                .filter(|hook| {
+                    hook["command"]
+                        .as_str()
+                        .is_some_and(|c| c.ends_with("/guard-run.sh"))
+                })
+                .collect();
+            assert_eq!(guard.len(), 1, "{hooks:?}");
+            guard[0]["timeout"].as_u64().expect("a timeout in seconds")
+        };
+        let settings: serde_json::Value =
+            serde_json::from_str(CLAUDE_SETTINGS_JSON).expect("settings JSON");
+        let claude = guard_of(
+            settings["hooks"]["PreToolUse"]
+                .as_array()
+                .expect("PreToolUse")
+                .iter()
+                .flat_map(|entry| entry["hooks"].as_array().expect("commands"))
+                .collect(),
+        );
+        let wiring: serde_json::Value =
+            serde_json::from_str(CURSOR_HOOKS_JSON).expect("hooks.json parses");
+        let cursor = guard_of(
+            wiring["hooks"]["beforeShellExecution"]
+                .as_array()
+                .expect("beforeShellExecution")
+                .iter()
+                .collect(),
+        );
+        for timeout in [claude, cursor] {
+            assert!(
+                timeout > deadline,
+                "timeout {timeout} s, deadline {deadline} s"
+            );
+        }
+        assert_eq!((deadline, claude, cursor), (20, 30, 30));
     }
 
     #[test]
@@ -1263,27 +1329,36 @@ mod tests {
                     let path = hook["command"]
                         .as_str()
                         .expect("command")
-                        .strip_prefix("\"$CLAUDE_PROJECT_DIR\"/")
-                        .expect("quoted project root");
+                        .strip_prefix("/bin/bash -p \"$CLAUDE_PROJECT_DIR\"/")
+                        .expect("started by /bin/bash -p from the quoted project root");
                     assert!(emitted.contains_key(path), "unshipped hook: {path}");
                 }
             }
         }
     }
 
-    /// The project manifest mirrors the KIT's — same events, same script
-    /// basenames, only the path prefix differs (workspace vs plugin
+    /// The project manifest mirrors the KIT's — the same `version`, the
+    /// same events, the same script basenames with the same timeout and
+    /// `failClosed`, only the path prefix differs (workspace vs plugin
     /// scope). The sibling test above checks internal consistency; this
     /// one checks the SOURCE: a seatbelt added to the kit that the
     /// project manifest misses fails here, not silently in the field.
+    /// Cursor requires `version: 1`, and no hook sets `failClosed`: a hook
+    /// that cannot start lets the command through on every host
+    /// (<https://cursor.com/docs/hooks>, read 2026-11-26).
     #[test]
     fn project_hooks_manifest_mirrors_the_kit() {
+        // An event, a script's basename, its timeout and its failClosed.
+        type Hook = (String, String, serde_json::Value, serde_json::Value);
         let ours: serde_json::Value =
             serde_json::from_str(CURSOR_HOOKS_JSON).expect("project manifest parses");
         let kit: serde_json::Value =
             serde_json::from_str(KIT_CURSOR_HOOKS).expect("kit manifest parses");
-        let shape = |v: &serde_json::Value| -> Vec<(String, String)> {
-            let mut out: Vec<(String, String)> = v["hooks"]
+        for manifest in [&ours, &kit] {
+            assert_eq!(manifest["version"], serde_json::json!(1), "{manifest}");
+        }
+        let shape = |v: &serde_json::Value| -> Vec<Hook> {
+            let mut out: Vec<Hook> = v["hooks"]
                 .as_object()
                 .expect("hooks object")
                 .iter()
@@ -1295,19 +1370,31 @@ mod tests {
                         .map(|e| {
                             let cmd = e["command"].as_str().expect("command string");
                             let base = cmd.rsplit('/').next().expect("basename");
-                            (event.clone(), base.to_owned())
+                            (
+                                event.clone(),
+                                base.to_owned(),
+                                e["timeout"].clone(),
+                                e["failClosed"].clone(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 })
                 .collect();
-            out.sort();
+            out.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
             out
         };
+        let ours = shape(&ours);
         assert_eq!(
-            shape(&ours),
+            ours,
             shape(&kit),
             "project hooks.json drifted from the kit manifest"
         );
+        let closed: Vec<&str> = ours
+            .iter()
+            .filter(|(_, _, _, fail)| fail != &serde_json::Value::Null)
+            .map(|(_, script, _, _)| script.as_str())
+            .collect();
+        assert_eq!(closed, Vec::<&str>::new(), "no hook sets failClosed");
     }
 
     /// The Codex plugin page opens with the three DOORS — one per visitor

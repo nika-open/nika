@@ -26,15 +26,13 @@ fn temporary_names_stay_distinct_under_ascii_case_folding() {
     }
 }
 
+/// The staging name is random, so a destination cannot be chosen to equal
+/// the next one; a destination spelled like any temporary stages under the
+/// other prefix, which no `.nika-tmp.` name can ever equal.
 #[test]
 fn staging_name_cannot_be_the_requested_destination() -> TestResult {
-    use std::sync::atomic::Ordering;
-
     let directory = tempfile::tempdir()?;
-    let next = crate::TMP_COUNTER.load(Ordering::Relaxed);
-    let destination = directory
-        .path()
-        .join(format!(".nika-tmp.{}.{}", std::process::id(), next));
+    let destination = directory.path().join(".nika-tmp.00000000deadbeef");
     let staged = StagedFile::create(&destination, b"complete").map_err(std::io::Error::other)?;
     assert!(
         matches!(
@@ -42,6 +40,13 @@ fn staging_name_cannot_be_the_requested_destination() -> TestResult {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound
         ),
         "staging must use a distinct name"
+    );
+    let staging = std::fs::read_dir(directory.path())?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    assert!(
+        matches!(staging.as_slice(), [name] if name.starts_with("..nika-tmp.")),
+        "{staging:?}"
     );
     staged
         .publish(&destination)

@@ -786,7 +786,9 @@ impl PinStore {
 
     /// Serialize + write via a sibling temp file renamed over the target
     /// (same-dir rename is atomic on POSIX — a crash mid-write leaves the
-    /// OLD lockfile, never a truncated one).
+    /// OLD lockfile, never a truncated one). The temporary is a new file
+    /// under a random name (`nika_fs::replace_file`): the project's state
+    /// folder can hold no entry that catches the bytes.
     fn write_atomic(&self) -> Result<(), PinError> {
         let text = serde_json::to_string_pretty(&self.file).map_err(|e| PinError::Io {
             path: self.path.clone(),
@@ -799,20 +801,18 @@ impl PinStore {
                 why: e.to_string(),
             })?;
         }
-        let tmp = self
-            .path
-            .with_extension(format!("tmp-{}", std::process::id()));
-        std::fs::write(&tmp, format!("{text}\n")).map_err(|e| PinError::Io {
-            // seam-bypass-ok: L4 crate — lockfile write is direct (run_stdio precedent)
-            path: tmp.clone(),
-            why: e.to_string(),
-        })?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| PinError::Io {
-            // seam-bypass-ok: L4 crate — atomic rename is direct (run_stdio precedent)
+        // A new lockfile gets the mode `std::fs::write` gave it; no sync is
+        // added, as before.
+        nika_fs::replace_file(
+            &self.path,
+            format!("{text}\n").as_bytes(),
+            nika_fs::ReplaceMode::KeepOr(0o666),
+            nika_fs::Durability::Unsynced,
+        )
+        .map_err(|e| PinError::Io {
             path: self.path.clone(),
-            why: format!("cannot rename the fresh lockfile into place: {e}"),
-        })?;
-        Ok(())
+            why: format!("cannot write the pin lockfile: {e}"),
+        })
     }
 }
 
@@ -1381,6 +1381,71 @@ mod tests {
             assert_eq!(out.code, 0, "{code}:\n{}", out.text);
             assert!(out.text.starts_with(code), "{code}:\n{}", out.text);
         }
+    }
+
+    /// The lockfile lands through a new temporary file: a link waiting at
+    /// the pid-shaped temporary name of earlier releases keeps pointing at
+    /// its outside file, which keeps its bytes, and the lockfile is a
+    /// regular file that reloads clean.
+    #[cfg(unix)]
+    #[test]
+    fn enrolling_never_writes_through_a_link_at_the_old_temporary_name() {
+        let dir = tmp("planted");
+        std::fs::create_dir_all(dir.join(".nika")).expect("state dir");
+        let outside = dir.with_extension("outside");
+        std::fs::write(&outside, "export KEEP=1\n").expect("outside file");
+        let planted = dir
+            .join(PINS_PATH)
+            .with_extension(format!("tmp-{}", std::process::id()));
+        std::os::unix::fs::symlink(&outside, &planted).expect("planted link");
+        let identity = ServerIdentity {
+            command: Some("srv".to_owned()),
+            args: Vec::new(),
+            url: None,
+        };
+        store_in(&dir)
+            .enroll("postgres", identity.clone(), &[query_def()], 1)
+            .expect("enroll");
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside file"),
+            "export KEEP=1\n"
+        );
+        assert_eq!(std::fs::read_link(&planted).expect("still a link"), outside);
+        let lock = std::fs::symlink_metadata(dir.join(PINS_PATH)).expect("lockfile");
+        assert!(lock.file_type().is_file());
+        // A new lockfile gets the mode `std::fs::write` gives a new file.
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let reference = dir.join("reference");
+            std::fs::write(&reference, "x").expect("reference");
+            let mode = |p: &std::path::Path| {
+                std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777
+            };
+            assert_eq!(mode(&dir.join(PINS_PATH)), mode(&reference));
+        }
+        assert!(matches!(
+            PinStore::load(&dir)
+                .expect("reload")
+                .verify("postgres", &identity, &[query_def()]),
+            Verify::Clean
+        ));
+        let mut left: Vec<String> = std::fs::read_dir(dir.join(".nika"))
+            .expect("list")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let mut expected = vec![
+            "mcp_pins.json".to_owned(),
+            planted
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        expected.sort();
+        assert_eq!(left, expected, "no temporary left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&outside);
     }
 
     #[test]

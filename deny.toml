@@ -91,7 +91,7 @@ wrappers = [
   "nika-clock",            # L1 time effect: tokio::time::sleep is the production async impl of nika-kernel Clock::sleep · 12-gate admitted 74a8ff483
   "nika-fs",               # L1 filesystem effect: tokio::fs is the production impl of the kernel fs *Dyn family (atomic temp+rename write) · announce-ladder s4 · 12-gate admitted (D-2026-06-10-N6)
   "nika-http",             # L1 http effect: tokio::net::lookup_host powers the SSRF DNS-resolve check (reqwest rides the same runtime) · announce-ladder s5
-  "nika-blob",             # L1 blob effect: tokio::fs is the production CAS backend (blake3 hash · sharded layout · atomic temp+rename) · announce-ladder s6
+  "nika-blob",             # L1 blob effect: tokio::fs reads, probes and removes for the production CAS backend (blake3 hash · sharded layout), and tokio::task::spawn_blocking runs the write through nika_fs::replace_file (a new file under a random name, then a rename) · announce-ladder s6
   "nika-exec-runner",      # L1 exec effect: tokio::process is THE subprocess spawner (kill_on_drop · concurrent drain · timeout · registry cancel-by-pid) · announce floor exec · s7
   "nika-input",            # L1 write-side effect (M2.4): tokio `rt` for spawn_blocking — the sync `enigo` OS-event synthesis runs off the async runtime (worker-local · CANCEL SAFETY contract · same pattern as nika-a11y) · B.3 wires enigo
   "nika-browser",          # L1 web effect (M2.5): tokio `rt` for the per-session CDP Handler task — chromiumoxide is async-native (NO spawn_blocking) · B.3 wires chromiumoxide

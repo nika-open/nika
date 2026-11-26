@@ -38,7 +38,9 @@ keeps the hand · the proof inside the first minute):
   CREATED settings.json, never string-spliced), and the trace cover
   (`gitignore` — adds-only: create when absent · one marked section
   appended when the human's file lacks it · never a duplicate, so a
-  founded repo cannot commit its own `.nika/traces/` journals).
+  founded repo cannot commit its own `.nika/traces/` journals; a
+  `.gitignore` that is a link to a file inside the project is read, never
+  written, and its row names the entries to add).
 - **`wizard`** — the founding conversation on the clack rail (recipe ·
   model · canvas · agents), over any `BufRead`/`Write` pair.
 - **`bootstrap`** — private init recipe/model prompts and stamping; no authoring
@@ -694,8 +696,38 @@ exit vocabulary.
 - **Project hooks**: Cursor and Claude project settings point at the same
   canonical kit scripts, copied into each client's `hooks-nika/` directory.
   Claude commands anchor at the quoted `CLAUDE_PROJECT_DIR`; existing settings
-  are skipped under the normal law. A declared hook is not proof a client
-  has loaded it.
+  are skipped under the normal law. Every command starts its script with
+  `/bin/bash -p`, as the kit's manifests do, so the host's PATH never picks
+  the shell and bash takes no `BASH_ENV` file or function from the
+  environment, and both wirings give the run guard a 30 s timeout, above
+  the 20 s its hook holds the judge to. A settings file is written last, and only
+  when every script it runs is a regular file holding exactly what this
+  `init` writes (`hook_copies`: `HOOK_WIRING` · `scaffold_body`): a skipped
+  script with other bytes refuses the wiring with one `✖ refused` row and
+  exit 3, and `--force` rewrites the scripts first; a kept wiring beside such
+  a script, a regular file or a link inside the project, says so in its row.
+  The scripts are read bounded and without waiting (`confine::read_text`). The project copy of the edit hook carries its
+  resolver line emptied, so it never runs a program from the folder beside
+  it, which in a project belongs to the repository. A declared hook is not
+  proof a client has loaded it.
+- **Every write stays inside the project** (`confine`): a link at a file's
+  own name is never written through, `--force` included; every link on the
+  way is read one step at a time (`nika_fs::resolve_beneath`) and followed
+  only while each place it leads through is inside the project or one of
+  the folders above it, so a way that leaves the project and comes back in
+  is refused where it leaves; the bytes go to a new file in the real folder
+  that walk reached, under a random name that must not exist yet, renamed
+  over the name (`nika_fs::replace_file`), and a replaced file keeps its
+  mode (a shell script is always `0755`, a new file is `0666` under the
+  umask, as `std::fs::write` gave it). Reads are bounded and never wait or
+  follow a link at the file's name (`read_text`, over
+  `nika_fs::read_owned`). Anything at a target counts as there, a dangling
+  link included. A refusal is a `✖` row with its remedy and no `--force`
+  advice, and exit 3; a link to a file inside the project that `init`
+  would only keep (`CLAUDE.md` pointing at `AGENTS.md`) stays as it is,
+  with its own skip row. The walk looks by path: a process that swaps a
+  real folder inside the project for a link after the walk is not stopped
+  (an `openat` walk would be).
 - **No CLI framework below the root**: `CanvasTheme` stays a plain enum
   here; the root mirrors it as its clap `ValueEnum`.
 

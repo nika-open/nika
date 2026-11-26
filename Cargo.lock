@@ -5239,6 +5239,7 @@ dependencies = [
  "nika-check",
  "nika-cli-host",
  "nika-exec-runner",
+ "nika-fs",
  "nika-graph",
  "nika-harness",
  "nika-kernel",
@@ -5409,6 +5410,7 @@ name = "nika-registry-client"
 version = "0.125.1"
 dependencies = [
  "minisign",
+ "nika-fs",
  "nika-kernel",
  "nika-kernel-mock",
  "nika-vocab",
@@ -5729,6 +5731,7 @@ dependencies = [
  "nika-display",
  "nika-error",
  "nika-event",
+ "nika-fs",
  "nika-harness",
  "nika-http",
  "nika-kernel",

@@ -382,6 +382,36 @@ impl OwnedDir {
         Ok(at.saturating_add(added))
     }
 
+    /// A new file at a fresh random temporary name beside `name`, created
+    /// exclusively and without following a link. Only a name this call
+    /// created is handed back, so a cleanup never removes another's entry.
+    fn create_spare(&self, name: &str) -> io::Result<(String, File)> {
+        let mut last = None;
+        for _ in 0..8 {
+            let (_, spare) = crate::tmp_sibling(Path::new(name));
+            let Some(tmp) = spare
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_owned)
+            else {
+                return Err(io::Error::other("owned directory: no temporary name"));
+            };
+            match self.open_file(
+                &tmp,
+                OFlag::O_CREAT
+                    | OFlag::O_EXCL
+                    | OFlag::O_WRONLY
+                    | OFlag::O_NOFOLLOW
+                    | OFlag::O_CLOEXEC,
+            ) {
+                Ok(file) => return Ok((tmp, file)),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| io::Error::from(io::ErrorKind::AlreadyExists)))
+    }
+
     /// Durably replace a regular file through a descriptor-relative rename.
     ///
     /// # Errors
@@ -391,11 +421,9 @@ impl OwnedDir {
         if self.read_optional(name)?.as_deref() == Some(body) {
             return Ok(());
         }
-        let tmp = format!(".{name}.tmp-{}", std::process::id());
-        let mut file = self.open_file(
-            &tmp,
-            OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-        )?;
+        // A random temporary name (`tmp_sibling`'s), never the pid: a
+        // predictable name lets an entry planted there refuse every write.
+        let (tmp, mut file) = self.create_spare(name)?;
         let result = (|| {
             file.write_all(body.as_bytes())?;
             file.sync_all()?;

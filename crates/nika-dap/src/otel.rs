@@ -903,19 +903,67 @@ mod tests {
         assert!(outcome.target.ends_with("run.otlp.jsonl"));
         let line = std::fs::read_to_string(&outcome.target).expect("export");
         assert!(line.ends_with('\n') && line.contains("resourceSpans"));
-        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+        // Every entry is named: a temporary under any name would show.
+        let mut entries: Vec<_> = std::fs::read_dir(dir.path())
             .expect("dir")
             .filter_map(Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| {
-                std::path::Path::new(n)
-                    .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case("tmp"))
-            })
             .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["run.ndjson", "run.otlp.jsonl"],
+            "no temp sibling survives"
+        );
+    }
+
+    /// The export lands through a new temporary file: a link waiting at
+    /// the pid-shaped temporary name of earlier releases keeps pointing at
+    /// its outside file, which keeps its bytes.
+    #[cfg(unix)]
+    #[test]
+    fn export_never_writes_through_a_link_at_the_old_temporary_name() {
+        let dir = tempfile::tempdir().expect("dir");
+        let outside = tempfile::tempdir().expect("outside dir");
+        let victim = outside.path().join("rc");
+        std::fs::write(&victim, "export KEEP=1\n").expect("outside file");
+        let trace = dir.path().join("run.ndjson");
+        let mut raw = String::new();
+        for event in run_fixture() {
+            raw.push_str(&serde_json::to_string(&event).expect("event json"));
+            raw.push('\n');
+        }
+        std::fs::write(&trace, raw).expect("journal");
+        let planted = dir
+            .path()
+            .join(format!(".run.otlp.jsonl.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &planted).expect("planted link");
+        let trace_str = trace.to_str().expect("utf8");
+        let outcome = export_journal(trace_str, None, false, "test").expect("exports");
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("outside file"),
+            "export KEEP=1\n"
+        );
+        assert_eq!(std::fs::read_link(&planted).expect("still a link"), victim);
+        let export = std::fs::symlink_metadata(&outcome.target).expect("export");
+        assert!(export.file_type().is_file());
+        // A new export gets the mode `std::fs::write` gives a new file.
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let reference = outside.path().join("reference");
+            std::fs::write(&reference, "x").expect("reference");
+            let mode = |p: &std::path::Path| {
+                std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777
+            };
+            assert_eq!(
+                mode(std::path::Path::new(&outcome.target)),
+                mode(&reference)
+            );
+        }
         assert!(
-            leftovers.is_empty(),
-            "no temp sibling survives: {leftovers:?}"
+            std::fs::read_to_string(&outcome.target)
+                .expect("export")
+                .contains("resourceSpans")
         );
     }
 
@@ -1310,28 +1358,17 @@ pub fn export_journal(
 
 /// Publish the export ATOMICALLY: a sibling temp file, then a rename —
 /// a reader never sees a half-written export claiming to be complete
-/// (an interrupted `fs::write` left exactly that). The temp name is
-/// per-process so two exports of one journal cannot share it.
+/// (an interrupted `fs::write` left exactly that). The temporary is a new
+/// file under a random name (`nika_fs::replace_file`), so two exports of
+/// one journal never share it and no entry planted beside the journal
+/// catches the bytes. A new export gets the mode `std::fs::write` gave it,
+/// and no sync is added, as before.
 fn write_whole(target: &str, contents: &str) -> Result<(), String> {
-    let path = std::path::Path::new(target);
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map_or_else(
-            || std::path::PathBuf::from("."),
-            std::path::Path::to_path_buf,
-        );
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("cannot write {target}: no file name"))?;
-    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, contents) // seam-bypass-ok: L4 verb writing the export beside the journal
-        .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        // seam-bypass-ok: L4 verb publishing the export beside the journal
-        let _ = std::fs::remove_file(&tmp); // seam-bypass-ok: cleanup of our own temp
-        return Err(format!("cannot write {target}: {e}"));
-    }
-    Ok(())
+    nika_fs::replace_file(
+        std::path::Path::new(target),
+        contents.as_bytes(),
+        nika_fs::ReplaceMode::KeepOr(0o666),
+        nika_fs::Durability::Unsynced,
+    )
+    .map_err(|e| format!("cannot write {target}: {e}"))
 }

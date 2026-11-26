@@ -38,9 +38,10 @@
 //! Readers never observe a half-written file. A future dropped between
 //! the temp write and the rename may leave a stale `.nika-tmp.*` or `..nika-tmp.*` file —
 //! exactly the failure mode the kernel trait documents — and the error
-//! path cleans its temp file best-effort. Durability (`fsync`) is
-//! intentionally NOT provided at this layer; callers needing
-//! crash-durability gate it at the policy/engine layer.
+//! path cleans its temp file best-effort. `FsWrite::write` adds no
+//! `fsync`: callers needing crash-durability gate it at the
+//! policy/engine layer. [`replace_file`] syncs only when its caller asks
+//! ([`Durability`]), so each writer keeps the durability it had.
 //!
 //! **Rename-replace semantics** (differ from a plain in-place write):
 //! an existing destination's permissions/xattrs are REPLACED by the
@@ -74,6 +75,11 @@
 //! the process working directory, which one process cannot hold for several
 //! runs at once. It moves coordinates only: no grant, no containment, the same
 //! symlink and pin semantics, and the caller's own spelling in what it reports.
+//!
+//! [`resolve_beneath`] finds where a path below a folder really is one name
+//! at a time, reading every link on the way, and reports a way that passes
+//! outside the folder even when it ends inside. The caller decides what that
+//! means; the walk looks by path, without holding descriptors.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -92,7 +98,11 @@ mod rooted;
 pub use rooted::{Capped, RootedFs, read_capped};
 mod anchored;
 pub use anchored::AnchoredFs;
+mod beneath;
+pub use beneath::{Beneath, Escape, MAX_LINKS, resolve_beneath};
 mod remove;
+mod replace;
+pub use replace::{Durability, ReplaceMode, replace_file};
 mod write_new;
 
 #[cfg(test)]
@@ -113,9 +123,26 @@ mod rooted_tests;
 #[cfg(test)]
 mod pin_tests;
 
-/// Monotonic discriminator for temp-file names: two concurrent writes to
-/// the same destination must never collide on the same temp path.
+#[cfg(test)]
+mod replace_tests;
+
+#[cfg(test)]
+#[cfg(unix)]
+mod beneath_tests;
+
+/// Monotonic input of the temp-file discriminator: two writes in one
+/// process never hash the same value.
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// An unpredictable discriminator for a temporary name: the per-process
+/// counter, hashed by std's randomly keyed `SipHash` (`RandomState` takes
+/// its keys from the operating system's random source). The counter keeps
+/// names distinct within the process; the keys keep them unguessable from
+/// outside it, so no entry can be planted at a temporary name in advance.
+fn spare_discriminator() -> u64 {
+    use std::hash::BuildHasher as _;
+    std::hash::RandomState::new().hash_one(TMP_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
 
 /// Production filesystem backed by `tokio::fs`.
 ///
@@ -242,7 +269,7 @@ impl FsWriteDyn for TokioFs {
     /// any underlying I/O error. On error the temp file is removed
     /// best-effort.
     ///
-    /// CANCEL SAFETY: `tokio::fs` operations detach (not abort) on drop —
+    /// CANCEL SAFETY: the blocking write detaches (not aborts) on drop —
     /// a cancelled write may still complete in the background, either
     /// leaving a stale `.nika-tmp.*` or `..nika-tmp.*` file or fully publishing the
     /// destination, but NEVER a partial destination (the
@@ -255,32 +282,28 @@ impl FsWriteDyn for TokioFs {
             });
         }
 
-        let (parent_to_create, tmp) = tmp_sibling(path);
-        if let Some(p) = parent_to_create {
+        if let Some(p) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             tokio::fs::create_dir_all(p)
                 .await
                 .map_err(|e| FsError::from_io(&e, p))?;
         }
 
-        // Write the temp, then publish it with one rename. ANY failure
-        // after the temp path is chosen removes it best-effort at a SINGLE
-        // site — a partial `tokio::fs::write` (e.g. ENOSPC mid-stream) would
-        // otherwise leak a `.nika-tmp.*` file, and the crate docs promise the
-        // error path cleans up. On rename success the temp no longer exists,
-        // so the guard only fires on a real write-or-rename failure.
-        let publish = async {
-            tokio::fs::write(&tmp, contents)
-                .await
-                .map_err(|e| FsError::from_io(&e, &tmp))?;
-            tokio::fs::rename(&tmp, path)
-                .await
-                .map_err(|e| FsError::from_io(&e, path))
-        };
-        let result = publish.await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(&tmp).await;
-        }
-        result
+        // A new temporary under a random name (`replace`: created
+        // exclusively, so it never opens a planted entry or follows a link
+        // there), then one rename. Any failure removes the temporary at a
+        // single site; on success it no longer exists. The default mode of
+        // a new file, as `tokio::fs::write` gave: a replaced file's own
+        // mode is not kept (the contract above).
+        let owned = path.to_path_buf();
+        let body = contents.to_vec();
+        tokio::task::spawn_blocking(move || {
+            replace_file(&owned, &body, ReplaceMode::New(0o666), Durability::Unsynced)
+        })
+        .await
+        .map_err(|error| FsError::Io {
+            reason: format!("write worker failed: {error}"),
+        })?
+        .map_err(|e| FsError::from_io(&e, path))
     }
 
     /// Create a directory and all parent directories (idempotent).
@@ -419,8 +442,9 @@ fn tmp_sibling(path: &Path) -> (Option<&Path>, PathBuf) {
     let dir = parent.unwrap_or_else(|| Path::new("."));
     // Discriminator-derived temp name: embedding the file name
     // would risk ENAMETOOLONG near the 255-byte limit and lossy
-    // collisions on non-UTF-8 names — pid+counter alone guarantees
-    // in-process uniqueness (review swarm P2 · 2026-06-10).
+    // collisions on non-UTF-8 names (review swarm P2 · 2026-06-10). The
+    // discriminator is random, never the pid and a counter: a name an
+    // outsider can predict is a name they can plant a link at.
     // A destination may itself look like a temporary name. Distinguish it
     // with punctuation, so case folding cannot alias staging to destination.
     let name = path.file_name().map(std::ffi::OsStr::as_encoded_bytes);
@@ -429,11 +453,7 @@ fn tmp_sibling(path: &Path) -> (Option<&Path>, PathBuf) {
     } else {
         ".nika-tmp"
     };
-    let tmp = dir.join(format!(
-        "{prefix}.{}.{}",
-        std::process::id(),
-        TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
-    ));
+    let tmp = dir.join(format!("{prefix}.{:016x}", spare_discriminator()));
     (parent, tmp)
 }
 

@@ -175,17 +175,16 @@ pub(crate) fn parse_sidecar(path: &Path, raw: &str) -> Result<AnchorSidecar, Str
 pub fn write_sidecar(path: &Path, sidecar: &AnchorSidecar) -> Result<(), String> {
     let json = serde_json::to_string_pretty(sidecar)
         .map_err(|e| format!("cannot serialize the anchor: {e}"))?;
-    let tmp = path.with_extension("anchor.json.tmp");
-    std::fs::write(&tmp, json) // seam-bypass-ok: L4 verb writing its own sidecar (atomic temp+rename)
-        .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp); // seam-bypass-ok: the same write's cleanup
-        format!(
-            "cannot rename {} over {}: {e}",
-            tmp.display(),
-            path.display()
-        )
-    })
+    // A new temporary under a random name, renamed over the sidecar: a
+    // fixed name beside the journal could be an entry planted there. A new
+    // sidecar gets the mode `std::fs::write` gave it; no sync, as before.
+    nika_fs::replace_file(
+        path,
+        json.as_bytes(),
+        nika_fs::ReplaceMode::KeepOr(0o666),
+        nika_fs::Durability::Unsynced,
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 /// The run key's raw ed25519 material, derived from the minisign
@@ -670,8 +669,39 @@ mod tests {
             anchored_at: "2026-07-20T17:25:01Z".to_owned(),
             engine: "0.105.0".to_owned(),
         };
+        // A link waiting at the fixed temporary name of earlier releases
+        // never receives the anchor: its outside file keeps its bytes.
+        let outside = tempfile::tempdir().expect("outside");
+        let victim = outside.path().join("rc");
+        std::fs::write(&victim, "export KEEP=1\n").expect("outside file");
+        let planted = path.with_extension("anchor.json.tmp");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&victim, &planted).expect("planted link");
         write_sidecar(&path, &sidecar).expect("write");
         assert_eq!(load_sidecar(&path).expect("load"), sidecar);
+        // A new sidecar gets the mode `std::fs::write` gives a new file.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let reference = outside.path().join("reference");
+            std::fs::write(&reference, "x").expect("reference");
+            let mode = |p: &std::path::Path| {
+                std::fs::metadata(p).expect("stat").permissions().mode() & 0o7777
+            };
+            assert_eq!(mode(&path), mode(&reference));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("outside file"),
+            "export KEEP=1\n"
+        );
+        #[cfg(unix)]
+        assert_eq!(std::fs::read_link(&planted).expect("still a link"), victim);
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .expect("sidecar")
+                .file_type()
+                .is_file()
+        );
         // The version gate: anchor_format 2 refuses with a teaching error.
         let newer = serde_json::to_string(&sidecar)
             .expect("json")

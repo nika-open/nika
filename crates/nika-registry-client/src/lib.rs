@@ -1032,13 +1032,17 @@ fn parse_entry(text: &str, art: &IndexArtifact) -> Result<ParsedEntry, RegistryE
 }
 
 /// Atomic write: temp sibling + rename, so a torn write can never look
-/// like a verified artifact.
+/// like a verified artifact. The temporary is a new file under a random
+/// name (`nika_fs::replace_file`), never an entry already in the cache.
+/// A new file gets the mode `std::fs::write` gave it; no sync, as before.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
-    let io_err =
-        |e: std::io::Error| RegistryError::env(format!("cannot write {}: {e}", path.display()));
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(io_err)?; // seam-bypass-ok: local artifact cache (digest-pinned reads/writes) · FsDyn descent tracked as the #512 follow-up
-    std::fs::rename(&tmp, path).map_err(io_err) // seam-bypass-ok: local artifact cache (digest-pinned reads/writes) · FsDyn descent tracked as the #512 follow-up
+    nika_fs::replace_file(
+        path,
+        bytes,
+        nika_fs::ReplaceMode::KeepOr(0o666),
+        nika_fs::Durability::Unsynced,
+    )
+    .map_err(|e| RegistryError::env(format!("cannot write {}: {e}", path.display())))
 }
 
 // ---------------------------------------------------------------------

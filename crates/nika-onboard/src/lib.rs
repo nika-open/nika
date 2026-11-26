@@ -66,10 +66,12 @@ pub mod compile {
     pub mod seat;
 }
 pub mod compile_config;
+mod confine;
 pub mod fixtures;
 pub mod founding;
 mod gitignore;
 pub mod guard;
+mod hook_copies;
 pub mod identity;
 mod intent;
 pub mod knowledge;
@@ -121,7 +123,9 @@ pub mod codes {
     pub const OK: u8 = 0;
     /// File findings (audit-before-run).
     pub const FILE: u8 = 2;
-    /// Environment error (unwritable target · cancelled conversation).
+    /// Environment error (unwritable target · a refused write: a hook wiring
+    /// whose scripts init did not write, a link or a folder leading outside
+    /// the project · cancelled conversation).
     pub const ENV: u8 = 3;
 }
 

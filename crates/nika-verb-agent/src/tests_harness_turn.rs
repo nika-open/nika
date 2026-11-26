@@ -127,10 +127,10 @@ fn typed() -> AgentInput {
     input
 }
 
-/// A turn stopped by a refusal, by the harness's own request limit, by a cancellation Nika
-/// never sent, by the output cap or by a word this engine does not know is not completed: each
-/// fails with its reason named and the text received at `partial_output`. `end_turn`
-/// completes, and so does a backend that reports no stop reason.
+/// A turn stopped by a refusal, by the harness's own request limit, called off, by the output
+/// cap or by a word this engine does not know is not completed: each fails with its reason
+/// named and the text received at `partial_output`. `end_turn` completes, and so does a
+/// backend that reports no stop reason.
 #[tokio::test]
 async fn a_turn_that_did_not_end_is_not_completed_and_names_its_reason() {
     let said = "I read the config. I can't help with that.";

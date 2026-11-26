@@ -110,11 +110,11 @@ pub enum VerbAgentError {
     /// A delegated seat ended its turn without completing it (NIKA-463 · wire
     /// `NIKA-INFER-001`, the code of a provider that refused or failed the response): the
     /// agent stopped on a refusal (`refusal`), at its own limit of model requests for the turn
-    /// (`max_turn_requests`), on a cancellation Nika never asked for (`cancelled`: a task's
-    /// turn is never cancelled by Nika, so the harness cut it), or with a word this engine does
-    /// not know, which is never read as a completion. The text received rides
-    /// `partial_output`, masked like every failed record. A seat stopped at its output cap is
-    /// [`Self::FinalCut`].
+    /// (`max_turn_requests`), called off (`cancelled`: by the harness, or on a permission
+    /// request Nika could only cancel because the harness offered no way to refuse it and go
+    /// on), or with a word this engine does not know, which is never read as a completion. The
+    /// text received rides `partial_output`, masked like every failed record. A seat stopped at
+    /// its output cap is [`Self::FinalCut`].
     #[error(
         "agent harness ended its turn without completing it (stop reason `{stop_reason}`): \
          {}; recover the text received through on_error:",
@@ -471,7 +471,10 @@ fn harness_stop_meaning(stop_reason: &str) -> &'static str {
     match stop_reason {
         "refusal" => "the model refused to continue",
         "max_turn_requests" => "the harness reached its own limit of model requests for the turn",
-        "cancelled" => "the harness cancelled the turn, which Nika never asks for on a task",
+        "cancelled" => {
+            "the turn was called off, by the harness or on a permission request it offered no \
+             way to refuse and go on"
+        }
         _ => "a stop reason this engine does not know is never read as a completion",
     }
 }

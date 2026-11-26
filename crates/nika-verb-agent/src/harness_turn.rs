@@ -7,9 +7,10 @@
 //!
 //! - `end_turn` completes, and so does a backend that reports no stop reason. `max_tokens` is a
 //!   cut final message (`NIKA-AGENT-006`). `refusal`, `max_turn_requests`, `cancelled` and a
-//!   word this engine does not know fail the task (`NIKA-INFER-001`) with the text received:
-//!   this path never sends `session/cancel`, so a turn that ends `cancelled` was cut by the
-//!   harness, not finished.
+//!   word this engine does not know fail the task (`NIKA-INFER-001`) with the text received.
+//!   This path never sends `session/cancel` and refuses a request with the harness's
+//!   `reject_once`, so a turn that ends `cancelled` was called off by the harness, or stopped
+//!   on a request Nika could only cancel because no way to refuse it was offered: not finished.
 //! - The counts are the adapter's (`adapter_prompt_result`); the budget weighs them as it
 //!   weighs a native turn. No counts, or counts whose weight overflows a count, is unknown: the
 //!   task's tokens stay unknown, and a declared `max_tokens_total` reads `unjudged`.

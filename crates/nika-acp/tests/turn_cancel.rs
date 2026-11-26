@@ -266,10 +266,12 @@ fn the_engine_and_the_sdk_name_cancel_alike() {
 // test, not sent by `drive`, so the engine-side reading of that stop is the same as in the
 // `cancelled` case of `turn_stop.rs`: a completed turn whose answer is the partial text.
 // Expected to change: the engine's conversation driver already sends this cancel on Stop
-// (`Driver::cancel` in `crates/nika-harness/src/client/conversation.rs`), and the turn's `end`
-// record (`Turn::end`, same file) carries the agent's answer as `TurnEnd::Cancelled` and the
-// sent cancel as `cancel_sent`. This case is to judge that driver instead of the relay once it
-// can run over pipes, and the reading of the stop changes with `turn_stop.rs`.
+// (`Driver::cancel` in `crates/nika-harness/src/client/conversation.rs`), and `Turn::end` (same
+// file) ends the turn with `TurnEvent::Ended`: its `end` is the `TurnEnd` value read from the
+// agent's stop, `TurnEnd::Cancelled` here, and the record written beside it carries the word
+// "cancelled" under `end` and the sent cancel as `cancel_sent` under `stop`. This case is to
+// judge that driver instead of the relay once it can run over pipes, and the reading of the
+// stop changes with `turn_stop.rs`.
 #[tokio::test]
 async fn a_cancelled_turn_completes_with_the_partial_text() {
     let (engine_out, relay_in) = tokio::io::duplex(64 * 1024);
@@ -308,13 +310,14 @@ async fn a_cancelled_turn_completes_with_the_partial_text() {
     );
 }
 
-// documents today's behaviour: over bare `drive` on pipes, dropping the event stream mid-turn
-// sends no `session/cancel`, and the driver reads on until the turn ends: it still answers the
-// agent's requests after the drop. The spawned path differs: dropping its stream kills the
-// adapter (`kill_on_drop`, and its whole process group under a completion profile), so a
-// shipped turn does not run on. Expected to change: a drop sends `session/cancel` for its
-// session and waits, bounded, for the `cancelled` stop, and that cancel has to coexist with
-// the spawned path's kill on drop.
+// documents today's behaviour: over bare `drive` on pipes, dropping the event stream mid-turn sends
+// no `session/cancel`, and the driver reads on after the drop: it still answers both of the agent's
+// requests. That it then reads the agent's final answer and returns is not asserted here; it
+// follows from the engine's code (`drive` ignores its failed sends to the dropped stream and
+// returns at the prompt result). The spawned path differs: dropping its stream kills the adapter
+// (`kill_on_drop`, and its whole process group under a completion profile), so a shipped turn does
+// not run on. Expected to change: a drop sends `session/cancel` for its session and waits, bounded,
+// for the `cancelled` stop, and that cancel has to coexist with the spawned path's kill on drop.
 #[tokio::test]
 async fn dropping_the_stream_mid_turn_sends_no_cancel() {
     let (engine_out, sdk_in) = tokio::io::duplex(64 * 1024);

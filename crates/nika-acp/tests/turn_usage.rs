@@ -191,6 +191,24 @@ async fn both_usage_reports_reach_the_engine_and_the_turn_completes() {
         .collect();
     assert_eq!(results, vec![&closed]);
 
+    // The update crosses before the prompt result. The engine stops reading the turn at its
+    // result, so an update written after it would never be read.
+    let update_at = frames
+        .iter()
+        .position(|frame| {
+            frame["method"] == "session/update"
+                && frame["params"]["update"]["sessionUpdate"] == "usage_update"
+        })
+        .expect("the agent writes the usage update");
+    let end_at = frames
+        .iter()
+        .position(|frame| frame["result"].get("stopReason").is_some())
+        .expect("the agent writes the prompt result");
+    assert!(
+        update_at < end_at,
+        "the update is frame {update_at}, the prompt result frame {end_at}"
+    );
+
     // The engine read the turn through both reports to its end: a refused report would show
     // here as a failure or a missing completion. What it keeps of them is the next case's.
     let [Seen::Chunk(text), Seen::Completed(outcome)] = seen.as_slice() else {

@@ -26,6 +26,7 @@ use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
 use nika_harness::TurnEnd;
 use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
+use serde_json::error::Category;
 use serde_json::json;
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -190,7 +191,12 @@ async fn cancelled_completes_like_end_turn() {
 
 /// The five cases above send these exact words. The SDK writes each stop reason as its wire
 /// word, and the engine's own name for the same end (`TurnEnd::as_str`, the word its
-/// conversation driver records) is that same word, value by value.
+/// conversation driver records) is that same word, value by value. The engine has a sixth end,
+/// `TurnEnd::Other`, which its conversation driver records for a stop word it does not know or
+/// for none: its word is "other", and the SDK refuses to read "other" as a stop reason, so that
+/// end is the engine's own and not a wire value. Both enums are non-exhaustive, so a variant
+/// added later on either side is not caught here and is found by reading the changelog when the
+/// pin moves.
 #[test]
 fn the_sdk_and_the_engine_name_the_five_stop_reasons_alike() {
     let ends = [
@@ -209,4 +215,13 @@ fn the_sdk_and_the_engine_name_the_five_stop_reasons_alike() {
         assert_eq!(written, json!(word), "the SDK's {sdk:?}");
         assert_eq!(engine.as_str(), word, "the engine's {engine:?}");
     }
+
+    assert_eq!(TurnEnd::Other.as_str(), "other");
+    let refused = serde_json::from_value::<StopReason>(json!("other"))
+        .expect_err("\"other\" is no stop reason on the wire");
+    assert_eq!(refused.classify(), Category::Data);
+    assert!(
+        refused.to_string().starts_with("unknown variant `other`"),
+        "the SDK refuses \"other\" as an unknown variant: {refused}"
+    );
 }

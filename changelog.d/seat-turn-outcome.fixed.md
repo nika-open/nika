@@ -20,19 +20,20 @@
   `tokens_in`, `tokens_out`, with `usage_source: adapter_prompt_result`),
   weighed like a native turn's, so `max_tokens_total` refuses a repair when
   the first turn reached or passed it, with NIKA-AGENT-002; counts too large
-  to add up are unknown. A seat that reports no counts (Codex sends `usage:
-  null`) leaves `tokens` unknown instead of 0, says `usage_source:
-  unreported`, and marks a declared ceiling `token_ceiling: unjudged`. The
-  context occupancy of the latest `usage_update` rides as `context_used` and
-  `context_size`, and Claude's session cost as `cost_estimate`, the
-  adapter's own unbilled estimate with its currency: it never becomes
-  `cost_usd` or reaches a cost ceiling, an update without a cost clears it,
-  and a cost whose currency is not three capital letters is dropped. The
-  model Claude reports having answered with is the task's `model_reported`
-  (source `adapter_usage_update`) and the receipt's responder, beside the
-  configured model; under an exact selection, a reported model that is
-  demonstrably another one (another model line, version or release date)
-  refuses the answer with NIKA-1805, as a model moved during the turn does,
-  and a spelling Nika cannot place is only recorded. A Codex prompt that
-  fails on an exhausted quota now shows Codex's own words beside the
-  JSON-RPC code.
+  to add up, in one turn or across a turn and its repair, are unknown. A
+  seat that reports no counts (Codex sends `usage: null`) leaves `tokens`
+  unknown instead of 0, says `usage_source: unreported`, and marks a
+  declared ceiling `token_ceiling: unjudged`. The context occupancy of the
+  latest `usage_update` rides as `context_used` and `context_size`, and
+  Claude's session cost as `cost_estimate`, the adapter's own unbilled
+  estimate with its currency: it never becomes `cost_usd` or reaches a cost
+  ceiling, an update without a cost clears it, and a cost whose currency is
+  not three capital letters, or whose amount is negative or not a finite
+  number, is dropped. The model Claude reports having answered with is the
+  task's `model_reported` (source `adapter_usage_update`) and the receipt's
+  responder, beside the configured model; under an exact selection, a
+  reported model that is demonstrably another one (another model line,
+  version or release date) refuses the answer with NIKA-1805, as a model
+  moved during the turn does, and a spelling Nika cannot place is only
+  recorded. A Codex prompt that fails on an exhausted quota now shows
+  Codex's own words beside the JSON-RPC code.

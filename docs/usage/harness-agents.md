@@ -172,16 +172,21 @@ says `usage_source: unreported`, never 0. The context occupancy of its latest
 `usage_update` rides as `context_used` and `context_size`. Claude's session
 cost rides as `cost_estimate`: the application's own estimate, cumulative for
 the session, with its currency and `billed: false`. Nika keeps a cost only
-when its currency is three capital letters (`USD`); a cost in any other unit
-is dropped, and the record shows none. It is never `cost_usd`, no cost
-ceiling reads it, and an update that omits it clears it. Counts too large to
-add up are recorded as unknown, never as a capped number. The model
-Claude reports having answered with is the task's `model_reported` (source
-`adapter_usage_update`) and the selection receipt's `responder`, beside the
-model the session confirmed. Under `fallback: none`, a reported model that is
-not the confirmed one refuses the answer (`NIKA-1805`), as a model the
-application moved during the turn does. The counts are the application's
-word: Nika does not verify them, and a subscription seat stays unpriced.
+when its currency is three capital letters (`USD`) and its amount a finite
+number of zero or more; any other cost is dropped, and the record shows none.
+It is never `cost_usd`, no cost ceiling reads it, and an update that omits it
+clears it. Counts too large to add up, in one turn or
+across a turn and its repair, are recorded as unknown, never as a capped
+number: the record then says `usage_source: unreported`, although the
+application sent them. The model Claude reports having answered with is the
+task's `model_reported` (source `adapter_usage_update`) and the selection
+receipt's `responder`, beside the model the session confirmed. Under
+`fallback: none`, only a reported model that is demonstrably another one
+(another model line, version or release date) refuses the answer
+(`NIKA-1805`), as a model the application moved during the turn does; a
+spelling Nika cannot place is only recorded. The counts are the
+application's word: Nika does not verify them, and a subscription seat stays
+unpriced.
 
 A `schema:` on such a task is validated by Nika: the prompt carries the
 schema, the final message must contain a JSON value that satisfies it, and

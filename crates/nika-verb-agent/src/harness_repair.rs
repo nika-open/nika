@@ -27,7 +27,7 @@
 //! - The repaired message is the terminal one: a second miss fails `NIKA-INFER-002` « after 1
 //!   repair attempt ». There is never a second repair.
 
-use nika_kernel::ai::harness::{FollowUpReply, HarnessRequest};
+use nika_kernel::ai::harness::{FollowUpReply, HarnessRequest, TokenUsage};
 
 use crate::observe::NudgeReason;
 use crate::shape::Rejection;
@@ -169,22 +169,39 @@ fn texts(output: &AgentOutput) -> Option<(&str, &str)> {
     Some((text, judged))
 }
 
-/// The repair turn's output counted with the first turn's: turns and tokens add up. When
-/// either turn reported no counts, the session's tokens are unknown, never the other turn's
-/// alone, and a declared ceiling reads unjudged.
+/// The repair turn's output counted with the first turn's: turns add up, and tokens by checked
+/// arithmetic. When either turn reported no counts, or the two turns' counts overflow a count,
+/// the session's tokens are unknown, never one turn's alone nor a capped sum, and a declared
+/// ceiling reads unjudged.
 fn counted_with(output: &mut AgentOutput, first: &AgentOutput, input: &AgentInput) {
     output.turns = output.turns.saturating_add(first.turns);
-    output.total_tokens = output.total_tokens.saturating_add(first.total_tokens);
-    output.usage.absorb(&first.usage);
-    let first_unknown = (first.seat.as_ref()).is_some_and(|seat| seat.usage_source.is_none());
-    if let Some(seat) = output.seat.as_mut()
-        && (first_unknown || seat.usage_source.is_none())
-    {
-        seat.usage_source = None;
-        seat.token_ceiling = crate::harness_turn::unjudged(input, None);
+    let reported = |out: &AgentOutput| (out.seat.as_ref()).is_none_or(|s| s.usage_source.is_some());
+    let known = reported(first) && reported(output) && adds_up(&output.usage, &first.usage);
+    if let Some(total) = (output.total_tokens.checked_add(first.total_tokens)).filter(|_| known) {
+        output.total_tokens = total;
+        output.usage.absorb(&first.usage);
+    } else {
         output.total_tokens = 0;
-        output.usage = nika_kernel::ai::harness::TokenUsage::default();
+        output.usage = TokenUsage::default();
+        if let Some(seat) = output.seat.as_mut() {
+            seat.usage_source = None;
+            seat.token_ceiling = crate::harness_turn::unjudged(input, None);
+        }
     }
+}
+
+/// Whether the counts an ACP prompt result can report (input, output, cache reads and writes,
+/// thought, total) add up across two turns within a count. A count only one turn reports is
+/// that turn's, so it cannot overflow.
+fn adds_up(a: &TokenUsage, b: &TokenUsage) -> bool {
+    let fits =
+        |x: Option<u64>, y: Option<u64>| x.zip(y).is_none_or(|(x, y)| x.checked_add(y).is_some());
+    a.input_tokens.checked_add(b.input_tokens).is_some()
+        && a.output_tokens.checked_add(b.output_tokens).is_some()
+        && fits(a.cache_read_tokens, b.cache_read_tokens)
+        && fits(a.cache_write_tokens, b.cache_write_tokens)
+        && fits(a.reasoning_tokens, b.reasoning_tokens)
+        && fits(a.total_tokens, b.total_tokens)
 }
 
 /// The repair prompt: every violation, the schema, and the final message only. The session

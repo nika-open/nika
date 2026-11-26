@@ -362,6 +362,44 @@ async fn counts_that_cannot_be_weighed_are_unknown() {
     }
 }
 
+/// Across a repair, two turns whose counts add up past a count are unknown, never a capped
+/// sum: weights that overflow together (a large input, then a large output), and inputs and
+/// cache reads that overflow while the weights fit.
+#[tokio::test]
+async fn two_turns_whose_counts_overflow_are_unknown() {
+    let half = u64::MAX / 2 + 1;
+    let mut cached = TokenUsage::new(u64::MAX - 10, 2);
+    cached.cache_read_tokens = Some(u64::MAX - 20);
+    for (first, second) in [
+        (TokenUsage::new(half, 0), TokenUsage::new(0, half)),
+        (cached.clone(), cached),
+    ] {
+        let (verb, prompts) = seated(vec![
+            (reported(ended(r#"{"note": "x"}"#, "end_turn"), first), true),
+            (
+                reported(ended(r#"{"title": "t", "tags": []}"#, "end_turn"), second),
+                false,
+            ),
+        ]);
+        let mut input = typed();
+        input.max_tokens_total = Some(u64::MAX);
+        let out = verb.run(input).await.expect("repaired");
+        assert_eq!(prompts.lock().unwrap().len(), 1, "the repair went out");
+        let seat = out.seat.expect("a seat report");
+        assert_eq!(seat.usage_source, None);
+        assert_eq!(seat.token_ceiling, Some("unjudged"));
+        assert_eq!(
+            (
+                out.total_tokens,
+                out.usage.input_tokens,
+                out.usage.output_tokens
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(out.usage.cache_read_tokens, None);
+    }
+}
+
 fn declared() -> AccessRequirement {
     AccessRequirement::new()
         .with_via(Some("claude".into()))

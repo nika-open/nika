@@ -16,6 +16,512 @@ section below at tag time (`bash scripts/release/changelog-assemble.sh --fold
 pull requests collided on 2026-08-24 with no source overlap between them, and
 `--check` refuses a hand-written bullet in this section.
 
+## [0.125.2](https://github.com/nika-open/nika/compare/v0.125.1..v0.125.2) - 2026-11-26
+
+Nika 0.125.2 is a corrective release. It brings the secret flow of `nika check` to every field where
+the run hands a secret on, and narrows what the kit's hooks run. `nika check` now follows a secret
+through a group fold, a recovered value and a `for_each:` item, and into an `exec:` task's `cwd:`, a
+task's `model:`, an agent's `images.save:` path and the `args.model` of `nika:tts_generate` and
+`nika:image_generate`: a secret reaching any of them is `NIKA-SEC-006`, whatever its `egress:`.
+Untrusted content keeps its label through a group fold, a late recover source, an unwind cleanup
+task and a `for_each:` item. `nika init` and `nika wire` write only inside the project and never
+through a link, `init` wires an editor hook only to a script it wrote, the run guard hook blocks a
+deny by its exit code and refuses a judge that stays silent for 20 seconds, and the plugin's hooks
+take no code or program from the open project. The embedded catalog adds the models released since
+the last one, an MCP server shelf (`nika catalog --mcp`) and seventeen recipe jobs. The embedded
+spec moves from `2edc285` to `810bb19`, which also records two rules 0.125.1 already enforced: the
+argv floor's recursive-delete refusal, and `NIKA-SEC-009` crediting a `choice` or `input` gate only
+where its answer is tested.
+
+Some files and projects that 0.125.1 accepted are now refused or handled differently.
+- A secret that reaches `cwd:`, `model:`, `images.save:` or a media builtin's `args.model` meets
+  `NIKA-SEC-006` at `nika check`, and a run holding an older report refuses the task before it
+  starts. Pass a value the file does not name through `inputs:` or `const:`.
+- The run guard hook, and the copies `nika init` writes, answer a deny with exit 2 and the verdict
+  on stderr, where they gave a JSON deny on exit 0.
+- The Cursor hooks files declare `version: 1`. A project an earlier `nika init` set up keeps its
+  own `.cursor/hooks.json`: add the key by hand, or remove the file and run `nika init` again.
+- `nika init` refuses, with one report row and exit 3, a hook wiring whose script is not what it
+  writes, and a link at a file's name or a folder that leads outside the project, `--force`
+  included. `nika compile` refuses with exit 3, before it writes, next to a `.gitignore` that is a
+  link or not a regular file.
+
+The file format and the SDK machine protocol are unchanged. The known limits of 0.125.0 still
+hold, each with a way around it: [Known limits](https://docs.nika.sh/changelog/known-limits).
+
+### Added
+
+- **`nika catalog --mcp` lists the embedded MCP server shelf.** Each server
+  shows its title, category, pricing hint, how it is reached (a package or a
+  hosted remote with its auth) and the env var names it reads; `--mcp
+  --json` emits the `catalog_version: 1` projection, and the MCP oracle's
+  `nika_catalog` tool returns the same list with `mcp: true`. The shelf adds
+  the tool hubs treg, Composio Connect, Pipedream Connect and Zapier MCP
+  (tag `tool-hub`) and the vendors' own hosted servers (GitHub, GitLab,
+  Linear, Slack, Stripe, Atlassian, Semrush, Ahrefs, Apollo, Hunter, Neon,
+  Square, Plaid, Google Maps, Brave Search, Bright Data and more); Firecrawl
+  gains its hosted endpoints and Alexandria provider discovery.
+- **`nika check` knows the models released since the last catalog.** Claude
+  Fable 5.2, Mythos 5.2 and Mythos 5.1 (reachable once Anthropic has
+  verified the organization), GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Terra,
+  Gemini 4 Neon, Hydrogen, Carbon and Argon, and Kimi K3.1 Pro and K3 get
+  catalog rows with limits read from each vendor's page, and admission
+  tariffs hashed from the pages they read (Kimi on Moonshot's own endpoint,
+  sent `max_completion_tokens`). Capability rules record only what those
+  pages state: the Gemini 4 models take audio, image, PDF, text and video
+  and always think; GPT-6.2 Sol and Astra and GPT-6.1 Terra take text and
+  images with structured outputs; Mistral Large 4 always reasons; Fable 5.2,
+  Mythos and the Kimi K3 models carry their always-on thinking and fixed
+  sampling. An explicit effort level on the new OpenAI models and the Kimi
+  K3 models is still refused before any byte, since the wire would send a
+  `thinking` key their APIs do not document. Retirement floors are recorded for
+  Gemini 2.5 Flash and Pro, Gemini 3.1 Flash-Lite and GPT-5 mini. The
+  defaults move off retiring models: Gemini and Vertex AI to
+  `gemini-3.5-flash-lite` (Gemini 2.5 Flash leaves the Gemini API on
+  2026-12-01 and left Vertex AI on 2026-10-20), and Moonshot's default and
+  cheap model to `kimi-k3.1-pro` (Kimi K2 retires by the end of December
+  2026).
+- **Seventeen recipe jobs ship in the embedded pack.** `nika try` lists and
+  rehearses ci-failure-triage, comfyui-image-chain, docs-answer-desk,
+  feed-digest, inbox-triage, launch-campaign-forge, lead-enrichment,
+  listing-link-audit, programmatic-seo-pages, qr-art-forge,
+  quote-compare-decide, receipt-ledger, refund-chaser, seo-site-audit,
+  source-to-45-locales, subscription-renewal-radar and workflow-watchdog,
+  each with the fixtures it reads. Seven of them put a confirm gate with no
+  default before their first fetch, post, render or scan: unanswered, the
+  rehearsal pauses there with no output written, and on `--answer approve=true`
+  the whole job rehearses. launch-campaign-forge runs on a Codex seat over
+  ACP and refuses the mock backend with NIKA-1801 rather than substitute it.
+
+### Changed
+
+- **Every MCP shelf entry now carries its own verification date and a
+  status.** `scripts/refresh-mcp-servers.sh` probes each package on npm,
+  PyPI or its OCI registry and sends each hosted remote an MCP `initialize`,
+  then dates only the entries that answered, records the version each
+  registry answered in its `--json` report, and records the counts in the
+  shelf's `[meta]` block: 113 of 120 verified on 2026-11-24, none gone. A run
+  that cannot reach half of its registries exits 3 and writes nothing, and
+  registry text is stripped of control characters before it is printed.
+  Each entry's `status` is `current`, `deprecated` (the 7 whose npm package
+  is deprecated upstream, which keep their older date) or `restricted`
+  (Ahrefs, whose terms permit its hosted endpoint only from the AI clients it
+  lists, not from custom or standalone MCP clients), with a `status_note`
+  saying why; `nika catalog --mcp` prints it on the row and `--mcp --json`
+  carries both fields. The build refuses a remote that is not `https://` and
+  a control character in a title, description, note, package or URL, and the
+  listing prints any it meets as U+FFFD. The oracle's `nika_catalog` returns
+  the shelf as compact JSON and takes a `query` that keeps the servers whose
+  id, alias, title, category or tag contains it. Intercom's entry names its
+  Streamable HTTP endpoint (`/mcp`) instead of the deprecated `/sse`, and
+  entries that named a community package for a vendor that publishes its own
+  server now name the vendor's.
+- **The embedded model pricing snapshot is refreshed from models.dev as of
+  2026-11-24.** 681 priced rows replace 727: 87 added (among them Claude
+  Fable 5.2, GPT-6.2 Sol and Astra, GPT-6.1 Terra, the four Gemini 4 models
+  and their OpenRouter routes), 133 retired upstream removed, and the
+  statuses models.dev marks deprecated recorded. 21 rows models.dev no longer
+  lists are kept at their last prices, each under a `# kept from` line,
+  because the lookup's substring fallback would otherwise price them as
+  another model (`o3-mini` as `o3`, `gpt-4.1-nano` as `gpt-4.1`); the refresh
+  keeps such rows from now on. Four rows a vendor page contradicts carry the
+  page's figure under a `# corrected from` line that survives the refresh:
+  Gemini 4 Carbon and Argon output 65,536 tokens and are priced at the rates
+  Google applies from 2026-12-01 ($4 input, $20 output, $0.20 cached per
+  million), which over-state their cost until 2026-11-30, and Mistral Small
+  carries no cached-input price, since Mistral's pricing page lists none.
+  `mistral-large-latest` now prices Mistral Large 4. A trace that pinned the
+  2026-10-12 table (`sha256_16 abd9babb167a88e4`) now refuses its cost replay
+  on this engine, as an unknown table version never silently re-prices.
+- **The catalog router asks more often in the grown catalog.** The seventeen
+  recipes moved every score, so the router's confidence floor rose from 5.5
+  to 12.5, derived again from the measured scores: vague phrases and a French
+  request keep asking which job is meant instead of routing on one shared
+  word. « translate my docs folder to spanish » now routes to
+  localization-factory instead of asking. More words in `-es` and `-ies`
+  now match their singular: « summarizes » reads as « summarize » (it read
+  « summariz »), « cases » as « case » and « summaries » as « summary ».
+  Some short requests that routed in 0.125.1 now ask which template you
+  mean, naming the best match first, such as « is there a template for
+  invoices? », where two invoice jobs fit.
+
+### Fixed
+
+- **The Anthropic wire refuses two more requests the current Claude models
+  answer with HTTP 400, before any byte is sent.** No workflow reaches them
+  today: the engine never sets a forced tool choice or a provider extra
+  `thinking.type`, so they guard a program that builds requests with
+  `nika-providers` directly. A forced tool choice (`any` or a named tool) is
+  refused on Claude Opus 5.5, Sonnet 5.5, Fable 5.2, Mythos 5.2, Fable 5.1
+  and Mythos 5.1, with the repair (`auto`, or a structured output); Fable 5,
+  Haiku 5.5, Opus 5 and the earlier models accept it. `thinking.type:
+  disabled` is refused on the Fable and Mythos models, Opus 5.5 and Sonnet
+  5.5, and `between_tools` on every model of Anthropic's per-model thinking
+  table but Sonnet 5.5, the 4.x models included. A refusal that depends on
+  the effort level is not claimed, and an id the catalog does not know is
+  never refused. Each refusal is a fact of the model's capability rule
+  (`reasoning_facts.refuses`), read from Anthropic's pages of 2026-11-24.
+  Claude Opus 4.8 and 4.7 now have their own rule: a temperature other than
+  the default, a `top_p`, a `top_k` or a thinking budget on them is refused
+  the same way. These rules, the earlier sampling and thinking-budget ones
+  included, apply on Anthropic's own endpoint only: a request sent through an
+  operator-pointed base URL (a gateway, a proxy) goes as declared, and that
+  endpoint answers for itself.
+- **`nika check` no longer advises removing what only an agent's `images: { save: }` uses.** A
+  declared input, const or secret read only by the save path was called "declared but never
+  referenced", and the `permits.fs.write` entry covering a literal save path was called dead.
+  Following either piece of advice broke the file: the save path's reference no longer resolved, or
+  the run's write was refused. A templated save path makes no claim about the write grants.
+- **`nika check` reads an `exec:` task's `cwd:` as part of its effect, as the run does.** The run
+  renders the working directory, labels it and re-gates a tainted one as a path against
+  `permits.fs.read`, but the static laws read only the command, its `stdin:` and its `env:` values.
+  Three verdicts disagreed with the run:
+  - a `lift: taint` whose binding only the `cwd:` reads was refused as a door that lifts nothing
+    (`NIKA-AUTH-011`), though the run's re-gate honors it;
+  - an input only the `cwd:` reads was missing from the requirements (`inputs_read`);
+  - fetched content that picks an `exec:`'s working directory did not complete the lethal trifecta
+    (`NIKA-SEC-009`), as the same content in an argument does. The file was still refused by the
+    order law (`NIKA-SEC-015`).
+- **An example that names its fixtures through a star at the root of `examples/fixtures/` gets
+  them.** `nika try`, `nika run` on an example and `nika init --example` stage the fixture files an
+  example names. A name such as `examples/fixtures/*.csv`, `examples/fixtures/top-*.csv` or
+  `examples/fixtures/**` staged nothing, because the star sat in the first segment. That segment is
+  now a pattern over the fixture root, and every file or folder it matches is staged; `*` or `**`
+  alone stages the whole shelf. The `11-lift-the-door` lesson bounds its read to
+  `examples/fixtures/*.csv` and lets the caller pick the file: it now gets the five root `.csv`
+  files its bound admits, where it got only the two its text spells out.
+- **A fixture read through a star inside its name is staged.** A body that
+  reads `examples/fixtures/quote-compare-decide/quote-*.txt` now stages the
+  directory those files live in, so `nika try quote-compare-decide` takes its
+  three quotes along instead of running without them.
+- **The run guard's warning when `nika` is missing shows once even
+  without a state folder.** Since 0.125.0 the hook remembered that it had
+  warned with a marker under `${XDG_STATE_HOME:-~/.local/state}/nika/`,
+  so with no `HOME`, or a state folder it could not write, it warned on
+  every shell command. It now keeps the marker as a folder of the user's
+  own under the temporary folder in that case, and removes it once
+  `nika` is found again.
+- **`nika check` reads an `agent:`'s `images.save:` as part of its effect, as the run does.** An
+  input only the save path reads is now listed in the requirements (`inputs_read`), and a
+  `lift: taint` whose binding only the save path reads is no longer refused as a door that lifts
+  nothing (`NIKA-AUTH-011`). The output names each saved path, so at run it now carries the label
+  of what the save path reads, as when the prompt reads it: a path built from an input or from
+  untrusted content makes the output untrusted, and a later task that hands that path to a program
+  is judged against `permits.fs.read` like any untrusted path.
+- **The secret journey `nika check` prints names only what the secret flow
+  found.** The verdict was right; the JOURNEY and SECRETS rungs described
+  the file wrongly in two places.
+  - **A secret that is never sent.** Since 0.107.0, the journey attached a
+    secret to every task naming it in its request, `with:` or `for_each:`,
+    not to the tasks the secret flow found it reaching. A secret a task
+    binds or iterates over but never sends was listed as flowing to the
+    task's destination, raised the class to `regulated` and was printed as
+    a sanctioned flow, while the flow proved it never left. A secret's
+    tasks and destinations now come from the flow the verdict reads, so
+    the two cannot disagree. Such a secret stays a used secret, since the
+    run resolves it, and goes nowhere.
+  - **A rule that pins another host.** Since 0.117.0, a sanctioned flow to
+    a host said `pins no host` whenever the secret's `egress:` rules did not
+    pin that host, even when they pinned another one. The row now names the
+    hosts the rules pin (`pins crm.example.com, not other.example.com`),
+    each under the sink of its rule when the rules name more than one,
+    says when a rule beside them pins none, and names each sink once. It
+    keeps `pins no host` for rules that pin none, and a rule whose sink
+    reaches no host pins nothing.
+
+### Security
+
+- **The Cursor hooks files declare their version.** Since 0.100.0 the
+  plugin's `hooks/cursor-hooks.json` and the `.cursor/hooks.json` that
+  `nika init` writes held no `version`, which Cursor's hooks format
+  requires. Both files now declare `version: 1`. Neither sets
+  `failClosed`, without which Cursor lets the action proceed when a hook
+  fails with any exit but 2: on Cursor, as on Claude Code and Codex, a
+  hook that cannot start lets the command through, and the run guard
+  refuses by its own exit (hooks documentation of
+  [Cursor](https://cursor.com/docs/hooks),
+  [Claude Code](https://code.claude.com/docs/en/hooks) and
+  [Codex](https://learn.chatgpt.com/docs/hooks), read 2026-11-26). A
+  project an earlier `init` set up keeps its own `.cursor/hooks.json`:
+  add the key by hand, or remove the file and run `nika init` again.
+- **The run guard hook blocks a deny by its exit code.** Since 0.100.0
+  the kit's run guard answered a denied `nika run` with a JSON deny on
+  exit 0, which only a host that reads that JSON dialect treats as a
+  refusal. The hook, and the copies `nika init` writes, now exit 2 with
+  the verdict and a fixed `guard_denied` line on stderr, which Claude
+  Code documents as the block's message
+  ([hooks](https://code.claude.com/docs/en/hooks)) and Codex as its
+  blocking reason ([hooks](https://learn.chatgpt.com/docs/hooks)), both
+  read 2026-11-26. Cursor documents exit 2 as a block, equivalent to a
+  `permission: deny` answer, and lists `hook_event_name` among the fields
+  every hook receives ([hooks](https://cursor.com/docs/hooks), read
+  2026-11-26). `nika guard` answers such a payload in the Claude Code
+  shape, so on Cursor today the deny is blocked by exit 2, and Cursor's
+  documentation does not say its reason reaches the agent. Only when the
+  judge answers with Cursor's own deny, exactly as `nika guard` writes it
+  for a payload without `hook_event_name` (one flat object holding
+  `permission` once, beside at most one `agent_message` and one
+  `user_message`, and no other key), is that answer passed on under
+  Cursor, with exit 0. The hook also catches QUIT, XCPU, XFSZ, VTALRM and
+  PROF from its first step after cleaning the PATH, exits 2 when it
+  cannot write its answer, and keeps the judge's answer under `/tmp` when
+  `TMPDIR` is a relative path.
+- **The run guard's hook refuses a judge that has not answered within 20
+  seconds, and an answer that is not a whole verdict.** Since 0.107.0 a
+  judge that never answered left the hook waiting until the host timed it
+  out, and a host that times a hook out lets the command through; the
+  hook also passed on whatever the judge printed, and a signal that ended
+  it left a status hosts read as a non-blocking error. The hook now ends
+  a judge still silent after 20 seconds, with every process it started,
+  and refuses the command as `guard_unavailable`. It passes on only one
+  line that ends, holding one JSON object, and on the judge's exit 2 only
+  a deny: an answer cut short, a second line, a banner or anything else
+  is refused the same way, on success included. Any other end of the
+  hook, a caught signal or an unexpected failure included, is the
+  blocking exit 2, and ends the judge with it. The Claude Code and
+  Cursor wiring of the plugin and of `nika init` give the hook a
+  30-second timeout, above that deadline. A very large workflow can take
+  longer than 20 seconds to judge, and is then refused.
+- **`nika guard` reads only a regular workflow file of at most 4 MiB.**
+  Since 0.107.0 the guard read the file a `nika run` names, whatever it
+  was, so a named pipe in its place kept it waiting, and a host that times
+  a hook out then let the command run unjudged. The guard now opens that
+  file without waiting on it and refuses anything else, or anything
+  larger, as `guard_unavailable`, with the path and the reason.
+- **`nika init` wires an editor hook only to a script it wrote.** Since
+  0.100.0 for Cursor and 0.120.0 for Claude Code, a hook script already in
+  a client's `hooks-nika/` folder was kept while the settings file that
+  runs it was still written, so the editor ran the repository's script
+  after every edit. `init` now writes a hook wiring only when every script
+  it runs holds exactly what this `init` writes, and otherwise refuses it
+  with one report row and exit 3; its copy of the edit hook no longer runs
+  anything from the folder beside it. A project an earlier `init` set up
+  keeps the copies it got: remove `.claude/hooks-nika/` and
+  `.cursor/hooks-nika/`, then run `nika init` again.
+- **`nika init` writes only inside the project and never through a link.**
+  Since 0.90.0 `init` wrote each file by its path, so a link in the
+  project, or a linked folder such as `.claude`, could carry a write to a
+  file outside it, the user's global editor settings included, and
+  `--force` overwrote what the link reached. Where `init` must write, it
+  now refuses a link at the file's name or a folder that leads outside
+  the project, with one report row and exit 3, `--force` included, even
+  when the way comes back into the project: each link is read one step
+  at a time, and a step outside ends it. It writes into the real folder
+  it checked, without resolving the path again. That write still reaches
+  the checked folder by its path, so a process already running inside the
+  project could race it within a very short window. Where
+  it would only leave an existing file as it is, a link there is kept and
+  never followed, with a row and exit 0. A link to a file inside the
+  project is kept under `--force` too, as with `CLAUDE.md` pointing at
+  `AGENTS.md`. A `.gitignore` that is a link is neither read nor
+  written, and its row says to replace it with a regular file holding
+  the entries: git does not read a `.gitignore` that is a link, whatever
+  the file it points at holds (git 2.32.0
+  [release notes](https://github.com/git/git/blob/master/Documentation/RelNotes/2.32.0.adoc)),
+  where `init` used to add them there.
+  `nika compile`, which adds the same entry beside a workflow it writes,
+  now refuses with exit 3, before it writes, when that `.gitignore` is a
+  link, for the same reason, or not a regular file, where it used to
+  append through the link.
+- **The plugin's hooks never take code or a program from the open
+  project.** Since 0.100.0 hosts have started the kit's hooks in the
+  project they opened, where files there could change what the kit's
+  Python imported, and a `PATH` entry naming a folder of the project, or
+  since 0.106.0 a relative `NIKA_BIN`, could name the `nika`, `git`, `cat`
+  or other program a hook ran. Every hook and helper now keeps only the
+  absolute `PATH` entries whose real folder lies outside the project (the
+  host's project folder and the working folder, each with its git work
+  tree, never the home), makes each Python call in isolated mode, and
+  takes `NIKA_BIN` only as an absolute path. The plugin's manifests and
+  the wiring `nika init` writes start every hook with `/bin/bash -p`, so
+  the host's `PATH` no longer picks the shell and bash reads no
+  `BASH_ENV` file and imports no function, and start the Python hooks
+  through a launcher that runs them isolated from their first line, so
+  `PYTHONHOME` and `PYTHONPATH` no longer reach them. The hooks trust the
+  environment the host gives them; a helper a command or an agent starts
+  by its own path, and the MCP and language servers' `nika`, still start
+  through the host's `PATH`, and a system without `/bin/bash` cannot start
+  the hooks at all.
+- **`nika check` follows a secret through a group fold, a recovered value, a
+  `for_each:` item and every secret a task's output carries.** The secret
+  flow of `nika check` lost a secret on five paths, so a file that sends a
+  secret where its `egress:` rules do not allow could check clean.
+  - **What was missed.** A `${{ group.<name> }}` read carried none of its
+    members' secrets: `check` misjudged it from 0.109.0, the release that
+    introduced `group:`, and the run could send the fold from 0.121.0
+    (before that the read failed at run with `NIKA-VAR-001`). Since 0.90.0,
+    the first release with the secret flow check, `check` did not read a
+    task's `on_error.recover:` value, which the run renders with secrets
+    resolved in clear and makes the task's output. Since 0.90.0 too, a
+    task's output passed one secret on: an output that held two gave later
+    tasks and `outputs:` only the first. A `with:` binding that reads `item`
+    carried none of the item's secrets, since 0.90.0 as well, though the run
+    renders it once per iteration with the item bound. And a `for_each:`
+    written as a literal list passed none of its items' secrets on to the
+    task's output, since 0.90.0: from 0.112.0 `check` judged the task's own
+    request with them, not what later tasks read from its output.
+  - **What is followed now.** A fold carries what each member's output
+    carries, through `with:` aliases, `for_each:` items and members that
+    fold another group. What a task's `for_each:` items carry, written as an
+    expression or as a literal list, reaches its request, its `with:`
+    bindings that read `item` and its recovered value, and an `exec:` or
+    `invoke:` output passes it on (an `infer:` or `agent:` answer still
+    carries no secret of its prompt). A recovered output carries what its
+    value reads, wherever the task it reads runs, including two tasks that
+    recover from each other. An output keeps one path per secret, the most
+    direct one, and every request (`NIKA-SEC-006`), every `outputs:` entry
+    (`NIKA-SEC-007`, one finding per secret) and the data journey read all
+    of them. A group none of whose members received a secret stays clean, a
+    destination the `egress:` rules allow stays allowed, and the recover
+    itself is no destination.
+- **`nika check` and the run refuse a secret in an `exec:` working
+  directory or a task's `model:`.** The run renders both fields with secrets resolved, but
+  the secret flow of `nika check` read neither, so a file could check clean
+  while the run handed a secret's value to a program or a provider.
+  - **What was missed.** Since 0.90.0, an `exec:` task's `cwd:` was rendered
+    with secrets resolved and given to the spawn, while `check` judged only
+    the command, `stdin:` and `env:`. Since 0.109.0, an `infer:` or `agent:`
+    task's `model:` was rendered with secrets resolved and sent as the
+    provider and model of the call, while `check` only noted it as a model
+    the run decides.
+  - **What is judged now.** A secret reaching `cwd:` or a task's `model:`
+    is `NIKA-SEC-006` whatever its `egress:`, since neither a directory nor
+    a model name is ever a secret: the finding gives the path from the
+    secret to the field and points to `inputs:` or `const:` for a value the
+    file does not name. The program can print its working directory, so its
+    output carries the secret as well. Both follow a direct reference, a
+    `with:` alias, a task output that carries the secret, a `group:` fold, a
+    `for_each` item and an `on_error.recover` value. The workflow `model:` is
+    unchanged.
+  - **In the journey.** A secret reaching a task's `model:` names that task
+    in the new `routes` list of the secret in the `--json` journey, and the
+    JOURNEY rung names "the model route of" that task as an external flow,
+    so the class is `regulated`: the provider receives the route, and
+    `check` cannot prove that a route rendered from a secret stays on this
+    machine. The row says that no `egress:` rule clears a route and names
+    the remedy, in place of the consent review it asks for a host.
+  - **At run.** A run holding a report older than this check refuses, before
+    it starts, a task whose `model:` or `cwd:` a secret reaches, with
+    `NIKA-SEC-006` and a message naming the task, the field and the path
+    from the secret. Nothing is rendered, sent or debited for it: no call,
+    no ledger line, no spawn, and the journal records only the refusal. An
+    `unwind` cleanup task is refused the same way. The run raises the same
+    `NIKA-SEC-006` as `check`: one law, one code, whichever of the two finds
+    it, and names the same path. The error a failed task records (the text
+    later tasks read as `tasks.<id>.error`) no longer carries a resolved
+    secret value that an `egress:` rule let a field render, as the event
+    stream already did not, and one secret inside another (`abc` in
+    `abcdef`) leaves no fragment of the longer one there, in the event
+    stream or in the `outputs:` map.
+  - **Limit.** The run's refusal follows the same static flow as `check`.
+    An `infer:` or `agent:` output carries no secret taint, so a model that
+    echoes a secret it was given into a later task's `model:` is not
+    caught.
+- **`nika check` and the run refuse a secret in an agent's `images.save:` path.** The run
+  renders the path with secrets resolved, writes each image the turn delivered there and names the
+  path in the task's output, but the secret flow of `nika check` did not read the field.
+  - **What was missed.** Since 0.124.0, an `agent:` task's `images: { save: }` was rendered with
+    secrets resolved on a harness seat, so a file could check clean while the run wrote a file
+    whose name held a secret's value and recorded that name in `images[].path`.
+  - **What is judged now.** A secret reaching `images.save:` is `NIKA-SEC-006` whatever its
+    `egress:`, a rule for the agent's own sink included, since a path is never a secret. The
+    finding gives the path from the secret to the field and points to `inputs:` or `const:` for a
+    name the file does not write out. It follows every way a secret travels, as for `model:` and
+    `cwd:`, and the task's output carries the secret for the tasks that read it. The journey
+    counts the task among the secret's tasks, with no destination: the file is written here.
+  - **At run.** A run holding a report older than this check refuses, before it starts, a task
+    whose `images.save:` a secret reaches, with `NIKA-SEC-006` and a message naming the task, the
+    field and the path from the secret. The seat starts no turn, nothing is written, and the
+    journal records only the refusal.
+- **`nika check` and the run refuse a secret in a media builtin's `args.model`.**
+  `nika:tts_generate` and `nika:image_generate` call the model `args.model` names, infer their
+  provider from it when `provider:` is left out, and name it in the file they save and in their
+  output. A secret there was a send that an `egress:` rule for the tool could clear.
+  - **What is judged now.** A secret reaching the `args.model` of either builtin is
+    `NIKA-SEC-006` whatever its `egress:`, the tool's own rule included, as for a task's
+    `model:`, and the journey names the task in the secret's `routes`. Every other argument stays
+    a send the tool's rule decides.
+  - **At run.** A run holding a report older than this check refuses such a task before the
+    call, with `NIKA-SEC-006` and a message naming the task, the `args.model` field and the path
+    from the secret.
+- **Nine writers that publish a whole file by rename now stage it in a
+  new file of their own.** Each staged the file under a temporary name
+  that could be known in advance and opened it in a way that follows a
+  link, so an entry already at that name could receive the bytes:
+  `nika check --fix` and the registry cache since 0.100.0, the MCP pin
+  lockfile and the anchor sidecar since 0.106.0, the OpenTelemetry
+  export since 0.119.0, the values kept beside a journal and the saved
+  session-intelligence choice since 0.123.0, and `nika:write` and the
+  blob store since 0.90.0. Each temporary file is now created only as a
+  new file, never through a link, with its mode set when it is made,
+  then written through that file and renamed into place. The values
+  kept beside a journal are still synced before the rename, as before;
+  the others are not, as before. Every writer keeps the mode it gave
+  before: `nika check --fix`, the pin lockfile, the registry cache, the
+  export and the anchor keep the mode of the file they replace, the kept
+  values stay owner-only, and the rest are created as a plain new file
+  would be. The writers that already refused an existing name (since
+  0.113.0) can no longer be stopped by one placed there ahead of time. A
+  model download still resumes from its fixed `.part` name in the models
+  folder of the account.
+- **Untrusted content keeps its label through a group fold, a late recover
+  source, an unwind cleanup task and a `for_each:` item.** Nika labels
+  content from outside as untrusted (an `exec:` output, `nika:fetch`, any
+  `mcp:*` tool, a browsing agent, and at run the caller's `inputs.*`);
+  `nika check` refuses that content reaching an egress task under the lethal
+  trifecta (`NIKA-SEC-009`) and the run re-gates it on an exec argv or cwd
+  and on `mcp:*` arguments (`NIKA-SEC-004`). Until now the label was lost in
+  five places, so untrusted content could reach an egress task or a command
+  line unlabelled. A `${{ group.<name> }}` fold read as trusted at check
+  since 0.109.0, and at run since 0.121.0. An `on_error.recover:` value whose
+  source the check reached later (declared after the task, or in a later
+  wave) read as trusted at check since 0.106.0. A cleanup task joined by
+  `after: { <task>: unwind }` was never judged by the trifecta since 0.109.0.
+  Under `for_each:`, a `with:` binding that reads `${{ item }}` and the item
+  of a literal list whose strings read untrusted content both read as
+  trusted, at check and at run, since 0.106.0. Now a fold carries the label
+  of its members' records, an untrusted member named as the source; the
+  check repeats its pass until no label moves and refuses every effect if
+  the bound is ever reached with a label still moving; cleanup tasks are
+  judged after their producers; a literal list carries what its strings
+  read; and a binding that reads `item` or `index` is labelled after the
+  item, as the run renders it, while the collection reads only the other
+  bindings. A `lift: taint` door still names one `tasks.<id>.output` or
+  `inputs.<name>` binding and never opens through a fold. `NIKA-VAR-021` now
+  quotes a fold as `group.<name>` (it printed `tasks.group.<name>`), names
+  `on_error.recover:` as the surface of a recover read (it printed
+  `outputs`), and prints the `outputs:` and `model:` surfaces with their
+  colon.
+- **`nika wire` and `nika init --wire` write a project's editor config
+  only where the project owns it.** Since 0.107.0 `wire` wrote each
+  config through a temporary file beside it whose name could be known in
+  advance, opened in a way that follows a link, so an entry already at
+  that name received the new config and the mode it set. The temporary
+  file is now created only as a new file, never through a link, with its
+  mode set through the file it wrote. A project config
+  (`.vscode/mcp.json`, `opencode.json`, `.junie/mcp/mcp.json`) that links
+  to a file of the project, such as `opencode.json` pointing at
+  `config/opencode.json`, is still updated where it points and stays a
+  link. One that leads out of the project or into its `.git` folder, or
+  that sits under a folder that does, is left as it is, with one refused
+  row and exit 3, even when the way comes back into the project: each
+  link is read one step at a time, and a step outside the project ends
+  it. So is one that leads nowhere, when the client is named (`wire
+  detected` does not list that client). A config that changes between
+  the check and the write is refused, nothing written, and the write
+  goes to the place that was checked, without resolving the name again.
+  That write still reaches the checked place by its path, so a process
+  already running inside the project could race it within a very short
+  window.
+- **`nika wire` no longer reads a config back after writing it.** Since
+  0.123.0 it did, and when the file did not hold what it wrote it put
+  the old text back (or removed the new file) and failed with exit 3,
+  "the file read back is not what nika wire wrote". That repair read and
+  wrote the config by its name a second time, after the check, where a
+  link put there in the meantime would have received it, so it is
+  removed with the read-back. A config another program changes right
+  after the write is no longer reported or restored; the next `nika
+  wire` finds it and updates it again.
 ## [0.125.1](https://github.com/nika-open/nika/compare/v0.125.0..v0.125.1) - 2026-11-25
 
 Nika 0.125.1 is a corrective release. The `exec` floor now refuses a recursive delete that leaves

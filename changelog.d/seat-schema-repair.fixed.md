@@ -7,8 +7,8 @@
   lists every violation and the schema, asks for the final message only,
   and shows in the trace as an `agent_nudge` with reason `schema_repair`.
   The repair must fit the task's `max_tokens_total` (a budget already met
-  fails NIKA-AGENT-002). On an ACP seat, which reports no token usage, a
-  `max_tokens`/token cap does not limit the single repair turn. A repaired
+  fails NIKA-AGENT-002). On an ACP seat that reports no token usage, the
+  cap cannot judge the single repair turn. A repaired
   message that misses again, a session the application closed with its
   final message, or a repair turn that
   never answers (the application exits, errors or goes silent) or that an

@@ -151,14 +151,45 @@ halftone:
   check` names it as a blocker and the run refuses it (`NIKA-465`): the
   engine's own loop gets its images from `nika:image_generate`.
 
+A turn ends the task only when the application says it finished
+(`end_turn`; `cancelled` keeps its meaning). A turn cut at the model's output
+limit (`max_tokens`) fails `NIKA-AGENT-006`; a refusal (`refusal`), the
+application's own limit of model requests for the turn (`max_turn_requests`)
+or a stop word Nika does not know fails `NIKA-INFER-001` with the reason
+named. Either way the text received is kept at `partial_output`, masked like
+every failed record.
+
+The task records what the application reported about the turn. The token
+counts of its answer to the prompt ride as `tokens`, `tokens_in` and
+`tokens_out`, with `usage_source: adapter_prompt_result`; an application
+that reports none (Codex answers `usage: null`) leaves `tokens` unknown and
+says `usage_source: unreported`, never 0. The context occupancy of its latest
+`usage_update` rides as `context_used` and `context_size`. Claude's session
+cost rides as `cost_estimate`: the application's own estimate, cumulative for
+the session, with its currency and `billed: false`. It is never `cost_usd`,
+no cost ceiling reads it, and an update that omits it clears it. The model
+Claude reports having answered with is the task's `model_reported` (source
+`adapter_usage_update`) and the selection receipt's `responder`, beside the
+model the session confirmed. Under `fallback: none`, a reported model that is
+not the confirmed one refuses the answer (`NIKA-1805`), as a model the
+application moved during the turn does. The counts are the application's
+word: Nika does not verify them, and a subscription seat stays unpriced.
+
 A `schema:` on such a task is validated by Nika: the prompt carries the
 schema, the final message must contain a JSON value that satisfies it, and
-the validated object becomes the output (`message` under `images:`). A final
+the validated object becomes the output (`message` under `images:`). The
+final message is the turn's last one: a change of `messageId`, or a tool call
+between chunks that carry none, starts a new message, so narration before a
+tool call is not parsed as the answer. The trace keeps the whole text beside
+the value (`seat_transcript`), and one turn may hold 4 MiB of text. A final
 message that does not validate gets one repair prompt in the same session,
 which still holds the agent's work: the prompt lists every violation and the
 schema and asks for the final message only, and the trace shows it as an
 `agent_nudge` with reason `schema_repair`. The repair is one more prompt on
-your subscription and must fit the task's `max_tokens_total`. A repaired
+your subscription and must fit the task's `max_tokens_total`: counts the
+first turn reported at or over the ceiling refuse it (`NIKA-AGENT-002`), and
+an application that reported no counts leaves the ceiling unjudged, which
+the trace says (`token_ceiling: unjudged`). A repaired
 message that still does not validate, a session the application closed
 with its final message, or a repair turn that never answers (the
 application exits, answers with an error or goes silent), fails

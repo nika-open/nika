@@ -923,8 +923,16 @@ so each image keeps one frame whose `storage` is `stored`, `failed` or — when 
 timeout cancelled the put — `unconfirmed`. `model_served` keeps its
 response-attested meaning (`gen_ai.response.model`); a harness's session model
 rides the terminal as `model_reported` plus `model_reported_source`
-(`session_config` · `confirmed_selection` · `accepted_request` · `unspecified`).
-It is never served, never a pricing key, and a subscription seat stays unpriced.
+(`session_config` · `confirmed_selection` · `accepted_request` ·
+`adapter_usage_update` · `unspecified`). It is never served, never a pricing key,
+and a subscription seat stays unpriced. An agent task on a seat adds its seat
+facts to the terminal: `seat_stop_reason`, `usage_source`
+(`adapter_prompt_result`, or `unreported` when the seat gave no counts, and then
+`tokens` is absent, never 0), `token_ceiling: unjudged` when a declared
+`max_tokens_total` met no counts, `context_used` and `context_size`,
+`cost_estimate` (the adapter's unbilled estimate as JSON, never `cost_usd`) and
+`seat_transcript` (the turn's whole text when the value is its last message),
+masked by the event lane like every frame.
 
 ## Operator Stop and stopped-call provenance
 

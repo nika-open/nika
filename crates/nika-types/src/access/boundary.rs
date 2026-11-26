@@ -39,8 +39,8 @@ pub struct HarnessBoundary {
     pub runs_unasked: Option<&'static str>,
     /// What it fetches without asking, under the selected mode (`None`: every fetch asks).
     pub fetches_unasked: Option<&'static str>,
-    /// What it loads from the user's own configuration on its own, at every session (`None`:
-    /// nothing measured).
+    /// What it loads or applies on its own at every session, and what the client keeps it
+    /// from loading (`None`: nothing measured).
     pub loads_unasked: Option<&'static str>,
     /// Whether the selected mode runs ordinary commands in the harness's own sandbox without
     /// asking, so a command it asks about asks to LEAVE that sandbox (NIK-274): the client
@@ -99,8 +99,15 @@ impl HarnessBoundary {
     /// the user's `permissions.defaultMode` (`auto` on a machine that set it), so `default` is
     /// selected and read back for both confinements — `plan` still lets an allowed write run.
     /// Reads in the session root, commands it classifies read-only and pre-approved
-    /// documentation hosts proceed without asking; a command ask carries a shell STRING; its
-    /// own settings (permission rules, hooks) still apply.
+    /// documentation hosts proceed without asking; a command ask carries a shell STRING. The
+    /// client opens the session with the user's, the project's and the local settings files
+    /// turned off (`settingSources: []`), strict MCP naming no server, no plugin, skill or
+    /// custom agent, auto memory and claude.ai connectors off: their permission rules (allow,
+    /// ask and deny alike), sandbox settings, hooks, memory files and MCP servers are not
+    /// loaded. Two inputs no option reaches are read regardless, a managed policy and the
+    /// global `~/.claude.json`; the adapter also reads the settings files itself for the mode
+    /// it starts in (replaced by `default`), the model of a task that names none, its model
+    /// list and its default effort.
     pub const CLAUDE_AGENT_ACP: Self = Self {
         seat: "claude-code",
         agents: &["@agentclientprotocol/claude-agent-acp"],
@@ -111,7 +118,12 @@ impl HarnessBoundary {
         writes_unasked: None,
         runs_unasked: Some("shell commands Claude Code classifies as read-only"),
         fetches_unasked: Some("documentation hosts Claude Code pre-approves"),
-        loads_unasked: None,
+        loads_unasked: Some(
+            "applies a managed Claude Code policy when the machine has one, and runs a task \
+             that names no model on the one your Claude settings name (your own permission \
+             rules, allow or deny, hooks, MCP servers, plugins, skills and memory files are \
+             not loaded into the session)",
+        ),
         asked_command_leaves_sandbox: false,
         delivers_images: false,
     };
@@ -242,8 +254,8 @@ pub const HARNESS_SHARED_RESIDUAL: &str = "A command asked as a shell string is 
      to approve one of the harness's own MCP tool calls always pauses. An action Nika allows \
      once runs under the harness's own sandbox, not Nika's exec sandbox, so permits.fs and \
      permits.net do not confine it: an allowed command opens whatever connections that sandbox \
-     lets it. The harness's own settings (its permission rules, hooks and MCP servers) still \
-     apply: what they allow never asks.";
+     lets it. Settings the harness loads on its own (its permission rules, hooks and MCP \
+     servers) still apply: what they allow never asks.";
 
 /// The marker an anchored ask location starts with when the client could not resolve the
 /// file the harness's path reaches (a symlink loop, an unreadable component, a component that
@@ -376,6 +388,24 @@ mod tests {
         assert!(
             claude.contains("fetches documentation hosts Claude Code pre-approves"),
             "{claude}"
+        );
+        // The Claude Code seat is opened without the user's own configuration: the row says
+        // what still applies, and the shared residual speaks only of settings a harness loads.
+        assert!(
+            claude.contains(
+                "; applies a managed Claude Code policy when the machine has one, and runs a \
+                 task that names no model on the one your Claude settings name (your own \
+                 permission rules, allow or deny, hooks, MCP servers, plugins, skills and \
+                 memory files are not loaded into the session) — permits: does not bound that"
+            ),
+            "{claude}"
+        );
+        assert!(
+            HARNESS_SHARED_RESIDUAL.ends_with(
+                "Settings the harness loads on its own (its permission rules, hooks and MCP \
+                 servers) still apply: what they allow never asks."
+            ),
+            "{HARNESS_SHARED_RESIDUAL}"
         );
         // NIK-274 · only the mode that runs ordinary commands sandboxed unasked turns every
         // command ask into an escalation.

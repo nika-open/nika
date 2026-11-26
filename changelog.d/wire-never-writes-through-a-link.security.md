@@ -16,3 +16,6 @@
   detected` does not list that client). A config that changes between
   the check and the write is refused, nothing written, and the write
   goes to the place that was checked, without resolving the name again.
+  That write still reaches the checked place by its path, so a process
+  already running inside the project could race it within a very short
+  window.

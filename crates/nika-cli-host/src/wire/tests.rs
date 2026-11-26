@@ -1522,8 +1522,10 @@ const OUTSIDE_FILE: &str = "{\"keep\":true}\n";
 /// project for a file the writer places in it, the home for the others.
 /// A repository can ship `opencode.json` as a link to any file of the
 /// account's, and following it would write there. Such a link is refused
-/// on its own line, naming the link, where it leads and the repair; the
-/// file outside is byte-identical and the link is still the link. Under
+/// on its own line, naming the link and the repair, and for a home config
+/// where it leads (a project config's way is walked one step at a time,
+/// and the walk ends at the step out); the file outside is byte-identical
+/// and the link is still the link. Under
 /// `detected` the other host is wired; by name it is the strict refusal.
 /// Three ways out: a project file linked outside the project, a home
 /// file linked outside the home, and a home FOLDER linked outside.
@@ -1558,13 +1560,24 @@ fn a_settings_link_that_leaves_its_folder_is_refused() {
         std::fs::create_dir_all(codex.parent().expect("parent")).expect("dir");
         std::fs::write(&codex, "model = \"x\"\n").expect("codex");
 
-        let refused = format!(
-            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
-            target.id(),
-            path.display(),
-            std::fs::canonicalize(&victim).expect("real").display(),
-            std::fs::canonicalize(owner).expect("real").display(),
-        );
+        // A project config's way is walked first and names the link that
+        // leads out; a home config's look names where it leads.
+        let row = |why: String| format!("✖ skipped {}: {why}", target.id());
+        let (refused, repair) = match way {
+            Way::ProjectFile => (
+                row(ProjectLink::Outside(link.clone()).to_string()),
+                "point it inside the project, or remove it",
+            ),
+            Way::HomeFile | Way::HomeFolder => (
+                row(format!(
+                    "{} leads to {}, outside {}; nika wire leaves it as it is",
+                    path.display(),
+                    std::fs::canonicalize(&victim).expect("real").display(),
+                    std::fs::canonicalize(owner).expect("real").display(),
+                )),
+                "point the link inside that folder, or remove it",
+            ),
+        };
         for (door, dry_run) in [
             (target, true),
             (target, false),
@@ -1591,7 +1604,7 @@ fn a_settings_link_that_leaves_its_folder_is_refused() {
                 .find(|row| row.starts_with(&refused))
                 .unwrap_or_default();
             assert!(
-                skipped.ends_with("point the link inside that folder, or remove it"),
+                skipped.ends_with(repair),
                 "{way:?} {door:?} (dry-run {dry_run}): {out:?}"
             );
             assert_eq!(
@@ -1642,13 +1655,23 @@ fn a_linked_parent_folder_that_leaves_is_refused_on_creation() {
             )
         };
 
-        let refused = format!(
-            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
-            target.id(),
-            path.display(),
-            std::fs::canonicalize(&outside).expect("real").display(),
-            std::fs::canonicalize(owner).expect("real").display(),
-        );
+        // The project's folder link is named on the walk; the home's by
+        // where the look finds it leads.
+        let refused = if in_project {
+            format!(
+                "✖ skipped {}: {}",
+                target.id(),
+                ProjectLink::Outside(link.clone())
+            )
+        } else {
+            format!(
+                "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is",
+                target.id(),
+                path.display(),
+                std::fs::canonicalize(&outside).expect("real").display(),
+                std::fs::canonicalize(owner).expect("real").display(),
+            )
+        };
         for dry_run in [true, false] {
             let out = run(target, dry_run);
             assert_eq!(out.code, crate::output::exit::ENV, "{target:?}: {out:?}");

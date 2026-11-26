@@ -471,27 +471,87 @@ fn no_home() -> String {
 /// project (or above it, on the way down), to something that is there and
 /// outside its `.git` folder, and the config's own link only to a regular
 /// file. What comes back is the path and where a write to it lands, real
-/// ([`settled::landing`]); the writer looks again, refuses a write that
-/// would land anywhere else by then ([`settled::Settled`]), and writes to
-/// the real place it compared ([`destination`]), so no link is followed
-/// again. The looks are by path: a process that swaps a real folder on that
-/// place for a link between the last look and the rename could still
-/// redirect the write (`nika init` documents the same gap; closing it needs
-/// every step held by descriptor).
+/// ([`settled::landing`]), itself judged before it is held ([`held_inside`]);
+/// the writer looks again, refuses a write that would land anywhere else by
+/// then ([`settled::Settled`]), and writes to the real place it compared
+/// ([`destination`]), so no link is followed again. The looks are by path:
+/// a process that swaps a real folder on that place for a link between the
+/// last look and the rename could still redirect the write (`nika init`
+/// documents the same gap; closing it needs every step held by descriptor).
 fn settled_path(
     target: WireTarget,
     home: Option<&Path>,
     dir: &Path,
 ) -> Result<(PathBuf, PathBuf), String> {
+    settled_with(target, home, dir, &landing)
+}
+
+/// [`settled_path`] with the look that finds where a write lands, so a test
+/// can stand in for a place that changed after the two checks before it.
+fn settled_with(
+    target: WireTarget,
+    home: Option<&Path>,
+    dir: &Path,
+    look: &dyn Fn(&Path) -> std::io::Result<PathBuf>,
+) -> Result<(PathBuf, PathBuf), String> {
     let (owner, base, path) = config_place(target, home, dir)?;
-    stays_inside(base, &path)
-        .and_then(|()| match owner {
-            Owner::Project => project_way(base, &path).map_err(|why| why.to_string()),
-            Owner::Home => Ok(()),
-        })
-        .and_then(|()| landing(&path).map_err(|e| format!("{}: {e}", path.display())))
-        .map_err(|why| format!("{}: {why}", target.id()))
-        .map(|lands| (path, lands))
+    // A project config's way is walked first, one step at a time: a link
+    // there that loops, leads nowhere or leads out is named as such, with
+    // its way out, before a look that resolves the whole path at once
+    // could only give the system's own reason.
+    match owner {
+        Owner::Project => project_way(base, &path).map_err(|why| why.to_string()),
+        Owner::Home => Ok(()),
+    }
+    .and_then(|()| stays_inside(base, &path))
+    .and_then(|()| look(&path).map_err(|e| format!("{}: {e}", path.display())))
+    .and_then(|lands| held_inside(base, &path, lands))
+    .map_err(|why| format!("{}: {why}", target.id()))
+    .map(|lands| (path, lands))
+}
+
+/// The place a write to `path` lands, judged by itself before the writer
+/// holds it: it comes from a look of its own, after the ones that judged
+/// the path, so it too must be inside the folder that owns the config
+/// (`owner`, real), below it by plain names only (no `..`, no `.`), and
+/// outside a `.git` folder there. Names are compared as components, `.git`
+/// without regard to ASCII case.
+fn held_inside(owner: &Path, path: &Path, lands: PathBuf) -> Result<PathBuf, String> {
+    let inside = nearest_real(owner).map_err(|e| format!("{}: {e}", path.display()))?;
+    let Ok(within) = lands.strip_prefix(&inside) else {
+        return Err(format!(
+            "{}: a write would land at {}, outside {}; nika wire leaves it as it is · \
+             run nika wire again",
+            path.display(),
+            lands.display(),
+            inside.display()
+        ));
+    };
+    if within.as_os_str().is_empty()
+        || !within
+            .components()
+            .all(|name| matches!(name, std::path::Component::Normal(_)))
+    {
+        return Err(format!(
+            "{}: a write would land at {}, not a file named plainly inside {}; nika wire \
+             leaves it as it is · run nika wire again",
+            path.display(),
+            lands.display(),
+            inside.display()
+        ));
+    }
+    if within
+        .components()
+        .any(|name| name.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err(format!(
+            "{}: a write would land at {}, in a .git folder; nika wire never writes there · \
+             run nika wire again",
+            path.display(),
+            lands.display()
+        ));
+    }
+    Ok(lands)
 }
 
 /// Why `wire` leaves a project config as it is: a link on the way to it
@@ -504,6 +564,9 @@ enum ProjectLink {
     Dangling(PathBuf),
     /// A link on the way leads outside the project.
     Outside(PathBuf),
+    /// A link on the way never ends: it leads back to itself, or through
+    /// more links than a walk follows ([`nika_fs::MAX_LINKS`]).
+    Loop(PathBuf),
     /// A link on the way leads into the project's `.git` folder.
     IntoGit(PathBuf),
     /// The config's own name links to something that is not a regular
@@ -526,6 +589,12 @@ impl std::fmt::Display for ProjectLink {
                 f,
                 "{} is a link that leads outside the project; nika wire writes a project \
                  config only inside the project: point it inside the project, or remove it",
+                at.display()
+            ),
+            Self::Loop(at) => write!(
+                f,
+                "{} is a link loop: following it never ends; nika wire follows a link only \
+                 to a place it reaches: point it at a file inside the project, or remove it",
                 at.display()
             ),
             Self::IntoGit(at) => write!(
@@ -607,7 +676,8 @@ fn followed(project: &Path, inside: &Path, at: &Path) -> Result<PathBuf, Project
         Err(nika_fs::Escape::Dangling(_)) | Ok(nika_fs::Beneath::Missing { .. }) => {
             return Err(ProjectLink::Dangling(at.into()));
         }
-        // A way out (and back), or a loop.
+        Err(nika_fs::Escape::Loop(_)) => return Err(ProjectLink::Loop(at.into())),
+        // A way out (and back).
         Ok(_) | Err(_) => return Err(ProjectLink::Outside(at.into())),
     };
     let Ok(within) = real.strip_prefix(inside) else {

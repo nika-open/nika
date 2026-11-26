@@ -230,12 +230,9 @@ fn a_project_config_link_leading_out_is_never_written_through() {
         std::fs::create_dir_all(path.parent().expect("folder")).expect("folder");
         symlink(&victim, &path).expect("link out");
         let row = format!(
-            "✖ skipped {}: {} leads to {}, outside {}; nika wire leaves it as it is: \
-             point the link inside that folder, or remove it",
+            "✖ skipped {}: {}",
             target.id(),
-            path.display(),
-            Room::real(&victim),
-            Room::real(&room.project),
+            ProjectLink::Outside(path.clone())
         );
         refused_row(&room, target, &row);
         untouched(&victim);
@@ -327,13 +324,8 @@ fn a_config_folder_leading_out_is_never_written_into() {
     let path = room.path(WireTarget::Vscode);
     let folder = room.project.join(".vscode");
     symlink(&room.outside, &folder).expect("link");
-    let row = format!(
-        "✖ skipped vscode: {} leads to {}, outside {}; nika wire leaves it as it is: \
-         point the link inside that folder, or remove it",
-        path.display(),
-        Room::real(&room.outside),
-        Room::real(&room.project),
-    );
+    let row = format!("✖ skipped vscode: {}", ProjectLink::Outside(folder.clone()));
+    assert!(path.starts_with(&folder), "the config sits under the link");
     refused_row(&room, WireTarget::Vscode, &row);
     assert_eq!(
         std::fs::read_dir(&room.outside).expect("list").count(),
@@ -593,12 +585,10 @@ fn a_config_way_out_and_back_in_is_refused_at_its_link() {
 }
 
 /// A folder on the way that cannot be searched: the run refuses the config
-/// with the reason the system gives, and writes nothing; the walk itself
-/// names the entry it could not read. (The run's refusal comes from the
-/// first look, which resolves the whole path; the walk's own arm is reached
-/// only when the folder changes between the two, so it is held here
-/// directly.) A process that reads every folder whatever its mode (root)
-/// cannot hold this layout: there the test asserts nothing.
+/// on the step walk, which names the entry it could not read with the
+/// reason the system gives, and writes nothing. A process that reads every
+/// folder whatever its mode (root) cannot hold this layout: there the test
+/// asserts nothing.
 #[test]
 fn an_unsearchable_folder_on_the_way_is_refused_and_named() {
     let room = Room::new();
@@ -615,10 +605,12 @@ fn an_unsearchable_folder_on_the_way_is_refused_and_named() {
         restore();
         return;
     }
-    let first = std::fs::canonicalize(&path).expect_err("unsearchable");
-    let row = format!("✖ skipped vscode: {}: {first}", path.display());
     let walked = project_way(&room.project, &path);
     let lstat = std::fs::symlink_metadata(&path).expect_err("unsearchable");
+    let row = format!(
+        "✖ skipped vscode: {}",
+        ProjectLink::Unreadable(path.clone(), lstat.to_string())
+    );
     let outs: Vec<_> = [true, false]
         .into_iter()
         .map(|dry_run| room.wire(WireTarget::Vscode, dry_run))
@@ -646,13 +638,7 @@ fn a_relative_project_config_link_leading_out_is_never_written_through() {
     let victim = room.victim();
     let path = room.path(WireTarget::Opencode);
     symlink("../outside/rc", &path).expect("relative link out");
-    let row = format!(
-        "✖ skipped opencode: {} leads to {}, outside {}; nika wire leaves it as it is: \
-         point the link inside that folder, or remove it",
-        path.display(),
-        Room::real(&victim),
-        Room::real(&room.project),
-    );
+    let row = format!("✖ skipped opencode: {}", ProjectLink::Outside(path.clone()));
     refused_row(&room, WireTarget::Opencode, &row);
     untouched(&victim);
     assert_eq!(
@@ -706,11 +692,8 @@ fn a_project_reached_through_a_link_is_judged_where_it_is() {
     let out = wire(WireTarget::Opencode);
     assert_eq!(out.code, crate::output::exit::ENV, "{out:?}");
     let row = format!(
-        "✖ skipped opencode: {} leads to {}, outside {}; nika wire leaves it as it is: \
-         point the link inside that folder, or remove it",
-        alias.join("opencode.json").display(),
-        Room::real(&victim),
-        Room::real(&room.project),
+        "✖ skipped opencode: {}",
+        ProjectLink::Outside(alias.join("opencode.json"))
     );
     assert!(
         out.text.lines().any(|line| line == row),
@@ -744,5 +727,137 @@ fn a_hard_linked_project_config_never_writes_the_outside_file() {
     assert_ne!(
         std::fs::metadata(&path).expect("stat").ino(),
         std::fs::metadata(&victim).expect("stat").ino()
+    );
+}
+
+/// A link loop that stays inside the project, at the config's own name
+/// (`.vscode/mcp.json -> a.json -> mcp.json`) or at its folder (`.vscode ->
+/// loop -> .vscode`): the step walk, which comes before any look that
+/// resolves the whole path, names it a link loop with its way out, never a
+/// way out of the project nor the system's own reason, by preview and by
+/// run, and creates nothing: the links stay as they are.
+#[test]
+fn a_link_loop_inside_the_project_is_named_as_one() {
+    let room = Room::new();
+    let path = room.path(WireTarget::Vscode);
+    let folder = path.parent().expect("folder").to_path_buf();
+    std::fs::create_dir_all(&folder).expect("folder");
+    let other = folder.join("a.json");
+    symlink(&other, &path).expect("to a.json");
+    symlink(&path, &other).expect("back to mcp.json");
+    assert_eq!(
+        project_way(&room.project, &path),
+        Err(ProjectLink::Loop(path.clone()))
+    );
+    refused_row(
+        &room,
+        WireTarget::Vscode,
+        &format!("✖ skipped vscode: {}", ProjectLink::Loop(path.clone())),
+    );
+    assert_eq!(std::fs::read_link(&path).expect("still the link"), other);
+    assert_eq!(std::fs::read_link(&other).expect("still the link"), path);
+    assert_eq!(spares(&folder), Vec::<String>::new());
+
+    let room = Room::new();
+    let folder = room.project.join(".vscode");
+    let hop = room.project.join("loop");
+    symlink(&hop, &folder).expect("to loop");
+    symlink(&folder, &hop).expect("back to .vscode");
+    let path = room.path(WireTarget::Vscode);
+    let looped = ProjectLink::Loop(folder.clone());
+    assert_eq!(project_way(&room.project, &path), Err(looped.clone()));
+    assert_eq!(
+        looped.to_string(),
+        format!(
+            "{} is a link loop: following it never ends; nika wire follows a link only to a \
+             place it reaches: point it at a file inside the project, or remove it",
+            folder.display()
+        )
+    );
+    refused_row(
+        &room,
+        WireTarget::Vscode,
+        &format!("✖ skipped vscode: {looped}"),
+    );
+    assert_eq!(std::fs::read_link(&folder).expect("still the link"), hop);
+    assert_eq!(std::fs::read_link(&hop).expect("still the link"), folder);
+    assert_eq!(
+        std::fs::read_dir(&room.project).expect("list").count(),
+        2,
+        "nothing created in the project"
+    );
+}
+
+/// Where a write lands comes from a look of its own, after the two that
+/// judged the path, and is judged before the writer holds it: a look that
+/// then finds a place outside the folder that owns the config (the project
+/// for a project config, the home for every other), below it by a name
+/// that is not plain (`..`), at that folder itself, or in a `.git` folder
+/// refuses the config; a place inside is held as the look found it.
+#[test]
+fn a_held_landing_is_judged_before_it_is_held() {
+    let room = Room::new();
+    let project = std::fs::canonicalize(&room.project).expect("real project");
+    let home = std::fs::canonicalize(&room.home).expect("real home");
+    let outside = std::fs::canonicalize(&room.outside)
+        .expect("real outside")
+        .join("rc");
+    let leaves = "nika wire leaves it as it is · run nika wire again";
+    let out = |inside: &Path| format!("outside {}; {leaves}", inside.display());
+    let not_plain = |inside: &Path| {
+        format!(
+            "not a file named plainly inside {}; {leaves}",
+            inside.display()
+        )
+    };
+    let in_git =
+        || "in a .git folder; nika wire never writes there · run nika wire again".to_owned();
+    // Under the owner by its prefix, yet out of it by `..`, or the owner
+    // folder itself: neither is a file named plainly inside it.
+    for (target, lands, why) in [
+        (
+            WireTarget::Vscode,
+            project.join(".vscode/../../rc"),
+            not_plain(&project),
+        ),
+        (WireTarget::Vscode, project.clone(), not_plain(&project)),
+        (WireTarget::Claude, home.join("../rc"), not_plain(&home)),
+        (WireTarget::Vscode, outside.clone(), out(&project)),
+        (
+            WireTarget::Vscode,
+            project.join(".git").join("mcp.json"),
+            in_git(),
+        ),
+        (WireTarget::Claude, outside.clone(), out(&home)),
+        (
+            WireTarget::Claude,
+            home.join(".GIT").join("config"),
+            in_git(),
+        ),
+    ] {
+        let path = room.path(target);
+        let got = settled_with(target, Some(&room.home), &room.project, &|_| {
+            Ok(lands.clone())
+        });
+        let why = format!(
+            "{}: a write would land at {}, {why}",
+            path.display(),
+            lands.display()
+        );
+        assert_eq!(got, Err(format!("{}: {why}", target.id())), "{path:?}");
+    }
+    let vscode = room.path(WireTarget::Vscode);
+    let lands = project.join(".vscode").join("mcp.json");
+    let found = lands.clone();
+    assert_eq!(
+        settled_with(WireTarget::Vscode, Some(&room.home), &room.project, &|_| {
+            Ok(found.clone())
+        }),
+        Ok((vscode.clone(), lands))
+    );
+    assert_eq!(
+        settled_path(WireTarget::Vscode, Some(&room.home), &room.project),
+        Ok((vscode, project.join(".vscode").join("mcp.json"))),
+        "the real look, unchanged, is held as it finds the place"
     );
 }

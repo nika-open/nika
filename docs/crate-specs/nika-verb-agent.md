@@ -449,11 +449,13 @@ the tokens are unknown and a declared `max_tokens_total` reads `unjudged`), the
 context occupancy, the adapter's unbilled cost estimate, the last message a
 `schema:` judges and, once that message validated, the turn's whole text. A
 turn that did not end fails before its value is judged: `max_tokens` is
-`FinalCut` (`NIKA-AGENT-006`), and `refusal`, `max_turn_requests` and an unknown
-stop word are `HarnessStopped` (`NIKA-463`, wire `NIKA-INFER-001`), each with the
-text received at `partial_output`. A turn's counts weigh like a native turn's
-(`budget_weight`), so the token gate refuses a repair the first turn already
-met.
+`FinalCut` (`NIKA-AGENT-006`), and `refusal`, `max_turn_requests`, `cancelled`
+(the agent path never sends `session/cancel`, so the harness cut the turn) and
+an unknown stop word are `HarnessStopped` (`NIKA-463`, wire `NIKA-INFER-001`),
+each with the text received at `partial_output` and no token counts. A turn's
+counts weigh like a native turn's (fresh input and output), by checked
+arithmetic: counts whose weight overflows are unknown. The token gate refuses a
+repair the first turn already met.
 
 ## Native operator Stop
 

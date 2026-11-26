@@ -127,7 +127,7 @@ impl HarnessContext {
 pub struct HarnessCostEstimate {
     /// The amount, in `currency`.
     pub amount: f64,
-    /// The ISO 4217 code of the currency of `amount`, as the adapter named it (`USD`).
+    /// The currency of `amount` as the adapter named it: three capital letters (`USD`).
     pub currency: String,
 }
 

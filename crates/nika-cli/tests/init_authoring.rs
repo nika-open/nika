@@ -169,6 +169,143 @@ fn claude_hooks_execute_from_a_nested_directory_and_preserve_user_settings() {
     );
 }
 
+/// An executable `nika-kit` the repository ships where the plugin keeps its
+/// resolver (`.claude/bin/`, `.cursor/bin/`, beside each `hooks-nika/`).
+fn plant_resolver(path: &Path, marker: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::create_dir_all(path.parent().expect("bin folder")).expect("mkdir");
+    std::fs::write(
+        path,
+        format!("#!/bin/sh\necho \"$@\" >>'{}'\n", marker.display()),
+    )
+    .expect("planted resolver");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("exec bit");
+}
+
+/// The scaffolded edit hook judges with the binary the order picks (here
+/// the PATH's, the binary under test) and never runs a resolver the
+/// repository holds beside it, in either client's copy.
+#[test]
+fn a_resolver_the_repository_ships_beside_the_hooks_never_runs() {
+    let home = tempfile::tempdir().expect("isolated home");
+    let project = home.path().join("project");
+    std::fs::create_dir(&project).expect("project");
+    let marker = home.path().join("planted-resolver-ran");
+    for client in [".claude", ".cursor"] {
+        plant_resolver(&project.join(client).join("bin/nika-kit"), &marker);
+    }
+    let init = nika(home.path(), &project, &["init", "--yes"]);
+    assert_eq!(init.status.code(), Some(0), "{}", transcript(&init));
+    let workflow = project.join("workflows/01-hello.nika");
+    assert!(workflow.is_file(), "init founds the hello lesson");
+    let settings: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(project.join(".claude/settings.json")).expect("settings"),
+    )
+    .expect("valid settings");
+    let claude = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .expect("generated edit command")
+        .to_owned();
+    let cursor: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(project.join(".cursor/hooks.json")).expect("cursor hooks"),
+    )
+    .expect("valid cursor hooks");
+    let cursor = cursor["hooks"]["afterFileEdit"][0]["command"]
+        .as_str()
+        .expect("generated cursor edit command")
+        .to_owned();
+    let judge = format!("clean · {}", env!("CARGO_BIN_EXE_nika"));
+    for (command, payload) in [
+        (
+            format!("NIKA_CHECK_ANNOUNCE_CLEAN=1 {claude}"),
+            serde_json::json!({"hook_event_name": "PostToolUse", "tool_input": {"file_path": workflow}, "cwd": project}),
+        ),
+        (
+            format!("NIKA_CHECK_ANNOUNCE_CLEAN=1 {cursor}"),
+            serde_json::json!({"file_path": workflow}),
+        ),
+    ] {
+        let edit = hook(home.path(), &project, &project, &command, &payload);
+        let text = transcript(&edit);
+        assert_eq!(edit.status.code(), Some(0), "{command}: {text}");
+        assert!(
+            text.contains(&judge),
+            "{command} judges with the PATH's nika: {text}"
+        );
+    }
+    assert!(
+        !marker.exists(),
+        "a scaffolded hook ran the repository's resolver: {}",
+        std::fs::read_to_string(&marker).unwrap_or_default()
+    );
+}
+
+/// `init` never wires a client to a hook script it did not write: a script
+/// already there with other bytes keeps `.claude/settings.json` unwritten,
+/// with one report row naming both files and exit 3. A script holding
+/// exactly what init writes is wired, and `--force` rewrites then wires.
+#[test]
+fn init_refuses_to_wire_a_hook_script_it_did_not_write() {
+    let home = tempfile::tempdir().expect("isolated home");
+    let project = home.path().join("project");
+    let script = project.join(".claude/hooks-nika/check-on-edit.sh");
+    std::fs::create_dir_all(script.parent().expect("hooks folder")).expect("project");
+    let planted = format!(
+        "#!/bin/sh\necho planted >>'{}'\n",
+        home.path().join("planted-hook-ran").display()
+    );
+    std::fs::write(&script, &planted).expect("planted script");
+
+    let refused = nika(home.path(), &project, &["init", "--yes"]);
+    let text = transcript(&refused);
+    assert_eq!(refused.status.code(), Some(3), "{text}");
+    assert!(
+        text.lines().any(|line| line
+            == "✖ refused ./.claude/settings.json — its hooks would run ./.claude/hooks-nika/check-on-edit.sh, which init did not write · remove it and run nika init again, or rerun with --force, which rewrites every file init writes, AGENTS.md, CLAUDE.md, .mcp.json and settings included"),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|line| line
+            == "· skipped ./.claude/hooks-nika/check-on-edit.sh (exists · --force to overwrite)"),
+        "{text}"
+    );
+    assert!(!project.join(".claude/settings.json").exists(), "{text}");
+    assert_eq!(
+        std::fs::read_to_string(&script).expect("script kept"),
+        planted
+    );
+    assert!(project.join(".cursor/hooks.json").is_file(), "{text}");
+    assert!(project.join("AGENTS.md").is_file(), "{text}");
+    assert!(!home.path().join("planted-hook-ran").exists());
+
+    // The bytes init writes, taken from a fresh scaffold, are init's own.
+    let fresh = home.path().join("fresh");
+    std::fs::create_dir(&fresh).expect("fresh project");
+    let founded = nika(home.path(), &fresh, &["init", "--yes"]);
+    assert_eq!(founded.status.code(), Some(0), "{}", transcript(&founded));
+    let own = std::fs::read(fresh.join(".claude/hooks-nika/check-on-edit.sh")).expect("own");
+    let twin = home.path().join("twin");
+    std::fs::create_dir_all(twin.join(".claude/hooks-nika")).expect("twin project");
+    std::fs::write(twin.join(".claude/hooks-nika/check-on-edit.sh"), &own).expect("same bytes");
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            twin.join(".claude/hooks-nika/check-on-edit.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("the mode init gives it");
+    }
+    let accepted = nika(home.path(), &twin, &["init", "--yes"]);
+    assert_eq!(accepted.status.code(), Some(0), "{}", transcript(&accepted));
+    assert!(twin.join(".claude/settings.json").is_file());
+
+    let forced = nika(home.path(), &project, &["init", "--yes", "--force"]);
+    assert_eq!(forced.status.code(), Some(0), "{}", transcript(&forced));
+    assert_eq!(std::fs::read(&script).expect("rewritten"), own);
+    assert!(project.join(".claude/settings.json").is_file());
+    assert!(!home.path().join("planted-hook-ran").exists());
+}
+
 #[test]
 fn human_guide_first_workflow_runs_offline_and_project_receipt_precedes_next() {
     let home = tempfile::tempdir().expect("isolated home");
@@ -253,5 +390,149 @@ fn a_founded_repository_ignores_the_serve_token_and_job_state() {
             "{path} must be ignored in a founded repository: {}",
             transcript(&verdict)
         );
+    }
+}
+
+/// Every file outside `project` under `top`, with its bytes or link target.
+fn outside_of(top: &Path, project: &Path) -> Vec<(std::path::PathBuf, String)> {
+    let mut seen = Vec::new();
+    let mut todo = vec![top.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        for entry in std::fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if path.starts_with(project) {
+                continue;
+            }
+            let kind = std::fs::symlink_metadata(&path).expect("stat");
+            if kind.file_type().is_symlink() {
+                let to = std::fs::read_link(&path).expect("link");
+                seen.push((path, format!("-> {}", to.display())));
+            } else if kind.is_dir() {
+                todo.push(path);
+            } else {
+                let bytes = std::fs::read(&path).expect("read");
+                seen.push((path, String::from_utf8_lossy(&bytes).into_owned()));
+            }
+        }
+    }
+    seen.sort();
+    seen
+}
+
+/// The real binary, with HOME as the fake user: a project link aimed at the
+/// user's global Claude settings, dangling or present, and a `.claude`
+/// folder that is itself a link, never carry a write outside the project,
+/// `--force` included.
+#[test]
+fn init_never_writes_through_a_link_to_the_user_settings() {
+    let home = tempfile::tempdir().expect("isolated home");
+    let top = home.path().canonicalize().expect("canonical home");
+    let global = top.join(".claude");
+    std::fs::create_dir_all(&global).expect("global settings folder");
+
+    // A dangling link, then the same link with the global file present.
+    let project = top.join("src/linked-settings");
+    std::fs::create_dir_all(project.join(".claude")).expect("project");
+    std::os::unix::fs::symlink(
+        "../../../.claude/settings.json",
+        project.join(".claude/settings.json"),
+    )
+    .expect("settings link");
+    for (present, args) in [
+        (false, &["init", "--yes"][..]),
+        (false, &["init", "--yes", "--force"][..]),
+        (true, &["init", "--yes"][..]),
+        (true, &["init", "--yes", "--force"][..]),
+    ] {
+        if present {
+            std::fs::write(global.join("settings.json"), "{\"the\": \"user's\"}\n")
+                .expect("global settings");
+        }
+        let before = outside_of(&top, &project);
+        let out = nika(&top, &project, args);
+        let text = transcript(&out);
+        // Without --force init would only skip the file, so the link is kept
+        // and never followed; --force needs a write, which is refused.
+        let (code, row) = if args.contains(&"--force") {
+            (
+                3,
+                "✖ ./.claude/settings.json: a link — init never writes through a link, --force included · remove the link, then run nika init again",
+            )
+        } else {
+            (
+                0,
+                "· skipped ./.claude/settings.json (a link leading out of the project or to nothing · kept, never followed)",
+            )
+        };
+        assert_eq!(out.status.code(), Some(code), "{args:?}\n{text}");
+        assert!(text.lines().any(|line| line == row), "{args:?}\n{text}");
+        assert_eq!(
+            outside_of(&top, &project),
+            before,
+            "{args:?}: nothing outside changed"
+        );
+        assert_eq!(global.join("settings.json").exists(), present, "{args:?}");
+    }
+
+    // `.claude` itself leads to the global folder.
+    let folder = top.join("src/linked-folder");
+    std::fs::create_dir_all(&folder).expect("project");
+    std::os::unix::fs::symlink("../../.claude", folder.join(".claude")).expect("folder link");
+    for args in [&["init", "--yes"][..], &["init", "--yes", "--force"][..]] {
+        let before = outside_of(&top, &folder);
+        let out = nika(&top, &folder, args);
+        let text = transcript(&out);
+        assert_eq!(out.status.code(), Some(3), "{args:?}\n{text}");
+        assert!(
+            text.lines().any(|line| line.starts_with(
+                "✖ ./.claude/hooks-nika/check-on-edit.sh: its folder leads outside the project"
+            )),
+            "{args:?}\n{text}"
+        );
+        assert_eq!(
+            outside_of(&top, &folder),
+            before,
+            "{args:?}: the global folder is untouched"
+        );
+        assert!(folder.join(".cursor/hooks.json").is_file(), "{text}");
+    }
+}
+
+/// The real binary: `.claude` leads out of the project to a link that leads
+/// back in (`.claude -> <top>/hop`, `hop -> <project>/agents-claude`). The
+/// hop outside belongs to whoever owns that folder and can be turned
+/// elsewhere between init's look and its write, so init refuses the way
+/// where it leaves, `--force` included, and writes nothing in the folder the
+/// way comes back to.
+#[test]
+fn init_refuses_a_folder_way_out_and_back_in() {
+    let home = tempfile::tempdir().expect("isolated home");
+    let top = home.path().canonicalize().expect("canonical home");
+    let project = top.join("src/hop");
+    let inner = project.join("agents-claude");
+    std::fs::create_dir_all(&inner).expect("project");
+    std::os::unix::fs::symlink(&inner, top.join("hop")).expect("hop back in");
+    std::os::unix::fs::symlink(top.join("hop"), project.join(".claude")).expect("out");
+    for args in [&["init", "--yes"][..], &["init", "--yes", "--force"][..]] {
+        let before = outside_of(&top, &project);
+        let out = nika(&top, &project, args);
+        let text = transcript(&out);
+        assert_eq!(out.status.code(), Some(3), "{args:?}\n{text}");
+        assert!(
+            text.lines().any(|line| line.starts_with(
+                "✖ ./.claude/hooks-nika/check-on-edit.sh: its folder leads outside the project"
+            )),
+            "{args:?}\n{text}"
+        );
+        assert_eq!(
+            std::fs::read_dir(&inner).expect("list").count(),
+            0,
+            "{args:?}: nothing written where the way comes back\n{text}"
+        );
+        assert_eq!(outside_of(&top, &project), before, "{args:?}");
+        assert!(project.join(".cursor/hooks.json").is_file(), "{text}");
     }
 }

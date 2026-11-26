@@ -45,6 +45,15 @@ pub(crate) enum Outcome {
     /// The entry was already there (ours or the human's) — nothing
     /// written (the idempotence law: a second init adds nothing).
     Covered,
+    /// A link, wherever it leads: git does not read a `.gitignore` that is a
+    /// link (since 2.32, whatever the file it points at holds), so it is no
+    /// cover. Init never reads it nor writes through it, and the row says to
+    /// replace it with a regular file holding the entries.
+    KeptLink,
+    /// Something not a regular file (a folder, a FIFO): never read, never
+    /// written, and the row says what to add by hand (the note is
+    /// [`crate::confine::Refusal::kept`]).
+    KeptAside(&'static str),
     /// A read/write failure — init's one environment error (exit 3).
     Failed(String),
 }
@@ -55,37 +64,41 @@ pub(crate) fn ensure(dir: &str) -> (String, Outcome) {
         .join(".gitignore")
         .to_string_lossy()
         .into_owned();
-    match ensure_inner(&path) {
+    match ensure_inner(Path::new(dir), Path::new(&path)) {
         Ok(outcome) => (path, outcome),
         Err(e) => (path, Outcome::Failed(e.to_string())),
     }
 }
 
-/// The io half — `?` propagation, the caller owns the error voice.
-fn ensure_inner(path: &str) -> std::io::Result<Outcome> {
-    let body = match std::fs::read_to_string(path) {
-        Ok(body) => Some(body),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e),
+/// The io half — `?` propagation, the caller owns the error voice. The
+/// file is read only when it is a regular file inside the project, bounded
+/// and without waiting, and written through `crate::confine` (the dir may
+/// not exist yet on a bare `init new-dir`: its folders are made, never
+/// through a link). A link is kept before anything is read: git does not
+/// read a `.gitignore` that is a link (its 2.32 release notes:
+/// <https://github.com/git/git/blob/master/Documentation/RelNotes/2.32.0.adoc>),
+/// so the entries in the file it reaches would protect nothing. Something
+/// not a regular file is not read at all.
+fn ensure_inner(dir: &Path, path: &Path) -> std::io::Result<Outcome> {
+    use crate::confine;
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Ok(Outcome::KeptLink);
+    }
+    let body = match confine::read_text(dir, path, confine::READ_CAP) {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            confine::write(dir, path, SECTION.as_bytes())?;
+            return Ok(Outcome::Created);
+        }
+        Err(e) => {
+            return confine::refusal(&e).map_or(Err(e), |why| Ok(Outcome::KeptAside(why.kept())));
+        }
     };
-    // Same care as the briefs' write: the dir may not exist yet on a
-    // bare `init new-dir` — create parents, never fail on the missing.
-    if let Some(parent) = Path::new(path).parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)?;
+    if covers(&body) {
+        return Ok(Outcome::Covered);
     }
-    match body {
-        None => {
-            std::fs::write(path, SECTION)?;
-            Ok(Outcome::Created)
-        }
-        Some(body) if covers(&body) => Ok(Outcome::Covered),
-        Some(body) => {
-            std::fs::write(path, appended(&body))?;
-            Ok(Outcome::Appended)
-        }
-    }
+    confine::write(dir, path, appended(&body).as_bytes())?;
+    Ok(Outcome::Appended)
 }
 
 /// The human's bytes verbatim, then the section behind ONE blank line
@@ -130,6 +143,19 @@ pub(crate) fn report(path: &str, outcome: &Outcome) -> (char, String) {
         Outcome::Covered => (
             '·',
             format!("skipped {path} (.nika/traces/ already ignored)"),
+        ),
+        Outcome::KeptLink => (
+            '·',
+            format!(
+                "skipped {path} ({}, and git does not read a .gitignore that is a link) · replace it with a regular file holding .nika/traces/, .nika/serve.token and .nika/serve/",
+                crate::founding::KEPT_LINK
+            ),
+        ),
+        Outcome::KeptAside(note) => (
+            '·',
+            format!(
+                "skipped {path} ({note}) · init did not read it: make sure your ignore rules hold .nika/traces/, .nika/serve.token and .nika/serve/"
+            ),
         ),
         Outcome::Failed(e) => ('✖', format!("{path}: {e}")),
     }
@@ -276,6 +302,59 @@ mod tests {
         let (mark, msg) = report(".gitignore", &Outcome::Failed("denied".to_owned()));
         assert_eq!(mark, '✖');
         assert!(msg.contains("denied"), "{msg}");
+    }
+
+    /// A link to a file inside the project is kept, never written (a calm
+    /// row, not a failure), and stays kept once the file it reaches holds
+    /// the entry: git does not read a `.gitignore` that is a link. The file
+    /// it reaches keeps every byte.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_the_project_is_kept_never_appended_through() {
+        let dir = fresh_dir("link");
+        std::fs::write(dir.join("rules"), "target/\n").expect("seed");
+        std::os::unix::fs::symlink("rules", dir.join(".gitignore")).expect("link");
+        let (path, outcome) = ensure(dir.to_str().expect("utf8"));
+        assert!(matches!(outcome, Outcome::KeptLink));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("rules")).expect("read"),
+            "target/\n"
+        );
+        let (mark, msg) = report(&path, &outcome);
+        assert_eq!(mark, '·');
+        assert_eq!(
+            msg,
+            format!(
+                "skipped {path} (a link · init never writes through a link, and git does not read a .gitignore that is a link) · replace it with a regular file holding .nika/traces/, .nika/serve.token and .nika/serve/"
+            )
+        );
+        std::fs::write(dir.join("rules"), "target/\n.nika/traces/\n").expect("cover");
+        let (_, outcome) = ensure(dir.to_str().expect("utf8"));
+        assert!(
+            matches!(outcome, Outcome::KeptLink),
+            "no cover through a link"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("rules")).expect("read"),
+            "target/\n.nika/traces/\n"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The section is appended by a rename, and the file keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn an_appended_file_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = fresh_dir("mode");
+        let file = dir.join(".gitignore");
+        std::fs::write(&file, "target/\n").expect("seed");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+        let (_, outcome) = ensure(dir.to_str().expect("utf8"));
+        assert!(matches!(outcome, Outcome::Appended));
+        let mode = std::fs::metadata(&file).expect("meta").permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o640);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Issue 1047 · an auditor had to derive that a hash-chained journal

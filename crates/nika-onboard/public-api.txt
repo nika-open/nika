@@ -2235,6 +2235,7 @@ pub mod nika_onboard::project_file
 #[non_exhaustive] pub enum nika_onboard::project_file::Outcome
 pub nika_onboard::project_file::Outcome::Created
 pub nika_onboard::project_file::Outcome::Failed(alloc::string::String)
+pub nika_onboard::project_file::Outcome::Kept(alloc::string::String)
 pub nika_onboard::project_file::Outcome::Skipped
 impl<D> owo_colors::OwoColorize for nika_onboard::project_file::Outcome
 impl<T, U> core::convert::Into<U> for nika_onboard::project_file::Outcome where U: core::convert::From<T>

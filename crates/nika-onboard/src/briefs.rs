@@ -398,10 +398,11 @@ const CURSOR_DELEGATION: &str = include_str!(concat!(
 ));
 
 /// `.cursor/hooks-nika/*.sh` — the three seatbelts from the kit. The session
-/// hook's one provenance slot is stamped by `apply_briefs`; all other script
-/// bytes are preserved. The scripts sniff their dialect from stdin and self-silence
-/// outside nika contexts, so carrying them project-side is safe by the
-/// same proof that ships them in the plugin.
+/// hook's provenance slot and the edit hook's resolver line are stamped by
+/// `crate::hook_copies::scaffold_body`; all other script bytes are preserved. The scripts
+/// sniff their dialect from stdin and self-silence outside nika contexts,
+/// so carrying them project-side is safe by the same proof that ships them
+/// in the plugin.
 const HOOK_SESSION_CONTEXT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../.agents/plugins/nika/scripts/session-context.sh"

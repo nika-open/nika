@@ -12,7 +12,10 @@
 //!
 //! The human keeps the hand everywhere: an existing file is SKIPPED,
 //! never clobbered — `--force` is the explicit override (same law as
-//! `nika compile`). A write failure is the one environment error (`exit 3`).
+//! `nika compile`). Every write stays inside the project (`crate::confine`:
+//! a link is never written through, `--force` included). A write failure,
+//! a refused write (a link, a folder leading outside) and a refused hook
+//! wiring are the environment error (`exit 3`).
 //! The one append-maybe surface is `.gitignore` (`crate::gitignore` —
 //! adds-only: the trace-cover section joins an existing file, never a
 //! rewrite, and a second run adds nothing).
@@ -21,7 +24,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::recipes::{self, ScaffoldStatus};
-use crate::{Audit, Outcome, Wire, briefs, codes, gitignore, project_file};
+use crate::{Audit, Outcome, Wire, briefs, codes, confine, gitignore, hook_copies, project_file};
 
 pub use briefs::agents_md;
 
@@ -84,6 +87,15 @@ pub(crate) enum Action {
     Create { path: String, body: &'static str },
     /// Leave `path` untouched — it already exists (`--force` to overwrite).
     Skip { path: String },
+}
+
+impl Action {
+    /// The joined target path, whatever the decision.
+    fn path(&self) -> &str {
+        match self {
+            Self::Create { path, .. } | Self::Skip { path } => path,
+        }
+    }
 }
 
 /// PURE plan over an injected existence oracle — `Create` an absent file (or
@@ -157,27 +169,14 @@ pub fn scripted_run(
     // same exit-3 class as a brief's.
     let git = gitignore::ensure(dir);
     let project = project_file::ensure(dir, force);
+    // A refused hook wiring stops the founding like a write failure (every
+    // other brief, the trace cover and the project file are written).
     let failed = rows
         .iter()
-        .any(|(_, o)| matches!(o, BriefOutcome::Failed(_)))
+        .any(|(_, o)| matches!(o, BriefOutcome::Failed(_) | BriefOutcome::Refused(..)))
         || matches!(git.1, gitignore::Outcome::Failed(_))
         || matches!(project.1, project_file::Outcome::Failed(_));
-    // Keep joined paths and receipt prefixes; explain each newly created
-    // brief so the transcript helps humans review the generated setup.
-    let mut lines: Vec<(char, String)> = rows
-        .iter()
-        .map(|(path, outcome)| match outcome {
-            BriefOutcome::Created => (
-                '✔',
-                format!("created {path} — {}", briefs::purpose(&rel_to(dir, path))),
-            ),
-            BriefOutcome::Skipped => (
-                '·',
-                format!("skipped {path} (exists · --force to overwrite)"),
-            ),
-            BriefOutcome::Failed(e) => ('✖', format!("{path}: {e}")),
-        })
-        .collect();
+    let mut lines = brief_rows(dir, &rows);
     lines.push(gitignore::report(&git.0, &git.1));
     lines.push(project_file::report(&project.0, &project.1));
     let mut text = render(&lines);
@@ -228,6 +227,31 @@ pub fn scripted_run(
         text: format!("{text}\n{next}"),
         code: worst.max(wiring.code),
     }
+}
+
+/// The scripted register's brief rows: joined paths and the receipt
+/// prefixes scripts parse; each newly created brief says what it is for, so
+/// the transcript helps humans review the generated setup.
+fn brief_rows(dir: &str, rows: &[(String, BriefOutcome)]) -> Vec<(char, String)> {
+    rows.iter()
+        .map(|(path, outcome)| match outcome {
+            BriefOutcome::Created => (
+                '✔',
+                format!("created {path} — {}", briefs::purpose(&rel_to(dir, path))),
+            ),
+            BriefOutcome::Skipped => (
+                '·',
+                format!("skipped {path} (exists · --force to overwrite)"),
+            ),
+            BriefOutcome::KeptLink => ('·', format!("skipped {path} ({KEPT_LINK})")),
+            BriefOutcome::KeptAside(note) => ('·', format!("skipped {path} ({note})")),
+            BriefOutcome::KeptWiring(scripts, kept) => {
+                ('·', kept_wiring_line(path, scripts, *kept))
+            }
+            BriefOutcome::Refused(scripts, why) => ('✖', refused_line(path, scripts, *why)),
+            BriefOutcome::Failed(e) => ('✖', format!("{path}: {e}")),
+        })
+        .collect()
 }
 
 /// Resolve the ONE founding source into a scaffold set, speak its
@@ -314,51 +338,284 @@ fn scaffold_report(
 pub(crate) enum BriefOutcome {
     Created,
     Skipped,
+    /// Left as it is: a link to a file inside the project (`CLAUDE.md`
+    /// pointing at `AGENTS.md`), which init never writes through,
+    /// `--force` included.
+    KeptLink,
+    /// Left as it is, never followed or read: at a name init would only
+    /// skip stands a link leading out (or to nothing), a folder leading
+    /// out, or something not a regular file. No write is needed, so
+    /// nothing is refused; the note says which ([`confine::Refusal::kept`]).
+    KeptAside(&'static str),
+    /// An existing hook-wiring file (or a link to one inside the project),
+    /// kept as it is, beside scripts that do not hold what `init` writes for
+    /// them (joined paths): the row says so, since that file's hooks may run
+    /// them.
+    KeptWiring(Vec<String>, Kept),
+    /// A hook-wiring file left unwritten: its hooks would run these scripts
+    /// (joined paths), which do not hold what `init` writes for them.
+    Refused(Vec<String>, Blocker),
+    /// A write that failed or was refused (`crate::confine`); the text is
+    /// the cause and its remedy.
     Failed(String),
 }
 
+/// The note of a [`BriefOutcome::KeptLink`] row, both registers.
+pub(crate) const KEPT_LINK: &str = "a link · init never writes through a link";
+
+/// What a kept hook wiring is: the note of its row differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kept {
+    /// A regular file: `--force` rewrites it.
+    File,
+    /// A link to a file inside the project, never written through.
+    Link,
+    /// Kept aside, never followed (the note of [`BriefOutcome::KeptAside`]).
+    Aside(&'static str),
+}
+
+/// Why a hook script blocks its wiring, worst last: the remedy differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Blocker {
+    /// A regular file with other bytes or without its exec bit: the
+    /// repository's own, or an older init's copy. `--force` rewrites it.
+    Foreign,
+    /// A link, kept: `--force` never writes through it.
+    Link,
+    /// Its own write failed or was refused in this run (its row says why).
+    Unwritten,
+}
+
+/// The report row of an existing hook wiring kept beside scripts init did
+/// not write, shared by both registers (each passes its own path spelling).
+/// Information only: the file is the repository's, and so are the scripts.
+pub(crate) fn kept_wiring_line(wiring: &str, scripts: &[String], kept: Kept) -> String {
+    let them = if scripts.len() == 1 { "it" } else { "them" };
+    let note = match kept {
+        Kept::File => "exists · --force to overwrite",
+        Kept::Link => KEPT_LINK,
+        Kept::Aside(note) => note,
+    };
+    format!(
+        "skipped {wiring} ({note}) · its hooks may run {}, which init did not write: review {them} before trusting it",
+        scripts.join(", ")
+    )
+}
+
+/// The report row of a refused hook wiring, shared by both registers (each
+/// passes its own path spelling). The remedy leads with the step that
+/// touches nothing else; `--force` is named only where it helps, with what
+/// else it rewrites.
+pub(crate) fn refused_line(wiring: &str, scripts: &[String], why: Blocker) -> String {
+    let (them, rows) = if scripts.len() == 1 {
+        ("it", "its own row names")
+    } else {
+        ("them", "their own rows name")
+    };
+    let list = scripts.join(", ");
+    match why {
+        Blocker::Foreign => format!(
+            "refused {wiring} — its hooks would run {list}, which init did not write · remove {them} and run nika init again, or rerun with --force, which rewrites every file init writes, AGENTS.md, CLAUDE.md, .mcp.json and settings included"
+        ),
+        Blocker::Link => format!(
+            "refused {wiring} — its hooks would run {list}, which init did not write (a link, never written through, --force included) · remove {them} and run nika init again"
+        ),
+        Blocker::Unwritten => format!(
+            "refused {wiring} — its hooks would run {list}, which init could not write · fix what {rows}, then run nika init again"
+        ),
+    }
+}
+
 /// Write the briefs per `plan`, honoring the canvas stamp on a CREATED
-/// settings file and producer version in a CREATED session hook. Skipped
-/// files retain their content and provenance.
+/// settings file and the project-copy stamps on CREATED hook scripts.
+/// Skipped files retain their content and provenance.
+///
+/// A hook-wiring file is written last, and only when every script its hooks
+/// run is a regular file holding exactly what `init` writes for it: written
+/// by this run, or already identical. A skipped script with other bytes or
+/// without its exec bit (a repository's own, or an older init's copy)
+/// refuses the wiring instead, so
+/// `init` never points a client at a file it did not write. `--force`
+/// rewrites the scripts first, which makes the wiring safe again; a script
+/// that is a link stays a blocker, since no write goes through a link.
+///
+/// Anything at a target counts as there (a dangling link included), so
+/// nothing is created through a link; every write goes through
+/// `crate::confine`.
 pub(crate) fn apply_briefs(
     dir: &str,
     force: bool,
     canvas: Option<CanvasTheme>,
 ) -> Vec<(String, BriefOutcome)> {
-    let plan = plan(dir, &|p| Path::new(p).exists(), force);
-    let mut rows: Vec<(String, BriefOutcome)> = Vec::new();
-    for action in plan {
-        match action {
-            Action::Skip { path } => rows.push((path, BriefOutcome::Skipped)),
-            Action::Create { path, body } => {
-                let stamped;
-                let body = if path.ends_with("hooks-nika/session-context.sh") {
-                    stamped = body.replacen(
-                        "scaffold_version=\"\"",
-                        concat!("scaffold_version=\"", env!("CARGO_PKG_VERSION"), "\""),
-                        1,
-                    );
-                    stamped.as_str()
-                } else {
-                    body
-                };
-                let themed;
-                let body = match canvas {
-                    Some(c) if path.ends_with(".vscode/settings.json") => {
-                        themed = themed_settings(c);
-                        themed.as_str()
+    let wiring = |path: &str| {
+        hook_copies::HOOK_WIRING
+            .iter()
+            .find(|(rel, _)| join(dir, rel) == path)
+            .map(|(_, scripts)| scripts)
+    };
+    let there = |p: &str| std::fs::symlink_metadata(p).is_ok();
+    let (hooks, rest): (Vec<_>, Vec<_>) = plan(dir, &there, force)
+        .into_iter()
+        .enumerate()
+        .partition(|(_, action)| wiring(action.path()).is_some());
+    let mut rows: Vec<(usize, String, BriefOutcome)> = Vec::new();
+    for (at, action) in rest {
+        let (path, outcome) = apply(dir, action, canvas);
+        rows.push((at, path, outcome));
+    }
+    for (at, action) in hooks {
+        let scripts = wiring(action.path()).map_or(&[][..], |s| &s[..]);
+        let (path, outcome) = match (action, blockers(dir, scripts, &rows)) {
+            // The wiring's own refusal (a link, a folder leading out) comes
+            // first: it names what to fix at that path.
+            (Action::Create { path, .. }, Some((blocked, why))) => {
+                match confine::occupied(Path::new(dir), Path::new(&path)) {
+                    Err(e) => (path, BriefOutcome::Failed(e.to_string())),
+                    // A link inside the project is never written (`--force`
+                    // included), so nothing is refused: it is kept, and named.
+                    Ok(_) if confine::link_inside(Path::new(dir), Path::new(&path)) => {
+                        (path, BriefOutcome::KeptWiring(blocked, Kept::Link))
                     }
-                    _ => body,
-                };
-                let outcome = match write_file(&path, body) {
-                    Ok(()) => BriefOutcome::Created,
-                    Err(e) => BriefOutcome::Failed(e.to_string()),
-                };
-                rows.push((path, outcome));
+                    Ok(_) => (path, BriefOutcome::Refused(blocked, why)),
+                }
             }
+            (action, blocked) => match (apply(dir, action, canvas), blocked) {
+                ((path, BriefOutcome::Skipped), Some((scripts, _))) => {
+                    (path, BriefOutcome::KeptWiring(scripts, Kept::File))
+                }
+                ((path, BriefOutcome::KeptLink), Some((scripts, _))) => {
+                    (path, BriefOutcome::KeptWiring(scripts, Kept::Link))
+                }
+                ((path, BriefOutcome::KeptAside(note)), Some((scripts, _))) => {
+                    (path, BriefOutcome::KeptWiring(scripts, Kept::Aside(note)))
+                }
+                (row, _) => row,
+            },
+        };
+        rows.push((at, path, outcome));
+    }
+    rows.sort_by_key(|(at, ..)| *at);
+    rows.into_iter()
+        .map(|(_, path, outcome)| (path, outcome))
+        .collect()
+}
+
+/// The scripts of one wiring that do not hold what `init` writes for them
+/// (joined paths), with the worst reason, or `None` when every one does.
+/// `rows` are this run's outcomes so far: a script whose own write failed
+/// is named as such.
+fn blockers(
+    dir: &str,
+    scripts: &[&str],
+    rows: &[(usize, String, BriefOutcome)],
+) -> Option<(Vec<String>, Blocker)> {
+    let mut worst = None;
+    let mut blocked = Vec::new();
+    for rel in scripts.iter().filter(|rel| !holds_scaffold(dir, rel)) {
+        let path = join(dir, rel);
+        let failed = rows
+            .iter()
+            .any(|(_, p, o)| *p == path && matches!(o, BriefOutcome::Failed(_)));
+        let why = if failed {
+            Blocker::Unwritten
+        } else if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            Blocker::Link
+        } else {
+            Blocker::Foreign
+        };
+        worst = worst.max(Some(why));
+        blocked.push(path);
+    }
+    worst.map(|why| (blocked, why))
+}
+
+/// Carry out one planned brief.
+fn apply(dir: &str, action: Action, canvas: Option<CanvasTheme>) -> (String, BriefOutcome) {
+    match action {
+        Action::Skip { path } => {
+            let target = Path::new(&path);
+            let outcome = match confine::occupied(Path::new(dir), target) {
+                // Nothing is written at a skipped name: what stands there is
+                // kept, never followed, and the founding goes on.
+                Err(e) => confine::refusal(&e).map_or_else(
+                    || BriefOutcome::Failed(e.to_string()),
+                    |why| BriefOutcome::KeptAside(why.kept()),
+                ),
+                Ok(_)
+                    if std::fs::symlink_metadata(target)
+                        .is_ok_and(|m| m.file_type().is_symlink()) =>
+                {
+                    BriefOutcome::KeptLink
+                }
+                Ok(_) => BriefOutcome::Skipped,
+            };
+            (path, outcome)
+        }
+        // `--force` over a link inside the project: kept, never written
+        // through (the file it leads to is the project's own row).
+        Action::Create { path, .. } if confine::link_inside(Path::new(dir), Path::new(&path)) => {
+            (path, BriefOutcome::KeptLink)
+        }
+        Action::Create { path, body } => {
+            let themed;
+            let stamped = hook_copies::scaffold_body(&path, body);
+            let body = match canvas {
+                Some(c) if path.ends_with(".vscode/settings.json") => {
+                    themed = themed_settings(c);
+                    themed.as_str()
+                }
+                _ => &stamped,
+            };
+            let outcome = match confine::write(Path::new(dir), Path::new(&path), body.as_bytes()) {
+                Ok(()) => BriefOutcome::Created,
+                Err(e) => BriefOutcome::Failed(e.to_string()),
+            };
+            (path, outcome)
         }
     }
-    rows
+}
+
+/// Whether the scaffold target `rel` under `dir` is a regular file inside
+/// the project (not a link, no folder on the way leading out) holding
+/// exactly the bytes `init` writes for it, stamps included, and, for a
+/// shell script, executable as init leaves it (a copy a host cannot start
+/// is not init's). The kind and
+/// the size are read first, so a link, a FIFO or a file of another length
+/// is refused without being opened; the read itself never waits and stops
+/// at that size (`confine::read_text`), so a FIFO swapped in meanwhile is
+/// refused too.
+fn holds_scaffold(dir: &str, rel: &str) -> bool {
+    let Some((_, body)) = briefs::targets().into_iter().find(|(r, _)| *r == rel) else {
+        return false;
+    };
+    let expected = hook_copies::scaffold_body(rel, body);
+    let path = join(dir, rel);
+    let (root, at) = (Path::new(dir), Path::new(&path));
+    let Ok(size) = u64::try_from(expected.len()) else {
+        return false;
+    };
+    confine::plain_file(root, at)
+        && std::fs::symlink_metadata(at).is_ok_and(|m| m.len() == size && runnable(rel, &m))
+        && confine::read_text(root, at, size).is_ok_and(|text| text.as_deref() == Some(&*expected))
+}
+
+/// Whether a scaffold file of that name has the mode init gives it: a
+/// shell script carries its exec bits (init writes `0755`); any other file
+/// passes.
+fn runnable(rel: &str, meta: &std::fs::Metadata) -> bool {
+    let script = Path::new(rel)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("sh"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        !script || meta.permissions().mode() & 0o111 == 0o111
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (script, meta);
+        true
+    }
 }
 
 /// The schema-wiring settings body with `nika.dag.theme` stamped in —
@@ -450,26 +707,9 @@ fn rel_to(dir: &str, path: &str) -> String {
         .map_or_else(|_| path.to_owned(), |p| p.to_string_lossy().into_owned())
 }
 
-/// Create any missing parent dirs, then write the file. Shell scripts
-/// (the scaffolded hooks) get the exec bit on unix — Cursor spawns them
-/// directly; on Windows bash hooks fail open anyway, so nothing to set.
-fn write_file(path: &str, body: &str) -> std::io::Result<()> {
-    if let Some(parent) = Path::new(path).parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, body)?;
-    #[cfg(unix)]
-    if std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("sh"))
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
-    }
-    Ok(())
-}
+#[cfg(test)]
+#[cfg(unix)]
+mod boundary_tests;
 
 #[cfg(test)]
 mod tests {

@@ -19,6 +19,36 @@
 #     non-blocking here: Claude SEES the findings and repairs).
 #
 # Capability-honest: no nika binary means no verdict, never a failure.
+
+# >>> nika-clean-path: every kit hook and helper opens with this same block,
+# before it starts any other program (a test keeps the copies identical).
+# Hosts start hooks in the open project, so a relative PATH entry (".",
+# "bin", "node_modules/.bin", the empty one) names a folder the repository
+# holds. Only the absolute entries are kept, so every program this script
+# starts, nika included, comes from an absolute folder. The host has already
+# started bash through its own PATH before this line runs (see the README).
+nika_path=""
+nika_rest="${PATH:-}"
+while [ -n "$nika_rest" ]; do
+  nika_dir="${nika_rest%%:*}"
+  case "$nika_rest" in
+    *:*) nika_rest="${nika_rest#*:}" ;;
+    *) nika_rest="" ;;
+  esac
+  case "$nika_dir" in
+    /*) nika_path="${nika_path:+$nika_path:}$nika_dir" ;;
+  esac
+done
+PATH="${nika_path:-/usr/bin:/bin}"
+export PATH
+unset nika_path nika_rest nika_dir
+# nika_on_path: the nika this PATH names, when there is one.
+# shellcheck disable=SC2329 # not every script asks for nika
+nika_on_path() {
+  command -v nika
+}
+# <<< nika-clean-path
+
 set -euo pipefail
 
 input="$(cat)"
@@ -71,15 +101,24 @@ esac
 # unset or broken NIKA_BIN and a missing binary fall back to silence, never
 # to a failure.
 NIKA="${NIKA_BIN:-}"
-kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../bin/nika-kit"
-if [ -x "$kit" ]; then
-  # Inside the plugin, every helper asks the one resolver, which applies the
-  # order written above. A copy of this hook that `nika init` wrote into a
-  # project has no resolver beside it and applies the same order itself.
-  NIKA="$("$kit" --path "$(dirname "$file")" 2>/dev/null || true)"
-  [ -n "$NIKA" ] || NIKA="${NIKA_BIN:-nika}"
+# Inside the plugin, every helper asks the one resolver, which sits beside
+# this hook and applies the order written above. `nika init` empties this
+# one line in the copy it writes into a project: there the folder beside the
+# hook belongs to the repository, so a project copy never runs anything from
+# it and applies the same order itself.
+resolver="../bin/nika-kit"
+kit=""
+if [ -n "$resolver" ]; then
+  kit="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$resolver"
+fi
+if [ -n "$kit" ] && [ -x "$kit" ]; then
+  answer="$("$kit" --path "$(dirname "$file")" 2>/dev/null || true)"
+  case "$answer" in
+    /*) NIKA="$answer" ;;
+    *) [ -n "$NIKA" ] || NIKA="$(nika_on_path || true)" ;;
+  esac
 elif [ -z "$NIKA" ]; then
-  NIKA="nika"
+  NIKA="$(nika_on_path || true)"
   case "${CARGO_TARGET_DIR:-}" in
     /*)
       root="$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)"

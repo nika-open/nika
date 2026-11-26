@@ -129,7 +129,9 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 ///
 /// # Errors
 /// An I/O failure creating a fixture directory or writing a fixture
-/// file — the door reports it and refuses to pretend the take is whole.
+/// file, or a refused write (a link at a fixture's name, a folder leading
+/// out of the staging folder: `crate::confine`) — the door reports it and
+/// refuses to pretend the take is whole.
 pub fn materialize(body: &str, dest: &Path) -> std::io::Result<(usize, usize)> {
     let root = dest.parent().unwrap_or_else(|| Path::new(""));
     let mut written = Vec::new();
@@ -176,11 +178,11 @@ fn stage(
             continue;
         };
         let target = base.join(name);
-        if target.exists() {
+        if crate::confine::occupied(fixture_root, &target)? {
             kept += 1;
             continue;
         }
-        std::fs::write(&target, child)?;
+        crate::confine::write(fixture_root, &target, child.as_bytes())?;
         written.push(target.clone());
         kept += stage(child, &target, fixture_root, written)?;
     }
@@ -197,14 +199,11 @@ fn stage(
             continue;
         }
         let target = fixture_root.join("examples").join("fixtures").join(tail);
-        if target.exists() {
+        if crate::confine::occupied(fixture_root, &target)? {
             kept += 1;
             continue;
         }
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&target, bytes)?;
+        crate::confine::write(fixture_root, &target, bytes)?;
         written.push(target);
     }
     Ok(kept)

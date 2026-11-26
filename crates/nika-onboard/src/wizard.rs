@@ -283,8 +283,10 @@ fn ask_project_file(
 }
 
 /// The briefs rows of the write phase — the adds-only report, and
-/// `true` when any write FAILED (the caller folds it into its early
-/// exit). Extracted under the 100-line fn law (ADR-023).
+/// `true` when any write FAILED or was refused (a link, a folder leading
+/// outside the project, a hook wiring whose scripts init did not write):
+/// the caller folds it into its early exit. Extracted under the 100-line
+/// fn law (ADR-023).
 fn report_briefs(
     dir: &str,
     theme: Theme,
@@ -302,6 +304,31 @@ fn report_briefs(
             ),
             BriefOutcome::Skipped => {
                 brief_line(theme, '·', &format!("skipped {rel} (exists · --force)"))
+            }
+            BriefOutcome::KeptLink => brief_line(
+                theme,
+                '·',
+                &format!("skipped {rel} ({})", crate::founding::KEPT_LINK),
+            ),
+            BriefOutcome::KeptAside(note) => {
+                brief_line(theme, '·', &format!("skipped {rel} ({note})"))
+            }
+            BriefOutcome::KeptWiring(scripts, kept) => {
+                let scripts: Vec<String> = scripts.iter().map(|s| relative(dir, s)).collect();
+                brief_line(
+                    theme,
+                    '·',
+                    &crate::founding::kept_wiring_line(&rel, &scripts, *kept),
+                )
+            }
+            BriefOutcome::Refused(scripts, why) => {
+                failed = true;
+                let scripts: Vec<String> = scripts.iter().map(|s| relative(dir, s)).collect();
+                brief_line(
+                    theme,
+                    '✖',
+                    &crate::founding::refused_line(&rel, &scripts, *why),
+                )
             }
             BriefOutcome::Failed(e) => {
                 failed = true;
@@ -736,6 +763,134 @@ mod tests {
                 .contains("client config cannot be written")
         );
         assert!(dir.join("AGENTS.md").exists());
+        std::fs::remove_dir_all(dir).expect("remove owned fixture");
+    }
+
+    /// The wizard door refuses the same wiring as the scripted one: a hook
+    /// script init did not write keeps its client unwired, the rail names
+    /// both files, and no ready panel comes back.
+    #[test]
+    fn a_hook_script_init_did_not_write_refuses_its_wiring_in_the_wizard() {
+        let dir = fresh_dir("hook-refusal");
+        let script = dir.join(".cursor/hooks-nika/check-on-edit.sh");
+        std::fs::create_dir_all(script.parent().expect("hooks folder")).expect("mkdir");
+        std::fs::write(&script, "#!/bin/sh\necho planted\n").expect("planted script");
+        let mut input = std::io::Cursor::new(b"\n\n\n\n\n".to_vec());
+        let mut output = Vec::new();
+        let result = wizard_io(
+            dir.to_str().expect("path"),
+            false,
+            PLAIN,
+            &mut input,
+            &mut output,
+            &stub_audit,
+            &stub_wire,
+        );
+        assert_eq!(result.code, codes::ENV, "{}", result.text);
+        let shown = String::from_utf8(output).expect("utf8");
+        assert!(
+            shown.contains(
+                "refused .cursor/hooks.json — its hooks would run .cursor/hooks-nika/check-on-edit.sh, which init did not write · remove it and run nika init again, or rerun with --force"
+            ),
+            "{shown}"
+        );
+        assert!(!dir.join(".cursor/hooks.json").exists());
+        assert!(dir.join(".claude/settings.json").is_file());
+        std::fs::remove_dir_all(dir).expect("remove owned fixture");
+    }
+
+    /// The wizard door writes through `confine` like the scripted one: a
+    /// dangling settings link aimed outside the project is refused with its
+    /// row and exit 3, and nothing is made where it leads.
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_link_leading_out_is_refused_in_the_wizard() {
+        let dir = fresh_dir("link-out");
+        let outside = fresh_dir("link-out-away");
+        std::fs::create_dir_all(dir.join(".claude")).expect("mkdir");
+        std::os::unix::fs::symlink(
+            outside.join("settings.json"),
+            dir.join(".claude/settings.json"),
+        )
+        .expect("link");
+        let mut input = std::io::Cursor::new(b"\n\n\n\n\n".to_vec());
+        let mut output = Vec::new();
+        let result = wizard_io(
+            dir.to_str().expect("path"),
+            true,
+            PLAIN,
+            &mut input,
+            &mut output,
+            &stub_audit,
+            &stub_wire,
+        );
+        assert_eq!(result.code, codes::ENV, "{}", result.text);
+        let shown = String::from_utf8(output).expect("utf8");
+        assert!(
+            shown.contains(
+                ".claude/settings.json: a link — init never writes through a link, --force included · remove the link, then run nika init again"
+            ),
+            "{shown}"
+        );
+        assert!(!outside.join("settings.json").exists(), "{shown}");
+        assert!(dir.join(".cursor/hooks.json").is_file(), "{shown}");
+        std::fs::remove_dir_all(dir).expect("remove owned fixture");
+        std::fs::remove_dir_all(outside).expect("remove owned fixture");
+    }
+
+    /// Links inside the project are kept on the wizard door too: a linked
+    /// settings file beside a script init did not write gets the warned
+    /// row, and a linked `.gitignore` without the entry says what to add,
+    /// exit 0, both files they reach unchanged.
+    #[cfg(unix)]
+    #[test]
+    fn links_inside_the_project_are_kept_with_their_rows_in_the_wizard() {
+        let dir = fresh_dir("link-in");
+        std::fs::create_dir_all(dir.join("config")).expect("mkdir");
+        std::fs::create_dir_all(dir.join(".claude/hooks-nika")).expect("mkdir");
+        std::fs::write(dir.join("config/settings.json"), "{}\n").expect("theirs");
+        std::fs::write(dir.join("config/ignore"), "target/\n").expect("theirs");
+        std::os::unix::fs::symlink("../config/settings.json", dir.join(".claude/settings.json"))
+            .expect("link");
+        std::os::unix::fs::symlink("config/ignore", dir.join(".gitignore")).expect("link");
+        std::fs::write(
+            dir.join(".claude/hooks-nika/guard-run.sh"),
+            "#!/bin/sh\necho theirs\n",
+        )
+        .expect("their script");
+        let mut input = std::io::Cursor::new(b"\n\n\n\n\n".to_vec());
+        let mut output = Vec::new();
+        let result = wizard_io(
+            dir.to_str().expect("path"),
+            false,
+            PLAIN,
+            &mut input,
+            &mut output,
+            &stub_audit,
+            &stub_wire,
+        );
+        assert_eq!(result.code, codes::OK, "{}", result.text);
+        let shown = String::from_utf8(output).expect("utf8");
+        assert!(
+            shown.contains(
+                "skipped .claude/settings.json (a link · init never writes through a link) · its hooks may run .claude/hooks-nika/guard-run.sh, which init did not write: review it before trusting it"
+            ),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(
+                "skipped .gitignore (a link · init never writes through a link, and git does not read a .gitignore that is a link) · replace it with a regular file holding .nika/traces/, .nika/serve.token and .nika/serve/"
+            ),
+            "{shown}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config/settings.json")).expect("kept"),
+            "{}\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config/ignore")).expect("kept"),
+            "target/\n"
+        );
         std::fs::remove_dir_all(dir).expect("remove owned fixture");
     }
 

@@ -120,7 +120,10 @@ pub(crate) fn scaffold(
         .iter()
         .map(|(tpl, rel, id)| {
             let dest = Path::new(dir).join(rel).to_string_lossy().into_owned();
-            (dest.clone(), scaffold_one(tpl, &dest, id, model, force))
+            (
+                dest.clone(),
+                scaffold_one(dir, tpl, &dest, id, model, force),
+            )
         })
         .collect();
     if !r.workflows.is_empty() {
@@ -128,17 +131,25 @@ pub(crate) fn scaffold(
             .join("workflows/README.md")
             .to_string_lossy()
             .into_owned();
-        let status = if Path::new(&dest).exists() && !force {
-            ScaffoldStatus::Skipped
-        } else {
-            match std::fs::write(&dest, readme(r)) {
-                Ok(()) => ScaffoldStatus::Created,
-                Err(e) => ScaffoldStatus::Failed(e.to_string()),
-            }
-        };
+        let status = lay(dir, &dest, force, || readme(r));
         out.push((dest, status));
     }
     out
+}
+
+/// Write one scaffold file inside the project (`crate::confine`), unless
+/// it is there and `force` is off. A link or a folder leading outside is a
+/// refusal, carried like a write failure.
+fn lay(dir: &str, dest: &str, force: bool, body: impl FnOnce() -> String) -> ScaffoldStatus {
+    let (root, target) = (Path::new(dir), Path::new(dest));
+    match crate::confine::occupied(root, target) {
+        Err(e) => ScaffoldStatus::Failed(e.to_string()),
+        Ok(true) if !force => ScaffoldStatus::Skipped,
+        Ok(_) => match crate::confine::write(root, target, body().as_bytes()) {
+            Ok(()) => ScaffoldStatus::Created,
+            Err(e) => ScaffoldStatus::Failed(e.to_string()),
+        },
+    }
 }
 
 /// The curriculum index — GENERATED from the recipe table + each
@@ -185,18 +196,7 @@ pub(crate) fn scaffold_example(
             )),
         )];
     };
-    let status = if Path::new(&dest).exists() && !force {
-        ScaffoldStatus::Skipped
-    } else if let Some(parent) = Path::new(&dest).parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        ScaffoldStatus::Failed(e.to_string())
-    } else {
-        match std::fs::write(&dest, body) {
-            Ok(()) => ScaffoldStatus::Created,
-            Err(e) => ScaffoldStatus::Failed(e.to_string()),
-        }
-    };
+    let status = lay(dir, &dest, force, || body.to_owned());
     // The lesson's companions, as `nika try` stages them: the fixtures its
     // runs read from the project root, the children it invokes beside it.
     // Adds only — a file already there is never overwritten.
@@ -223,18 +223,12 @@ pub(crate) fn scaffold_example(
         .join("workflows/README.md")
         .to_string_lossy()
         .into_owned();
-    let readme_status = if Path::new(&readme_dest).exists() && !force {
-        ScaffoldStatus::Skipped
-    } else {
+    let readme_status = lay(dir, &readme_dest, force, || {
         let tag = crate::bootstrap::tagline(clean, body);
-        let text = format!(
+        format!(
             "# workflows — founded from an example\n\n> Scaffolded by `nika init` (generated — regenerate by re-running\n> `nika init --example {clean}` with `--force`).\n\n## {base}.nika\n\n{tag}\n\n```sh\nnika check {rel}\nnika run {rel} --model mock/echo   # simulated envelope inference; tools and effects remain real\n```\n\nEvery finding teaches: `nika explain NIKA-XXXX`. The full contract\nlives in `AGENTS.md` at the repo root.\n"
-        );
-        match std::fs::write(&readme_dest, text) {
-            Ok(()) => ScaffoldStatus::Created,
-            Err(e) => ScaffoldStatus::Failed(e.to_string()),
-        }
-    };
+        )
+    });
     out.push((readme_dest, readme_status));
     out
 }
@@ -248,6 +242,7 @@ pub(crate) enum ScaffoldStatus {
 }
 
 fn scaffold_one(
+    dir: &str,
     tpl: &str,
     dest: &str,
     id: &str,
@@ -259,27 +254,17 @@ fn scaffold_one(
         // bug — surfaced honestly, pinned by the own-corpus test below.
         return ScaffoldStatus::Failed(format!("unknown template `{tpl}`"));
     };
-    if Path::new(dest).exists() && !force {
-        return ScaffoldStatus::Skipped;
-    }
-    let stamp_model = model.filter(|_| bootstrap::template_takes_model(body));
-    let mut stamped = bootstrap::stamp(body, id, stamp_model);
-    // A recipe file lives under `workflows/` and runs from the REPO root
-    // — the skeleton's repo-root README default would miss in a freshly
-    // founded (empty) directory, so the scaffold points it at the index
-    // THIS scaffold writes: the curriculum's first run summarizes its
-    // own curriculum, green in any directory `init` just founded.
-    stamped = stamped.replace("\"./README.md\"", "\"./workflows/README.md\"");
-    if let Some(parent) = Path::new(dest).parent()
-        && !parent.as_os_str().is_empty()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        return ScaffoldStatus::Failed(e.to_string());
-    }
-    match std::fs::write(dest, stamped) {
-        Ok(()) => ScaffoldStatus::Created,
-        Err(e) => ScaffoldStatus::Failed(e.to_string()),
-    }
+    lay(dir, dest, force, || {
+        let stamp_model = model.filter(|_| bootstrap::template_takes_model(body));
+        // A recipe file lives under `workflows/` and runs from the REPO
+        // root — the skeleton's repo-root README default would miss in a
+        // freshly founded (empty) directory, so the scaffold points it at
+        // the index THIS scaffold writes: the curriculum's first run
+        // summarizes its own curriculum, green in any directory `init`
+        // just founded.
+        bootstrap::stamp(body, id, stamp_model)
+            .replace("\"./README.md\"", "\"./workflows/README.md\"")
+    })
 }
 
 #[cfg(test)]

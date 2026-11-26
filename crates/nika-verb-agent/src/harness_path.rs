@@ -170,14 +170,13 @@ pub(crate) async fn run_on_harness(
                 }
             }
             Some(Ok(HarnessEvent::TurnEnded { outcome, follow_up })) => {
-                let ended = turn_output(*outcome, &input, typed).map_err(|e| repair.refused(e))?;
+                let ended = turn_output(*outcome, &input, typed, &repair)?;
                 if let Some(output) = repair.ended(ended, follow_up, observer)? {
                     return Ok(HarnessRun::new(output, received, reported_only));
                 }
             }
             Some(Ok(HarnessEvent::Completed { outcome })) => {
-                let turn = turn_output(*outcome, &input, typed).map_err(|e| repair.refused(e))?;
-                let output = repair.completed(turn)?;
+                let output = repair.completed(turn_output(*outcome, &input, typed, &repair)?)?;
                 return Ok(HarnessRun::new(output, received, reported_only));
             }
             Some(Ok(_)) => {
@@ -406,14 +405,16 @@ fn gate_label(facts: &HarnessAskFacts) -> String {
 }
 
 /// A turn's outcome → its output. Under a declaration the selection is exact: a model or an
-/// effort the agent moved after it was applied refuses.
+/// effort the agent moved after it was applied refuses; on a repair turn that refusal keeps the
+/// first turn's message ([`crate::harness_repair::SchemaRepair::refused`]).
 fn turn_output(
     outcome: nika_kernel::ai::harness::HarnessOutcome,
     input: &AgentInput,
     typed: bool,
+    repair: &crate::harness_repair::SchemaRepair<'_>,
 ) -> Result<AgentOutput, VerbAgentError> {
     if typed && let Some(refusal) = outcome.selection.moved_refusal() {
-        return Err(harness_err(refusal, typed));
+        return Err(repair.refused(harness_err(refusal, typed)));
     }
     Ok(completed_output(outcome, input))
 }

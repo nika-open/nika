@@ -49,11 +49,16 @@ every such task as a `[harness]` hint (`nika explain harness`).
   session, and your answer decides its first ask outside the grants, once for
   the task: an attempt that `retry:` replays never reuses it, so an ask outside
   the grants there pauses again.
-- An answer of `false` refuses the request with the harness's own one-time
-  refusal ("reject once"), never "reject always": the agent hears no and can go
-  on without the action. A harness that offers no one-time refusal is answered
-  `cancelled`, the protocol's word for calling the turn off, so the turn may end
-  there and fail `NIKA-INFER-001`.
+- An answer of `false` refuses the request: Nika selects the harness's own
+  one-time refusal ("reject once"), the first one it offers, never "reject
+  always". What happens next is the harness's: some refusal options let the
+  agent go on without the action, others end the turn, which then fails
+  `NIKA-INFER-001`. In the codex-acp 1.13.1 source, as read, a command's
+  default options put "No, continue without running it" before "No, and tell
+  Codex what to do differently", which interrupts the turn, and a file change or
+  a command that asks for more permissions offers only the second. A harness
+  that offers no one-time refusal is answered `cancelled`, the protocol's word
+  for calling the turn off, so the turn may end there too.
 - Paths are judged in your project's terms (`./out/**` matches the absolute path
   the harness names) and where the operating system will land: each path is
   walked from the root, component by component, through every symlink (a

@@ -224,12 +224,16 @@ or `current_mode_update` away from the held mode ends the session. The table is
   the runtime never hands it to an attempt `retry:` replays, whose ask pauses ·
   `permit_checked escalate`, journaled before the `workflow_paused` frame although
   the paused task never settles; the human gate is never answered by the engine;
-- a bound answer `false` refuses its ask → the harness's `reject_once` when it
-  offers one, so the agent goes on without the action (`reject_always` NEVER), else
-  `cancelled`, the protocol's word for a client calling the turn off, so the turn
-  may end `cancelled` and fail `NIKA-INFER-001` · `permit_checked deny`. The rule
-  is the conversation path's (`nika_harness::conversation::answer`). An ask left
-  unanswered (the pause, a session torn down) hears `cancelled` whatever it offers;
+- a bound answer `false` refuses its ask → the first `reject_once` the harness
+  offers, in its order (`reject_always` NEVER), else `cancelled`, the protocol's
+  word for a client calling the turn off · `permit_checked deny`. What follows is
+  the harness's: a `reject_once` may let the agent go on without the action or end
+  the turn (codex-acp 1.13.1, as read: a command's default `decline` comes before
+  `cancel`, which interrupts the turn, and a file change or a command asking for
+  more permissions offers only `cancel`); a turn that ends `cancelled` fails
+  `NIKA-INFER-001`. The rule is the conversation path's
+  (`nika_harness::conversation::answer`). An ask left unanswered (the pause, a
+  session torn down) hears `cancelled` whatever it offers;
 - the paths an ask names are anchored on the session root (root-relative inside
   it, the vocabulary `permits.fs` is authored in; absolute outside it), and each
   path's physical identity is judged too (`nika_harness::client::anchor`): the raw
@@ -362,10 +366,11 @@ beside the one-shot profile, which is unchanged.
 - **Permissions.** Nika answers every `session/request_permission` itself: `allow_once` only when
   the call names one of the offered tools on Nika's server (`mcp__<server>__<tool>`, read from
   `_meta.claudeCode.toolName` or the call's `name`, the server Claude Code names beside it
-  agreeing); anything else is rejected with `reject_once`, so the agent goes on without it
-  (`cancelled` when no such option is offered). `allow_always` and remembered rejections are
-  never chosen. Each decision is a turn beat and lands in the turn record (`allowed` count,
-  `denied` tool names, plain words only).
+  agreeing); anything else is rejected with the first `reject_once` offered, after which the
+  agent goes on without it or the harness ends the turn, as that option does (`cancelled` when
+  no such option is offered). `allow_always` and remembered rejections are never chosen. Each
+  decision is a turn beat and lands in the turn record (`allowed` count, `denied` tool names,
+  plain words only).
 - **Turns and Stop.** A turn's beats are its answer and thought text, its tool frames (now
   expected activity) and the permission decisions, ending with its record: the closed end
   (`end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`, `other`), the Stops

@@ -446,7 +446,7 @@ const CURSOR_HOOKS_JSON: &str = r#"{
       { "command": "./.cursor/hooks-nika/check-on-edit.sh" }
     ],
     "beforeShellExecution": [
-      { "command": "./.cursor/hooks-nika/guard-run.sh" }
+      { "command": "./.cursor/hooks-nika/guard-run.sh", "timeout": 30 }
     ]
   }
 }
@@ -460,7 +460,7 @@ const CLAUDE_SETTINGS_JSON: &str = r#"{
       { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/session-context.sh" }
     ] }],
     "PreToolUse": [{ "matcher": "Bash", "hooks": [
-      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh" }
+      { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/guard-run.sh", "timeout": 30 }
     ] }],
     "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit", "hooks": [
       { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks-nika/check-on-edit.sh" }
@@ -1236,6 +1236,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A host that times a hook out lets the command through, so both
+    /// wirings give the guard hook a timeout above the deadline the hook
+    /// holds its judge to, read from the script itself: Claude Code's and
+    /// Cursor's (`timeout`, in seconds, for each).
+    #[test]
+    fn the_guard_hook_timeout_is_above_its_judge_deadline() {
+        let deadline: u64 = HOOK_GUARD_RUN
+            .lines()
+            .find_map(|line| line.strip_prefix("deadline="))
+            .expect("the hook's deadline line")
+            .parse()
+            .expect("a whole number of seconds");
+        let guard_of = |hooks: Vec<&serde_json::Value>| -> u64 {
+            let guard: Vec<&&serde_json::Value> = hooks
+                .iter()
+                .filter(|hook| {
+                    hook["command"]
+                        .as_str()
+                        .is_some_and(|c| c.ends_with("/guard-run.sh"))
+                })
+                .collect();
+            assert_eq!(guard.len(), 1, "{hooks:?}");
+            guard[0]["timeout"].as_u64().expect("a timeout in seconds")
+        };
+        let settings: serde_json::Value =
+            serde_json::from_str(CLAUDE_SETTINGS_JSON).expect("settings JSON");
+        let claude = guard_of(
+            settings["hooks"]["PreToolUse"]
+                .as_array()
+                .expect("PreToolUse")
+                .iter()
+                .flat_map(|entry| entry["hooks"].as_array().expect("commands"))
+                .collect(),
+        );
+        let wiring: serde_json::Value =
+            serde_json::from_str(CURSOR_HOOKS_JSON).expect("hooks.json parses");
+        let cursor = guard_of(
+            wiring["hooks"]["beforeShellExecution"]
+                .as_array()
+                .expect("beforeShellExecution")
+                .iter()
+                .collect(),
+        );
+        for timeout in [claude, cursor] {
+            assert!(
+                timeout > deadline,
+                "timeout {timeout} s, deadline {deadline} s"
+            );
+        }
+        assert_eq!((deadline, claude, cursor), (20, 30, 30));
     }
 
     #[test]

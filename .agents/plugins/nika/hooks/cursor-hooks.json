@@ -12,7 +12,8 @@
     ],
     "beforeShellExecution": [
       {
-        "command": "./scripts/guard-run.sh"
+        "command": "./scripts/guard-run.sh",
+        "timeout": 30
       }
     ]
   }

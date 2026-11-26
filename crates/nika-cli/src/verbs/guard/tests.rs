@@ -1223,14 +1223,15 @@ fn run_shim(dir: &Path, payload: &str, extra_env: &[(&str, &str)]) -> (String, S
     )
 }
 
-/// A stub `nika` on PATH: captures its stdin, parrots `STUB_OUT`,
-/// exits `STUB_RC` — the shim's plumbing is tested against the real
-/// bytes without needing the compiled binary in a --lib test.
+/// A stub `nika` on PATH: captures its stdin, parrots `STUB_OUT` on one
+/// line that ends, as `nika guard` prints it (the hook refuses an answer
+/// cut short), exits `STUB_RC` — the shim's plumbing is tested against
+/// the real bytes without needing the compiled binary in a --lib test.
 fn stub_nika(dir: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt as _;
     let bin = dir.join("bin");
     std::fs::create_dir(&bin).expect("bin dir");
-    let stub = "#!/usr/bin/env bash\ncat > \"$CAPTURE\"\nprintf '%s' \"$STUB_OUT\"\nexit \"${STUB_RC:-0}\"\n";
+    let stub = "#!/usr/bin/env bash\ncat > \"$CAPTURE\"\nprintf '%s\\n' \"$STUB_OUT\"\nexit \"${STUB_RC:-0}\"\n";
     let path = bin.join("nika");
     std::fs::write(&path, stub).expect("stub written");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))

@@ -61,7 +61,7 @@ mkdir -p "$home/.nika" "$home/work" "$scratch/outside" "$scratch/bin" \
   "$scratch/project/deep/er" "$scratch/store/.nika" "$scratch/store/sub"
 : >"$scratch/project/nika.yaml"
 # A judge that answers « no opinion », to bring the binary back.
-printf '%s\n' '#!/bin/sh' '/bin/cat >/dev/null' "printf '{}'" >"$scratch/bin/nika"
+printf '%s\n' '#!/bin/sh' '/bin/cat >/dev/null' "printf '{}\\n'" >"$scratch/bin/nika"
 chmod +x "$scratch/bin/nika"
 
 # shim <dir> <payload> [NAME=value …] — run the shim from <dir>; sets rc out err.

@@ -133,16 +133,106 @@ broken() {
   refuse "nika guard failed ($1): the nika binary on PATH did not give a verdict, so the hook refuses every shell command until it does. Check it with nika doctor or reinstall it (brew install nika-open/tap/nika, other paths: nika.sh), then retry."
 }
 
+# The judge answers within a deadline, or the command is refused. A host
+# that times a hook out lets the action through, so a judge that never
+# answers (a workflow path that blocks when read, a hung binary) would
+# hand the command over unjudged. Past the deadline the hook ends the judge
+# and every process it started (its own process group), then refuses. The
+# deadline is fixed here, not read from a variable, which a project's
+# settings could raise. Every wiring of this hook gives it a 30 s timeout,
+# above the deadline, and a test holds each one there: the Claude Code one
+# (the kit's hooks/claude-hooks.json, which the Codex plugin also names,
+# and the .claude/settings.json nika init writes) and the Cursor one (the
+# kit's hooks/cursor-hooks.json and the .cursor/hooks.json nika init
+# writes; Cursor reads `timeout` in seconds). No `timeout` binary (macOS
+# ships none) and nothing newer than bash 3.2 (macOS /bin/bash).
+deadline=20
+# The folder named in a refusal, printable characters only and bounded.
+tmp_shown="${TMPDIR:-/tmp}"
+tmp_shown="${tmp_shown//[^[:print:]]/?}"
+tmp_shown="${tmp_shown:0:200}"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/nika-guard.XXXXXX" 2>/dev/null)" \
+  || refuse "the hook could not make a temporary folder for the judge's answer, so it cannot hold nika guard to its deadline: it refuses every shell command until it can. Check that $tmp_shown is writable, then retry."
+# However the hook ends, the judge's group and the watcher end with it: a
+# host that stops the hook (a signal to its process group) would otherwise
+# leave the judge running in the group of its own it was given below.
+# From here on every end but the verdict's own exit 0 is the blocking exit
+# 2: the trap keeps the status the hook ended with and turns any other one
+# into 2 (an unforeseen failure exits 1, which every host reads as a
+# non-blocking error). A signal that would end the hook is caught and ends
+# it with 2 as well: bash 3.2 runs the EXIT trap of a shell an uncaught
+# signal ends with a status of 0, then dies of the signal (128 + its
+# number, again a non-blocking error).
+judge=""
+watch=""
+# shellcheck disable=SC2329 # run by the EXIT trap below
+finish() {
+  st=$?
+  [ -z "$judge" ] || kill -KILL -- "-$judge" 2>/dev/null || kill -KILL "$judge" 2>/dev/null
+  [ -z "$watch" ] || kill -TERM "$watch" 2>/dev/null
+  rm -rf "$scratch"
+  [ "$st" -eq 0 ] || exit 2
+}
+trap finish EXIT
+trap 'exit 2' HUP INT TERM PIPE ALRM USR1 USR2
+
 # Stdin goes directly to the engine's bounded reader, never into an
 # unbounded shell variable. 0/2 carry a judged verdict; 3 is unavailable.
-out="$(nika guard --stdin 2>/dev/null)" && rc=0 || rc=$?
+# Job control gives the judge a process group of its own, so the deadline
+# ends everything it started, and `<&0` hands it the hook's stdin (a
+# background job otherwise reads /dev/null). bash sets that group from both
+# sides of the fork; on macOS the child's call can fail under load while the
+# parent's holds, and bash then prints a diagnostic of its own. The hook's
+# stderr carries only refusals, so it points at /dev/null for the fork.
+exec 3>&2 2>/dev/null
+set -m
+nika guard --stdin <&0 >"$scratch/verdict" 2>/dev/null 3>&- &
+judge=$!
+set +m
+exec 2>&3 3>&-
+(
+  nap=""
+  trap '[ -z "$nap" ] || kill "$nap" 2>/dev/null; exit 0' TERM
+  sleep "$deadline" &
+  nap=$!
+  wait "$nap"
+  : >"$scratch/expired"
+  kill -KILL -- "-$judge" 2>/dev/null || kill -KILL "$judge" 2>/dev/null
+) >/dev/null 2>&1 &
+watch=$!
+wait "$judge" 2>/dev/null && rc=0 || rc=$?
+kill -TERM "$watch" 2>/dev/null
+wait "$watch" 2>/dev/null
+watch=""
+# Whatever the judge left in its group ends with it.
+kill -KILL -- "-$judge" 2>/dev/null || kill -KILL "$judge" 2>/dev/null
+judge=""
+if [ -e "$scratch/expired" ]; then
+  refuse "nika guard did not answer within $deadline s, so the hook refuses this command rather than let it run unjudged. Check what the command names (a workflow path that is not a regular file blocks a reader; a very large workflow can take longer than $deadline s to judge) and the binary with nika doctor, then retry."
+fi
 case "$rc" in
   0 | 2 | 3) ;;
   *) broken "exit $rc" ;;
 esac
-if [ -z "$out" ]; then
+# The answer is read only when it is no larger than an answer can be: a
+# deny reason is capped at 2000 bytes, and 16 KiB leaves room for the JSON
+# escapes around it.
+size="$(wc -c <"$scratch/verdict" 2>/dev/null)"
+size="${size//[!0-9]/}"
+if [ -z "$size" ] || [ "$size" -eq 0 ]; then
   broken "exit $rc, no output"
 fi
+if [ "$size" -gt 16384 ]; then
+  broken "exit $rc, an answer longer than any verdict"
+fi
+raw="$(
+  head -c 16384 "$scratch/verdict"
+  printf x
+)"
+raw="${raw%x}"
+nl='
+'
+out="${raw%"$nl"}"
 if [ "$rc" -eq 3 ]; then
   # An unreadable/truncated payload cannot establish the host dialect.
   # Preserve the engine's explanation, but block via the shared protocol.
@@ -150,6 +240,56 @@ if [ "$rc" -eq 3 ]; then
   printf '%s\n' "$out" >&2
   refuse "nika guard could not judge this command (exit 3); the reason above is the cause. The nika binary is on PATH and answered, so restoring it changes nothing: make what the reason names visible on the command line (for example a command or workflow path written out, not held in a variable), then retry."
 fi
+
+# A verdict is one line written whole: the JSON object nika guard prints
+# and the end of line after it. A host reads the answer as JSON, and one
+# that cannot (Claude Code, on exit 0) takes it as plain text and lets the
+# command through, so an answer cut short (a judge that died writing it),
+# a second line or text around the object is no verdict.
+if [ "$out" = "$raw" ]; then
+  broken "exit $rc, an answer cut short (its line does not end)"
+fi
+case "$out" in
+  *"$nl"*) broken "exit $rc, an answer of more than one line" ;;
+esac
+# awk reads the object (POSIX awk; bash 3.2 matches a pattern against a
+# long answer far too slowly): with each escape set aside, every string
+# must close, and every member must hold a string or an object, the only
+# values nika guard writes. On exit 2 the judge denied, so the answer must
+# deny: a member "permission" or "permissionDecision" whose value is
+# "deny", the deny of either dialect. This is not a JSON parser: it checks
+# that shape and nothing more.
+# shellcheck disable=SC2016 # an awk program, not shell text
+verdict_awk='{
+  t = $0
+  gsub(/\\./, "", t)
+  shape = ""
+  while (match(t, /"[^"]*"/)) {
+    between = substr(t, 1, RSTART - 1)
+    if (between ~ /[^{}:,]/) exit 1
+    word = substr(t, RSTART + 1, RLENGTH - 2)
+    if (word == "deny") letter = "d"
+    else if (word == "permission" || word == "permissionDecision") letter = "p"
+    else letter = "s"
+    shape = shape between letter
+    t = substr(t, RSTART + RLENGTH)
+  }
+  if (t ~ /[^{}:,]/) exit 1
+  shape = shape t
+  folded = shape
+  while (gsub(/[{]([spd]:[spdo](,[spd]:[spdo])*)?[}]/, "o", folded) > 0) {
+  }
+  if (folded != "o") exit 1
+  if (code == 2 && shape !~ /[{,]p:d[,}]/) exit 2
+}'
+shape_rc=0
+printf '%s\n' "$out" | awk -v code="$rc" "$verdict_awk" 2>/dev/null || shape_rc=$?
+case "$shape_rc" in
+  0) ;;
+  1) broken "exit $rc, an answer that is not a verdict" ;;
+  2) broken "exit 2, an answer that does not deny" ;;
+  *) refuse "the hook could not read nika guard's answer (awk exit $shape_rc), so it refuses every shell command until it can: it reads the answer with awk, which the PATH must hold." ;;
+esac
 
 printf '%s\n' "$out"
 exit 0

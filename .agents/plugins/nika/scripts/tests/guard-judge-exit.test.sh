@@ -142,10 +142,16 @@ $deny" unavailable
   done
 done
 
-# Under Cursor, on either payload: Cursor's own deny is the answer, with
-# exit 0, whatever exit the judge gave; a deny in Claude Code's dialect, or
-# a Cursor deny that is not one flat object, is still blocked by exit 2;
-# an allow is passed on, and a deny cut short is no verdict.
+# Under Cursor, on either payload: Cursor's own deny, exactly as nika guard
+# writes it (in any key order, its messages holding escapes), is the
+# answer, with exit 0, whatever exit the judge gave. Any other deny is
+# still blocked by exit 2: one in Claude Code's dialect, one that is not a
+# flat object, one with "permission" twice (a parser keeping the last key
+# reads the second), a message key twice, a key written with an escape, or
+# a key nika guard never writes. A word that held an escape is never
+# "deny", so on the judge's exit 2 such an answer denies nothing and is
+# refused. An allow is passed on, and a deny cut short is no verdict.
+engine_deny='{"agent_message":"say \"x\"\nthen re-check","permission":"deny","user_message":"blocked — repair it"}'
 cursor_version=2.1.0
 for payload in '{"command":"nika run fixture.nika","cwd":"/tmp"}' \
   '{"hook_event_name":"beforeShellExecution","command":"nika run fixture.nika","cwd":"/tmp"}'; do
@@ -155,7 +161,16 @@ for payload in '{"command":"nika run fixture.nika","cwd":"/tmp"}' \
     judge cursor "$code" "$payload" '{"permission":"deny","extra":{"permission":"allow"}}' denied
     judge cursor "$code" "$payload" '{"outer":{"permission":"deny"}}' denied
     judge cursor "$code" "$payload" "$cursor_deny" unavailable cut
+    judge cursor "$code" "$payload" "$engine_deny" "$engine_deny"
+    judge cursor "$code" "$payload" '{"permission":"deny","permission":"allow"}' denied
+    judge cursor "$code" "$payload" '{"permission":"allow","permission":"deny"}' denied
+    judge cursor "$code" "$payload" '{"permission":"deny","agent_message":"a","agent_message":"b"}' denied
+    judge cursor "$code" "$payload" '{"permission":"deny","permissio\u006e":"allow"}' denied
+    judge cursor "$code" "$payload" '{"permission":"deny","continue":"true"}' denied
   done
+  judge cursor 2 "$payload" '{"permission":"de\\ny"}' unavailable
+  judge cursor 2 "$payload" '{"permission":"de\u006ey"}' unavailable
+  judge claude 2 "$payload" '{"hookSpecificOutput":{"permissionDecision":"de\\ny"}}' unavailable
   judge cursor 0 "$payload" '{"permission":"allow"}' '{"permission":"allow"}'
   judge cursor 0 "$payload" '{}' '{}'
 done

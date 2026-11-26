@@ -370,26 +370,33 @@ case "$out" in
   *"$nl"*) broken "exit $rc, an answer of more than one line" ;;
 esac
 # awk reads the object (POSIX awk; bash 3.2 matches a pattern against a
-# long answer far too slowly): with each escape set aside, every string
-# must close, and every member must hold a string or an object, the only
-# values nika guard writes. On exit 2 the judge denied, so the answer must
-# deny: a member "permission" (Cursor's) or "permissionDecision" (Claude
-# Code's and Codex's) whose value is "deny" (awk exit 2 when it does not).
-# An answer that denies, on any exit, is awk's exit 3, or 4 when it is
-# Cursor's own deny: one flat object whose "permission" is "deny". This is
-# not a JSON parser: it checks that shape and nothing more.
+# long answer far too slowly): every string must close, and every member
+# must hold a string or an object, the only values nika guard writes. Each
+# escape becomes one "~", so a string that held one is an ordinary string,
+# never "deny", "allow" or a key the hook reads. On exit 2 the judge
+# denied, so the answer must deny: a member "permission" (Cursor's) or
+# "permissionDecision" (Claude Code's and Codex's) whose value is "deny"
+# (awk exit 2 when it does not). An answer that denies, on any exit, is
+# awk's exit 3, or 4 only when it is exactly Cursor's own deny as nika
+# guard writes it: one flat object holding "permission" once, with "deny",
+# beside at most one "agent_message" and one "user_message", and no other
+# key. When in doubt, a deny is exit 3, which blocks. This is not a JSON
+# parser: it checks that shape and nothing more.
 # shellcheck disable=SC2016 # an awk program, not shell text
 verdict_awk='{
   t = $0
-  gsub(/\\./, "", t)
+  gsub(/\\./, "~", t)
   shape = ""
   while (match(t, /"[^"]*"/)) {
     between = substr(t, 1, RSTART - 1)
     if (between ~ /[^{}:,]/) exit 1
     word = substr(t, RSTART + 1, RLENGTH - 2)
-    if (word == "deny") letter = "d"
+    if (index(word, "~") > 0) letter = "s"
+    else if (word == "deny") letter = "d"
     else if (word == "permission") letter = "c"
     else if (word == "permissionDecision") letter = "p"
+    else if (word == "agent_message") letter = "a"
+    else if (word == "user_message") letter = "u"
     else letter = "s"
     shape = shape between letter
     t = substr(t, RSTART + RLENGTH)
@@ -397,13 +404,21 @@ verdict_awk='{
   if (t ~ /[^{}:,]/) exit 1
   shape = shape t
   folded = shape
-  while (gsub(/[{]([spdc]:[spdco](,[spdc]:[spdco])*)?[}]/, "o", folded) > 0) {
+  while (gsub(/[{]([spdcau]:[spdcauo](,[spdcau]:[spdcauo])*)?[}]/, "o", folded) > 0) {
   }
   if (folded != "o") exit 1
   denies = shape ~ /[{,][pc]:d[,}]/
   if (code == 2 && !denies) exit 2
-  if (denies && shape ~ /^[{][^{}]*[}]$/ && shape ~ /[{,]c:d[,}]/) exit 4
-  if (denies) exit 3
+  if (!denies) exit 0
+  keys = shape
+  permissions = gsub(/[{,]c:/, "", keys)
+  keys = shape
+  agents = gsub(/[{,]a:/, "", keys)
+  keys = shape
+  users = gsub(/[{,]u:/, "", keys)
+  if (shape ~ /^[{][cau]:[spdcau](,[cau]:[spdcau])*[}]$/ && shape ~ /[{,]c:d[,}]/ &&
+    permissions == 1 && agents <= 1 && users <= 1) exit 4
+  exit 3
 }'
 # The judge denied. Each host documents its own way to block a command and
 # hand the agent the reason (read 2026-11-26):
@@ -416,14 +431,17 @@ verdict_awk='{
 #     agent_message of a permission "deny" answer on exit 0.
 #     https://cursor.com/docs/hooks
 # So under Cursor (which sets CURSOR_VERSION for every hook) Cursor's own
-# deny is passed on as the answer, with exit 0. Every other deny blocks by
-# the hook's exit 2, with the verdict on stderr ahead of a fixed line: a
-# deny passed on as JSON is read only by the host whose dialect it speaks
-# (Claude Code given Cursor's {"permission":"deny"} finds no decision in it
-# and runs the command), and exit 2 is the block all three read alike.
-# nika guard answers in Cursor's dialect only for a payload without
-# hook_event_name; under Cursor, a deny in the other dialect is blocked by
-# exit 2, and what reaches the agent then is not documented.
+# deny, exactly as nika guard writes it, is passed on as the answer, with
+# exit 0. Every other deny blocks by the hook's exit 2, with the verdict on
+# stderr ahead of a fixed line: a deny passed on as JSON is read only by
+# the host whose dialect it speaks (Claude Code given Cursor's
+# {"permission":"deny"} finds no decision in it and runs the command), and
+# exit 2 is the block all three read alike. nika guard answers in Cursor's
+# dialect only for a payload without hook_event_name, and Cursor's hooks
+# documentation lists hook_event_name among the fields every hook receives
+# (read 2026-11-26): a current Cursor payload is answered in Claude Code's
+# shape, so its deny is blocked by exit 2, and that documentation does not
+# say the reason then reaches the agent.
 denied() {
   printf '%s\n' "$out" >&2
   printf 'guard_denied: nika guard denied this nika run; the verdict above says why. Repair what it names, then retry.\n' >&2

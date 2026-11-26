@@ -15,7 +15,8 @@
 #     the open project, so a hook of those two events names its script by
 #     the one documented anchor, "${CURSOR_PLUGIN_ROOT}"/. Every other
 #     command names a script of the kit, relative to the plugin's folder or
-#     by that same anchor.
+#     by that same anchor. The script's path holds no `..` step, and no
+#     word follows it: no hook of the kit takes arguments.
 #
 # The checker runs on the kit's file, then on broken copies of it, each of
 # which it must refuse, and on one stop hook anchored at the plugin root,
@@ -66,8 +67,12 @@ def problems(data):
                 named = None
             else:
                 named = script
-            if named is not None and not os.path.isfile(os.path.join(kit, named)):
+            if named is not None and ".." in named.split("/"):
+                found.append("%s: %s steps through .., not a path inside the plugin's folder" % (event, script))
+            elif named is not None and not os.path.isfile(os.path.join(kit, named)):
                 found.append("%s: %s names no script of the kit from the plugin's folder" % (event, script))
+            if len(words) > 1:
+                found.append("%s: %s is followed by %r, and no hook of the kit takes arguments" % (event, script, " ".join(words[1:])))
             if command.endswith("/guard-run.sh"):
                 guards += 1
             if "failClosed" in entry:
@@ -122,6 +127,17 @@ broken("a relative command naming no kit script",
 broken("an anchored command naming no kit script",
        lambda bad: bad["hooks"]["sessionStart"].append({"command": '/bin/bash -p "${CURSOR_PLUGIN_ROOT}"/scripts/missing.sh'}),
        "names no script of the kit")
+for event, script in (("sessionStart", "./scripts/../scripts/session-context.sh"),
+                      ("stop", '"${CURSOR_PLUGIN_ROOT}"/scripts/../scripts/stop-gate.sh'),
+                      ("stop", '"${CURSOR_PLUGIN_ROOT}"/../nika/scripts/stop-gate.sh')):
+    broken("a %s hook at %s" % (event, script),
+           lambda bad, event=event, script=script: stop_hook(script)(bad, event),
+           "steps through ..")
+for event, script in (("sessionStart", "./scripts/session-context.sh --verbose"),
+                      ("stop", '"${CURSOR_PLUGIN_ROOT}"/scripts/stop-gate.sh "$PWD"/x.sh')):
+    broken("a %s hook running %s" % (event, script),
+           lambda bad, event=event, script=script: stop_hook(script)(bad, event),
+           "no hook of the kit takes arguments")
 broken("a command anchored elsewhere",
        lambda bad: bad["hooks"]["sessionStart"].append({"command": '/bin/bash -p "${CURSOR_PROJECT_DIR}"/scripts/session-context.sh'}),
        "names its script by another anchor")

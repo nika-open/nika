@@ -152,7 +152,7 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2460
-  aggregate_sha256: 444f31e5ee8157fe5f5aa53a34118394c1b70f53a43e1cd281e3a0076b043711
+  aggregate_sha256: f42049826c59639adbfdb88358502c788ead1e5f7ced593dc66fcd0823ca9a72
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
@@ -242,7 +242,7 @@ patterns:
 - glob: "changelog.d/**"
   class: authored
   match_count: 34
-  aggregate_sha256: 0e0c35463b3909a57f53d09243d0c9156a9440ffca52e381064e19c01c2b27ee
+  aggregate_sha256: e2bf9829b262571dbd5b0e25b689467cde1375515580b2c67166b844ef80606e
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

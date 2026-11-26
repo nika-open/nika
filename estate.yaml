@@ -67,7 +67,7 @@ files:
   note: "ROADMAP.md:98 carries the same refresh-status.sh AUTO-GENERATED status block — a tool-maintained block inside an authored file"
 - path: "SPEC_PIN"
   class: authored-pin
-  sha256: 20fd589ac37c2846d05a43c58394ff54213a36bcd835341c88543fa25baa869e
+  sha256: 0c44fa8fd5bfae6da893b15f4d4d95b1cac4d40a66b1b46395f4ce78e6c016dd
   evidence: "its own header: 'Advanced by .github/workflows/spec-pin-heal.yml (PR-only · the Diamond CI tests leg judges at the new pin). Consumed by diamond-ci.yml. Never HEAD.'"
 - path: "crates/nika-catalog/data/model-pricing.toml"
   class: generated
@@ -114,7 +114,7 @@ patterns:
 - glob: "crates/nika-pack/pack/**"
   class: pinned-copy
   match_count: 265
-  aggregate_sha256: 2aa87fa92e5e2f5f1ebac6af3d789497336fc5eb822a87fd9dab65a79eeb635b
+  aggregate_sha256: ae0ad70d1e7fd1b0d66c2e1cab33ee90b4024cb3b8a4585d665b6da2fb0fed4a
   evidence: "crates/nika-pack/src/lib.rs:16 'The snapshot under pack/ is vendored by scripts/sync-pack.sh' — a byte-copy of the spec surface, never edited here"
   derivation:
     tool: "bash scripts/sync-pack.sh <nika-spec checkout at SPEC_PIN> — spec-pin-heal.yml advances the pin and pack together, and Diamond CI refuses any pack differing from spec@SPEC_PIN"
@@ -157,7 +157,7 @@ patterns:
 - glob: "crates/**/tests/**"
   class: authored
   match_count: 881
-  aggregate_sha256: 1661fac1224352bd0e4ed04408f07783acc82dd2d125a9a2bd57a202d4412c87
+  aggregate_sha256: 67697f8a07e6521afcce3521bdedf8566fed97e4faddbbda9090aeab32a7d370
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
@@ -193,7 +193,7 @@ patterns:
 - glob: ".github/workflows/**"
   class: authored
   match_count: 25
-  aggregate_sha256: 4f68650f3d7643343960ce120bebbe2e70e271bf3d15f90dd1a69adbb05111aa
+  aggregate_sha256: fc4c001be9996ba316e7fd0746a027a9c696d75b0e636d2f8c0a441d43cd7992
   evidence: "hand-written CI rails, comments narrate design decisions; the heal lanes here rewrite OTHER files (spec-pin-heal.yml → SPEC_PIN + pack · changelog-cliff.yml → CHANGELOG.md), nothing rewrites the workflows themselves"
 - glob: ".github/**"
   class: authored

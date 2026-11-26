@@ -2027,6 +2027,7 @@ version = "0.125.1"
 dependencies = [
  "blake3",
  "bytes",
+ "nika-fs",
  "nika-kernel",
  "tokio",
 ]

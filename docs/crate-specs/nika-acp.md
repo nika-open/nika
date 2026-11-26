@@ -7,7 +7,7 @@
 | Design | The **harness access class** made real: `agent:` tasks execute on the user's OWN authenticated agent harness (gemini-cli · qwen-code · kimi-code · codex-acp · claude-agent-acp), driven through the official Agent Client Protocol — under nika authority (permits bridge), billed honestly (subscription ≠ free), behind an explicit opt-in. The harness owns auth; nika never holds a credential (A-3). |
 | Name | `nika-acp` (the protocol is the crate's whole surface — the `nika-mcp` naming precedent). |
 | LOC budget | ≤6k src (est. ~3.5k). ≤1500/file, ≤100/fn. |
-| Deps | `agent-client-protocol = "2"` (pinned · see §2) · `nika-kernel` (hub) · `nika-types` · tokio (workspace). dev: the mock agent fixture (§5). |
+| Deps | `agent-client-protocol = "^5.6.1"` (pinned · see §2) · `nika-kernel` (hub) · `nika-types` · tokio (workspace). dev: the mock agent fixture (§5). |
 | Publish | `false` — engine-internal effect crate. |
 
 ## 1 · Why this crate exists (legitimacy is the design constraint)
@@ -23,15 +23,45 @@ The adapter process is engine INFRASTRUCTURE (like an HTTP socket), NOT a user
 `agent:` ↔ harness is the natural pairing; `infer:` on a harness is P4's
 evidence-gated question, refused here with a witness.
 
-## 2 · Protocol pin (re-verified 2026-08-05 · primary sources)
+## 2 · Protocol pin (re-verified 2026-11-26 · primary sources)
 
-- Crate `agent-client-protocol` **2.0.0** (2026-07-23 · 3.5M downloads ·
-  `agentclientprotocol/rust-sdk`). SDK version ≠ wire version: 2.0.0 speaks
-  **stable protocol v1**; a DRAFT `V2SessionBuilder` exists in-tree.
+- Crate `agent-client-protocol` **5.6.1** (released 2026-11-25 ·
+  `agentclientprotocol/rust-sdk`), resolved in this crate's own lockfile
+  with `agent-client-protocol-derive` 5.6.1 and `agent-client-protocol-schema`
+  1.22.0, which the SDK pins exactly. SDK version ≠ wire version: the judge
+  speaks **stable protocol v1** through the SDK's `v1` module (`Agent.v1()`,
+  `Client.v1()`, `agent_client_protocol::v1::schema`). Wire v2 sits behind the
+  SDK's `unstable_protocol_v2` feature, which the judge does not enable.
+- Verified on 2026-11-26. The SDK's release tag was read on GitHub: its
+  changelog, the 5.x migration notes, its manifests and the sources of the
+  `v1` module. Then, on the repository's toolchain (Rust 1.91.1):
+  - `cargo update --manifest-path crates/nika-acp/Cargo.toml -p
+    agent-client-protocol` moved three packages (the SDK and its derive crate
+    from 2.0.0, the schema from 1.5.0) and removed 18 others;
+  - `NIKA_KEYCHAIN=off cargo test --locked -- --test-threads=1`, run in
+    `crates/nika-acp` as CI runs it: the whole suite passes (34 cases that
+    day);
+  - `cargo clippy --locked --manifest-path crates/nika-acp/Cargo.toml
+    --all-targets -- -D warnings`: no warning;
+  - `cargo metadata --locked` through this manifest, `fuzz/Cargo.toml` and
+    the root manifest: the root and fuzz lockfiles do not change.
+- Features: the SDK has no default features, and the judge enables one,
+  `unstable_end_turn_token_usage`, because the draft `usage` field of a
+  `session/prompt` result exists only behind it and the turn usage cases
+  write it. Stop reasons, `usage_update`, `session/cancel` and
+  `session/close` are stable v1 and need no feature. Neither `process` nor
+  `stdio` is on: the cases connect over in-process pipes.
+- Earlier pin: 2.0.0 (2026-07-23, verified 2026-08-05). The move to 5.x
+  renamed the entry points (`builder()` became `v1()`) and the schema path
+  (`schema::v1` became `v1::schema`); the wire did not change.
 - Consequence: the **per-version generated-schema diff gate is mandatory** —
   a wire-v2 stabilization must fail loud at pin-bump time, never drift in.
 - SDK roles: Client · Agent · Proxy · Conductor. Nika implements the
   **Client** role only.
+- The engine's client stays hand-written on wire v1 (`nika_harness::wire`):
+  the SDK judges it from this workspace and is never linked into the engine.
+  The SDK's own test agent is not a second judge: it is not published on
+  crates.io and pulls in other crates (rmcp, http and more).
 
 ### §2bis · The `preserve_order` wall (found 2026-08-05 · the quarantine)
 
@@ -53,7 +83,7 @@ engine's. The engine-side design is the OPERATOR'S GATE, two lanes:
   small hand-rolled JSON-RPC client (initialize · session/new · prompt ·
   update · cancel · request_permission — the Client role's narrow waist),
   and THIS harness proves conformance from the outside (the official SDK
-  drives the mock agent against our client over a process boundary).
+  plays the agent against our client over in-process pipes).
   Anti-capture by construction; the official SDK stays the judge, never a
   link-time dependency.
 - **Lane B (parallel · upstream)** · PR the SDK to feature-gate

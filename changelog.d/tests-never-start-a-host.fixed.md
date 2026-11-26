@@ -9,8 +9,9 @@
   (`cargo test`, `cargo nextest run`, `cargo run`): each host program is
   then absent, not found on `PATH`, its sign-in unreadable, its probe or
   session refused as a missing binary (NIKA-1803), and nothing starts.
-  `nika doctor` and `nika welcome` then say each runtime was not looked
-  for and name the switch, never that it is not installed.
+  The runtime findings of `nika doctor` and `nika welcome` then say each
+  runtime was not looked for and name the switch, never that it is not
+  installed; the access paths `nika doctor` lists keep their install line.
   `NIKA_HARNESS_HOSTS=on` starts hosts again for a live suite or a
   `cargo run`; an installed `nika` reads no Cargo configuration and starts
   hosts as before. The welcome tests keep their seat choice in a home of

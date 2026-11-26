@@ -206,7 +206,8 @@ pub struct PresenceFact {
     /// ACP speaker on PATH (`claude-agent-acp`).
     pub acp_present: bool,
     /// [`AuthProbe::HomeFile`] witness, or the login command's exit
-    /// code for Command auth — SIGNED IN, never merely installed.
+    /// code for Command auth — SIGNED IN, never merely installed. A row the host switch
+    /// hides is `false` without its home being read: it was not looked for.
     pub configured: bool,
     /// What the login command answered, when one ran (a Command-auth row whose
     /// product is present): `configured` is true only for

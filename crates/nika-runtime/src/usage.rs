@@ -68,6 +68,61 @@ pub(crate) struct UsageSplit {
     /// The HTTP status of every answer the transport waited on, in order:
     /// empty on a current record, since the transport never re-sends.
     pub retried_on: Vec<u16>,
+    /// A delegated seat's account of its turn beyond the counts; `None` off a seat.
+    pub seat: Option<SeatFacts>,
+}
+
+/// What a delegated seat said about its turn beyond the counts, as the terminal frame carries
+/// it: how the turn ended, where the counts came from (`unreported` when the seat gave none,
+/// so the task's tokens are unknown), a token ceiling those missing counts left unjudged, the
+/// session's context occupancy, the adapter's own cost estimate (never `cost_usd`, never a
+/// ceiling's input) and the turn's whole text when the value is its last message. The frame
+/// rides the event lane, which masks the run's secrets in the text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SeatFacts {
+    /// The wire word the turn ended with.
+    pub stop_reason: Option<String>,
+    /// The report the counts came from; `None` when the seat reported none.
+    pub usage_source: Option<&'static str>,
+    /// `unjudged` when a declared `max_tokens_total` met no reported counts.
+    pub token_ceiling: Option<&'static str>,
+    /// The context occupancy: tokens held, window size.
+    pub context: Option<(u64, u64)>,
+    /// The adapter's estimate as its record (amount, currency, source, scope, unbilled).
+    pub cost_estimate: Option<String>,
+    /// The turn's whole text when the value is its validated last message.
+    pub transcript: Option<String>,
+}
+
+impl SeatFacts {
+    /// The frame spelling of counts a seat did not report.
+    pub(crate) const UNREPORTED: &'static str = "unreported";
+
+    fn push(&self, fields: &mut Vec<(&'static str, FieldValue)>) {
+        fn n(v: u64) -> FieldValue {
+            i(i64::try_from(v).unwrap_or(i64::MAX))
+        }
+        if let Some(stop) = &self.stop_reason {
+            fields.push(("seat_stop_reason", s(stop)));
+        }
+        fields.push((
+            "usage_source",
+            s(self.usage_source.unwrap_or(Self::UNREPORTED)),
+        ));
+        if let Some(ceiling) = self.token_ceiling {
+            fields.push(("token_ceiling", s(ceiling)));
+        }
+        if let Some((used, size)) = self.context {
+            fields.push(("context_used", n(used)));
+            fields.push(("context_size", n(size)));
+        }
+        if let Some(estimate) = &self.cost_estimate {
+            fields.push(("cost_estimate", s(estimate)));
+        }
+        if let Some(text) = &self.transcript {
+            fields.push(("seat_transcript", s(text)));
+        }
+    }
 }
 
 impl UsageSplit {
@@ -100,6 +155,7 @@ impl UsageSplit {
             attempts: None,
             waited_ms: None,
             retried_on: Vec::new(),
+            seat: None,
         }
     }
 
@@ -197,7 +253,8 @@ impl UsageSplit {
     pub(crate) fn carried(self) -> Option<Box<Self>> {
         let named = self.model_served.is_some()
             || self.response_id.is_some()
-            || self.model_reported.is_some();
+            || self.model_reported.is_some()
+            || self.seat.is_some();
         (self.has_signal() || named || self.attempts.is_some() || !self.inference_calls.is_empty())
             .then(|| Box::new(self))
     }
@@ -253,6 +310,9 @@ pub(crate) fn push_usage_fields(
     if let Some((model, source)) = &split.model_reported {
         fields.push(("model_reported", s(model)));
         fields.push(("model_reported_source", s(source)));
+    }
+    if let Some(seat) = &split.seat {
+        seat.push(fields);
     }
     if let Some(attempts) = split.attempts {
         fields.push(("attempts", i(i64::from(attempts))));

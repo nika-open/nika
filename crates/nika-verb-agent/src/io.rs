@@ -203,8 +203,9 @@ pub struct AgentOutput {
     pub usage: TokenUsage,
     /// The model the loop requested (`provider/name`), not a billing route. `None` on harness-built outputs.
     pub model_resolved: Option<String>,
-    /// The session model a delegated harness REPORTED (configured, selected or
-    /// accepted — see `model_reported_source`). Not a response attestation, never
+    /// The model a delegated harness REPORTED: its session model (configured, selected or
+    /// accepted), or the model its adapter reported having answered with
+    /// (`adapter_usage_update`) — see `model_reported_source`. The adapter's word, never
     /// the served model and never a pricing key.
     pub model_reported: Option<String>,
     /// How `model_reported` was learned; `None` when the harness did not say.
@@ -212,6 +213,47 @@ pub struct AgentOutput {
     /// How the authored selection travelled (`access_selection`) — set
     /// only when the input carried a requirement.
     pub selection: Option<nika_types::access::SelectionEvidence>,
+    /// What a delegated seat said about its turn beyond the value; `None` on outputs that no
+    /// seat built.
+    pub seat: Option<SeatReport>,
+}
+
+/// What a delegated seat said about its turn beyond the value: how the turn ended, the
+/// adapter's own reports, and the text the value was judged on. Every fact is the adapter's
+/// word; an absent one is unknown, never zero, and nothing here is billed spend.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct SeatReport {
+    /// The wire word the last turn ended with (`end_turn`, `cancelled`), when the seat said.
+    pub stop_reason: Option<String>,
+    /// The report the token counts came from (`adapter_prompt_result`); `None` when the seat
+    /// reported none, so the task's tokens are unknown.
+    pub usage_source: Option<&'static str>,
+    /// `unjudged` when the task declares `max_tokens_total` and the seat reported no counts:
+    /// the ceiling could not be judged, which is not a ceiling that held.
+    pub token_ceiling: Option<&'static str>,
+    /// The session's context occupancy at the end of the turn (`usage_update`).
+    pub context: Option<nika_kernel::ai::harness::HarnessContext>,
+    /// The adapter's own estimate of the session's cumulative cost (`usage_update`): never
+    /// billed spend, never read by a cost ceiling.
+    pub cost_estimate: Option<nika_kernel::ai::harness::HarnessCostEstimate>,
+    /// The turn's last message when the turn held several (narration, a tool call, then the
+    /// answer): what a `schema:` judges.
+    pub last_message: Option<String>,
+    /// The turn's whole text when the value is its validated last message, kept for the
+    /// record.
+    pub transcript: Option<String>,
+}
+
+impl SeatReport {
+    /// The record spelling of a ceiling the seat's missing counts left unjudged.
+    pub const CEILING_UNJUDGED: &'static str = "unjudged";
+
+    /// Construct an empty report (INV-019).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 impl AgentOutput {
@@ -237,6 +279,7 @@ impl AgentOutput {
             model_reported: None,
             model_reported_source: None,
             selection: None,
+            seat: None,
         }
     }
 

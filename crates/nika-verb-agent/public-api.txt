@@ -132,6 +132,10 @@ pub nika_verb_agent::errors::VerbAgentError::HarnessGate
 pub nika_verb_agent::errors::VerbAgentError::HarnessGate::detail: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::HarnessGate::question: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::HarnessGate::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::errors::VerbAgentError::HarnessStopped
+pub nika_verb_agent::errors::VerbAgentError::HarnessStopped::partial_output: alloc::string::String
+pub nika_verb_agent::errors::VerbAgentError::HarnessStopped::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::errors::VerbAgentError::HarnessStopped::stop_reason: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::ImageWrite
 pub nika_verb_agent::errors::VerbAgentError::ImageWrite::code: alloc::string::String
 pub nika_verb_agent::errors::VerbAgentError::ImageWrite::detail: alloc::string::String
@@ -785,6 +789,10 @@ pub nika_verb_agent::VerbAgentError::HarnessGate
 pub nika_verb_agent::VerbAgentError::HarnessGate::detail: alloc::string::String
 pub nika_verb_agent::VerbAgentError::HarnessGate::question: alloc::string::String
 pub nika_verb_agent::VerbAgentError::HarnessGate::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::VerbAgentError::HarnessStopped
+pub nika_verb_agent::VerbAgentError::HarnessStopped::partial_output: alloc::string::String
+pub nika_verb_agent::VerbAgentError::HarnessStopped::spend: alloc::boxed::Box<nika_types::cost::SpendOnFailure>
+pub nika_verb_agent::VerbAgentError::HarnessStopped::stop_reason: alloc::string::String
 pub nika_verb_agent::VerbAgentError::ImageWrite
 pub nika_verb_agent::VerbAgentError::ImageWrite::code: alloc::string::String
 pub nika_verb_agent::VerbAgentError::ImageWrite::detail: alloc::string::String
@@ -1019,6 +1027,7 @@ pub nika_verb_agent::AgentOutput::model_reported: core::option::Option<alloc::st
 pub nika_verb_agent::AgentOutput::model_reported_source: core::option::Option<nika_kernel_ai::harness::ModelProvenance>
 pub nika_verb_agent::AgentOutput::model_resolved: core::option::Option<alloc::string::String>
 pub nika_verb_agent::AgentOutput::output: nika_verb_agent::AgentValue
+pub nika_verb_agent::AgentOutput::seat: core::option::Option<nika_verb_agent::SeatReport>
 pub nika_verb_agent::AgentOutput::selection: core::option::Option<nika_types::access::selection::SelectionEvidence>
 pub nika_verb_agent::AgentOutput::stop_reason: nika_kernel_runtime::agent::AgentStopReason
 pub nika_verb_agent::AgentOutput::tools_cost_usd: core::option::Option<f64>
@@ -1206,6 +1215,53 @@ impl<T> dyn_clone::DynClone for nika_verb_agent::config::RouterConfig where T: c
 pub fn nika_verb_agent::config::RouterConfig::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
 impl<T> nika_error::traits::AsAny for nika_verb_agent::config::RouterConfig where T: 'static
 pub fn nika_verb_agent::config::RouterConfig::as_any(&self) -> &(dyn core::any::Any + 'static)
+#[non_exhaustive] pub struct nika_verb_agent::SeatReport
+pub nika_verb_agent::SeatReport::context: core::option::Option<nika_kernel_ai::harness::turn::HarnessContext>
+pub nika_verb_agent::SeatReport::cost_estimate: core::option::Option<nika_kernel_ai::harness::turn::HarnessCostEstimate>
+pub nika_verb_agent::SeatReport::last_message: core::option::Option<alloc::string::String>
+pub nika_verb_agent::SeatReport::stop_reason: core::option::Option<alloc::string::String>
+pub nika_verb_agent::SeatReport::token_ceiling: core::option::Option<&'static str>
+pub nika_verb_agent::SeatReport::transcript: core::option::Option<alloc::string::String>
+pub nika_verb_agent::SeatReport::usage_source: core::option::Option<&'static str>
+impl nika_verb_agent::SeatReport
+pub const nika_verb_agent::SeatReport::CEILING_UNJUDGED: &'static str
+pub fn nika_verb_agent::SeatReport::new() -> Self
+impl core::clone::Clone for nika_verb_agent::SeatReport
+pub fn nika_verb_agent::SeatReport::clone(&self) -> nika_verb_agent::SeatReport
+impl core::cmp::PartialEq for nika_verb_agent::SeatReport
+pub fn nika_verb_agent::SeatReport::eq(&self, other: &nika_verb_agent::SeatReport) -> bool
+impl core::default::Default for nika_verb_agent::SeatReport
+pub fn nika_verb_agent::SeatReport::default() -> nika_verb_agent::SeatReport
+impl core::fmt::Debug for nika_verb_agent::SeatReport
+pub fn nika_verb_agent::SeatReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for nika_verb_agent::SeatReport
+impl<D> owo_colors::OwoColorize for nika_verb_agent::SeatReport
+impl<T, U> core::convert::Into<U> for nika_verb_agent::SeatReport where U: core::convert::From<T>
+pub fn nika_verb_agent::SeatReport::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_verb_agent::SeatReport where U: core::convert::Into<T>
+pub type nika_verb_agent::SeatReport::Error = core::convert::Infallible
+pub fn nika_verb_agent::SeatReport::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_verb_agent::SeatReport where U: core::convert::TryFrom<T>
+pub type nika_verb_agent::SeatReport::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_verb_agent::SeatReport::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_verb_agent::SeatReport where T: core::clone::Clone
+pub type nika_verb_agent::SeatReport::Owned = T
+pub fn nika_verb_agent::SeatReport::clone_into(&self, target: &mut T)
+pub fn nika_verb_agent::SeatReport::to_owned(&self) -> T
+impl<T> core::any::Any for nika_verb_agent::SeatReport where T: 'static + ?core::marker::Sized
+pub fn nika_verb_agent::SeatReport::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_verb_agent::SeatReport where T: ?core::marker::Sized
+pub fn nika_verb_agent::SeatReport::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_verb_agent::SeatReport where T: ?core::marker::Sized
+pub fn nika_verb_agent::SeatReport::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_verb_agent::SeatReport where T: core::clone::Clone
+pub unsafe fn nika_verb_agent::SeatReport::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_verb_agent::SeatReport
+pub fn nika_verb_agent::SeatReport::from(t: T) -> T
+impl<T> dyn_clone::DynClone for nika_verb_agent::SeatReport where T: core::clone::Clone
+pub fn nika_verb_agent::SeatReport::__clone_box(&self, _: dyn_clone::sealed::Private) -> *mut ()
+impl<T> nika_error::traits::AsAny for nika_verb_agent::SeatReport where T: 'static
+pub fn nika_verb_agent::SeatReport::as_any(&self) -> &(dyn core::any::Any + 'static)
 #[non_exhaustive] pub struct nika_verb_agent::SourceCounts
 pub nika_verb_agent::SourceCounts::builtin: u32
 pub nika_verb_agent::SourceCounts::mcp: u32

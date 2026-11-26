@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8237
+  classified_files: 8265
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 4979
+    authored: 5007
     authored-pin: 2
     generated: 283
     pinned-copy: 266
@@ -48,7 +48,7 @@ files:
   note: "generated with a human gate — the maintainer may amend the section at PR review"
 - path: "Cargo.lock"
   class: generated
-  sha256: 378d88c6930cafd1e6fd04091c837675d62700c6a26f59880d08a14340005892
+  sha256: 599b41494cfe19182f0a6e406b630183203c4892497bb2886914130968df6797
   evidence: "cargo's resolver writes it; no human edits a lockfile"
   derivation:
     tool: "cargo (dependency resolution against Cargo.toml + crates/*/Cargo.toml)"
@@ -140,7 +140,7 @@ patterns:
 - glob: "crates/*/public-api.txt"
   class: generated
   match_count: 90
-  aggregate_sha256: dfaac00dd2ed42c27f2791c78b18bb49c9c678702a4d403de4e675c41bf9bdf8
+  aggregate_sha256: aca2b472a49de1b1b92eb9bc6b5ee718be74d893a1b685d41b97e10382466d83
   evidence: ".github/workflows/public-api.yml 'diff each covered lib crate' byte-compares each snapshot against cargo public-api output; macOS renders differently, so snapshots regenerate FROM THE UBUNTU ARTIFACT (workflow comment)"
   derivation:
     tool: "cargo public-api -p <crate> --omit auto-trait-impls > crates/<crate>/public-api.txt (DEFAULT features · the CI job shape — all-features drags platform deps into the render · cargo-public-api 0.51.0 pinned · the public-api-actual CI artifact stays the judge)"
@@ -151,18 +151,18 @@ patterns:
     - "cargo-public-api 0.51.0"
 - glob: "crates/**/src/**"
   class: authored
-  match_count: 2438
-  aggregate_sha256: 5e03af48165f6bbb51c6c7bed51ead5fd09a955175bafeebc1b75d2956fcf673
+  match_count: 2447
+  aggregate_sha256: 2a4465a70e5e1b739e28762e38115d01a2edc440e5aae024991c0e0fcf310595
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
   match_count: 881
-  aggregate_sha256: 751d097b4d96e3f237594dff1e285cea1768934f9658950470fc06a1f9d69f6f
+  aggregate_sha256: 96397222e38cf16629587e68bc968def9ef981435074a78b4fb4f147364a3c82
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
   match_count: 714
-  aggregate_sha256: fad33c86b8ff07a46d8b10c35aa7bebf2dac8a954e78396b47f2e0ba026a17e4
+  aggregate_sha256: 14307fd35c37e116ea7a11ecaf6566e5d5d05c25661bf2510b266aa304222946
   evidence: "the remaining crate surface — Cargo.toml manifests · build.rs · benches · READMEs · hand-curated data catalogs (llm-providers · mcp-servers · embeddings · model-capabilities, probed daily by catalog-verify.yml); the pricing snapshot is excepted in files:"
   note: "scripts/sync-pack.sh is the ONE vendoring lane; the divergent crate-local duplicate was retired"
 - glob: "fuzz/**"
@@ -183,12 +183,12 @@ patterns:
 - glob: "docs/**"
   class: authored
   match_count: 150
-  aggregate_sha256: 77e2930de7690bf69d943775cd749c19bf029490f1a7d8ffaa2d3f7cb24e9ffc
+  aggregate_sha256: 47d3b858e9b45b716c48ba7f9c6a024e1f418ae7cbd990f51539598e639e5cdf
   evidence: "crate-specs · architecture prose · perf notes — no generation markers at file heads"
 - glob: "scripts/**"
   class: authored
   match_count: 359
-  aggregate_sha256: 8c1c50ec25d6fdfabe7116ba8c0cd6ef4fab6b28204284953826cc086d30bee3
+  aggregate_sha256: 7dc5dbd27fd8ae66ad230ea3c36b28e4d2f9ffbde3c9478f3f42fa84a2959f63
   evidence: "hand-written gates · hooks · hygiene vectors · media lanes; the ratchet baselines (scripts/ci/*-baseline.txt · scripts/hygiene/baselines/) are hand-kept monotonic floors ('Never remove a line by hand')"
 - glob: ".github/workflows/**"
   class: authored
@@ -202,8 +202,8 @@ patterns:
   evidence: "issue/PR templates · CODEOWNERS · dependabot config — hand-written review policy"
 - glob: ".agents/**"
   class: authored
-  match_count: 193
-  aggregate_sha256: 39576cfec9140a881c2931c6e4b95f764e7b8872fa485b73ce1e41a55d3874b2
+  match_count: 201
+  aggregate_sha256: 7ff4ece97c2a55e34cf9e2f6c736e351a1a46f328574d8c9006e629a5763c9a3
   evidence: "the engine-owned portable release kit; wave-sweep advances its manifests with the engine and nika-plugins mirrors these bytes only from immutable engine release tags via resync-mirror.py"
   note: "direction is engine tag → nika-plugins mirror; clients-resync owns only clients.registry.yaml and must never overwrite this tree from a moving downstream main branch"
 - glob: ".claude/**"
@@ -241,14 +241,14 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 19
-  aggregate_sha256: b5e4d9a523b5846912b3c3b95d9ed50e8ec8da366bd48e16e8d2de28ac0c9c22
+  match_count: 30
+  aggregate_sha256: 332f08a9fd775416009f7dc4c500f9de163a189681098ec937cc484070891f5a
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"
   class: authored
   match_count: 31
-  aggregate_sha256: 143fe605db2c5f783e5bb9378e2713092e9bab406f2b5cc83851a14315020440
+  aggregate_sha256: 801b6337dac72e11b60a2e7a6aa2db12d171b1ae25ab5fd337ff25c589257346
   evidence: "root prose + config surface (README · DIAMOND · LICENSE · llms.txt · Cargo.toml · deny/clippy/cliff/typos toml · lefthook.yml · flake.nix · Dockerfile) — no generation markers at file heads; CHANGELOG.md · Cargo.lock · SPEC_PIN · ROADMAP.md excepted in files:"
 - glob: "**"
   class: authored

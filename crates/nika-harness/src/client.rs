@@ -9,8 +9,9 @@
 //! routes incoming beats into the kernel's [`HarnessEvent`] stream, and
 //! bridges `session/request_permission` through the seam's
 //! [`PermissionReply`] under the fail-closed law: a refusal selects the
-//! agent's `reject_once` option when offered, so it goes on without the
-//! tool, and a reply DROPPED unanswered answers the agent `cancelled` —
+//! agent's first `reject_once` option when offered (the harness then lets
+//! the agent go on without the tool or ends the turn, as that option
+//! does), and a reply DROPPED unanswered answers the agent `cancelled` —
 //! never a hang, never a silent allow (A-5).
 //!
 //! Cancel safety: dropping the returned stream ends the run — every
@@ -837,11 +838,14 @@ mod turn;
 /// The engine's verdict → the wire outcome, by the rule the conversation
 /// path answers with (`crate::conversation::answer`): `AllowOnce` selects
 /// the agent's `allow_once` option, and every other verdict (`Deny`, or a
-/// FUTURE variant, refused conservatively) its `reject_once` option, so
-/// the agent goes on without the tool. `allow_always` and `reject_always`
-/// are NEVER selected (A-5): a verdict whose one-time option is not
-/// offered answers `cancelled`, fail-closed. A dropped ask reaches here
-/// with no options ([`ReplyGuard`]), so it always answers `cancelled`.
+/// FUTURE variant, refused conservatively) its first `reject_once` option
+/// in the harness's order. What follows is the harness's: an option may
+/// let the agent go on without the tool, or end the turn (codex-acp
+/// 1.13.1's `cancel`, as read in its source). `allow_always` and
+/// `reject_always` are NEVER selected (A-5): a verdict whose one-time
+/// option is not offered answers `cancelled`, fail-closed. A dropped ask
+/// reaches here with no options ([`ReplyGuard`]), so it always answers
+/// `cancelled`.
 fn permission_outcome(
     decision: PermissionDecision,
     options: &[wire::PermissionOptionIn],

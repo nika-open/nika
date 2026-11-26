@@ -88,8 +88,8 @@ fn a_usage_update_gives_context_cost_and_the_reported_model() {
     assert_eq!(usage_report(&chunk), None, "only its own kind");
 }
 
-/// A cost that is no amount in a unit is no estimate; a reported model that is no plain id
-/// is named `unrecognized`, never echoed.
+/// A cost that is no amount in an ISO 4217 currency is no estimate; a reported model that is
+/// no plain id is named `unrecognized`, never echoed.
 #[test]
 fn a_misshaped_cost_is_dropped_and_a_hostile_model_is_never_echoed() {
     let update = |cost: serde_json::Value, model: &str| {
@@ -100,15 +100,18 @@ fn a_misshaped_cost_is_dropped_and_a_hostile_model_is_never_echoed() {
         json!({"amount": -1.0, "currency": "USD"}),
         json!({"amount": "0.1", "currency": "USD"}),
         json!({"amount": 0.1, "currency": "US D"}),
+        json!({"amount": 0.1, "currency": "usd"}),
+        json!({"amount": 3, "currency": "credits"}),
+        json!({"amount": 0.1, "currency": "827351"}),
         json!({"amount": 0.1}),
         json!(null),
     ] {
         let report = usage_report(&update(cost.clone(), "m")).expect("an update");
         assert_eq!(report.cost, None, "{cost}");
     }
-    let credits =
-        usage_report(&update(json!({"amount": 3, "currency": "credits"}), "m")).expect("an update");
-    assert_eq!(credits.cost, Some(HarnessCostEstimate::new(3.0, "credits")));
+    let euros =
+        usage_report(&update(json!({"amount": 3, "currency": "EUR"}), "m")).expect("an update");
+    assert_eq!(euros.cost, Some(HarnessCostEstimate::new(3.0, "EUR")));
     for hostile in [
         "",
         "opus\u{1b}[2J",

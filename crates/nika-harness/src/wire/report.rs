@@ -50,7 +50,7 @@ pub(crate) fn prompt_usage(result: &Value) -> Option<TokenUsage> {
 pub(crate) struct UsageReport {
     /// `used` and `size`, when both are counts.
     pub(crate) context: Option<HarnessContext>,
-    /// `cost`, when it holds a finite, non-negative `amount` and a `currency` word.
+    /// `cost`, when it holds a finite, non-negative `amount` and an ISO 4217 `currency` code.
     pub(crate) cost: Option<HarnessCostEstimate>,
     /// claude-agent-acp's `_meta["_claude/model"]`: an id, or `unrecognized` when the report
     /// names one that is no plain model id.
@@ -66,15 +66,13 @@ pub(crate) fn usage_report(update: &Value) -> Option<UsageReport> {
     let context = count("used")
         .zip(count("size"))
         .map(|(used, size)| HarnessContext::new(used, size));
+    // The currency rides the record, so only an ISO 4217 code shape is kept: three ASCII
+    // capitals. Any other unit is no estimate the record can name.
     let cost = update.get("cost").and_then(|cost| {
         let amount = cost.get("amount")?.as_f64()?;
         let currency = cost.get("currency")?.as_str()?;
-        let unit = !currency.is_empty()
-            && currency.len() <= 16
-            && currency
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_');
-        (amount.is_finite() && amount >= 0.0 && unit)
+        let code = currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase());
+        (amount.is_finite() && amount >= 0.0 && code)
             .then(|| HarnessCostEstimate::new(amount, currency))
     });
     let model = update

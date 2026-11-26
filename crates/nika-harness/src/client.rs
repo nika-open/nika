@@ -8,9 +8,10 @@
 //! narrow waist (`initialize` → `session/new` → `session/prompt`),
 //! routes incoming beats into the kernel's [`HarnessEvent`] stream, and
 //! bridges `session/request_permission` through the seam's
-//! [`PermissionReply`] under the fail-closed law: a reply DROPPED
-//! unanswered answers the agent `cancelled` (Deny) — never a hang,
-//! never a silent allow (A-5).
+//! [`PermissionReply`] under the fail-closed law: a refusal selects the
+//! agent's `reject_once` option when offered, so it goes on without the
+//! tool, and a reply DROPPED unanswered answers the agent `cancelled` —
+//! never a hang, never a silent allow (A-5).
 //!
 //! Cancel safety: dropping the returned stream ends the run — every
 //! event send fails once the receiver is gone and the driver task
@@ -446,8 +447,8 @@ where
         // absolute outside, plus each path's physical identity when a link or `..` moves it.
         let locations = anchor::anchor(locations, root).await;
         // The drop-reads-as-Deny guard: if the engine never answers,
-        // the closure is DROPPED, the guard fires, the agent hears
-        // `cancelled` — fail-closed, never a hang (A-5 twin).
+        // the closure is DROPPED, the guard fires with no options, the
+        // agent hears `cancelled` — fail-closed, never a hang (A-5 twin).
         let reply = {
             let mut guard = ReplyGuard {
                 tx: Some(ptx.clone()),
@@ -833,25 +834,20 @@ mod prompt;
 /// reports about its tokens, context, cost and model.
 mod turn;
 
-/// The engine's verdict → the wire outcome. `AllowOnce` selects the
-/// agent's `allow_once` option; `allow_always` is NEVER selected even
-/// when it is the only allow (A-5 — the ask then cancels, fail-closed).
-/// `Deny` always cancels.
+/// The engine's verdict → the wire outcome, by the rule the conversation
+/// path answers with (`crate::conversation::answer`): `AllowOnce` selects
+/// the agent's `allow_once` option, and every other verdict (`Deny`, or a
+/// FUTURE variant, refused conservatively) its `reject_once` option, so
+/// the agent goes on without the tool. `allow_always` and `reject_always`
+/// are NEVER selected (A-5): a verdict whose one-time option is not
+/// offered answers `cancelled`, fail-closed. A dropped ask reaches here
+/// with no options ([`ReplyGuard`]), so it always answers `cancelled`.
 fn permission_outcome(
     decision: PermissionDecision,
     options: &[wire::PermissionOptionIn],
 ) -> PermissionResult {
-    match decision {
-        PermissionDecision::AllowOnce => options
-            .iter()
-            .find(|o| o.kind == "allow_once")
-            .map_or_else(PermissionResult::cancelled, |o| {
-                PermissionResult::selected(&o.option_id)
-            }),
-        // Deny cancels — and a FUTURE decision variant refuses
-        // conservatively through the same word (fail-closed).
-        _ => PermissionResult::cancelled(),
-    }
+    let allowed = matches!(decision, PermissionDecision::AllowOnce);
+    crate::conversation::answer(allowed, options)
 }
 
 struct ReplyGuard {
@@ -870,7 +866,10 @@ impl ReplyGuard {
 
 impl Drop for ReplyGuard {
     fn drop(&mut self) {
-        // Unanswered = Deny (fail-closed) — the agent hears `cancelled`.
+        // Unanswered = Deny (fail-closed), and the engine is gone: the
+        // options are cleared first, so no option can be selected and
+        // the agent hears `cancelled`, never a refusal it may go on after.
+        self.options.clear();
         self.answer(PermissionDecision::Deny);
     }
 }
@@ -1478,6 +1477,11 @@ mod tests {
         assert!(outcome.is_some());
     }
 
+    /// A reply dropped unanswered, with only an allow option offered,
+    /// answers `cancelled` and never that allow (fail-closed). With no
+    /// `reject_once` offered, a dropped ask and a refusal answer alike;
+    /// `refusal_tests` pins each apart, and the dropped ask with a refusal
+    /// offered.
     #[tokio::test]
     async fn an_unanswered_permission_reads_cancelled_fail_closed() {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
@@ -1695,3 +1699,6 @@ mod media_bound_tests;
 
 #[cfg(test)]
 mod model_selection_tests;
+
+#[cfg(test)]
+mod refusal_tests;

@@ -166,14 +166,14 @@ A turn ends the task only when the application says it finished
 `NIKA-AGENT-006`. A refusal (`refusal`), the application's own limit of model
 requests for the turn (`max_turn_requests`), a cancelled turn (`cancelled`)
 and a stop word Nika does not know fail `NIKA-INFER-001` with the reason
-named. A turn ends `cancelled` when the application called it off, or when it
-stopped on a request Nika could only cancel because the application offered
-no way to refuse it and go on; the task does not complete. Either way the
-text received is kept at `partial_output`, masked like every failed record,
-and the failure records no token counts, even when the application reported
-some. An ACP answer must name its stop reason: one that names none is
-malformed and fails. A seat backend that reports no stop reasons at all
-completes the task as before.
+named. A turn ends `cancelled` when the application called it off, on its own
+or after a refusal whose option ends the turn, or when it stopped on a request
+Nika could only cancel because the application offered no way to refuse it
+and go on; the task does not complete. Either way the text received is kept
+at `partial_output`, masked like every failed record, and the failure records
+no token counts, even when the application reported some. An ACP answer must
+name its stop reason: one that names none is malformed and fails. A seat
+backend that reports no stop reasons at all completes the task as before.
 
 The task records what the application reported about the turn. The token
 counts of its answer to the prompt ride as `tokens`, `tokens_in` and

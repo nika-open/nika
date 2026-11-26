@@ -55,8 +55,8 @@ every such task as a `[harness]` hint (`nika explain harness`).
   agent go on without the action, others end the turn, which then fails
   `NIKA-INFER-001`. In the codex-acp 1.13.1 source, as read, a command's
   default options put "No, continue without running it" before "No, and tell
-  Codex what to do differently", which interrupts the turn, and a file change or
-  a command that asks for more permissions offers only the second. A harness
+  Codex what to do differently", which by its label interrupts the turn, and a
+  file change or a command that asks for more permissions offers only the second. A harness
   that offers no one-time refusal is answered `cancelled`, the protocol's word
   for calling the turn off, so the turn may end there too.
 - Paths are judged in your project's terms (`./out/**` matches the absolute path

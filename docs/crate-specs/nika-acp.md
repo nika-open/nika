@@ -229,8 +229,8 @@ or `current_mode_update` away from the held mode ends the session. The table is
   word for a client calling the turn off · `permit_checked deny`. What follows is
   the harness's: a `reject_once` may let the agent go on without the action or end
   the turn (codex-acp 1.13.1, as read: a command's default `decline` comes before
-  `cancel`, which interrupts the turn, and a file change or a command asking for
-  more permissions offers only `cancel`); a turn that ends `cancelled` fails
+  `cancel`, which by its label interrupts the turn, and a file change or a command
+  asking for more permissions offers only `cancel`); a turn that ends `cancelled` fails
   `NIKA-INFER-001`. The rule is the conversation path's
   (`nika_harness::conversation::answer`). An ask left unanswered (the pause, a
   session torn down) hears `cancelled` whatever it offers;

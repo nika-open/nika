@@ -62,6 +62,26 @@ fn a_null_absent_or_partial_usage_is_unknown() {
     assert_eq!(usage.reasoning_tokens, None);
 }
 
+/// An input and cache counts that overflow a count are unknown: a saturated input would let
+/// the budget weight subtract the cache back down to almost nothing.
+#[test]
+fn counts_that_overflow_are_unknown() {
+    let near = u64::MAX - 50;
+    let read = json!({"usage": {"totalTokens": u64::MAX, "inputTokens": 100,
+        "outputTokens": 5, "cachedReadTokens": near}});
+    assert_eq!(prompt_usage(&read), None);
+    let write = json!({"usage": {"totalTokens": u64::MAX, "inputTokens": 100,
+        "outputTokens": 5, "cachedReadTokens": 0, "cachedWriteTokens": near}});
+    assert_eq!(prompt_usage(&write), None);
+    let fits = json!({"usage": {"totalTokens": u64::MAX, "inputTokens": 50,
+        "outputTokens": 5, "cachedReadTokens": near}});
+    let usage = prompt_usage(&fits).expect("the sum fits a count");
+    assert_eq!(
+        (usage.input_tokens, usage.cache_read_tokens),
+        (u64::MAX, Some(near))
+    );
+}
+
 /// claude-agent-acp 0.81.1's end-of-turn `usage_update` (its `result` handler: context,
 /// cumulative `total_cost_usd`, and the model of the last answer under `_meta`), and
 /// codex-acp's (context only).
@@ -88,8 +108,8 @@ fn a_usage_update_gives_context_cost_and_the_reported_model() {
     assert_eq!(usage_report(&chunk), None, "only its own kind");
 }
 
-/// A cost that is no amount in an ISO 4217 currency is no estimate; a reported model that is
-/// no plain id is named `unrecognized`, never echoed.
+/// A cost that is no amount in a currency (three capital letters) is no estimate; a reported
+/// model that is no plain id is named `unrecognized`, never echoed.
 #[test]
 fn a_misshaped_cost_is_dropped_and_a_hostile_model_is_never_echoed() {
     let update = |cost: serde_json::Value, model: &str| {

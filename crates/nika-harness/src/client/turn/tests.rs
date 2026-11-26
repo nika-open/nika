@@ -80,6 +80,16 @@ async fn turn(
     frames: Vec<Value>,
     answer: Value,
 ) -> Result<HarnessOutcome, HarnessError> {
+    played(request, selected, frames, answer).await.1
+}
+
+/// [`turn`], with the size of every text chunk the client published before the turn settled.
+async fn played(
+    request: HarnessRequest,
+    selected: Option<&'static str>,
+    frames: Vec<Value>,
+    answer: Value,
+) -> (Vec<usize>, Result<HarnessOutcome, HarnessError>) {
     let (ours, theirs) = tokio::io::duplex(64 * 1024);
     let (client_read, client_write) = tokio::io::split(ours);
     let (peer_read, mut w) = tokio::io::split(theirs);
@@ -124,17 +134,21 @@ async fn turn(
         }
         write(&mut w, &last).await;
     });
-    let outcome = settle(crate::client::drive(client_read, client_write, request)).await;
+    let settled = settle(crate::client::drive(client_read, client_write, request)).await;
     peer.await.expect("the scripted peer");
-    outcome
+    settled
 }
 
-async fn settle(mut stream: HarnessEventStream) -> Result<HarnessOutcome, HarnessError> {
+async fn settle(
+    mut stream: HarnessEventStream,
+) -> (Vec<usize>, Result<HarnessOutcome, HarnessError>) {
+    let mut published = Vec::new();
     loop {
         match std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await {
-            Some(Ok(HarnessEvent::Completed { outcome })) => return Ok(*outcome),
+            Some(Ok(HarnessEvent::Completed { outcome })) => return (published, Ok(*outcome)),
+            Some(Ok(HarnessEvent::MessageChunk { text })) => published.push(text.len()),
             Some(Ok(_)) => {}
-            Some(Err(error)) => return Err(error),
+            Some(Err(error)) => return (published, Err(error)),
             None => panic!("the turn completes or fails"),
         }
     }
@@ -169,8 +183,8 @@ async fn narration_a_tool_call_then_an_answer_is_judged_on_the_answer() {
     assert_eq!(outcome.stop_reason, Some(HarnessStopReason::EndTurn));
 }
 
-/// A change of `messageId` starts a message; a tool call inside one message (the same id on
-/// both sides) does not split it; a trailing blank message is not the answer.
+/// A change of `messageId` starts a message, and a trailing blank message is not the answer; a
+/// tool call always splits, even between two chunks of one id.
 #[tokio::test]
 async fn a_change_of_message_id_starts_a_message() {
     let outcome = turn(
@@ -178,7 +192,6 @@ async fn a_change_of_message_id_starts_a_message() {
         None,
         vec![
             text("Reading ", Some("msg_01")),
-            tool_call("t1"),
             text("the file.", Some("msg_01")),
             text("{\"a\": 1}", Some("msg_02")),
             text("\n", Some("msg_03")),
@@ -190,7 +203,7 @@ async fn a_change_of_message_id_starts_a_message() {
     assert_eq!(outcome.output, "Reading the file.{\"a\": 1}\n");
     assert_eq!(outcome.last_message(), "{\"a\": 1}");
 
-    let one = turn(
+    let split = turn(
         HarnessRequest::new("research", "/tmp"),
         None,
         vec![
@@ -202,8 +215,46 @@ async fn a_change_of_message_id_starts_a_message() {
     )
     .await
     .expect("the turn completes");
-    assert_eq!(one.last_message, None, "one message is the whole text");
-    assert_eq!(one.last_message(), "Reading {\"a\": 1}");
+    assert_eq!(split.output, "Reading {\"a\": 1}");
+    assert_eq!(split.last_message.as_deref(), Some("{\"a\": 1}"));
+}
+
+/// The ledger and the text after `chunks`, each placed where the driver appends it.
+fn ledgered(chunks: &[(&str, Option<&str>)]) -> (TurnLedger, String) {
+    let mut ledger = TurnLedger::default();
+    let mut text = String::new();
+    for (chunk, id) in chunks {
+        ledger.chunk(text.len(), chunk, id.map(str::to_owned));
+        text.push_str(chunk);
+    }
+    (ledger, text)
+}
+
+/// A chunk without an id after chunks with one stays in their message: a notice an adapter
+/// sends without an id after the answer does not replace the answer as the last message.
+#[test]
+fn a_chunk_without_an_id_stays_in_the_current_message() {
+    let (ledger, text) = ledgered(&[
+        ("Reading the file. ", Some("msg_01")),
+        ("{\"a\": 1}", Some("msg_02")),
+        (" (context compacted)", None),
+    ]);
+    assert_eq!(
+        ledger.last_message(&text).as_deref(),
+        Some("{\"a\": 1} (context compacted)")
+    );
+}
+
+/// A chunk with an id after chunks without one starts a message.
+#[test]
+fn a_chunk_with_an_id_after_chunks_without_one_starts_a_message() {
+    let (ledger, text) = ledgered(&[
+        ("I will check the notes. ", None),
+        ("Done. ", None),
+        ("{\"a\": 1}", Some("msg_01")),
+        ("\n", Some("msg_01")),
+    ]);
+    assert_eq!(ledger.last_message(&text).as_deref(), Some("{\"a\": 1}\n"));
 }
 
 /// Neither an id nor a tool call: the whole text is one message, as before.
@@ -352,7 +403,8 @@ async fn every_stop_reason_rides_the_outcome() {
 
 /// Under a model the client sent (`opus`, confirmed), the adapter reporting another model
 /// for its answer is the route moving the model: recorded, and refused by the exact
-/// selection. The confirmed alias answering as its own dated id is no move.
+/// selection. The confirmed alias answering as its own dated id is no move, and a spelling the
+/// rule cannot place is recorded as the observed model, never refused.
 #[tokio::test]
 async fn a_reported_model_other_than_the_confirmed_one_is_a_move() {
     let reported = |model: &str| {
@@ -415,47 +467,138 @@ async fn a_reported_model_other_than_the_confirmed_one_is_a_move() {
         )
     );
     assert_eq!(held.selection.configured_model.as_deref(), Some("opus"));
+
+    let unplaced = turn(
+        request(),
+        Some("opus"),
+        vec![text("ok", None), reported("claude-opus-4-5-preview")],
+        end_turn(),
+    )
+    .await
+    .expect("the client reports the turn");
+    assert!(unplaced.selection.changed_mid_turn.is_empty());
+    assert!(unplaced.selection.moved_refusal().is_none());
+    assert_eq!(
+        unplaced.observed_model.as_deref(),
+        Some("claude-opus-4-5-preview")
+    );
 }
 
-/// The confirmed value names the reported id only through its own words, a version, a date
-/// and a leading vendor word.
+/// One move is enough to refuse: a thousand distinct ids keep the first move only, in the
+/// list and in the refusal.
+#[tokio::test]
+async fn a_stream_of_moved_ids_keeps_the_first_move_only() {
+    let mut frames = vec![text("ok", None)];
+    frames.extend((0..1000).map(|minor| {
+        update(
+            json!({"sessionUpdate":"usage_update","used":3,"size":200_000,
+            "_meta":{"_claude/model": format!("claude-sonnet-4-{minor}")}}),
+        )
+    }));
+    let moved = turn(
+        HarnessRequest::new("hi", "/tmp").with_requested_model("anthropic/opus"),
+        Some("opus"),
+        frames,
+        end_turn(),
+    )
+    .await
+    .expect("the client reports the turn");
+    assert_eq!(
+        moved.selection.changed_mid_turn,
+        ["model=claude-sonnet-4-0"]
+    );
+    let Some(HarnessError::Selection { reason }) = moved.selection.moved_refusal() else {
+        panic!("an exact selection refuses the answer");
+    };
+    assert!(reason.contains("model=claude-sonnet-4-0"), "{reason}");
+    assert!(!reason.contains("claude-sonnet-4-1"), "{reason}");
+}
+
+/// A refusal must be certain: only a demonstrated difference is another model, and a spelling
+/// the rule cannot place is recorded, never refused.
 #[test]
-fn a_confirmed_alias_names_only_its_own_dated_ids() {
-    for (confirmed, reported) in [
-        ("opus", "claude-opus-4-5-20251101"),
-        ("sonnet", "claude-sonnet-4-5-20250929"),
-        ("opus[1m]", "claude-opus-4-6"),
-        ("haiku", "claude-3-5-haiku-20241022"),
-        ("claude-opus-4-5", "claude-opus-4-5-20251101"),
-        ("anthropic/claude-opus-4-5", "claude-opus-4-5"),
-        ("gpt-5.5", "gpt-5.5"),
+fn only_a_demonstrated_difference_is_another_model() {
+    use Verdict::{Different, Same, Unplaced};
+    for (confirmed, reported, expected) in [
+        ("opus", "claude-opus-4-5-20251101", Same),
+        ("opus", "anthropic.claude-opus-4-5-20251101-v1:0", Same),
+        ("opus", "claude-opus-4-5@20251101", Same),
+        ("sonnet", "claude-sonnet-4-5-20250929", Same),
+        ("opus[1m]", "claude-opus-4-6", Same),
+        ("haiku", "claude-3-5-haiku-20241022", Same),
+        ("claude-opus-4-5", "claude-opus-4-5-20251101", Same),
+        ("claude-opus-4", "claude-opus-4-20250514", Same),
+        ("anthropic/claude-opus-4-5", "claude-opus-4-5", Same),
+        ("gpt-5.5", "gpt-5.5", Same),
+        ("opus", "claude-sonnet-4-5-20250929", Different),
+        ("claude-opus-4", "claude-opus-4-5-20251101", Different),
+        ("claude-opus-4-6", "claude-opus-4-5-20251101", Different),
+        (
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-5-20250929",
+            Different,
+        ),
+        ("gpt-5.5", "gpt-5.4", Different),
+        ("opus", "claude-opus-4-5-preview", Unplaced),
+        ("opusplan", "claude-sonnet-4-5-20250929", Unplaced),
+        ("default", "claude-opus-4-5-20251101", Unplaced),
+        ("gpt-5.5", "gpt-5.5-codex", Unplaced),
+        ("claude-opus-4-5", "claude-opus", Unplaced),
+        ("gpt-4", "gpt-4-0613", Unplaced),
+        ("opus", "unrecognized", Unplaced),
+        ("", "claude-opus-4-5", Unplaced),
+        ("sonnet", "", Unplaced),
     ] {
-        assert!(names(confirmed, reported), "{confirmed} → {reported}");
-    }
-    for (confirmed, reported) in [
-        ("opus", "claude-sonnet-4-5-20250929"),
-        ("claude-opus-4-6", "claude-opus-4-5-20251101"),
-        ("gpt-5.5", "gpt-5.5-codex"),
-        ("opus", "unrecognized"),
-        ("", "claude-opus-4-5"),
-        ("sonnet", ""),
-    ] {
-        assert!(!names(confirmed, reported), "{confirmed} ↛ {reported}");
+        assert_eq!(
+            verdict(confirmed, reported),
+            expected,
+            "{confirmed} → {reported}"
+        );
     }
 }
 
-/// One turn may hold at most its bound of text: past it the turn is refused before the text
-/// is held, in Nika's words.
+/// The bound on one turn's text, on values: exactly [`MAX_TURN_TEXT`] bytes are held, one more
+/// byte is not, and a sum past the count is past the bound.
+#[test]
+fn a_turn_holds_exactly_its_bound() {
+    assert!(admits(0, MAX_TURN_TEXT));
+    assert!(admits(MAX_TURN_TEXT - 1, 1));
+    assert!(admits(MAX_TURN_TEXT, 0));
+    assert!(!admits(MAX_TURN_TEXT, 1));
+    assert!(!admits(1, MAX_TURN_TEXT));
+    assert!(!admits(usize::MAX, 1));
+}
+
+/// One turn holds exactly its bound of text; one byte more is refused before it is held or
+/// published, in Nika's words.
 #[tokio::test]
 async fn a_turn_past_its_text_bound_is_refused() {
     let big = "x".repeat(MAX_TURN_TEXT);
-    let refused = turn(
+    let (published, held) = played(
+        HarnessRequest::new("hi", "/tmp"),
+        None,
+        vec![text(&big, None)],
+        end_turn(),
+    )
+    .await;
+    let held = held.expect("exactly the bound is held");
+    assert_eq!(
+        (held.output.len(), published),
+        (MAX_TURN_TEXT, vec![MAX_TURN_TEXT])
+    );
+
+    let (published, refused) = played(
         HarnessRequest::new("hi", "/tmp"),
         None,
         vec![text(&big, None), text("y", None)],
         end_turn(),
     )
     .await;
+    assert_eq!(
+        published,
+        [MAX_TURN_TEXT],
+        "the refused byte is never published"
+    );
     let Err(HarnessError::Refused { reason }) = refused else {
         panic!("a turn past its bound is refused, got {refused:?}");
     };

@@ -23,8 +23,10 @@ const MAX_MODEL_WORD: usize = 128;
 /// without the cache (`totalTokens` = input + output + cache reads + cache writes, the RFD's
 /// example and both installed adapters), so the cache counts are added back. `None` when
 /// `usage` is absent, `null`, or lacks one of its three required counts (`totalTokens`,
-/// `inputTokens`, `outputTokens`): unknown, never zero. An optional count that is absent or
-/// `null` stays `None`.
+/// `inputTokens`, `outputTokens`): unknown, never zero. `None` too when the input and its cache
+/// counts overflow a count: unknown, never a saturated input from which the budget weight
+/// subtracts the cache back down to an under-count. An optional count that is absent or `null`
+/// stays `None`.
 pub(crate) fn prompt_usage(result: &Value) -> Option<TokenUsage> {
     let usage = result.get("usage")?.as_object()?;
     let count = |key: &str| usage.get(key).and_then(Value::as_u64);
@@ -35,8 +37,8 @@ pub(crate) fn prompt_usage(result: &Value) -> Option<TokenUsage> {
     );
     let (read, write) = (count("cachedReadTokens"), count("cachedWriteTokens"));
     let prompt = input
-        .saturating_add(read.unwrap_or(0))
-        .saturating_add(write.unwrap_or(0));
+        .checked_add(read.unwrap_or(0))?
+        .checked_add(write.unwrap_or(0))?;
     let mut tokens = TokenUsage::new(prompt, output);
     tokens.cache_read_tokens = read;
     tokens.cache_write_tokens = write;
@@ -50,7 +52,8 @@ pub(crate) fn prompt_usage(result: &Value) -> Option<TokenUsage> {
 pub(crate) struct UsageReport {
     /// `used` and `size`, when both are counts.
     pub(crate) context: Option<HarnessContext>,
-    /// `cost`, when it holds a finite, non-negative `amount` and an ISO 4217 `currency` code.
+    /// `cost`, when it holds a finite, non-negative `amount` and a `currency` of three capital
+    /// letters.
     pub(crate) cost: Option<HarnessCostEstimate>,
     /// claude-agent-acp's `_meta["_claude/model"]`: an id, or `unrecognized` when the report
     /// names one that is no plain model id.
@@ -66,8 +69,8 @@ pub(crate) fn usage_report(update: &Value) -> Option<UsageReport> {
     let context = count("used")
         .zip(count("size"))
         .map(|(used, size)| HarnessContext::new(used, size));
-    // The currency rides the record, so only an ISO 4217 code shape is kept: three ASCII
-    // capitals. Any other unit is no estimate the record can name.
+    // The currency rides the record, so only the shape of a currency code is kept: three ASCII
+    // capital letters (`USD`). A cost in any other unit is dropped.
     let cost = update.get("cost").and_then(|cost| {
         let amount = cost.get("amount")?.as_f64()?;
         let currency = cost.get("currency")?.as_str()?;
@@ -98,8 +101,8 @@ fn model_word(raw: &str) -> String {
     if plain { raw } else { "unrecognized" }.to_owned()
 }
 
-/// The `messageId` of an agent message chunk, when it carries one: a change of it starts a
-/// new message (ACP `ContentChunk.messageId`).
+/// The `messageId` of an agent message chunk, when it carries one: an id the current message
+/// does not carry starts a new message (ACP `ContentChunk.messageId`).
 pub(crate) fn chunk_message_id(update: &Value) -> Option<String> {
     update
         .get("messageId")
@@ -108,8 +111,8 @@ pub(crate) fn chunk_message_id(update: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Whether the update reports a new tool call (`tool_call`): between chunks that carry no
-/// `messageId`, it ends the message before it.
+/// Whether the update reports a new tool call (`tool_call`): it always ends the message before
+/// it.
 pub(crate) fn is_tool_call(update: &Value) -> bool {
     update.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call")
 }

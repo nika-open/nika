@@ -664,6 +664,45 @@ async fn a_failed_call_keeps_its_typed_identity_and_no_adapter_text() {
     }
 }
 
+/// codex-acp's exhausted quota on the one-shot path: the driver's refusal now carries the
+/// adapter's words beside the JSON-RPC code, and the authoring call still tells only its own.
+#[tokio::test(start_paused = true)]
+async fn a_quota_refusal_carries_the_adapters_words_and_the_call_tells_its_own() {
+    let quota = || {
+        json!({"code":-32603,"message":"Internal error","data":{
+            "message":"Usage limits were exceeded","codexErrorInfo":"usageLimitExceeded"}})
+    };
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(erring(quota())(theirs));
+    let (r, w) = tokio::io::split(ours);
+    let bound = Duration::from_secs(crate::IDLE_TIMEOUT_SECS);
+    let meta = claude().session_meta();
+    let once = HarnessRequest::new("p", "/tmp");
+    let stream = crate::client::drive_profile(r, w, once, bound, Some(claude()), None, meta, None);
+    let refused = whole(stream).await;
+    let Err(HarnessError::Refused { reason }) = &refused else {
+        panic!("an exhausted quota is a final refusal, got {refused:?}");
+    };
+    assert_eq!(
+        reason,
+        "Internal error — Usage limits were exceeded (jsonrpc -32603)"
+    );
+    assert_eq!(
+        refused.as_ref().err().map(safe_error).as_deref(),
+        Some(
+            "ACP authoring refused: the audited ACP completion profile, selected model or \
+             text-only contract was not satisfied; no answer accepted"
+        )
+    );
+    let door = door(Duration::ZERO, erring(quota()));
+    let told = authoring(&door)
+        .infer(request(None))
+        .await
+        .expect_err("no answer");
+    assert!(told.to_string().contains("ACP authoring refused"), "{told}");
+    assert!(!told.to_string().contains("Usage limits"), "{told}");
+}
+
 /// A refusal during the handshake and an adapter that never opens keep their classes too.
 #[tokio::test(start_paused = true)]
 async fn a_refused_session_and_an_unopened_adapter_keep_their_classes() {

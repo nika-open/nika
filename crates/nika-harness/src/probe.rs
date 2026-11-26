@@ -232,13 +232,30 @@ pub(crate) fn presence_facts_with(
     rows: Vec<AdapterRow>,
     probe: &(dyn Fn(&AuthProbe, &[String]) -> LoginCheck + Sync),
 ) -> Vec<PresenceFact> {
+    #[allow(clippy::disallowed_methods)] // PATH walk · presence only
+    let path = std::env::var_os("PATH");
+    presence_facts_under(rows, probe, Hosts::from_env(), path.as_deref(), &|row| {
+        probe_auth_home_sync(&row.auth, row.directory_auth)
+    })
+}
+
+/// [`presence_facts_with`] with the host switch, the `PATH` and the home-file reader injected.
+/// A row whose product the switch keeps absent ([`crate::hosts`]) is not looked for at all: its
+/// home file is not read either, so a sign-in file in a person's home never turns an absent
+/// host into a detected seat, and no test reports the seats its developer's home is signed in
+/// to.
+fn presence_facts_under(
+    rows: Vec<AdapterRow>,
+    probe: &(dyn Fn(&AuthProbe, &[String]) -> LoginCheck + Sync),
+    hosts: Hosts,
+    path: Option<&std::ffi::OsStr>,
+    home_file: &dyn Fn(&AdapterRow) -> Option<bool>,
+) -> Vec<PresenceFact> {
     let presence: Vec<(bool, bool)> = rows
         .iter()
         .map(|row| {
-            let rt = nika_types::access::HarnessRuntime::lookup(&row.adapter.id);
-            let detect = rt.map_or(row.adapter.command.as_str(), |r| r.detect_bin);
-            let acp = rt.map_or(row.adapter.command.as_str(), |r| r.acp_bin);
-            (binary_on_path(detect), binary_on_path(acp))
+            let (detect, acp) = host_bins(row);
+            (binary_in(path, detect, hosts), binary_in(path, acp, hosts))
         })
         .collect();
     // The login commands of the present products answer CONCURRENTLY
@@ -267,7 +284,7 @@ pub(crate) fn presence_facts_with(
         .map(|((row, (product_present, acp_present)), login)| {
             let configured = match row.auth {
                 AuthProbe::HomeFile(_) => {
-                    probe_auth_home_sync(&row.auth, row.directory_auth).unwrap_or(false)
+                    !product_hidden(&row, hosts) && home_file(&row).unwrap_or(false)
                 }
                 // An unknown sign-in (no answer in time · the command itself
                 // failed to run) does not admit the seat: fail closed, while
@@ -284,6 +301,22 @@ pub(crate) fn presence_facts_with(
             }
         })
         .collect()
+}
+
+/// The product and ACP program names of a row: the shipped runtime's, else the adapter's own.
+fn host_bins(row: &AdapterRow) -> (&str, &str) {
+    let rt = nika_types::access::HarnessRuntime::lookup(&row.adapter.id);
+    let own = row.adapter.command.as_str();
+    (
+        rt.map_or(own, |r| r.detect_bin),
+        rt.map_or(own, |r| r.acp_bin),
+    )
+}
+
+/// Whether the host switch keeps this row's product absent ([`crate::hosts`]). The switch knows
+/// a host by its program name, so a row that names none (a test's own stub) is never hidden.
+fn product_hidden(row: &AdapterRow, hosts: Hosts) -> bool {
+    hosts.admit(std::path::Path::new(host_bins(row).0)).is_err()
 }
 
 /// The login/identity probe for a sync caller — [`login_check`] on a
@@ -377,10 +410,12 @@ async fn probe_one(row: AdapterRow) -> AdapterProbeRow {
     };
     let authenticated = match login {
         Some(login) => login.signed_in(),
+        // A row the switch hides is not looked for: its home file is not read either, and
+        // its sign-in stays unknown, never signed out.
+        None if product_hidden(&row, Hosts::from_env()) => None,
         None => probe_auth(&row.auth, row.directory_auth, passthrough).await,
     };
-    let detect = nika_types::access::HarnessRuntime::lookup(&row.adapter.id)
-        .map_or(row.adapter.command.as_str(), |rt| rt.detect_bin);
+    let detect = host_bins(&row).0;
     AdapterProbeRow {
         id: row.adapter.id.clone(),
         version,
@@ -1548,5 +1583,88 @@ mod tests {
             out.iter().map(|r| r.authenticated).collect::<Vec<_>>(),
             vec![Some(false), Some(false)]
         );
+    }
+
+    /// The shipped rows a home file signs in.
+    fn home_file_rows() -> Vec<AdapterRow> {
+        let rows: Vec<AdapterRow> = crate::registry_with(&|_| None)
+            .expect("registry loads")
+            .into_iter()
+            .filter(|row| matches!(row.auth, AuthProbe::HomeFile(_)))
+            .collect();
+        assert!(rows.len() >= 2, "rows signed in by a home file: {rows:?}");
+        rows
+    }
+
+    /// While the host switch is off, a shipped row is not looked for at all: the sign-in file
+    /// a person's home holds is not read, so it never makes an absent host a detected seat and
+    /// no result depends on the machine the test runs on. With the switch on, the same file
+    /// signs the row in. A row that names no host program is never hidden.
+    #[test]
+    fn a_home_file_does_not_sign_in_a_row_the_host_switch_hides() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let read = AtomicUsize::new(0);
+        let present = |_: &AdapterRow| {
+            read.fetch_add(1, Ordering::SeqCst);
+            Some(true)
+        };
+        let never = |_: &AuthProbe, _: &[String]| LoginCheck::Unreadable;
+
+        let off = presence_facts_under(home_file_rows(), &never, Hosts::Off, None, &present);
+        for fact in &off {
+            assert!(
+                !fact.configured && !fact.product_present && !fact.acp_present,
+                "{fact:?}"
+            );
+        }
+        assert_eq!(
+            read.load(Ordering::SeqCst),
+            0,
+            "a hidden row's home is not read"
+        );
+
+        let on = presence_facts_under(home_file_rows(), &never, Hosts::Start, None, &present);
+        assert_eq!(on.len(), off.len());
+        for fact in &on {
+            assert!(fact.configured && !fact.product_present, "{fact:?}");
+        }
+        assert_eq!(read.load(Ordering::SeqCst), on.len(), "one read per row");
+
+        let stub = crate::registry::AdapterRow {
+            adapter: crate::HarnessAdapter::new("stub-seat", "false").expect("fine"),
+            serves: &["mock"],
+            auth: AuthProbe::HomeFile(".any"),
+            directory_auth: None,
+            package: "test-only",
+        };
+        assert!(
+            !product_hidden(&stub, Hosts::Off),
+            "`false` is no host program"
+        );
+        let kept = presence_facts_under(vec![stub], &never, Hosts::Off, None, &present);
+        assert!(kept[0].configured, "{kept:?}");
+    }
+
+    /// The doctor's probe leaves the sign-in of a hidden row unknown: its home file is not
+    /// read, and unknown is never signed out. Under Cargo the switch is off
+    /// (`.cargo/config.toml`). A live run turns it on and starts real hosts: this test starts
+    /// none, so it pins nothing there.
+    #[tokio::test]
+    async fn the_probe_leaves_the_sign_in_of_a_row_the_host_switch_hides_unknown() {
+        if !crate::hosts_switched_off() {
+            return;
+        }
+        for row in home_file_rows() {
+            let id = row.adapter.id.clone();
+            let probed = probe_one(row).await;
+            assert_eq!(
+                probed.authenticated, None,
+                "{id}: not read, never signed out"
+            );
+            assert!(
+                probed.hosts_off && !probed.product_present && probed.version.is_none(),
+                "{id}: {probed:?}"
+            );
+        }
     }
 }

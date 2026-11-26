@@ -8,8 +8,9 @@
 //! check, a sign-in check, a probe or a session through the registry would therefore start the
 //! real program installed on the developer's machine, under their own sign-in. With
 //! [`HOSTS_ENV`] set to `off`, every host program is absent instead: a presence check does not
-//! find it, a sign-in check cannot be read, a probe or a session refuses as for a missing
-//! binary, and no process starts.
+//! find it, a sign-in check cannot be read (its login command does not start, and the sign-in
+//! file it keeps in the person's home is not read), a probe or a session refuses as for a
+//! missing binary, and no process starts.
 //!
 //! The repository's `.cargo/config.toml` sets `NIKA_HARNESS_HOSTS = "off"` for every process
 //! Cargo starts (`cargo test`, `cargo nextest run`, `cargo run`). Cargo's `[env]` never replaces

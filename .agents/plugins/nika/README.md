@@ -124,7 +124,21 @@ callable is a tool under `invoke:`, and the engine ships its own
 - **What the hooks trust.** The environment a hook starts with is the
   host's to set, and the hooks trust it: they defend against the open
   repository, its files and its folders, not against that environment.
-  Not defended:
+  Each host's rules decide how a hook is started. Cursor runs a plugin's
+  hooks from the plugin's folder (`CURSOR_PLUGIN_ROOT`), but `stop` and
+  `subagentStop` from the workspace root, where a relative command would
+  name a file of the project, so a hook of those two must name its
+  script by `"${CURSOR_PLUGIN_ROOT}"/` (the kit has none); it requires
+  `version: 1` in the hooks file, and it lets a command through when a
+  hook crashes, times out or exits with anything but 2 unless the hook
+  sets `failClosed`, which no hook of the kit does
+  (<https://cursor.com/docs/hooks>, read 2026-11-26). Codex gives plugin
+  hooks `PLUGIN_ROOT` and, as Claude Code does, `CLAUDE_PLUGIN_ROOT`, and
+  matches its shell commands as `Bash`, the guard's matcher
+  (<https://learn.chatgpt.com/docs/hooks>, read 2026-11-26). Every
+  manifest quotes that root: unquoted, a root whose path holds a space
+  splits there, and the shell's exit 127 is an error every host lets
+  through. Not defended:
   - an absolute PATH folder outside the project that someone else can
     write, a `NIKA_BIN` that names another program, `TMPDIR`, and every
     other variable the host passes;
@@ -138,9 +152,11 @@ callable is a tool under `invoke:`, and the engine ships its own
     exported functions, and that first Python honours `PYTHONHOME`
     before the script starts itself again with `-I`;
   - a system without `/bin/bash` (NixOS, for one): the manifests' hooks
-    cannot start there, and a hook that cannot start is an error that
-    does not block (Claude Code blocks only on exit 2, Cursor only with
-    `failClosed`, which the kit does not set), so the run guard is off;
+    cannot start there, and on all three hosts a hook that cannot start
+    lets the command through (Claude Code and Codex block only on exit 2,
+    Cursor only with `failClosed`, which the kit does not set), so the run
+    guard is off; `nika run` itself still refuses a workflow whose
+    `nika check` is not clean;
   - the MCP server (`.mcp.json`, `mcp.json`) and the language server
     (`.lsp.json`), which the host starts itself as a bare `nika` through
     its own PATH, with no block of the kit in front.
@@ -185,7 +201,8 @@ callable is a tool under `invoke:`, and the engine ships its own
   run is judged: a `nika run` started by an absolute path outside a
   project is not checked by this hook. A hook set to block on failure
   (Claude Code `onFailure: "block"`, Cursor `failClosed`) turns the
-  warning into a refusal.
+  warning into a refusal; the kit's wiring, and the one `nika init`
+  writes, sets neither.
 - **A healthy guard speaks only about `nika run`.** Every other parsed shell command
   the agent proposes passes through untouched — the hook returns no
   decision at all, so your host's own permission flow decides exactly
@@ -194,12 +211,15 @@ callable is a tool under `invoke:`, and the engine ships its own
   only outside a Nika project, after its one warning (the rules above).
   An affirmative « proceed » is only ever earned by a run the ladder
   just saw clean.
-- **Windows**: the hooks are bash scripts; without a bash on PATH the
-  hook processes cannot run — comfort AND guard rails are effectively
-  absent (runs fall back to the host's own permission flow, unguarded).
-  `nika doctor` names the missing rails; the engine's own boundaries
-  (`nika check` · `permits:` · cost caps) still hold whenever you run
-  the binary yourself.
+- **Windows**: the manifests start every hook with `/bin/bash`, which
+  Windows does not have (there Cursor's desktop app runs hook commands
+  through PowerShell, <https://cursor.com/docs/hooks>, read 2026-11-26),
+  so no hook can start, and on all three hosts a hook that cannot start
+  lets the command through: the comfort hooks and the run guard are off,
+  and commands fall back to the host's own permission flow. `nika doctor`
+  names the missing rails; `nika run` itself still refuses a workflow
+  whose `nika check` is not clean, and `permits:` and cost caps still
+  hold.
 - The engine stays the authority: hooks are a seatbelt, never the
   airbag. Everything the oracle answers is read-only by design: the
   MCP oracle audits and teaches; execution uses the host's visible shell

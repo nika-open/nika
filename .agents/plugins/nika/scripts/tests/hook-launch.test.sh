@@ -10,7 +10,15 @@
 # PATH first, finds python3 there as an absolute path and runs the script
 # with -I.
 #
-# Four proofs:
+# Each command runs from the folder its host documents, as it is written:
+# Cursor runs a plugin's hooks from the plugin's install folder
+# (CURSOR_PLUGIN_ROOT), but `stop` and `subagentStop` from the workspace
+# root (https://cursor.com/docs/hooks, read 2026-11-26); Claude Code and
+# Codex run them from the session's folder, the project, with the plugin's
+# root in CLAUDE_PLUGIN_ROOT (Codex sets PLUGIN_ROOT too,
+# https://learn.chatgpt.com/docs/hooks, read 2026-11-26).
+#
+# Five proofs:
 #   1. The manifests: each command is /bin/bash -p and a kit script, and a
 #      Python hook is reached only through python-hook.sh.
 #   2. Each command, run the way a host runs it with a BASH_ENV file and an
@@ -21,6 +29,10 @@
 #      absolute PATH folder outside the project, never a planted one.
 #   4. python-hook.sh refuses a name that is not a Python script beside it,
 #      and says so when the PATH holds no python3.
+#   5. Under a plugin root whose path holds a space, each command still
+#      reaches its own script: an unquoted root splits there, and the shell's
+#      exit 127 is an error every host lets through. The same command with
+#      the root unquoted reaches nothing (the control).
 #
 # Stub binaries stand in for nika; no model, no network, no workflow run.
 set -uo pipefail
@@ -62,30 +74,36 @@ chmod +x "$root/stub/nika"
 p="$root/project"
 printf 'nika: project\n' >"$p/nika.yaml"
 
-# 1. The manifests.
+# 1. The manifests. Each line is the folder the host runs the command from
+# (`plugin` for the plugin root, `project` otherwise), a tab, the command.
 commands="$(
   python3 -I - "$KIT" <<'PY'
 import glob, json, os, sys
-def walk(node):
+def walk(node, event=None):
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "command" and isinstance(value, str):
-                yield value
+                yield event, value
             else:
-                yield from walk(value)
+                yield from walk(value, key if event is None and key != "hooks" else event)
     elif isinstance(node, list):
         for value in node:
-            yield from walk(value)
+            yield from walk(value, event)
 kit = sys.argv[1]
 for manifest in sorted(glob.glob(os.path.join(kit, "hooks", "*.json"))) + [os.path.join(kit, "monitors", "monitors.json")]:
-    for command in walk(json.load(open(manifest, encoding="utf-8"))):
-        print(command)
+    cursor = os.path.basename(manifest) == "cursor-hooks.json"
+    for event, command in walk(json.load(open(manifest, encoding="utf-8"))):
+        where = "plugin" if cursor and event not in ("stop", "subagentStop") else "project"
+        print("%s\t%s" % (where, command))
 PY
 )"
 count="$(printf '%s\n' "$commands" | grep -c .)"
 [ "$count" -ge 13 ] && ok=yes || ok=no
 check "the manifests name the hooks and monitors ($count commands)" "$ok" "too few commands read"
-while IFS= read -r command; do
+plugin_run="$(printf '%s\n' "$commands" | grep -c '^plugin')"
+[ "$plugin_run" = 3 ] && ok=yes || ok=no
+check "Cursor's three hooks run from the plugin root" "$ok" "$plugin_run commands read as run from the plugin root"
+while IFS=$'\t' read -r where command; do
   [ -n "$command" ] || continue
   rest="${command#/bin/bash -p }"
   [ "$rest" != "$command" ] && ok=yes || ok=no
@@ -120,28 +138,29 @@ done <<<"$commands"
 # shell only, so only the hook's own bash can leave a marker.
 marker="$root/marker"
 printf 'echo bash_env >>"%s"\n' "$marker" >"$root/bash-env.sh"
-# start <command>: run it as a host does, from the project, with the
-# command's script folder spelled out for Cursor's relative ones.
+# start <where> <command>: run it as its host does, from the folder that
+# host documents for it (the plugin root, or the project), as it is written.
 start() {
-  local run="$1"
-  case "$run" in *' ./'*) run="${run%% ./*} \"$KIT\"/${run#* ./}" ;; esac
+  local from="$p" run="$2"
+  [ "$1" != plugin ] || from="$KIT"
   # shellcheck disable=SC2016 # the function text, exported by bash itself
-  (cd "$p" && printf '{}' | env -i PATH="$root/stub:/usr/bin:/bin" HOME="$root/home" \
+  (cd "$from" && printf '{}' | env -i PATH="$root/stub:/usr/bin:/bin" HOME="$root/home" \
     TMPDIR="$root/tmp" CLAUDE_PLUGIN_DATA="$root/data" CLAUDE_PLUGIN_ROOT="$KIT" \
+    CURSOR_PLUGIN_ROOT="$KIT" CURSOR_PROJECT_DIR="$p" \
     CLAUDE_PROJECT_DIR="$p" NIKA_PROGRESS_ONCE=1 NIKA_PENDING_WATCH_ONCE=1 \
     NIKA_PROGRESS_STATE="$root/progress.json" NIKA_KIT_TIMEOUT_SECONDS=2 \
     HOOK_BASH_ENV="$root/bash-env.sh" MARKER="$marker" RUN="$run" \
     /bin/bash -p -c 'cd() { echo function >>"$MARKER"; builtin cd "$@"; }; export -f cd
       BASH_ENV="$HOOK_BASH_ENV" exec /bin/sh -c "$RUN"') >/dev/null 2>&1
 }
-while IFS= read -r command; do
+while IFS=$'\t' read -r where command; do
   [ -n "$command" ] || continue
   rm -f "$marker"
-  start "$command"
+  start "$where" "$command"
   [ ! -e "$marker" ] && ok=yes || ok=no
   check "$command · no BASH_ENV file and no exported function runs" "$ok" "marker: $(tr '\n' ' ' <"$marker" 2>/dev/null)"
   rm -f "$marker"
-  start "/bin/bash ${command#/bin/bash -p }"
+  start "$where" "/bin/bash ${command#/bin/bash -p }"
   grep -qx bash_env "$marker" 2>/dev/null && grep -qx function "$marker" 2>/dev/null && ok=yes || ok=no
   check "$command · control: without -p both run" "$ok" "marker: $(tr '\n' ' ' <"$marker" 2>/dev/null)"
 done <<<"$commands"
@@ -201,6 +220,51 @@ launch "$root/nopython" probe.py
 [ "$(cat "$root/rc")" = 1 ] && [ ! -s "$root/out" ] && grep -q 'python3 is not on the PATH' "$root/err" \
   && ok=yes || ok=no
 check "python-hook · no python3 on the PATH: said on stderr, exit 1" "$ok" "rc=$(cat "$root/rc") err=$(head -c 300 "$root/err")"
+
+# 5. A plugin root whose path holds a space: a copy of the manifests under
+# it, and in its scripts/ a probe for each script they name, which records
+# its own name and arguments. Each command runs as its host runs it, from
+# its folder, with the root in CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT and
+# CURSOR_PLUGIN_ROOT, and must reach its own probe.
+spaced="$root/plugin root"
+mkdir -p "$spaced/hooks" "$spaced/monitors" "$spaced/scripts"
+cp "$KIT"/hooks/*.json "$spaced/hooks/"
+cp "$KIT/monitors/monitors.json" "$spaced/monitors/"
+probe_log="$root/probe.log"
+for script in "$KIT"/scripts/*.sh; do
+  # shellcheck disable=SC2016 # the probe's own $0 and $*
+  printf '#!/bin/sh\nprintf "%%s %%s\\n" "${0##*/}" "$*" >>"%s"\n' "$probe_log" >"$spaced/scripts/${script##*/}"
+done
+# reach <where> <command>: run it as its host does under the spaced root.
+reach() {
+  local from="$p"
+  [ "$1" != plugin ] || from="$spaced"
+  rm -f "$probe_log"
+  (cd "$from" && env -i PATH=/usr/bin:/bin HOME="$root/home" CLAUDE_PLUGIN_ROOT="$spaced" \
+    PLUGIN_ROOT="$spaced" CURSOR_PLUGIN_ROOT="$spaced" CLAUDE_PROJECT_DIR="$p" \
+    /bin/sh -c "$2" </dev/null >/dev/null 2>&1)
+}
+# shellcheck disable=SC2016 # the manifests' own spelling of the root
+quoted='"${CLAUDE_PLUGIN_ROOT}"'
+# shellcheck disable=SC2016 # the same root, unquoted
+bare='${CLAUDE_PLUGIN_ROOT}'
+while IFS=$'\t' read -r where command; do
+  [ -n "$command" ] || continue
+  rest="${command#/bin/bash -p }"
+  script="${rest%% *}"
+  arg="${rest#"$script"}"
+  script="$(printf '%s' "$script" | tr -d '"')"
+  want="${script##*/} ${arg# }"
+  reach "$where" "$command" && [ "$(cat "$probe_log" 2>/dev/null)" = "$want" ] && ok=yes || ok=no
+  check "$command · under a root with a space it reaches its own script" "$ok" "probe: $(cat "$probe_log" 2>/dev/null)"
+  case "$command" in
+    *"$quoted"*)
+      reach "$where" "${command/"$quoted"/$bare}"
+      [ ! -e "$probe_log" ] && ok=yes || ok=no
+      check "$command · control: the root unquoted splits at the space and reaches nothing" "$ok" "probe: $(cat "$probe_log" 2>/dev/null)"
+      ;;
+  esac
+done <<<"$commands"
 
 if [ "$fails" -ne 0 ]; then
   printf 'FAIL  %s launch control(s)\n' "$fails" >&2

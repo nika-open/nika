@@ -39,10 +39,13 @@
 #   - Codex: a failed PreToolUse run is reported and the tool call
 #     continues; its source records "hook exited with code 1", without
 #     the stderr text.
-#     https://developers.openai.com/codex/hooks
+#     https://learn.chatgpt.com/docs/hooks
 # A hook configured to block on failure (Claude Code onFailure "block",
 # Cursor failClosed, Codex opt-in failure blocking) turns the warning
-# into a refusal; the kit's own manifests set none of them.
+# into a refusal; the kit's own manifests set none of them, and neither
+# do the copies `nika init` writes. Blocking on failure would also refuse
+# every shell command, in every folder, wherever the hook cannot start (no
+# /bin/bash, as on Windows) or cannot run to its end: the rule above.
 #
 # The warning shows once until nika is found again: a marker under
 # ${XDG_STATE_HOME:-~/.local/state}/nika/ is written when warning and

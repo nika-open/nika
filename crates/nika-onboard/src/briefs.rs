@@ -437,7 +437,14 @@ const KIT_CODEX_MANIFEST: &str = include_str!(concat!(
     "/../../.agents/plugins/nika/.codex-plugin/plugin.json"
 ));
 
+// Cursor requires `version`, runs project hooks from the project root, and
+// lets a command through when a hook crashes, times out or exits with
+// anything but 2 unless the hook sets `failClosed`. None of these does: a
+// hook that cannot start (no /bin/bash) lets the command through, as on
+// Claude Code and Codex, and the run guard refuses by its own exit 2.
+// https://cursor.com/docs/hooks (read 2026-11-26)
 const CURSOR_HOOKS_JSON: &str = r#"{
+  "version": 1,
   "hooks": {
     "sessionStart": [
       { "command": "/bin/bash -p ./.cursor/hooks-nika/session-context.sh" }
@@ -1330,19 +1337,28 @@ mod tests {
         }
     }
 
-    /// The project manifest mirrors the KIT's — same events, same script
-    /// basenames, only the path prefix differs (workspace vs plugin
+    /// The project manifest mirrors the KIT's — the same `version`, the
+    /// same events, the same script basenames with the same timeout and
+    /// `failClosed`, only the path prefix differs (workspace vs plugin
     /// scope). The sibling test above checks internal consistency; this
     /// one checks the SOURCE: a seatbelt added to the kit that the
     /// project manifest misses fails here, not silently in the field.
+    /// Cursor requires `version: 1`, and no hook sets `failClosed`: a hook
+    /// that cannot start lets the command through on every host
+    /// (<https://cursor.com/docs/hooks>, read 2026-11-26).
     #[test]
     fn project_hooks_manifest_mirrors_the_kit() {
+        // An event, a script's basename, its timeout and its failClosed.
+        type Hook = (String, String, serde_json::Value, serde_json::Value);
         let ours: serde_json::Value =
             serde_json::from_str(CURSOR_HOOKS_JSON).expect("project manifest parses");
         let kit: serde_json::Value =
             serde_json::from_str(KIT_CURSOR_HOOKS).expect("kit manifest parses");
-        let shape = |v: &serde_json::Value| -> Vec<(String, String)> {
-            let mut out: Vec<(String, String)> = v["hooks"]
+        for manifest in [&ours, &kit] {
+            assert_eq!(manifest["version"], serde_json::json!(1), "{manifest}");
+        }
+        let shape = |v: &serde_json::Value| -> Vec<Hook> {
+            let mut out: Vec<Hook> = v["hooks"]
                 .as_object()
                 .expect("hooks object")
                 .iter()
@@ -1354,19 +1370,31 @@ mod tests {
                         .map(|e| {
                             let cmd = e["command"].as_str().expect("command string");
                             let base = cmd.rsplit('/').next().expect("basename");
-                            (event.clone(), base.to_owned())
+                            (
+                                event.clone(),
+                                base.to_owned(),
+                                e["timeout"].clone(),
+                                e["failClosed"].clone(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 })
                 .collect();
-            out.sort();
+            out.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
             out
         };
+        let ours = shape(&ours);
         assert_eq!(
-            shape(&ours),
+            ours,
             shape(&kit),
             "project hooks.json drifted from the kit manifest"
         );
+        let closed: Vec<&str> = ours
+            .iter()
+            .filter(|(_, _, _, fail)| fail != &serde_json::Value::Null)
+            .map(|(_, script, _, _)| script.as_str())
+            .collect();
+        assert_eq!(closed, Vec::<&str>::new(), "no hook sets failClosed");
     }
 
     /// The Codex plugin page opens with the three DOORS — one per visitor

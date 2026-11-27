@@ -85,6 +85,14 @@ impl Profile {
         }
     }
 
+    /// The registry seat this profile is audited for: the inverse of [`Self::for_seat`].
+    pub(crate) const fn seat(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+        }
+    }
+
     const fn identity(self) -> (&'static str, &'static str) {
         match self {
             Self::ClaudeCode => (NAME, VERSION),

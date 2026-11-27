@@ -2,7 +2,10 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 //! Pure ACP model and mode projections; existing selectors moved without changing behavior.
 use nika_kernel::ai::harness::HarnessError;
+use nika_types::access::HarnessBoundary;
 use serde_json::Value;
+
+use crate::authoring::acp::Profile;
 
 /// The `category: "model"` config option, when advertised.
 pub(super) fn model_option(config_options: Option<&Value>) -> Option<&Value> {
@@ -104,17 +107,22 @@ pub(super) fn offered_option(option: Option<&Value>, wanted: &str) -> Option<(St
     Some((id, choice.get("value")?.clone()))
 }
 
+/// Whether a session selects a named model only through its model option
+/// (`HarnessBoundary::models_through_option`, on any release): by the row of the adapter's
+/// reported name, else by the seat of the audited profile the session was admitted under (a
+/// conversation records no name).
+pub(super) fn option_only(agent_name: Option<&str>, profile: Option<Profile>) -> bool {
+    let by_name = agent_name.and_then(HarnessBoundary::for_agent);
+    let by_profile = profile.and_then(|profile| HarnessBoundary::for_seat(profile.seat()));
+    by_name
+        .or(by_profile)
+        .is_some_and(|row| row.models_through_option)
+}
+
 /// The legacy model list a requested model may be selected from: the session's own, except
-/// on an adapter whose measured row selects models through the model option only
-/// (`HarnessBoundary::models_through_option`, on any release of it), where a model the option
-/// does not offer is not offered at all.
-pub(super) fn legacy_list<'s>(
-    agent_name: Option<&str>,
-    models: Option<&'s Value>,
-) -> Option<&'s Value> {
-    let option_only = agent_name
-        .and_then(nika_types::access::HarnessBoundary::for_agent)
-        .is_some_and(|row| row.models_through_option);
+/// on a session that selects models through the model option only ([`option_only`]), where
+/// a model the option does not offer is not offered at all.
+pub(super) fn legacy_list(option_only: bool, models: Option<&Value>) -> Option<&Value> {
     if option_only { None } else { models }
 }
 

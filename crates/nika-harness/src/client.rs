@@ -550,7 +550,7 @@ where
         let mut config = session.config_options.clone();
         let requested = request.requested_model.as_deref();
         // No legacy fallback on an adapter whose row selects models through the option only.
-        let legacy = seats::legacy_list(self.agent_name.as_deref(), session.models.as_ref());
+        let legacy = seats::legacy_list(self.option_only_models(), session.models.as_ref());
         if let Some(wanted) = seats::wanted(requested) {
             let option = |name: &str| seats::offered_option(model_option, name);
             if let Some((config_id, value)) = seats::exact_first(requested, &wanted, option) {
@@ -625,6 +625,14 @@ where
             config = Some(held);
         }
         self.seat_after_model(sid, session, config, request).await
+    }
+
+    /// Whether this session selects a named model only through its model option
+    /// ([`seats::option_only`]): by the adapter's reported name, or by the audited profile a
+    /// conversation was admitted under.
+    fn option_only_models(&self) -> bool {
+        let profile = self.completion.map(|one_shot| one_shot.profile);
+        seats::option_only(self.agent_name.as_deref(), profile)
     }
 
     /// The session's mode, last before the prompt: a one-shot profile's required mode, an

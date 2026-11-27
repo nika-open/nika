@@ -123,7 +123,7 @@ where
     async fn offer(&mut self, request: &HarnessRequest) -> Result<SessionOffer, HarnessError> {
         let session = self.open_session(request).await?;
         let model_option = seats::model_option(session.config_options.as_ref());
-        let legacy = seats::legacy_list(self.agent_name.as_deref(), session.models.as_ref());
+        let legacy = seats::legacy_list(self.option_only_models(), session.models.as_ref());
         let listed = seats::offered_values(model_option, legacy);
         let (model, config) = self.offered_model(&session, request).await?;
         let (effort, service_tier) = match &model {
@@ -166,7 +166,7 @@ where
         let option = |name: &str| seats::offered_option(model_option, name);
         let Some((config_id, value)) = seats::exact_first(requested, &wanted, option) else {
             // A run never selects through the legacy list of an option-only adapter.
-            let list = seats::legacy_list(self.agent_name.as_deref(), session.models.as_ref());
+            let list = seats::legacy_list(self.option_only_models(), session.models.as_ref());
             let legacy =
                 seats::exact_first(requested, &wanted, |name| seats::offered_model(list, name));
             let answer = legacy.map_or(ModelOffer::NotOffered, |native| ModelOffer::LegacyList {

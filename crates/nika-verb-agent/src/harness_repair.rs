@@ -26,6 +26,12 @@
 //!   unpriced (the subscription's to bound), so the run's USD cap has nothing to charge it.
 //! - The repaired message is the terminal one: a second miss fails `NIKA-INFER-002` « after 1
 //!   repair attempt ». There is never a second repair.
+//! - Only a first turn that ended gets a repair. One that stopped first, at the task's own
+//!   `max_turns` on a seat that applies it (`max_turn_requests`) as on a refusal, fails with its
+//!   stop named and the repair prompt is never sent: the session closes with the lane. A
+//!   repair, when one is sent, is a second prompt of the same session, under the same options:
+//!   Nika sends a turn limit once, with `session/new`, and how the adapter counts the repair's
+//!   requests against it is the adapter's own.
 
 use nika_kernel::ai::harness::{FollowUpReply, HarnessRequest, TokenUsage};
 

@@ -15,6 +15,15 @@
 //! one-time refusal (`cancelled` when it offers none) and counted in the receipt; the seat sets
 //! no cap on asks and reads the session to its end.
 //!
+//! A turn answers only when it ended `end_turn`, or when its backend names no stop (the ACP
+//! driver always names one). A turn the model refused, cut at its output limit, stopped at
+//! the harness's own limit of model requests, called off, or ended with any other stop is
+//! refused as a provider error that names the harness and the stop, never the text: what such
+//! a turn said is not the answer, so it never reaches the compiler as one. Its call stays in
+//! the receipt with the asks it denied. A harness that goes on after a denied ask and ends
+//! `end_turn` answers; one that calls its turn off instead (it stops `cancelled`) is refused,
+//! even when its text held a whole answer.
+//!
 //! Codex is the exception, and the same rule the Session door applies: its ACP completion
 //! profile is not an empty-tools profile (`apply_patch` stays callable inside the scratch), so
 //! `codex/<model>` seats the native infer-grade transport under its measured empty-tools
@@ -23,7 +32,7 @@ use crate::authoring::HarnessAuthoring;
 use crate::{SpawnedHarness, seat_from_id};
 use nika_kernel::ai::harness::{
     AgentBackendDyn, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
-    PermissionDecision,
+    HarnessStopReason, PermissionDecision,
 };
 use nika_kernel::ai::provider::{
     ContentBlock, InferRequest, InferResponse, Message, ProviderError, ProviderInferDyn,
@@ -124,7 +133,10 @@ impl HarnessSeat {
         })
     }
 
-    fn finish(&self, outcome: HarnessOutcome, denied: u32) -> InferResponse {
+    /// The answer of a completed session, its call recorded first so that a refused turn keeps
+    /// the asks it saw. A turn that ended any other way than `end_turn` is refused with its stop
+    /// named and its text kept out of the answer; a backend that names no stop answers.
+    fn finish(&self, outcome: HarnessOutcome, denied: u32) -> Result<InferResponse, ProviderError> {
         let reported = outcome.usage.is_some();
         if let Ok(mut observed) = self.observed.lock() {
             observed.push(json!({
@@ -132,6 +144,16 @@ impl HarnessSeat {
                 "usage_reported": reported,
                 "asks_denied": denied,
             }));
+        }
+        if let Some(stop) =
+            (outcome.stop_reason.as_ref()).filter(|s| **s != HarnessStopReason::EndTurn)
+        {
+            return Err(self.refused(format_args!(
+                "the authoring turn ended without completing (stop reason `{}`): {}; no answer \
+                 accepted",
+                stop.as_str(),
+                unfinished(stop)
+            )));
         }
         let text =
             json_object(&outcome.output).map_or_else(|| outcome.output.clone(), str::to_owned);
@@ -142,7 +164,7 @@ impl HarnessSeat {
         );
         // A subscription quota is not a token meter: only what the harness itself reported.
         response.usage_reported = reported;
-        response
+        Ok(response)
     }
 
     /// A refusal of this seat's call, the harness named.
@@ -179,13 +201,33 @@ impl HarnessSeat {
                     }
                 }
                 Some(Ok(HarnessEvent::Completed { outcome })) => {
-                    return Ok(self.finish(*outcome, denied));
+                    return self.finish(*outcome, denied);
                 }
                 Some(Ok(_)) => {}
                 Some(Err(e)) => return Err(self.refused(e)),
                 None => return Err(self.refused("the session ended without an answer")),
             }
         }
+    }
+}
+
+/// What a turn that did not end `end_turn` means for the answer it left, in the seat's words.
+fn unfinished(stop: &HarnessStopReason) -> &'static str {
+    match stop {
+        HarnessStopReason::Refusal => "the model refused to continue",
+        HarnessStopReason::MaxTokens => {
+            "the model stopped at its output limit, which this seat does not set, so the answer \
+             is cut"
+        }
+        HarnessStopReason::MaxTurnRequests => {
+            "the harness reached its own limit of model requests for the turn"
+        }
+        HarnessStopReason::Cancelled => {
+            "the turn was called off, by the harness on its own or after a tool ask this seat \
+             denied"
+        }
+        HarnessStopReason::Unknown(_) => "the harness named a stop word this engine does not know",
+        _ => "this seat reads no answer from that stop",
     }
 }
 
@@ -368,6 +410,185 @@ mod tests {
                 {"observed_model": null, "usage_reported": false, "asks_denied": 1}
             ]),
             "{receipt}"
+        );
+    }
+
+    /// A claude-code seat over its shipped row; nothing is spawned, its sessions are driven here.
+    fn claude_code_seat() -> HarnessSeat {
+        let runtime = HarnessRuntime::lookup("claude-code").expect("a shipped harness");
+        let rows = crate::registry::registry_with(&|_| None).expect("the shipped rows");
+        let row = (rows.iter().find(|row| row.adapter.id == runtime.id)).expect("its row");
+        HarnessSeat {
+            seat: Backend::Acp(Box::new(SpawnedHarness::new(row.adapter.clone()))),
+            runtime,
+            requested_model: None,
+            cwd: std::path::PathBuf::from("/tmp"),
+            observed: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A turn that did not end `end_turn` is no answer, however complete its text looks: the
+    /// seat refuses it with the harness, the stop and what it means, never the text, and the
+    /// receipt still counts the ask denied during that turn.
+    #[tokio::test]
+    async fn an_acp_seat_refuses_a_turn_that_did_not_end_and_still_counts_its_ask() {
+        use nika_error::traits::NikaErrorCode as _;
+        let options = json!([
+            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
+        ]);
+        let partial = "{\"candidate\": \"nika: partial\"}";
+        for (stop, meaning) in [
+            ("refusal", "the model refused to continue"),
+            (
+                "max_tokens",
+                "the model stopped at its output limit, which this seat does not set, so the \
+                 answer is cut",
+            ),
+            (
+                "max_turn_requests",
+                "the harness reached its own limit of model requests for the turn",
+            ),
+            (
+                "cancelled",
+                "the turn was called off, by the harness on its own or after a tool ask this \
+                 seat denied",
+            ),
+            (
+                "paused",
+                "the harness named a stop word this engine does not know",
+            ),
+        ] {
+            let seat = claude_code_seat();
+            let (ours, theirs) = tokio::io::duplex(64 * 1024);
+            let (read, write) = tokio::io::split(ours);
+            let agent = crate::client::refusal_tests::one_ask_ending(
+                theirs,
+                options.clone(),
+                partial,
+                stop,
+            );
+            let stream = crate::client::drive(read, write, HarnessRequest::new("author", "/tmp"));
+            let error = match seat.denying(stream).await {
+                Err(error) => error,
+                Ok(response) => panic!("`{stop}` answered: {:?}", response.content),
+            };
+            assert_eq!(
+                agent.await.expect("the scripted agent ends"),
+                json!({"outcome": "selected", "optionId": "reject"}),
+                "{stop}"
+            );
+            let reason = format!(
+                "harness `claude-code`: the authoring turn ended without completing (stop reason \
+                 `{stop}`): {meaning}; no answer accepted"
+            );
+            assert!(
+                matches!(&error, ProviderError::Other { reason: said } if *said == reason),
+                "{stop}: {error:?}"
+            );
+            assert_eq!(error.to_string(), format!("provider error: {reason}"));
+            assert_eq!(error.nika_code().to_string(), "NIKA-339", "{stop}");
+            assert!(!error.is_transient(), "{stop}");
+            assert_eq!(
+                seat.descriptor()["observed"],
+                json!([
+                    {"denied_ask": crate::client::refusal_tests::ASKED},
+                    {"observed_model": null, "usage_reported": false, "asks_denied": 1}
+                ]),
+                "{stop}"
+            );
+        }
+    }
+
+    /// A harness that offers no way to refuse hears `cancelled` for its ask. When it then ends
+    /// its turn `cancelled`, the seat refuses the turn and keeps the ask in the receipt, however
+    /// whole the text it left looks.
+    #[tokio::test]
+    async fn an_acp_seat_refuses_the_turn_a_harness_cancels_after_an_ask_it_could_not_reject() {
+        let seat = claude_code_seat();
+        let options = json!([{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]);
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (read, write) = tokio::io::split(ours);
+        let agent = crate::client::refusal_tests::one_ask_ending(
+            theirs,
+            options,
+            "{\"candidate\": \"nika: whole\"}",
+            "cancelled",
+        );
+        let stream = crate::client::drive(read, write, HarnessRequest::new("author", "/tmp"));
+        let error = match seat.denying(stream).await {
+            Err(error) => error,
+            Ok(response) => panic!("answered: {:?}", response.content),
+        };
+        assert_eq!(
+            agent.await.expect("the scripted agent ends"),
+            json!({"outcome": "cancelled"})
+        );
+        assert_eq!(
+            error.to_string(),
+            "provider error: harness `claude-code`: the authoring turn ended without completing \
+             (stop reason `cancelled`): the turn was called off, by the harness on its own or \
+             after a tool ask this seat denied; no answer accepted"
+        );
+        assert_eq!(
+            seat.descriptor()["observed"],
+            json!([
+                {"denied_ask": crate::client::refusal_tests::ASKED},
+                {"observed_model": null, "usage_reported": false, "asks_denied": 1}
+            ])
+        );
+    }
+
+    /// A turn that ended `end_turn` and one whose backend named no stop both answer with the
+    /// object the text holds, and each call is in the receipt.
+    #[test]
+    fn a_turn_that_ended_or_named_no_stop_answers() {
+        let seat = claude_code_seat();
+        let answer = "{\"candidate\": \"nika: a\"}";
+        let said = format!("Here it is:\n{answer}");
+        for outcome in [
+            HarnessOutcome::new(said.clone()),
+            HarnessOutcome::new(said.clone()).with_stop_reason(HarnessStopReason::EndTurn),
+        ] {
+            let named = outcome.stop_reason.clone();
+            let response = match seat.finish(outcome, 0) {
+                Ok(response) => response,
+                Err(error) => panic!("{named:?} refused: {error}"),
+            };
+            assert_eq!(response.stop_reason, StopReason::EndTurn, "{named:?}");
+            let [ContentBlock::Text { text }] = response.content.as_slice() else {
+                panic!("{named:?}: {:?}", response.content);
+            };
+            assert_eq!(text, answer, "{named:?}");
+            assert!(!response.usage_reported, "{named:?}");
+        }
+        let entry = json!({"observed_model": null, "usage_reported": false, "asks_denied": 0});
+        assert_eq!(seat.descriptor()["observed"], json!([entry, entry]));
+    }
+
+    /// A stop word that is not a protocol word rides the refusal as `unrecognized`, and the
+    /// turn's text never rides it; the call keeps its model and its reported usage.
+    #[test]
+    fn a_refused_turn_names_only_a_protocol_stop_word_and_never_its_text() {
+        let seat = claude_code_seat();
+        let partial = "{\"candidate\": \"nika: partial\"}";
+        let outcome = HarnessOutcome::new(partial)
+            .with_stop_reason(HarnessStopReason::parse("Paused: see the log"))
+            .with_usage(TokenUsage::new(120, 40))
+            .with_observed_model("author-model");
+        let error = match seat.finish(outcome, 2) {
+            Err(error) => error,
+            Ok(response) => panic!("answered: {:?}", response.content),
+        };
+        assert_eq!(
+            error.to_string(),
+            "provider error: harness `claude-code`: the authoring turn ended without completing \
+             (stop reason `unrecognized`): the harness named a stop word this engine does not \
+             know; no answer accepted"
+        );
+        assert_eq!(
+            seat.descriptor()["observed"],
+            json!([{"observed_model": "author-model", "usage_reported": true, "asks_denied": 2}])
         );
     }
 

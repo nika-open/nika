@@ -44,6 +44,16 @@ pub(crate) fn one_ask(
     options: Value,
     then: &'static str,
 ) -> tokio::task::JoinHandle<Value> {
+    one_ask_ending(agent, options, then, "end_turn")
+}
+
+/// [`one_ask`], the turn ending with the stop reason `stop` instead of `end_turn`.
+pub(crate) fn one_ask_ending(
+    agent: tokio::io::DuplexStream,
+    options: Value,
+    then: &'static str,
+    stop: &'static str,
+) -> tokio::task::JoinHandle<Value> {
     let (agent_read, mut agent_write) = tokio::io::split(agent);
     tokio::spawn(async move {
         let mut reader = BufReader::new(agent_read);
@@ -81,7 +91,7 @@ pub(crate) fn one_ask(
         .await;
         send(
             &mut agent_write,
-            &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
+            &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": stop}}),
         )
         .await;
         answer["result"]["outcome"].clone()

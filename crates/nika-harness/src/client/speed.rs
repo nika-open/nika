@@ -202,6 +202,8 @@ where
         if self.observed_source == Some(ModelProvenance::AcceptedRequest) {
             // A legacy model selection answers no configuration: the option the session
             // listed before it says nothing about the model now selected.
+            // Not reachable on today's only binding (the codex seat no longer selects through
+            // the legacy list): it guards a future binding on a seat that keeps that list.
             return Err(refusal(format!(
                 "the harness selects `{model}` only through the legacy model list, which \
                  reports no refreshed options — {field} cannot be judged for it (no prompt was \

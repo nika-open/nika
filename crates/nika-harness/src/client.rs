@@ -190,7 +190,8 @@ struct Driver<R, W> {
     /// The adapter's own name (`initialize` → `agentInfo.name`): the key its measured
     /// confinement is looked up by, never a guess from the command that spawned it.
     agent_name: Option<String>,
-    /// The adapter's own release (`agentInfo.version`): what a measured speed control holds for.
+    /// The adapter's own release (`agentInfo.version`): what a measured speed control holds for,
+    /// and whether the measured confinement row was made on it (measured or carried).
     agent_version: Option<String>,
     /// The mode the session was confined to before the prompt (NIK-266): held for the whole
     /// turn, a reported change away from it ends the session.

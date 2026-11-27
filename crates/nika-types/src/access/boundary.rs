@@ -65,8 +65,8 @@ pub struct HarnessBoundary {
     pub delivers_images: bool,
     /// Whether the adapter selects a session's model only through its model configuration
     /// option. A model a task names that the option does not offer then refuses before the
-    /// prompt: the client never falls back to the legacy `session/set_model`, which the
-    /// adapter does not serve as the client would send it.
+    /// prompt: the client never falls back to the legacy `session/set_model` (each row says
+    /// why), on any release of the adapter.
     pub models_through_option: bool,
 }
 
@@ -174,7 +174,8 @@ impl HarnessBoundary {
         ),
         asked_command_leaves_sandbox: true,
         delivers_images: true,
-        // Its legacy `session/set_model` extension wants `model[effort]`, never a bare id.
+        // Its legacy `session/set_model` sets the effort together with the model (each id it
+        // lists is `model[effort]`) and answers nothing the client can read back.
         models_through_option: true,
     };
 

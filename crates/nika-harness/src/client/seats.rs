@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
-//! Pure ACP model and mode projections; existing selectors moved without changing behavior.
+//! Pure ACP model and mode projections: the selectors, the rule that keeps a legacy model
+//! list from an option-only session ([`legacy_list`]) and the refusal of a model nothing
+//! offers ([`no_such_model`]).
 use nika_kernel::ai::harness::HarnessError;
 use nika_types::access::HarnessBoundary;
 use serde_json::Value;

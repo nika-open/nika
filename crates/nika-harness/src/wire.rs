@@ -38,7 +38,7 @@ pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const METHOD_SET_CONFIG_OPTION: &str = "session/set_config_option";
 /// `session/set_mode` — deprecated in v1, still what several agents advertise.
 pub const METHOD_SET_MODE: &str = "session/set_mode";
-/// `session/set_model` — a legacy extension (the Claude adapter · Gemini CLI · Kiro) beside a
+/// `session/set_model` — a legacy extension (Gemini CLI · Kiro) beside a
 /// `models` list on `session/new`.
 pub const METHOD_SET_MODEL: &str = "session/set_model";
 /// `session/update` (notification, agent → client).

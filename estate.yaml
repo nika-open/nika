@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8276
+  classified_files: 8277
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 5017
+    authored: 5018
     authored-pin: 2
     generated: 284
     pinned-copy: 266
@@ -152,7 +152,7 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2470
-  aggregate_sha256: f1b306539765d2c256273888438f60e0b1f389e6772dae474870fb8ded32ab2e
+  aggregate_sha256: 741343eb63e82e7106f5072104c4a13267cf69472a07254bed405a6d5634602b
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 13
-  aggregate_sha256: b6855e6b64df238a16bbd6e09f990691e619c25d70dde24748864b09745073b5
+  match_count: 14
+  aggregate_sha256: 33c576ac0e4027ffa1d80f425c8d2acdbef0a2084acfab2101953cb9033bb88d
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

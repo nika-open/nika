@@ -133,7 +133,9 @@ where
             mcp_servers: Vec::new(),
         })
         .map_err(session_err)?;
-        if let Some(meta) = self.meta.take() {
+        let (meta, one_shot) = (self.meta.take(), self.completion.is_some());
+        let meta = crate::authoring::acp::carry_max_turns(meta, request.max_turns, one_shot)?;
+        if let Some(meta) = meta {
             params["_meta"] = meta;
         }
         self.send_request(ID_SESSION_NEW, wire::METHOD_SESSION_NEW, &params)

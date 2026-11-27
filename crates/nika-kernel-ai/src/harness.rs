@@ -76,6 +76,11 @@ pub struct HarnessRequest {
     /// that cannot ignores it and completes as before, which the caller reads as a closed
     /// session.
     pub follow_up: bool,
+    /// The turn limit an `agent:` task declared (`max_turns:`), carried to the session's own
+    /// options. The client sends it only where the session's options carry a turn limit (a
+    /// Claude Code agent session's `maxTurns`) and refuses before `session/new` otherwise; it
+    /// is never dropped. `None` sends no limit: the session keeps its own loop.
+    pub max_turns: Option<u32>,
 }
 
 impl HarnessRequest {
@@ -93,7 +98,15 @@ impl HarnessRequest {
             confinement: None,
             images: Vec::new(),
             follow_up: false,
+            max_turns: None,
         }
+    }
+
+    /// Carry a declared turn limit to the session (see [`Self::max_turns`]).
+    #[must_use]
+    pub fn with_max_turns(mut self, max_turns: Option<u32>) -> Self {
+        self.max_turns = max_turns;
+        self
     }
 
     /// Keep room for one follow-up prompt on the same session (see [`Self::follow_up`]).

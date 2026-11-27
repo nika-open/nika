@@ -1021,6 +1021,7 @@ pub nika_kernel_ai::harness::HarnessRequest::confinement: core::option::Option<n
 pub nika_kernel_ai::harness::HarnessRequest::cwd: std::path::PathBuf
 pub nika_kernel_ai::harness::HarnessRequest::follow_up: bool
 pub nika_kernel_ai::harness::HarnessRequest::images: alloc::vec::Vec<nika_kernel_ai::harness::HarnessPromptImage>
+pub nika_kernel_ai::harness::HarnessRequest::max_turns: core::option::Option<u32>
 pub nika_kernel_ai::harness::HarnessRequest::prompt: alloc::string::String
 pub nika_kernel_ai::harness::HarnessRequest::requested_effort: core::option::Option<alloc::string::String>
 pub nika_kernel_ai::harness::HarnessRequest::requested_mode: core::option::Option<alloc::string::String>
@@ -1032,6 +1033,7 @@ pub fn nika_kernel_ai::harness::HarnessRequest::new(prompt: impl core::convert::
 pub fn nika_kernel_ai::harness::HarnessRequest::with_confinement(self, confinement: nika_kernel_ai::harness::HarnessConfinement) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_follow_up(self) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_images(self, images: alloc::vec::Vec<nika_kernel_ai::harness::HarnessPromptImage>) -> Self
+pub fn nika_kernel_ai::harness::HarnessRequest::with_max_turns(self, max_turns: core::option::Option<u32>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_requested_effort(self, effort: core::option::Option<alloc::string::String>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_requested_mode(self, mode: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn nika_kernel_ai::harness::HarnessRequest::with_requested_model(self, model: impl core::convert::Into<alloc::string::String>) -> Self

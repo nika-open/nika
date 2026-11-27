@@ -116,8 +116,9 @@ claude-agent-acp 0.81.1; this session's adapter reports release `0.112.0`,
 on which it was not measured." When the adapter does not offer the mode or
 does not confirm it, the refusal before the prompt ends with the same
 sentence. What the harness does without asking may differ on that release.
-`nika check` does not read the installed release, so its `[harness]` hint
-states the row's text without that sentence.
+`nika check` reads neither the installed adapter's name nor its release, so
+its `[harness]` hint states the seat's row as it is, without that sentence,
+whichever adapter is installed.
 
 An adapter the seat admits under another name has no measured row and is
 treated like the seats of the table's last line: no mode is selected, a

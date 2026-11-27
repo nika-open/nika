@@ -152,6 +152,14 @@ pub enum LeakReason {
     /// so no `egress:` rule clears it: the path belongs in the file, in
     /// `inputs:` or in `const:`.
     ImageSavePath,
+    /// The secret reaches a builtin's path argument
+    /// (`nika_cap::path_arguments`: `nika:read`/`nika:write` `path`, a media
+    /// generator's `output_dir` and `filename_prefix`, each
+    /// `nika:image_compose` `inputs[k]`, …), the file or directory the call
+    /// reads or writes, which the trace, the output and a generated file name
+    /// carry. A path is never a secret, so no `egress:` rule clears it: the
+    /// path belongs in the file, in `inputs:` or in `const:`.
+    ToolPath,
 }
 
 /// Compute the refusal reason for one refused edge — the caller asks

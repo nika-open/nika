@@ -27,15 +27,18 @@
 //!   secret reaching the workflow `outputs:` is an EGRESS (the value leaves
 //!   the run as the return). A secret reaching a ROUTE ([`Route`]: an
 //!   `infer:`/`agent:` `model:`, an `exec:`'s `cwd:`, an `agent:`'s
-//!   `images.save:`, a media builtin's `args.model`) is refused: the run
+//!   `images.save:`, a media builtin's `args.model`, a builtin's path
+//!   argument such as `nika:write` `path` or a media `output_dir`) is
+//!   refused: the run
 //!   renders each with secrets resolved, as the provider and model it calls,
 //!   the directory it spawns the program in or the file it writes, and
 //!   neither a model name nor a path is ever a secret, so no `egress:` rule
 //!   clears it (the run refuses such a task before the field renders). A task
 //!   model carries nothing into the record (the output carve-out above); the
 //!   other routes do: a program can print its working directory, an agent's
-//!   output names the path of each image it saved, and a media builtin names
-//!   its model in the file it saves and in its output.
+//!   output names the path of each image it saved, a media builtin names
+//!   its model in the file it saves and in its output, and a file builtin
+//!   names the path it read or wrote.
 //!
 //! Every slot holds one trace PER SECRET, the most direct one found (fewest
 //! hops; a tie keeps the trace read first), so a record that carries two
@@ -552,10 +555,16 @@ impl<'a> Reads<'a> {
                 .flat_map(refs_in_str)
                 .collect(),
         );
-        let route = route_fields(&task.action)
-            .into_iter()
-            .map(|(route, text)| (route, scope.resolve(refs_in_str(text))))
-            .collect();
+        // One entry per route: the texts of one path argument (each
+        // `inputs[k]`) read together, so none overwrites another's reads.
+        let mut route: Vec<(Route, Vec<Read>)> = Vec::new();
+        for (field, text) in route_fields(&task.action) {
+            let reads = scope.resolve(refs_in_str(text));
+            match route.iter_mut().find(|(known, _)| *known == field) {
+                Some((_, known)) => known.extend(reads),
+                None => route.push((field, reads)),
+            }
+        }
         let recover = match task.on_error.as_ref().map(|e| &e.value.action) {
             Some(OnErrorAction::Recover(value)) => Some(scope.resolve(refs_in_json(&value.value))),
             _ => None,
@@ -903,10 +912,84 @@ pub(crate) enum Route {
     /// calls and, without a `provider:`, the provider it infers from it. The
     /// file the tool saves and its output name it.
     ToolModel,
+    /// A builtin's path argument ([`nika_cap::path_arguments`]): the file or
+    /// the directory the call reads or writes, or the prefix of the file name
+    /// a media generator writes. The run judges it against the boundary,
+    /// writes it into the trace and the output, and a media generator folds it
+    /// into the name of the file it saves.
+    ToolPath(PathArg),
 }
 
 /// The builtins whose `args.model` names the model they call.
 const MODEL_TOOLS: [&str; 2] = ["nika:image_generate", "nika:tts_generate"];
+
+/// One path argument of a builtin call ([`Route::ToolPath`]): the field a
+/// trace and a finding name, and the sink of its leak.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct PathArg {
+    /// `args.<slot>`, the slot without its indices (`args.inputs` for every
+    /// `inputs[k]`).
+    field: &'static str,
+    /// `invoke.<field>`.
+    sink: &'static str,
+}
+
+/// Every path argument [`nika_cap::path_arguments`] lists, by its slot
+/// without indices. A slot the owner adds later and this table does not know
+/// is still a route, named [`UNKNOWN_PATH_ARG`]: a path never becomes a send.
+const PATH_ARGS: [(&str, PathArg); 13] = [
+    ("path", path_arg("args.path", "invoke.args.path")),
+    ("pattern", path_arg("args.pattern", "invoke.args.pattern")),
+    ("bundle", path_arg("args.bundle", "invoke.args.bundle")),
+    ("input", path_arg("args.input", "invoke.args.input")),
+    ("inputs", path_arg("args.inputs", "invoke.args.inputs")),
+    (
+        "data.path",
+        path_arg("args.data.path", "invoke.args.data.path"),
+    ),
+    ("out", path_arg("args.out", "invoke.args.out")),
+    (
+        "output_dir",
+        path_arg("args.output_dir", "invoke.args.output_dir"),
+    ),
+    ("image", path_arg("args.image", "invoke.args.image")),
+    ("images", path_arg("args.images", "invoke.args.images")),
+    ("mask", path_arg("args.mask", "invoke.args.mask")),
+    (
+        "multipart.path",
+        path_arg("args.multipart.path", "invoke.args.multipart.path"),
+    ),
+    (
+        "filename_prefix",
+        path_arg("args.filename_prefix", "invoke.args.filename_prefix"),
+    ),
+];
+
+/// The route of a path slot [`PATH_ARGS`] does not name.
+const UNKNOWN_PATH_ARG: PathArg = path_arg("args", "invoke.args");
+
+const fn path_arg(field: &'static str, sink: &'static str) -> PathArg {
+    PathArg { field, sink }
+}
+
+/// The [`PathArg`] of a slot as [`nika_cap::path_arguments`] names it
+/// (`inputs[2]`, `multipart[0].path`): the slot without its indices.
+fn path_arg_of(slot: &str) -> PathArg {
+    let mut head = String::with_capacity(slot.len());
+    let mut depth = 0_usize;
+    for c in slot.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => head.push(c),
+            _ => {}
+        }
+    }
+    PATH_ARGS
+        .iter()
+        .find(|(name, _)| *name == head)
+        .map_or(UNKNOWN_PATH_ARG, |(_, arg)| *arg)
+}
 
 impl Route {
     /// The field, as the last hop of a trace names it.
@@ -916,6 +999,7 @@ impl Route {
             Self::WorkingDirectory => "cwd",
             Self::ImageSave => "images.save",
             Self::ToolModel => "args.model",
+            Self::ToolPath(arg) => arg.field,
         }
     }
 
@@ -927,6 +1011,7 @@ impl Route {
             Self::WorkingDirectory => "exec.cwd",
             Self::ImageSave => "agent.images.save",
             Self::ToolModel => "invoke.args.model",
+            Self::ToolPath(arg) => arg.sink,
         }
     }
 
@@ -936,14 +1021,15 @@ impl Route {
             Self::Model | Self::ToolModel => declass::LeakReason::ModelRoute,
             Self::WorkingDirectory => declass::LeakReason::WorkingDirectory,
             Self::ImageSave => declass::LeakReason::ImageSavePath,
+            Self::ToolPath(_) => declass::LeakReason::ToolPath,
         }
     }
 
     /// Whether the route is a field of the effect too, which the shared
     /// effect table lists ([`action_effect_fields`]) and which the task's
     /// output names (a program can print its working directory, an agent's
-    /// output names each image it saved, a media builtin its model). A task's
-    /// `model:` is neither.
+    /// output names each image it saved, a media builtin its model, a file
+    /// builtin the path it read or wrote). A task's `model:` is neither.
     const fn is_effect_field(self) -> bool {
         !matches!(self, Self::Model)
     }
@@ -974,8 +1060,32 @@ fn route_fields(action: &RawAction) -> Vec<(Route, &str)> {
                     .map(|d| (Route::WorkingDirectory, d.value.as_str())),
             );
         }
-        RawAction::Invoke(a) => routes.extend(tool_model(a).map(|m| (Route::ToolModel, m))),
+        RawAction::Invoke(a) => routes.extend(invoke_routes(a)),
         _ => {}
+    }
+    routes
+}
+
+/// The routes of an `invoke:` of a builtin: its `args.model`
+/// ([`Route::ToolModel`]) and every text of its path arguments
+/// ([`Route::ToolPath`]). Each text is borrowed from the call's `args`, so
+/// [`sink_fields`] leaves exactly these texts out of the call's sends.
+fn invoke_routes(a: &RawInvokeAction) -> Vec<(Route, &str)> {
+    let mut routes: Vec<(Route, &str)> = tool_model(a)
+        .map(|m| (Route::ToolModel, m))
+        .into_iter()
+        .collect();
+    let RawInvokeTarget::Tool(tool) = &a.target else {
+        return routes;
+    };
+    let args = a.args.as_ref().map(|args| &args.value);
+    for (slot, value) in nika_cap::path_arguments(&tool.value, args) {
+        let route = Route::ToolPath(path_arg_of(&slot));
+        routes.extend(
+            collect_json_strings(value)
+                .into_iter()
+                .map(|text| (route, text)),
+        );
     }
     routes
 }
@@ -1057,16 +1167,19 @@ fn sink_fields(action: &RawAction) -> Vec<&str> {
             }
             fields
         }
-        RawAction::Invoke(a) => match (a.args.as_ref().map(|args| &args.value), tool_model(a)) {
-            // A media builtin's model is its route, judged there alone.
-            (Some(serde_json::Value::Object(args)), Some(_)) => args
-                .iter()
-                .filter(|(key, _)| key.as_str() != "model")
-                .flat_map(|(_, value)| collect_json_strings(value))
-                .collect(),
-            (Some(args), _) => collect_json_strings(args),
-            (None, _) => Vec::new(),
-        },
+        // A builtin's model and path arguments are its routes, judged there
+        // alone: every text a route reads is left out, by identity (each one
+        // is borrowed from these `args`), and every other text is a send.
+        RawAction::Invoke(a) => {
+            let Some(args) = a.args.as_ref().map(|args| &args.value) else {
+                return Vec::new();
+            };
+            let routes = invoke_routes(a);
+            collect_json_strings(args)
+                .into_iter()
+                .filter(|text| !routes.iter().any(|(_, route)| std::ptr::eq(*route, *text)))
+                .collect()
+        }
         // The prompt (+ system) is a third-party egress sink — a secret
         // reaching it is a leak unless the author sanctions `to: "infer"`/
         // `"agent"` (BUG#3). Output taint stays excluded (evaluate §5).

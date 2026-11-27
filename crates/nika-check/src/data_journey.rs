@@ -585,8 +585,10 @@ enum Via {
 /// found it: its effect (a direct reference, a `with:` alias, an item, a
 /// tainted upstream record or group fold, whether or not an `egress:` rule
 /// sanctions the send) or its route. An exec's `cwd:` is the directory the
-/// program runs in, which goes to that program like its command, so the
-/// journey counts it with the effect; an `infer:`/`agent:` `model:` goes to
+/// program runs in, which goes to that program like its command, and a
+/// builtin's path argument goes to that tool like its other arguments (a
+/// `nika:fetch` file part names its file to the host), so the journey counts
+/// both with the effect; an `infer:`/`agent:` `model:` goes to
 /// the provider; an `agent:`'s `images.save:` names a file the run writes
 /// here, a task of the secret's with no destination. These are the facts the
 /// SECRETS verdict reads, so the destinations the journey names and the
@@ -599,7 +601,7 @@ fn secrets_reaching(idx: usize, flow: &FlowFacts) -> impl Iterator<Item = (Strin
     let routes = flow.route_taints(idx).map(|(route, trace)| {
         let via = match route {
             Route::Model | Route::ToolModel => Via::Route,
-            Route::WorkingDirectory => Via::Effect,
+            Route::WorkingDirectory | Route::ToolPath(_) => Via::Effect,
             Route::ImageSave => Via::Path,
         };
         (trace.secret.clone(), via)

@@ -2,8 +2,9 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 
 //! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:`,
-//! an `agent:`'s `images.save:` or a media builtin's `args.model` (spec 10 ·
-//! `NIKA-SEC-006`, the run-time twin of the check).
+//! an `agent:`'s `images.save:`, a media builtin's `args.model` or a builtin's
+//! path argument (`nika_cap::path_arguments`) (spec 10 · `NIKA-SEC-006`, the
+//! run-time twin of the check).
 //!
 //! Each field decides where the effect goes: the provider and model the run
 //! or the tool calls, the directory it spawns the program in, the file it writes an image
@@ -72,7 +73,9 @@ fn refusal(leak: &SecretLeak) -> TaskErrorRecord {
             "name the directory there, or read it from `inputs:` or `const:`"
         }
         LeakReason::ModelRoute => "name the model there, or read it from `inputs:` or `const:`",
-        LeakReason::ImageSavePath => "name the path there, or read it from `inputs:` or `const:`",
+        LeakReason::ImageSavePath | LeakReason::ToolPath => {
+            "name the path there, or read it from `inputs:` or `const:`"
+        }
         // A route the run does not know yet is refused under its field.
         _ => "keep the secret out of it",
     };

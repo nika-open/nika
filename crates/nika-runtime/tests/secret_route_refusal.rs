@@ -2,9 +2,9 @@
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:` or a media
-//! builtin's `args.model` (an `agent:`'s `images.save:` is pinned on a harness seat, in the
-//! crate's `harness_image_values` tests).
+//! The run never renders a secret into a task's `model:`, an `exec:`'s `cwd:`, a media
+//! builtin's `args.model` or a builtin's path argument (an `agent:`'s `images.save:` is pinned
+//! on a harness seat, in the crate's `harness_image_values` tests).
 //!
 //! `nika check` refuses each (`NIKA-SEC-006`), and the run refuses a dirty report, so every run
 //! below holds the report an older check gave for the same bytes: one that did not judge these
@@ -807,6 +807,71 @@ tasks:
             places_carrying(&ran, "canary-q7z"),
             Vec::<String>::new(),
             "{tool}"
+        );
+    }
+}
+
+/// A builtin's path argument names the file or the directory the call reads or writes, and a
+/// media generator folds `output_dir` and `filename_prefix` into the name of the file it saves:
+/// a secret there, under the rule that lets it reach the tool, is refused before the call, and
+/// nothing the run writes carries it.
+#[tokio::test]
+async fn a_secret_in_a_path_argument_is_refused_before_the_call() {
+    for (tool, args, field) in [
+        (
+            "nika:tts_generate",
+            r#"provider: mock, text: hi, output_dir: "./out", filename_prefix: "SECRET""#,
+            "args.filename_prefix",
+        ),
+        (
+            "nika:image_generate",
+            r#"provider: mock, prompt: hi, output_dir: "./out/SECRET""#,
+            "args.output_dir",
+        ),
+        (
+            "nika:write",
+            r#"path: "./out/SECRET.txt", content: hi"#,
+            "args.path",
+        ),
+        ("nika:read", r#"path: "./in/SECRET.txt""#, "args.path"),
+    ] {
+        let yaml = format!(
+            r#"nika: secret-tool-path
+secrets:
+  k: {{ source: env, key: MY_K, egress: [{{ to: "{tool}" }}] }}
+permits:
+  tools: ["{tool}"]
+  fs: {{ read: ["./in/**"], write: ["./out/**"] }}
+tasks:
+  go:
+    invoke: {{ tool: "{tool}", args: {{ {} }} }}
+"#,
+            args.replace("SECRET", "${{ secrets.k }}")
+        );
+        let seams = Seams::new(MockShell::new());
+        let ran = run_on_a_stale_report(&yaml, &["go"], &[("k", "canary-q7z")], &seams).await;
+        assert!(!ran.outcome.ok, "{tool} {field}");
+        assert_eq!(
+            error_of(&ran, "go"),
+            (
+                "NIKA-SEC-006".to_owned(),
+                format!(
+                    "refused before the task ran: a secret reaches the `{field}:` of task `go` \
+                     (secrets.k → {field} @ go), and the run renders no secret there · name the \
+                     path there, or read it from `inputs:` or `const:`"
+                )
+            ),
+            "{tool} {field}"
+        );
+        assert_eq!(
+            kinds_of(&ran.events, "go"),
+            REFUSED_FRAMES,
+            "{tool} {field}"
+        );
+        assert_eq!(
+            places_carrying(&ran, "canary-q7z"),
+            Vec::<String>::new(),
+            "{tool} {field}"
         );
     }
 }

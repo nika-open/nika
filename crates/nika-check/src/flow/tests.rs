@@ -669,3 +669,77 @@ fn a_secrets_own_value_is_never_declassified_to_outputs() {
         report.findings
     );
 }
+
+/// Every slot `nika_cap::path_arguments` can name, for every builtin that has one, is a field of
+/// its own: the generic `args` route is the fail-closed answer to a slot the table does not know,
+/// never the name of a known one.
+#[test]
+fn every_path_slot_the_owner_names_has_its_own_field() {
+    let calls = [
+        ("nika:read", serde_json::json!({"path": "p"})),
+        (
+            "nika:grep",
+            serde_json::json!({"path": "p", "pattern": "x"}),
+        ),
+        (
+            "nika:write",
+            serde_json::json!({"path": "p", "content": "c"}),
+        ),
+        ("nika:edit", serde_json::json!({"path": "p"})),
+        ("nika:remove_file", serde_json::json!({"path": "p"})),
+        ("nika:glob", serde_json::json!({"pattern": "p/*"})),
+        (
+            "nika:decide",
+            serde_json::json!({"bundle": "${{ with.b }}"}),
+        ),
+        (
+            "nika:image_fx",
+            serde_json::json!({"input": "i", "out": "o"}),
+        ),
+        (
+            "nika:image_compose",
+            serde_json::json!({"inputs": ["a", "b"], "out": "o"}),
+        ),
+        (
+            "nika:chart",
+            serde_json::json!({"data": {"path": "d"}, "out": "o.svg"}),
+        ),
+        (
+            "nika:image_generate",
+            serde_json::json!({
+                "output_dir": "o", "filename_prefix": "f", "image": "i", "images": ["a"], "mask": "m"
+            }),
+        ),
+        (
+            "nika:tts_generate",
+            serde_json::json!({"output_dir": "o", "filename_prefix": "f"}),
+        ),
+        (
+            "nika:fetch",
+            serde_json::json!({"multipart": [{"path": "f"}]}),
+        ),
+    ];
+    let mut seen = BTreeSet::new();
+    for (tool, args) in calls {
+        for (slot, _) in nika_cap::path_arguments(tool, Some(&args)) {
+            let arg = path_arg_of(&slot);
+            assert_ne!(arg, UNKNOWN_PATH_ARG, "{tool} {slot}");
+            assert_eq!(arg.sink, format!("invoke.{}", arg.field), "{tool} {slot}");
+            seen.insert(arg.field);
+        }
+    }
+    // Every row of the table is reached by some builtin: no dead row.
+    assert_eq!(
+        seen,
+        PATH_ARGS
+            .iter()
+            .map(|(_, arg)| arg.field)
+            .collect::<BTreeSet<_>>()
+    );
+    assert_eq!(path_arg_of("inputs[3]").field, "args.inputs");
+    assert_eq!(
+        path_arg_of("multipart[0].path").field,
+        "args.multipart.path"
+    );
+    assert_eq!(path_arg_of("a_slot_added_later"), UNKNOWN_PATH_ARG);
+}

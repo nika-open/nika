@@ -53,7 +53,7 @@ mod witness;
 pub use effect::{
     BuiltinEffect, PURE_INTERNAL_TOOLS, SlotPath, builtin_effect, builtin_egresses,
     chart_vl_sibling, glob_walk_root, is_pure_internal, is_pure_internal_call,
-    is_pure_internal_call_proven, pure_internal_for_all_calls, read_slot_paths,
+    is_pure_internal_call_proven, path_arguments, pure_internal_for_all_calls, read_slot_paths,
     required_fs_directions, secondary_read_slots, unbound_fs_args, write_slot_paths,
 };
 pub use env::{

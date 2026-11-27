@@ -31,6 +31,8 @@ mod harness_retry;
 #[cfg(feature = "access-harness")]
 mod harness_schema_repair;
 #[cfg(feature = "access-harness")]
+mod harness_seat_limits;
+#[cfg(feature = "access-harness")]
 mod harness_turn_outcome;
 mod returns_contract;
 mod route_identity_trace;

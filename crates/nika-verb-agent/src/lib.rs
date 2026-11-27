@@ -1555,7 +1555,13 @@ fn validate_params(input: &AgentInput) -> Result<(), VerbAgentError> {
             detail: format!("temperature must be within 0-2, got {temperature}"),
         });
     }
-    if let Some(max_turns) = input.max_turns
+    check_max_turns(input.max_turns)
+}
+
+/// A declared turn limit sits in `1..=`[`MAX_TURNS_CEILING`], on the native loop and on a seat
+/// that is sent it alike.
+fn check_max_turns(max_turns: Option<u32>) -> Result<(), VerbAgentError> {
+    if let Some(max_turns) = max_turns
         && !(1..=MAX_TURNS_CEILING).contains(&max_turns)
     {
         return Err(VerbAgentError::InvalidParam {
@@ -1680,3 +1686,7 @@ mod tests_harness_repair;
 #[cfg(test)]
 #[cfg(feature = "access-harness")]
 mod tests_harness_turn;
+
+#[cfg(test)]
+#[cfg(feature = "access-harness")]
+mod tests_harness_limits;

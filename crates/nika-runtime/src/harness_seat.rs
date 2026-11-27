@@ -14,8 +14,9 @@ pub(crate) fn seat_from_env() -> Result<Seat, nika_kernel::HttpError> {
     let Some(b) = nika_harness::seat_from_env().map_err(nika_harness::seat_http_err)? else {
         return Ok(None);
     };
+    let turns = declared_id().is_some_and(|id| nika_harness::applies_max_turns(&id));
     nika_verb_agent::harness_path::HarnessSeat::from_backend(std::sync::Arc::new(b))
-        .map(Some)
+        .map(|seat| Some(seat.applying_max_turns(turns)))
         .map_err(nika_harness::seat_http_err)
 }
 
@@ -36,7 +37,8 @@ pub(crate) const fn declared_id() -> Option<String> {
 }
 
 impl<S, T, H, P, D, C> crate::Runtime<S, T, H, P, D, C> {
-    /// Attach the selected backend.
+    /// Attach the selected backend. The seat `id` decides whether a task's `max_turns:` is
+    /// sent to it or refused before anything is sent (`nika_harness::applies_max_turns`).
     ///
     /// # Errors
     /// Refuses when the adapter cannot be seated or the admitted project
@@ -48,7 +50,8 @@ impl<S, T, H, P, D, C> crate::Runtime<S, T, H, P, D, C> {
         id: String,
     ) -> Result<Self, nika_kernel::HttpError> {
         let seat = nika_verb_agent::harness_path::HarnessSeat::from_backend(backend)
-            .map_err(nika_harness::seat_http_err)?;
+            .map_err(nika_harness::seat_http_err)?
+            .applying_max_turns(nika_harness::applies_max_turns(&id));
         let mut runtime = self.with_seat(Some(seat))?;
         runtime.harness_seat_id = Some(id);
         Ok(runtime)

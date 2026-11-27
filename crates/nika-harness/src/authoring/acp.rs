@@ -225,8 +225,9 @@ pub(crate) fn show_thinking(mut meta: Value) -> Value {
 }
 
 /// The options an agent session on `adapter` sends with `session/new`, outside any one-shot
-/// profile. A Claude Code session keeps its own loop and its built-in tools (no `tools`, no
-/// turn limit), judged through its permission asks, and loads nothing of the user's or the
+/// profile. A Claude Code session keeps its own loop and its built-in tools (no `tools`, and no
+/// turn limit unless the task declares one, which [`carry_max_turns`] adds), judged through its
+/// permission asks, and loads nothing of the user's or the
 /// project's Claude configuration: the surface every Claude Code session shares
 /// ([`claude_options`]), with the two inputs `settingSources` does not control turned off in
 /// the session's environment, the auto memory of the project and the claude.ai connectors of
@@ -239,6 +240,51 @@ pub(crate) fn agent_meta(adapter: &str) -> Option<Value> {
             "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
             "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
         }}))
+    })
+}
+
+/// Whether an agent session on the registry seat `seat` is sent a turn limit an `agent:` task
+/// declares (`max_turns:`): the `claude-code` seat is sent it as the SDK option `maxTurns` with
+/// the session's options (an option a client may set, as read in claude-agent-acp 0.81.1's
+/// source; the adapter counts the turns, not Nika). Measured on a live seat with that release
+/// on 27 November 2026: limits of 1 and 2 stopped a task that needed three model requests, a
+/// limit of 8 let it complete; not measured: whether the count is per prompt or per session,
+/// any other release, the deprecated package the seat still admits. Codex offers no turn limit
+/// a client can set and no other seat's is read, so a declared limit there is refused before
+/// anything is sent. The predicate is the one the spawner's agent-session options follow;
+/// `nika check` and the composer that seats the agent verb read it, so the check and the run
+/// refuse the same tasks.
+#[must_use]
+pub fn applies_max_turns(seat: &str) -> bool {
+    Profile::for_seat(seat) == Some(Profile::ClaudeCode)
+}
+
+/// The options `session/new` sends once a task declared a turn limit (`max_turns`): an agent
+/// session's Claude Code options ([`agent_meta`]) with the limit as `maxTurns`, every other
+/// option kept as it is. Anything else is refused before `session/new`, never opened without
+/// the limit: a one-shot (`one_shot`), which keeps its audited profile, and options that carry
+/// no turn limit (Codex's none, another adapter's, an adapter Nika could not place). `meta`
+/// is returned as given when the task declared no limit.
+pub(crate) fn carry_max_turns(
+    meta: Option<Value>,
+    max_turns: Option<u32>,
+    one_shot: bool,
+) -> Result<Option<Value>, HarnessError> {
+    let Some(limit) = max_turns else {
+        return Ok(meta);
+    };
+    let carried = meta.filter(|_| !one_shot).and_then(|mut meta| {
+        let options = meta.pointer_mut("/claudeCode/options")?.as_object_mut()?;
+        options.insert("maxTurns".to_owned(), json!(limit));
+        Some(meta)
+    });
+    carried.map(Some).ok_or_else(|| {
+        refusal(
+            "this session cannot carry the task's `max_turns`: its options hold no turn limit \
+             (only a Claude Code agent session's do); no session was opened; drop `max_turns:` \
+             or run the task as an `agent:` on the `claude-code` seat, or on an API or local \
+             model",
+        )
     })
 }
 
@@ -441,3 +487,6 @@ mod activity_tests;
 
 #[cfg(test)]
 mod idle_tests;
+
+#[cfg(test)]
+mod turn_limit_tests;

@@ -38,6 +38,7 @@ pub mod run_acp;
 pub mod spawn;
 pub mod wire;
 
+pub use authoring::acp::applies_max_turns;
 pub use client::{IDLE_TIMEOUT_SECS, MAX_LINE_BYTES, drive, drive_with_idle};
 pub use conversation::{
     Conversation, ConversationSetup, ToolOffer, Transport, TurnEnd, TurnEvent, TurnStream,

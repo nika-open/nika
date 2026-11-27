@@ -18,7 +18,7 @@ fn audit(source: &str) -> Audit {
 const HARNESS_AGENT: &str = "nika: codex-image\nmodel: openai/gpt-6-sol\nrun:\n  access:\n    \
     via: codex\n    protocol: acp\npermits:\n  fs:\n    read: [\"./out/codex-image.png\"]\n    \
     write: [\"./out/codex-image.png\"]\n  exec: [\"cp\", \"shasum\"]\n  tools: [\"nika:read\"]\n\
-    tasks:\n  draw:\n    agent:\n      prompt: \"copy the image to ./out\"\n      max_turns: 6\n  \
+    tasks:\n  draw:\n    agent:\n      prompt: \"copy the image to ./out\"\n  \
     digest:\n    after: { draw: success }\n    \
     exec: { command: [\"shasum\", \"-a\", \"256\", \"./out/codex-image.png\"] }\n  \
     measure:\n    after: { draw: success }\n    \
@@ -91,8 +91,8 @@ fn a_harness_agent_task_is_told_its_boundary_and_keeps_its_bridged_grants() {
     );
 
     let native = audit(&HARNESS_AGENT.replace(
-        "      max_turns: 6\n",
-        "      max_turns: 6\n      tools: [\"nika:read\"]\n",
+        "      prompt: \"copy the image to ./out\"\n",
+        "      prompt: \"copy the image to ./out\"\n      tools: [\"nika:read\"]\n",
     ));
     assert!(
         native.verdict.harness.is_empty(),

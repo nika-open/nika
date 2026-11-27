@@ -20,7 +20,11 @@ another route for the whole run (spec 01 §run):
 - Use `agent:` tasks on a seat. An ACP seat is not thereby fit for `infer:`
   (spec 02 §Subscription harness access).
 - A seat is unpriced: its budget is the subscription's quota, never 0 USD.
-  Check reports the task as unpriced; keep `max_turns` and `max_tokens_total`.
+  Check reports the task as unpriced; keep `max_tokens_total`.
+- A seat runs its own loop. `max_turns` is sent to the `claude-code` seat as
+  its session's turn limit and is refused on every other seat; `temperature` is
+  refused on every seat. Check names such a task as a blocker and the run
+  refuses it before anything is sent (`NIKA-465`): drop the field there.
 - A seat widens effects. On a seat the application runs its own tools, and
   `permits:` does not bound what its mode lets it do without asking: check
   prints a `[harness]` hint naming them, and `nika explain harness` teaches
@@ -50,7 +54,6 @@ tasks:
   banner:
     agent:
       prompt: "Draw a 16:9 release banner for ${{ inputs.product }}, no text"
-      max_turns: 4
       max_tokens_total: 20000
       images:
         save: "./out/release/banner.png"

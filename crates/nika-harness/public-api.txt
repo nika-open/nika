@@ -3080,6 +3080,7 @@ pub const nika_harness::IDLE_TIMEOUT_SECS: u64
 pub const nika_harness::MAX_LINE_BYTES: usize
 pub const nika_harness::MAX_OFFERED_VALUES: usize
 pub const nika_harness::MAX_OFFERED_VALUE_BYTES: usize
+pub fn nika_harness::applies_max_turns(seat: &str) -> bool
 pub fn nika_harness::compose_env(parent: &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, passthrough: &[alloc::string::String]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn nika_harness::declared_adapter_id() -> core::option::Option<alloc::string::String>
 pub fn nika_harness::drive<R, W>(reader: R, writer: W, request: nika_kernel_ai::harness::HarnessRequest) -> nika_kernel_ai::harness::HarnessEventStream where R: tokio::io::async_read::AsyncRead + core::marker::Unpin + core::marker::Send + 'static, W: tokio::io::async_write::AsyncWrite + core::marker::Unpin + core::marker::Send + 'static

@@ -16,6 +16,8 @@
 //!   the ACP one-shot only when that session would carry the whole task. A seat with no direct
 //!   one-shot is again the access line's refusal;
 //! - an `agent:` on a seat refuses a `tools:` whitelist (NIKA-465): the harness runs its own;
+//!   so do a `max_turns` on a seat that is sent no turn limit (all but `claude-code`, which
+//!   is sent it) and a `temperature` on any seat, both refused at run before anything is sent;
 //! - `images:` is a seat's field: an `agent:` the plan does not seat refuses it (NIKA-465).
 //!
 //! The tasks a seat serves are also returned: their `[cost]` hints, which push
@@ -25,7 +27,7 @@ use std::collections::BTreeSet;
 
 use nika_check::CheckReport;
 use nika_providers::ExecutionAccessPlan;
-use nika_schema::raw::{RawAction, RawInferAction, RawWorkflow, VisionInput};
+use nika_schema::raw::{RawAction, RawAgentAction, RawInferAction, RawWorkflow, VisionInput};
 use nika_types::access::{AccessProtocol, HarnessRuntime};
 
 /// The seat judgement of one verdict.
@@ -91,13 +93,7 @@ pub(super) fn judge(
             }
             (RawAction::Agent(agent), Some(seat)) => {
                 out.seated.insert(id.to_owned());
-                if !agent.tools.is_empty() {
-                    out.blockers.push(format!(
-                        "seat · `{id}` is an agent: on `{seat}`, which runs its own tools: a \
-                         `tools:` whitelist cannot be enforced there and the run refuses it \
-                         (NIKA-465) — drop `tools:` or run the task on an API or local model"
-                    ));
-                }
+                out.blockers.extend(agent_unapplied(id, seat, agent));
             }
             (RawAction::Agent(agent), None) if agent.images.is_some() => {
                 out.blockers.push(format!(
@@ -111,6 +107,67 @@ pub(super) fn judge(
         }
     }
     out
+}
+
+/// The blocker of an `agent:` that sets what Nika cannot send `seat`, as the run refuses it
+/// before anything is sent (NIKA-465): a `tools:` whitelist (the harness runs its own tools), a
+/// `max_turns` on a seat that is sent no turn limit (every seat but `claude-code`) and a
+/// `temperature` (no seat is sent one). One line per task; its remedy meets no second refusal.
+fn agent_unapplied(id: &str, seat: &str, agent: &RawAgentAction) -> Option<String> {
+    let tools = !agent.tools.is_empty();
+    let turns = agent.max_turns.is_some() && refuses_max_turns(seat);
+    let temperature = agent.temperature.is_some();
+    let mut why = Vec::new();
+    let (mut named, mut dropped) = (Vec::new(), Vec::new());
+    if tools {
+        why.push("runs its own tools");
+        named.push("a `tools:` whitelist");
+        dropped.push("`tools:`");
+    }
+    why.extend(match (turns, temperature) {
+        (true, true) => Some("takes no turn limit or temperature from Nika"),
+        (true, false) => Some("takes no turn limit from Nika"),
+        (false, true) => Some("takes no temperature from Nika"),
+        (false, false) => None,
+    });
+    for (set, field, key) in [
+        (turns, "`max_turns`", "`max_turns:`"),
+        (temperature, "`temperature`", "`temperature:`"),
+    ] {
+        if set {
+            named.push(field);
+            dropped.push(key);
+        }
+    }
+    if named.is_empty() {
+        return None;
+    }
+    let remedy = if tools || temperature {
+        "an API or local model"
+    } else {
+        "the `claude-code` seat or an API or local model"
+    };
+    Some(format!(
+        "seat · `{id}` is an agent: on `{seat}`, which {}: {} cannot be enforced there and the \
+         run refuses it (NIKA-465) — drop {} or run the task on {remedy}",
+        why.join(" and "),
+        named.join(" · "),
+        dropped.join(" · ")
+    ))
+}
+
+/// Whether the run refuses a task's declared `max_turns` on `seat` (the run's own predicate,
+/// `nika_harness::applies_max_turns`).
+#[cfg(feature = "access-harness")]
+fn refuses_max_turns(seat: &str) -> bool {
+    !nika_harness::applies_max_turns(seat)
+}
+
+/// Without the adapters there is no seat to judge: the access line refuses it, and no turn
+/// limit line is claimed.
+#[cfg(not(feature = "access-harness"))]
+const fn refuses_max_turns(_seat: &str) -> bool {
+    false
 }
 
 /// What an `infer:` sets that `seat`'s ACP one-shot cannot carry, as the run refuses it there

@@ -340,7 +340,7 @@ fn a_harness_agent_task_is_told_its_boundary_and_keeps_its_bridged_grant() {
          protocol: acp\npermits:\n  fs:\n    read: [\"./out/codex-image.png\"]\n    \
          write: [\"./out/codex-image.png\"]\n  exec: [\"cp\", \"shasum\"]\n  \
          tools: [\"nika:read\"]\ntasks:\n  draw:\n    agent:\n      prompt: \"copy the image \
-         to ./out\"\n      max_turns: 6\n  digest:\n    after: { draw: success }\n    \
+         to ./out\"\n  digest:\n    after: { draw: success }\n    \
          exec: { command: [\"shasum\", \"-a\", \"256\", \"./out/codex-image.png\"] }\n",
     );
     let check = rig.nika(&["check", "codex-image.nika"]);

@@ -654,7 +654,8 @@ apply:
 - [ ] Every external value (a file, a page, an API answer, a model answer that
       is data) is validated before an effect or a model uses it.
 - [ ] Every `infer:` has `max_tokens:`, and `schema:` when its output is data.
-      Every `agent:` has `max_turns:` and `max_tokens_total:`.
+      Every `agent:` has `max_tokens_total:`, and `max_turns:` unless it runs
+      on a seat other than `claude-code`, which refuses it.
 - [ ] A quiet run spends nothing: `when:` on `size(...) > 0` before paid work.
 - [ ] A repeated job keeps state and reports only what is new (a fetching
       job offers it, since it brings the gate).

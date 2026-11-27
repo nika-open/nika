@@ -790,6 +790,24 @@ pub fn judge_version(
     })
 }
 
+/// What an ACP adapter whose `initialize` reports a release outside `pin` is told: the range
+/// Nika accepts for the adapter of the seat `adapter_id`, and, for a seat with a measured
+/// boundary, the adapter release its measurements were made on. Only the handshake judgment
+/// says it: a `--version` probe may read a native program, not the adapter the row measured.
+pub(crate) fn outside_the_pin(adapter_id: &str, pin: &VersionPin) -> String {
+    let range = format!(
+        "Nika accepts this adapter from {}.{} through every {}.x release",
+        pin.min.0, pin.min.1, pin.max_major
+    );
+    match nika_types::access::HarnessBoundary::for_seat(adapter_id) {
+        Some(row) => format!(
+            "{range}; install the release it was measured on, {}",
+            row.measured_on
+        ),
+        None => range,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1178,6 +1196,63 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("3.0"), "{msg}");
         assert!(msg.contains("major <= 2"), "{msg}");
+    }
+
+    /// An adapter release outside its pin is refused at the handshake with the range Nika
+    /// accepts and, on a measured seat, the release to install; a release inside the pin that
+    /// its row was not measured on is admitted (it is carried, not refused).
+    #[test]
+    fn a_handshake_outside_the_pin_names_the_range_and_the_measured_release() {
+        let registry = crate::registry::registry_with(&|_| None).expect("the static table");
+        let row = |id: &str| {
+            let found = registry.iter().find(|row| row.adapter.id == id);
+            found.expect("a shipped row").adapter.clone()
+        };
+        let answer = |name: &str, version: &str| {
+            serde_json::json!({"protocolVersion": 1,
+                "agentInfo": {"name": name, "version": version}})
+        };
+        let codex = row("codex");
+        let claude = row("claude-code");
+        let refused =
+            |adapter: &crate::spawn::HarnessAdapter, init: serde_json::Value| match adapter
+                .judge_handshake(&init)
+            {
+                Err(HarnessError::Unavailable { reason }) => reason,
+                other => panic!("an unavailable adapter, got {other:?}"),
+            };
+        assert_eq!(
+            refused(&codex, answer("@agentclientprotocol/codex-acp", "2.12.0")),
+            "adapter `codex`: handshake version 2.12 is outside the pin (>= 0.16 · major <= \
+             1): Nika accepts this adapter from 0.16 through every 1.x release; install the \
+             release it was measured on, codex-acp 1.13.1"
+        );
+        assert_eq!(
+            refused(
+                &claude,
+                answer("@agentclientprotocol/claude-agent-acp", "1.0.0")
+            ),
+            "adapter `claude-code`: handshake version 1.0 is outside the pin (>= 0.23 · major \
+             <= 0): Nika accepts this adapter from 0.23 through every 0.x release; install the \
+             release it was measured on, claude-agent-acp 0.81.1"
+        );
+        // A seat with no measured boundary is told the range alone.
+        let opencode = refused(&row("opencode"), answer("OpenCode", "2.0.0"));
+        assert!(
+            opencode.ends_with("Nika accepts this adapter from 1.18 through every 1.x release"),
+            "{opencode}"
+        );
+        // Inside the pin, a release the row was not measured on is admitted: carried.
+        let claude_now = answer("@agentclientprotocol/claude-agent-acp", "0.112.0");
+        assert_eq!(
+            claude.judge_handshake(&claude_now).ok(),
+            Some(Some((0, 112)))
+        );
+        let codex_older = answer("@agentclientprotocol/codex-acp", "1.12.0");
+        assert_eq!(
+            codex.judge_handshake(&codex_older).ok(),
+            Some(Some((1, 12)))
+        );
     }
 
     #[test]

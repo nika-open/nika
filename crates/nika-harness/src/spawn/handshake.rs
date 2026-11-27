@@ -59,8 +59,12 @@ impl HarnessAdapter {
             (Some(pin), Some((major, minor))) => Err(HarnessError::Unavailable {
                 reason: format!(
                     "adapter `{}`: handshake version {major}.{minor} is outside the pin \
-                     (>= {}.{} · major <= {})",
-                    self.id, pin.min.0, pin.min.1, pin.max_major
+                     (>= {}.{} · major <= {}): {}",
+                    self.id,
+                    pin.min.0,
+                    pin.min.1,
+                    pin.max_major,
+                    crate::probe::outside_the_pin(&self.id, pin)
                 ),
             }),
             (Some(_), None) => Err(HarnessError::Unavailable {

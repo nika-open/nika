@@ -116,9 +116,9 @@ impl DynAgentBackend for Seat {
 
 type Verb = AgentVerb<MockProvider, MockToolExecutor, MockToolDefinitionProvider>;
 
-/// The verb on a seat its composer says is sent a declared turn limit (`sent`) or not, whose
-/// first turn ends as `first` says.
-fn seated(sent: bool, first: First) -> (Verb, Arc<Heard>) {
+/// The verb on a seat its composer says is sent a declared turn limit (`limit_sent`) or not,
+/// whose first turn ends as `first` says.
+fn seated(limit_sent: bool, first: First) -> (Verb, Arc<Heard>) {
     let heard = Arc::new(Heard::default());
     let seat = Arc::new(Seat {
         first,
@@ -133,7 +133,7 @@ fn seated(sent: bool, first: First) -> (Verb, Arc<Heard>) {
         "openai/gpt-6-luna",
     )
     .with_harness_seat(
-        HarnessSeat::new(seat as Arc<dyn DynAgentBackend>, "/tmp").applying_max_turns(sent),
+        HarnessSeat::new(seat as Arc<dyn DynAgentBackend>, "/tmp").applying_max_turns(limit_sent),
     );
     (verb, heard)
 }

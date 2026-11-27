@@ -798,9 +798,25 @@ pub(crate) fn outside_the_pin(adapter_id: &str) -> String {
     nika_types::access::HarnessBoundary::for_seat(adapter_id).map_or_else(String::new, |row| {
         format!(
             "; install the release its boundary was measured on, {}",
-            row.measured_on
+            to_install(&row)
         )
     })
+}
+
+/// What the advice outside the pin names for `row`: its one scoped package name (the maintained
+/// package, as its `agentInfo.name` reports it) at the newest release the row was measured on,
+/// such as `@agentclientprotocol/codex-acp 1.13.1`. A row with no scoped name, or more than one,
+/// or no release, is named by its `measured_on` text: the choice never rests on an order.
+fn to_install(row: &nika_types::access::HarnessBoundary) -> String {
+    let mut scoped = row.agents.iter().filter(|name| name.starts_with('@'));
+    let package = match (scoped.next(), scoped.next()) {
+        (Some(package), None) => Some(package),
+        _ => None,
+    };
+    match (package, row.releases.iter().max()) {
+        (Some(package), Some(release)) => format!("{package} {release}"),
+        _ => row.measured_on.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -1193,9 +1209,40 @@ mod tests {
         assert!(msg.contains("major <= 2"), "{msg}");
     }
 
+    /// The advice names a row's one scoped package (the maintained one) and its newest measured
+    /// release; a row that names no scoped package, or more than one, is named by its
+    /// `measured_on` text. Every row names at most one, so the choice never rests on an order.
+    #[test]
+    fn the_advice_names_the_maintained_package_of_each_row() {
+        use nika_types::access::HarnessBoundary;
+        for row in HarnessBoundary::MEASURED {
+            let scoped = row
+                .agents
+                .iter()
+                .filter(|name| name.starts_with('@'))
+                .count();
+            assert!(scoped <= 1, "{}: {scoped} scoped names", row.seat);
+        }
+        let names: Vec<(&str, String)> = HarnessBoundary::MEASURED
+            .into_iter()
+            .map(|row| (row.seat, to_install(&row)))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("gemini-cli", "gemini-cli 0.62.0".to_owned()),
+                ("codex", "@agentclientprotocol/codex-acp 1.13.1".to_owned()),
+                (
+                    "claude-code",
+                    "@agentclientprotocol/claude-agent-acp 0.81.1".to_owned()
+                ),
+            ]
+        );
+    }
+
     /// An adapter release outside its pin is refused at the handshake with the range once and,
-    /// on a seat with a measured boundary, the release to install; a seat without one keeps
-    /// the refusal it had. A release inside the pin that its row was not measured on is
+    /// on a seat with a measured boundary, the maintained package and the release to install;
+    /// a seat without one keeps the refusal it had. A release inside the pin that its row was not measured on is
     /// admitted (it is carried, not refused).
     #[test]
     fn a_handshake_outside_the_pin_names_the_range_and_the_measured_release() {
@@ -1220,7 +1267,8 @@ mod tests {
         assert_eq!(
             refused(&codex, answer("@agentclientprotocol/codex-acp", "2.12.0")),
             "adapter `codex`: handshake version 2.12 is outside the pin (>= 0.16 · major <= \
-             1); install the release its boundary was measured on, codex-acp 1.13.1"
+             1); install the release its boundary was measured on, \
+             @agentclientprotocol/codex-acp 1.13.1"
         );
         assert_eq!(
             refused(
@@ -1228,7 +1276,8 @@ mod tests {
                 answer("@agentclientprotocol/claude-agent-acp", "1.0.0")
             ),
             "adapter `claude-code`: handshake version 1.0 is outside the pin (>= 0.23 · major \
-             <= 0); install the release its boundary was measured on, claude-agent-acp 0.81.1"
+             <= 0); install the release its boundary was measured on, \
+             @agentclientprotocol/claude-agent-acp 0.81.1"
         );
         // A seat with no measured boundary is told what it was told before.
         assert_eq!(

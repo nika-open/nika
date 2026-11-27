@@ -136,7 +136,7 @@ pub use admit::{
     access_pin_refusal, budget_floor_refusal, budget_floor_refusal_bound,
     budget_floor_refusal_bound_over, budget_floor_refusal_remaining, budget_floor_refusal_seated,
     effective_workflow, first_modelless_task, floor_refusal, modelless_refusal, plan_refusal,
-    remaining_cost, required_inputs_refusal, resolve_model_expr, scope_to_task,
+    remaining_cost, required_inputs_refusal, resolve_model_expr, scope_to_task, seated_on_harness,
     unbounded_breakdown,
 };
 pub use compose::{

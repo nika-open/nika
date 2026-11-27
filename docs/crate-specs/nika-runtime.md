@@ -776,7 +776,15 @@ workflow also binds fan-out collections (the analyzer's
 `rendered_collections`): a `for_each` over an input the invocation binds is
 counted from the bound value, as the run binds it (a bound value replaces the
 declared default and never falls back to it; a bound non-array is an unknown
-count). The MODELS gate applies the
+count). The floor asks `seated_on_harness` whether the run is seated on a
+harness, and the host's preflight asks the same function: a run is seated
+when it names at least one model the launch can resolve and the frozen
+plan's `seat_for` names a seat for each of them, which is the test dispatch
+applies to route a call. A model no seat serves rides the provider path and
+unseats the run; a run with no plan is not seated. Seated,
+an unpriced cloud model is the subscription's to bound and does not refuse
+under a cap; an id this binary cannot resolve, an unpriced paid media call
+and a priced floor above the cap still refuse. The MODELS gate applies the
 checker's own laws (the resolver's refusal, `thinking_findings`,
 `capacity_findings`) to every such seat, literal or rendered, and refuses with
 `ReportMismatch` (NIKA-1707) naming the findings. This also closes the

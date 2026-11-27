@@ -135,6 +135,23 @@ fn take_probe_pipes(
 /// CLI needs to run at all, none of them a secret channel.
 const ENV_FLOOR: [&str; 7] = ["HOME", "PATH", "TERM", "LANG", "LC_ALL", "USER", "TMPDIR"];
 
+/// What the Claude Code programs may read beside the floor: their relocatable config home, and
+/// the machine's proxy and certificate bundle. A session opened without the settings files no
+/// longer gets those two from a settings `env` block, and behind a corporate proxy the program
+/// cannot reach its service without them. No credential and no cloud provider switch: a seat
+/// runs on Claude Code's own sign-in, and [`compose_env`] refuses a credential-shaped name
+/// whatever a list says.
+pub(crate) const CLAUDE_PASSTHROUGH: [&str; 8] = [
+    "CLAUDE_CONFIG_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+];
+
 /// Credential-shaped NAME fragments — a suffix list is not enough:
 /// the single most common cloud family (`AWS_SECRET_ACCESS_KEY` ·
 /// `AWS_ACCESS_KEY_ID`) ends in neither `_API_KEY` nor `_SECRET`, and
@@ -1210,6 +1227,73 @@ mod tests {
         assert_eq!(env.get("NO_COLOR").map(String::as_str), Some("1"));
         assert!(!env.contains_key("MISTRAL_API_KEY"));
         assert!(!env.contains_key("ABSENT_VAR"));
+    }
+
+    #[test]
+    fn the_claude_row_gets_its_home_and_the_network_plumbing_and_nothing_else() {
+        let parent: BTreeMap<String, String> = [
+            ("PATH", "/usr/bin"),
+            ("HOME", "/home/u"),
+            ("CLAUDE_CONFIG_DIR", "/tmp/relocated-claude"),
+            ("HTTPS_PROXY", "http://proxy.example:8080"),
+            ("HTTP_PROXY", "http://proxy.example:8081"),
+            ("NO_PROXY", "localhost,.example.com"),
+            ("https_proxy", "http://proxy.example:8082"),
+            ("http_proxy", "http://proxy.example:8083"),
+            ("no_proxy", "localhost"),
+            ("NODE_EXTRA_CA_CERTS", "/etc/ssl/corp-ca.pem"),
+            // A provider switch, a route and a model choice stay on Nika's side: the seat
+            // runs on Claude Code's own sign-in and on the model the session reports.
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+            ("CLAUDE_CODE_USE_VERTEX", "1"),
+            ("ANTHROPIC_BASE_URL", "https://gateway.example"),
+            ("ANTHROPIC_MODEL", "opus"),
+            ("AWS_PROFILE", "work"),
+            ("ANTHROPIC_API_KEY", "sk-never"),
+            ("CLAUDE_CODE_CLIENT_KEY", "/etc/ssl/client-key.pem"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let rows = crate::registry_with(&|_| None).expect("registry");
+        let passthrough = |id: &str| {
+            rows.iter()
+                .find(|row| row.adapter.id == id)
+                .map(|row| row.adapter.passthrough_env.clone())
+                .expect("a shipped row")
+        };
+        let claude = passthrough("claude-code");
+        assert_eq!(claude, CLAUDE_PASSTHROUGH.map(str::to_owned));
+        let env = compose_env(&parent, &claude);
+        let crossed: Vec<(&str, &str)> =
+            env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(
+            crossed,
+            [
+                ("CLAUDE_CONFIG_DIR", "/tmp/relocated-claude"),
+                ("HOME", "/home/u"),
+                ("HTTPS_PROXY", "http://proxy.example:8080"),
+                ("HTTP_PROXY", "http://proxy.example:8081"),
+                ("NODE_EXTRA_CA_CERTS", "/etc/ssl/corp-ca.pem"),
+                ("NO_PROXY", "localhost,.example.com"),
+                ("PATH", "/usr/bin"),
+                ("http_proxy", "http://proxy.example:8083"),
+                ("https_proxy", "http://proxy.example:8082"),
+                ("no_proxy", "localhost"),
+            ]
+        );
+        // The one-shot profile of the same program reads the same list, and no other row
+        // gained a name: the Codex row still passes its home alone.
+        assert_eq!(
+            crate::oneshot::Cli::Claude.passthrough(),
+            CLAUDE_PASSTHROUGH
+        );
+        assert_eq!(passthrough("codex"), ["CODEX_HOME".to_owned()]);
+        let codex = compose_env(&parent, &passthrough("codex"));
+        assert_eq!(
+            codex.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["HOME", "PATH"]
+        );
     }
 
     #[test]

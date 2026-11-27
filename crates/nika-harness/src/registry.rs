@@ -241,7 +241,7 @@ fn rows() -> Result<Vec<AdapterRow>, HarnessError> {
                 .with_identities(vec!["Claude Agent".to_owned()])
                 .with_handshake_probe()
                 .with_version_pin(VersionPin::new((0, 23), 0))
-                .with_passthrough_env(vec!["CLAUDE_CONFIG_DIR".to_owned()]),
+                .with_passthrough_env(crate::spawn::CLAUDE_PASSTHROUGH.map(str::to_owned).to_vec()),
             serves: &["anthropic"],
             auth: AuthProbe::Command {
                 command: "claude",

@@ -92,11 +92,12 @@ impl Cli {
         }
     }
 
-    /// The extra parent variables the CLI may read (a relocatable config home; never a
-    /// credential-shaped name — `compose_env` refuses those).
-    const fn passthrough(self) -> &'static [&'static str] {
+    /// The extra parent variables the CLI may read (a relocatable config home, and for Claude
+    /// Code the machine's proxy and certificate bundle; never a credential-shaped name —
+    /// `compose_env` refuses those).
+    pub(crate) const fn passthrough(self) -> &'static [&'static str] {
         match self {
-            Self::Claude => &["CLAUDE_CONFIG_DIR"],
+            Self::Claude => &crate::spawn::CLAUDE_PASSTHROUGH,
             Self::Grok | Self::Copilot => &[],
         }
     }

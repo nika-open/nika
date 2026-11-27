@@ -156,14 +156,34 @@ pub(crate) fn admit(init: &Value, one_shot: OneShot) -> Result<(), HarnessError>
     Ok(())
 }
 
+/// The options every Claude Code session Nika opens sends, whatever its role, then the role's
+/// `own`, its thinking shown ([`show_thinking`]). The shared part keeps the session to what
+/// Nika hands it. `settingSources: []` loads no user, project or local settings file, so none
+/// of their permission rules, hooks or environment entries, and no `CLAUDE.md`, skill, agent
+/// or command read from disk. `strictMcpConfig` keeps the MCP servers to the ones
+/// `session/new` names, and `mcpServers`, `plugins`, `skills` and `agents` name none.
+/// `allowDangerouslySkipPermissions: false` withholds the mode that approves everything
+/// (the adapter lists `bypassPermissions` only when the client leaves it unset, and
+/// such a mode must not even be reachable mid-session). The adapter spreads these options
+/// over its own default (`settingSources: ["user", "project", "local"]`), so each replaces
+/// it. No option reaches a managed policy or the global `~/.claude.json`: both are read
+/// regardless.
+fn claude_options(own: Value) -> Value {
+    let mut options = json!({
+        "mcpServers":{}, "strictMcpConfig":true,
+        "settingSources":[], "plugins":[], "skills":[], "agents":{},
+        "allowDangerouslySkipPermissions":false
+    });
+    if let (Some(shared), Value::Object(own)) = (options.as_object_mut(), own) {
+        shared.extend(own);
+    }
+    show_thinking(json!({"claudeCode": {"options": options}}))
+}
+
 /// Options passed by this exact adapter to SDK query before any prompt.
 /// MCP and disk settings are excluded independently of the empty built-in tools.
 pub(crate) fn profile() -> Value {
-    show_thinking(json!({"claudeCode":{"options":{
-        "tools":[], "mcpServers":{}, "strictMcpConfig":true,
-        "settingSources":[], "plugins":[], "skills":[], "agents":{},
-        "allowDangerouslySkipPermissions":false, "maxTurns":1, "persistSession":false
-    }}}))
+    claude_options(json!({"tools":[], "maxTurns":1, "persistSession":false}))
 }
 
 /// Options passed by this exact adapter to SDK query before a conversation's first prompt: the
@@ -172,11 +192,7 @@ pub(crate) fn profile() -> Value {
 /// The only MCP server is Nika's tool server, mounted through `session/new`'s `mcpServers`
 /// (`crate::conversation`), never through these options.
 pub(crate) fn conversation_profile() -> Value {
-    show_thinking(json!({"claudeCode":{"options":{
-        "tools":[], "mcpServers":{}, "strictMcpConfig":true,
-        "settingSources":[], "plugins":[], "skills":[], "agents":{},
-        "allowDangerouslySkipPermissions":false, "persistSession":false
-    }}}))
+    claude_options(json!({"tools":[], "persistSession":false}))
 }
 
 /// `meta` asking a Claude Code session to show its thinking: the SDK option
@@ -201,16 +217,20 @@ pub(crate) fn show_thinking(mut meta: Value) -> Value {
 }
 
 /// The options an agent session on `adapter` sends with `session/new`, outside any one-shot
-/// profile: its own loop, tools and settings untouched. A Claude Code session shows its
-/// thinking ([`show_thinking`]) and never offers `bypassPermissions` (NIK-266: the adapter
-/// lists that mode only when the client leaves `allowDangerouslySkipPermissions` unset, and a
-/// mode that approves everything must not even be reachable mid-session); every other adapter
-/// sends none.
+/// profile. A Claude Code session keeps its own loop and its built-in tools (no `tools`, no
+/// turn limit), judged through its permission asks, and loads nothing of the user's or the
+/// project's Claude configuration: the surface every Claude Code session shares
+/// ([`claude_options`]), with the two inputs `settingSources` does not control turned off in
+/// the session's environment, the auto memory of the project and the claude.ai connectors of
+/// the signed-in account. Every other adapter sends none. `adapter` is a registry seat: the
+/// spawner passes its row's id, and the client passes the seat of the adapter that answered
+/// `initialize` when the row carried no options (`crate::client`).
 pub(crate) fn agent_meta(adapter: &str) -> Option<Value> {
     (Profile::for_seat(adapter) == Some(Profile::ClaudeCode)).then(|| {
-        show_thinking(
-            json!({"claudeCode": {"options": {"allowDangerouslySkipPermissions": false}}}),
-        )
+        claude_options(json!({"env": {
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+        }}))
     })
 }
 

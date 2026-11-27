@@ -410,8 +410,12 @@ async fn one_declaration_serves_infer_and_agent_over_acp() {
         agent[4]["params"],
         json!({"sessionId":"s-claude","configId":"mode","value":"default"})
     );
+    // The agent session opens with the user's Claude configuration off, whoever drives it:
+    // its options follow the adapter that answered `initialize`.
+    let options = &agent[1]["params"]["_meta"]["claudeCode"]["options"];
+    assert_eq!(options["settingSources"], json!([]), "agent: {agent:?}");
     assert!(
-        agent[1]["params"].get("_meta").is_none(),
+        options.get("tools").is_none() && options.get("maxTurns").is_none(),
         "the agent session keeps its own loop"
     );
     for session in [&infer, &agent] {

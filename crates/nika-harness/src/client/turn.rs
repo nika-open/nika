@@ -17,7 +17,8 @@
 //! - The model a `usage_update` names is the turn's attested model. Under a selection the
 //!   client applied, a reported model that is demonstrably another model than the confirmed one
 //!   is recorded as the route moving the model during the turn, which an exact selection refuses
-//!   (`HarnessSelection::moved_refusal`); a spelling the rule cannot place is only recorded.
+//!   (`HarnessSelection::moved_refusal`) and a model the client only held does not; a spelling
+//!   the rule cannot place is only recorded.
 
 use nika_kernel::ai::harness::{
     AdapterReport, HarnessContext, HarnessCostEstimate, HarnessError, HarnessOutcome,
@@ -275,8 +276,10 @@ impl<R, W> Driver<R, W> {
     /// Under a model the client sent, a reported model that is demonstrably another one
     /// ([`verdict`]) is the route moving the model during the turn, recorded for the exact
     /// selection to refuse. Only the first move is kept: one is enough to refuse, and a stream
-    /// of new ids grows neither the list nor the refusal. Without a sent model nothing was
-    /// pinned, and the report is only the outcome's observed model.
+    /// of new ids grows neither the list nor the refusal. A model the client only held was
+    /// sent too: its move is recorded here and refuses nothing
+    /// (`HarnessSelection::held_model`). Without a sent model the report is only the
+    /// outcome's observed model.
     fn judge_reported_model(&mut self, reported: &str) {
         let Some(sent) = self.selection.transmitted_model.as_deref() else {
             return;

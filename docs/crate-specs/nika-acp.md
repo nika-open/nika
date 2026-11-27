@@ -146,7 +146,12 @@ Lifted from `nika-mcp/src/client.rs:559-604` (the confined-spawn seam):
 **The difference (A-3):** NO `apply_env_scrub` of the harness's own auth
 store — the harness MUST read its own credentials; scrubbing its env would
 break the whole legitimacy model. The child env is: the runner floor ∪ the
-adapter's declared passthrough ∪ nothing of nika's secrets. Documented at the
+adapter's declared passthrough ∪ nothing of nika's secrets. The Claude Code row
+passes its config home and the machine's proxy and certificate bundle
+(`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, their lower-case forms and
+`NODE_EXTRA_CA_CERTS`): a session opened without the settings files (§6, 1bis)
+no longer reads them from a settings `env` block. No cloud provider switch
+crosses: a seat runs on the harness's own sign-in. Documented at the
 spawn site; a negative test proves nika's own `NIKA_*_API_KEY` vars never
 cross. Auth readiness reads no credential byte: it checks path metadata, obtains
 a zero-read read-only handle so the OS applies UID/ACL policy, and requires the
@@ -208,9 +213,55 @@ or `current_mode_update` away from the held mode ends the session. The table is
 | Seat (measured on) | Adapter default | Mode Nika holds | What the harness still does without asking |
 |---|---|---|---|
 | codex (codex-acp 1.13.1 · codex 0.156.1) | `agent` (Codex's auto-reviewer approves for the client) | `read-only` (approval `on-request`, reviewed by the client, over a `workspaceWrite` sandbox) | reads any file; writes the project, `/tmp` and `$TMPDIR`; runs any program in that sandbox; network off unless it asks. No mode is a read-only sandbox: without an `fs.write` grant the project stays writable |
-| claude-code (claude-agent-acp 0.81.1 · Claude Code 2.1.280) | the user's `permissions.defaultMode` (`auto`: a classifier decides) | `default` ("Manual": edits and non-read-only commands ask) | reads files in the project; runs commands it classifies read-only; fetches documentation hosts it pre-approves. `bypassPermissions` is withheld (`_meta.claudeCode.options.allowDangerouslySkipPermissions: false`) |
+| claude-code (claude-agent-acp 0.81.1 · Claude Code 2.1.280) | the user's `permissions.defaultMode` (`auto`: a classifier decides) | `default` ("Manual": edits and non-read-only commands ask) | reads files in the project; runs commands it classifies read-only; fetches documentation hosts it pre-approves. `bypassPermissions` is withheld (`_meta.claudeCode.options.allowDangerouslySkipPermissions: false`); the session loads nothing of the user's or the project's Claude configuration (below); a managed policy still applies |
 | gemini-cli (0.62.0) | `default`, or `--approval-mode` / settings | `default` (legacy `session/set_mode`: its success is the only acknowledgement; gemini-cli announces a later mode change only as message text, which Nika does not read) | reads files in the workspace (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches |
 | qwen-code · kimi-code · opencode · copilot · grok-build | — | none measured: nothing is selected; a current mode that visibly approves on its own (`auto`, `accept`, `full`, `yolo`, `bypass` …) refuses the session | everything it does without asking |
+
+**1bis · A Claude Code agent session loads only what Nika hands it**
+(`nika_harness::authoring::acp::agent_meta`). `session/new` carries, in
+`_meta.claudeCode.options`, the surface the one-shot and conversation profiles already send,
+without the keys that close an agent's own loop and with two environment switches of its
+own. The options follow the registry row (`claude-code`) and, for a row declared under
+another id, the adapter that answers `initialize` as claude-agent-acp, the name the boundary
+row is found by: the session a `permit_checked` row describes is the one that was opened.
+
+The options:
+
+| Option | Value | What it leaves out |
+|---|---|---|
+| `settingSources` | `[]` | the user, project and local settings files: their permission rules (allow, ask and deny), sandbox settings, hooks and `env`; `CLAUDE.md`; the skills, agents and commands of `.claude/`; the plugins those settings enable |
+| `strictMcpConfig`, `mcpServers` | `true`, `{}` | every MCP server but the ones `session/new` names: `.mcp.json`, user settings, plugins |
+| `plugins`, `skills`, `agents` | `[]`, `[]`, `{}` | what a client could hand the SDK itself: none is handed (installed plugins and the skills of `.claude/` are already left out by `settingSources`) |
+| `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` | `"1"` | the project's auto memory, which `settingSources` does not control |
+| `env.ENABLE_CLAUDEAI_MCP_SERVERS` | `"false"` | claude.ai connectors |
+| `allowDangerouslySkipPermissions` | `false` | the `bypassPermissions` mode |
+
+Never sent to an agent session: `tools` (it keeps its built-in tools, each judged through
+its permission ask), `maxTurns` and `persistSession`. claude-agent-acp 0.81.1 spreads the
+client's options over its own default (`settingSources: ["user", "project", "local"]`), so
+each value replaces it. It then sets `cwd`, `permissionMode` and `canUseTool` itself,
+recomputes `allowDangerouslySkipPermissions` (the client's `false` holds), drops `agent`, and
+merges five keys where it replaces the others: `env` (the client's entries over its own
+environment), `mcpServers` (with the servers of `session/new`), `extraArgs`,
+`disallowedTools` and `hooks`. Outside these options: a managed policy, the plugins built
+into Claude Code and the global `~/.claude.json` are read regardless, Claude Code saves the
+session's transcript, and the adapter's own settings reader still takes four values from the
+settings files: `permissions.defaultMode` (replaced by the held `default`), `model`, the
+model list and the default effort. The CLI no longer reads `model`, and the adapter does not
+send it a model it believes the CLI already read. So when the task names no model (or names
+`default`), the client selects the model the session reports through its model option
+(`session/set_config_option`) and reads it back before the prompt: the recorded model is the
+one the session starts on. A session that does not confirm it is refused before the prompt,
+one that rejects the selection fails there with the adapter's error, and a later answer of
+the session's setup (effort, service tier, mode) that reports another model is refused
+before the prompt too. The task asked for no model, so a model the agent moves during the
+turn stays a recorded fact, where a move of a model the task named refuses the answer under
+`fallback: none`. The hold rides every session this client opens on the adapter that names
+itself claude-agent-acp: an `agent:` task, an `infer:` or authoring one-shot, the compile
+seat. A conversation does not record the adapter's name and holds nothing; a model option
+that states no current value, and a session that states its model only through the legacy
+model list, get no request. The three profiles are built from one function, so their shared
+keys cannot drift.
 
 **2 · Every permission ask, judged against `permits:`** (`nika_cap::judge_harness_ask`):
 
@@ -294,7 +345,7 @@ itself are not asks (Codex keeps sandboxed commands offline; Claude Code and
 Gemini CLI commands have the host's network); what Codex does on its own (its MCP
 tools marked `readOnlyHint`, its hosted web tool, its `~/.codex`, the MCP servers it
 starts and the user's global `AGENTS.md` and plugins it applies, measured on
-2026-10-26); the harness's own permission
+2026-10-26); on every seat but Claude Code (1bis), the harness's own permission
 rules, hooks and configured MCP servers
 act without Nika's judgment unless they ask; an unmeasured seat is judged on its
 asks alone. `NIKA-DRIFT-001` never calls the `permits.exec` or `permits.fs` grants
@@ -327,13 +378,13 @@ So every Claude Code session the engine opens, the audited one-shot profile (aut
 over its defaults, and the SDK maps them to `--thinking adaptive --thinking-display
 summarized`. Adaptive thinking is the SDK's default for the models that support it, so this
 changes what is displayed, never the model, the effort, a budget or a tool; an agent session
-carries no other option, and its own loop, tools and settings stay its own. A thinking option a
-caller already names is kept as given. Codex and every other adapter send no options. Thought
-frames stay counted, never stored as text, and the 600 s silence allowance and the frames that
-re-arm it are unchanged: a thought frame shows the adapter wrote one, not what the model is
-doing. How the option meets a thinking setting of the user's own Claude Code configuration
-(which an `agent:` session reads, and the one-shot profile does not), and whether every offered
-Claude model accepts adaptive thinking, are to be verified live on the integrated binary.
+carries it beside the options of §6 (1bis), and its own loop and tools stay its own. A
+thinking option a caller already names is kept as given. Codex and every other adapter send
+no options. Thought frames stay counted, never stored as text, and the 600 s silence
+allowance and the frames that re-arm it are unchanged: a thought frame shows the adapter
+wrote one, not what the model is doing. A thinking setting of the user's own Claude Code
+configuration reaches neither profile (1bis). Whether every offered Claude model accepts
+adaptive thinking is to be verified live on the integrated binary.
 
 ## 7ter · Persistent conversation profile (2026-10-09)
 

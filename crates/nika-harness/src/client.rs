@@ -100,7 +100,9 @@ where
 
 /// [`drive_with_idle`] under a one-shot `completion` profile, telling `progress`, sending
 /// `meta` with `session/new` (`OneShot::session_meta`, or an agent session's own options), and
-/// judging the `initialize` answer with `start` when the spawner lent its judgment.
+/// judging the `initialize` answer with `start` when the spawner lent its judgment. An agent
+/// session given no `meta` opens with the options of the adapter that answered `initialize`
+/// (`start::follow_the_reported_agent`): [`drive`] sends them to that adapter too.
 pub(crate) fn drive_profile<R, W>(
     reader: R,
     writer: W,
@@ -527,7 +529,9 @@ where
     /// Between `session/new` and the prompt: the model the workflow names must be one the agent
     /// offers (a pin is a pin: an unoffered model refuses before any prompt), set through the
     /// v1 config option when the agent advertises one, through the legacy `session/set_model`
-    /// when it advertises a `models` list; the current model is observed either way.
+    /// when it advertises a `models` list; the current model is observed either way. A task
+    /// that names no model keeps the session's own, which the client selects and reads back
+    /// itself on an adapter that reports it apart from its program (`hold.rs`).
     /// Model ids and display names must match a live offer; a family match must not
     /// discard an explicit variant. A requested mode (`read-only`) picks an advertised
     /// plan / read-only mode, best effort.
@@ -618,6 +622,8 @@ where
                     ),
                 });
             }
+        } else if let Some(held) = self.hold_reported_model(&sid, model_option).await? {
+            config = Some(held);
         }
         self.seat_after_model(sid, session, config, request).await
     }
@@ -813,6 +819,10 @@ pub(crate) use offer::read_offer;
 /// The session's own `initialize`, judged by the spawner when it lent its judgment.
 mod start;
 pub(crate) use start::StartJudge;
+
+/// The model of a task that names none, selected and read back on an adapter that reports it
+/// apart from the program it drives.
+mod hold;
 
 /// A completion profile's required session mode, applied and read back before the prompt.
 mod mode;

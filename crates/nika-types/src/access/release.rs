@@ -73,13 +73,14 @@ impl fmt::Display for AdapterRelease {
 const SHOWN_CHARS: usize = 40;
 
 /// An adapter's reported release as a sentence repeats it: printable ASCII only (any other
-/// character reads `?`), at most [`SHOWN_CHARS`] characters, then `…`.
+/// character, and a backtick, which would close the code span the sentence prints it in,
+/// reads `?`), at most [`SHOWN_CHARS`] characters, then `…`.
 pub(super) fn shown(reported: &str) -> String {
     let mut out: String = reported
         .chars()
         .take(SHOWN_CHARS)
         .map(|c| {
-            if c.is_ascii_graphic() || c == ' ' {
+            if (c.is_ascii_graphic() || c == ' ') && c != '`' {
                 c
             } else {
                 '?'
@@ -159,6 +160,11 @@ mod tests {
     fn a_reported_release_is_repeated_printable_and_bounded() {
         assert_eq!(shown("0.112.0"), "0.112.0");
         assert_eq!(shown("1.0\u{1b}[31m\n"), "1.0?[31m?");
+        assert_eq!(
+            shown("1.0` x `y"),
+            "1.0? x ?y",
+            "a backtick never closes a code span"
+        );
         let long = "9".repeat(50);
         let repeated = shown(&long);
         assert_eq!(repeated.chars().count(), SHOWN_CHARS + 1);

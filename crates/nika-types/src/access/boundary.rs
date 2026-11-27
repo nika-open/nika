@@ -70,6 +70,11 @@ pub struct HarnessBoundary {
     pub models_through_option: bool,
 }
 
+/// The release an adapter reported, when it reported one: an empty or blank text is none.
+fn reported_release(reported: Option<&str>) -> Option<&str> {
+    reported.filter(|release| !release.trim().is_empty())
+}
+
 /// A measured row as it holds for one session: the row found by the name the adapter
 /// reported on `initialize`, and whether it was measured on the release it reported
 /// ([`HarnessBoundary::for_release`]).
@@ -84,7 +89,10 @@ pub enum SessionBoundary {
     Carried {
         /// The row of the adapter's name.
         row: HarnessBoundary,
-        /// The release the adapter reported, verbatim (`None`: it reported none).
+        /// The release the adapter reported (`None`: it reported none, or an empty or blank
+        /// text), the adapter's own text, unfiltered: print it through
+        /// [`HarnessBoundary::carried_note`] or [`SessionBoundary::note`], which repeat it as
+        /// bounded printable ASCII.
         reported: Option<String>,
     },
 }
@@ -104,18 +112,25 @@ impl SessionBoundary {
         matches!(self, Self::Measured(_))
     }
 
+    /// The sentence a carried session adds to what it states ([`HarnessBoundary::carried_note`]):
+    /// the release measured and the one the adapter reports. `None` on a measured session.
+    #[must_use]
+    pub fn note(&self) -> Option<String> {
+        match self {
+            Self::Measured(_) => None,
+            Self::Carried { row, reported } => Some(row.carried_note(reported.as_deref())),
+        }
+    }
+
     /// What the harness still does without asking, as the run's witness states it: the
     /// row's text ([`HarnessBoundary::unasked`]), followed on a carried session by the
-    /// sentence that names both releases.
+    /// sentence that names both releases ([`Self::note`]).
     #[must_use]
     pub fn unasked(&self, writes_granted: bool) -> String {
-        match self {
-            Self::Measured(row) => row.unasked(writes_granted),
-            Self::Carried { row, reported } => format!(
-                "{} {}",
-                row.unasked(writes_granted),
-                row.carried_note(reported.as_deref())
-            ),
+        let text = self.row().unasked(writes_granted);
+        match self.note() {
+            Some(note) => format!("{text} {note}"),
+            None => text,
         }
     }
 }
@@ -243,6 +258,7 @@ impl HarnessBoundary {
     #[must_use]
     pub fn for_release(agent_name: &str, reported: Option<&str>) -> Option<SessionBoundary> {
         let row = Self::for_agent(agent_name)?;
+        let reported = reported_release(reported);
         Some(match reported {
             Some(release) if row.measures(release) => SessionBoundary::Measured(row),
             _ => SessionBoundary::Carried {
@@ -261,12 +277,13 @@ impl HarnessBoundary {
 
     /// The sentence a carried session adds to every text that states what the harness does
     /// without asking: the release the row was measured on, and the one the session's
-    /// adapter reported (`None`: it reported none).
+    /// adapter reported (`None`, or an empty or blank text: it reported none), repeated as
+    /// printable ASCII with no backtick.
     #[must_use]
     pub fn carried_note(&self, reported: Option<&str>) -> String {
-        let session = match reported {
+        let session = match reported_release(reported) {
             Some(release) => format!(
-                "this session runs release `{}` of that adapter, on which it was not measured",
+                "this session's adapter reports release `{}`, on which it was not measured",
                 shown(release)
             ),
             None => "this session's adapter reports no release, so it was not measured on \
@@ -643,9 +660,11 @@ mod tests {
         let carried = carried.expect("a row for the name");
         assert_eq!(carried.row(), row, "the rule is the row's");
         let note = "What the harness does without asking was measured on claude-agent-acp \
-                    0.81.1; this session runs release `0.112.0` of that adapter, on which it \
-                    was not measured.";
+                    0.81.1; this session's adapter reports release `0.112.0`, on which it was \
+                    not measured.";
         assert_eq!(row.carried_note(Some("0.112.0")), note);
+        assert_eq!(carried.note().as_deref(), Some(note));
+        assert_eq!(measured.note(), None);
         assert_eq!(
             carried.unasked(true),
             alloc::format!("{} {note}", row.unasked(true))
@@ -666,7 +685,35 @@ mod tests {
         assert_eq!(
             codex.carried_note(Some("2.0\u{1b}[2J")),
             "What the harness does without asking was measured on codex-acp 1.13.1; this \
-             session runs release `2.0?[2J` of that adapter, on which it was not measured."
+             session's adapter reports release `2.0?[2J`, on which it was not measured."
         );
+        // A backtick cannot close the code span the release is printed in.
+        assert_eq!(
+            codex.carried_note(Some("1.12.0` and more")),
+            "What the harness does without asking was measured on codex-acp 1.13.1; this \
+             session's adapter reports release `1.12.0? and more`, on which it was not \
+             measured."
+        );
+    }
+
+    /// An empty or blank release is no release: the session is carried with none, and the
+    /// sentence says the adapter reports none.
+    #[test]
+    fn an_empty_release_is_no_release() {
+        let codex = HarnessBoundary::CODEX_ACP;
+        let none = "What the harness does without asking was measured on codex-acp 1.13.1; this \
+                    session's adapter reports no release, so it was not measured on the one it \
+                    runs.";
+        for blank in ["", " ", "\t \n"] {
+            assert_eq!(codex.carried_note(Some(blank)), none, "{blank:?}");
+            assert_eq!(
+                HarnessBoundary::for_release(codex.agents[0], Some(blank)),
+                Some(SessionBoundary::Carried {
+                    row: codex,
+                    reported: None,
+                }),
+                "{blank:?}"
+            );
+        }
     }
 }

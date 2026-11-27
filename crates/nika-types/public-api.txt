@@ -451,6 +451,7 @@ pub nika_types::access::SessionBoundary::Carried::row: nika_types::access::Harne
 pub nika_types::access::SessionBoundary::Measured(nika_types::access::HarnessBoundary)
 impl nika_types::access::SessionBoundary
 pub const fn nika_types::access::SessionBoundary::is_measured(&self) -> bool
+pub fn nika_types::access::SessionBoundary::note(&self) -> core::option::Option<alloc::string::String>
 pub const fn nika_types::access::SessionBoundary::row(&self) -> nika_types::access::HarnessBoundary
 pub fn nika_types::access::SessionBoundary::unasked(&self, writes_granted: bool) -> alloc::string::String
 impl core::clone::Clone for nika_types::access::SessionBoundary

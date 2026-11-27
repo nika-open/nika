@@ -27,9 +27,10 @@ otherwise, in this order:
 6. **Order only when no data flows.** `after:` is pure sequencing; if
    data flows the `with:` binding already IS the edge. Never both.
 7. **Bound the spend where it is spent.** Every `infer:` carries
-   `max_tokens`; every `agent:` carries `max_turns` and
-   `max_tokens_total`. A ceiling the checker can compute beats a cap
-   someone has to remember to pass.
+   `max_tokens`; every `agent:` carries `max_tokens_total`, and
+   `max_turns` unless it runs on a seat other than `claude-code`, which
+   refuses it. A ceiling the checker can compute beats a cap someone has
+   to remember to pass.
 8. **Reconcile the boundary with the body and intended effects.**
    `nika check <file> --infer-permits` proposes grants; review them
    against the authorized scope before applying them. Expect a

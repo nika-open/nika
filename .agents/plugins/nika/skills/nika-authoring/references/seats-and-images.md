@@ -21,8 +21,8 @@ another route for the whole run (spec 01 §run):
   (spec 02 §Subscription harness access).
 - A seat is unpriced: its budget is the subscription's quota, never 0 USD.
   Check reports the task as unpriced; keep `max_tokens_total`.
-- A seat runs its own loop. `max_turns` reaches the `claude-code` seat as its
-  session's turn limit and is refused on every other seat; `temperature` is
+- A seat runs its own loop. `max_turns` is sent to the `claude-code` seat as
+  its session's turn limit and is refused on every other seat; `temperature` is
   refused on every seat. Check names such a task as a blocker and the run
   refuses it before anything is sent (`NIKA-465`): drop the field there.
 - A seat widens effects. On a seat the application runs its own tools, and

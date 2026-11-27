@@ -217,6 +217,26 @@ or `current_mode_update` away from the held mode ends the session. The table is
 | gemini-cli (0.62.0) | `default`, or `--approval-mode` / settings | `default` (legacy `session/set_mode`: its success is the only acknowledgement; gemini-cli announces a later mode change only as message text, which Nika does not read) | reads files in the workspace (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches |
 | qwen-code · kimi-code · opencode · copilot · grok-build | — | none measured: nothing is selected; a current mode that visibly approves on its own (`auto`, `accept`, `full`, `yolo`, `bypass` …) refuses the session | everything it does without asking |
 
+A row is found by the adapter's `agentInfo.name` and holds the releases it was measured on as
+data (`HarnessBoundary::releases`); `HarnessBoundary::for_release` answers measured, carried or
+none from the reported name and `agentInfo.version`. A release that does not parse as
+`MAJOR.MINOR.PATCH` is carried, never measured. A carried session (a release inside the
+registry pin that the row was not measured on) gets the same rule: the same mode selected and
+read back or a refusal before the prompt, the same `asked_command_leaves_sandbox`, the same
+session options. Its `SessionConfined.unasked` (the `permit_checked` `why`) is the row's text
+followed by `HarnessBoundary::carried_note`, one sentence naming the release measured and the
+one the session runs. A release outside the pin is refused at the handshake with the range and,
+on a measured seat, the release the row was measured on. The pins are unchanged
+(claude-agent-acp 0.23 through 0.x, codex-acp 0.16 through 1.x). `initialize` carries
+`clientInfo` (`name` `nika`, `version` the engine's release) on every path: the session, the
+conversation and the standalone probe.
+
+On a row with `models_through_option` (codex and claude-code), a model the task names is
+selected only through the session's model option and read back: the client never falls back
+to the legacy `session/set_model` (claude-agent-acp has no handler for it, codex-acp's wants
+another value shape), so a model the option does not list refuses before the prompt, and an
+offer reports it `not_offered`. Every other row keeps the fallback.
+
 **1bis · A Claude Code agent session loads only what Nika hands it**
 (`nika_harness::authoring::acp::agent_meta`). `session/new` carries, in
 `_meta.claudeCode.options`, the surface the one-shot and conversation profiles already send,

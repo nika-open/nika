@@ -97,6 +97,28 @@ Nika, so `permits:` does not bound it:
 | `gemini-cli` (0.62.0) | `default`, or your `--approval-mode` / settings | `default` | reads files in the project (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches. |
 | `qwen-code`, `kimi-code`, `opencode`, `copilot`, `grok-build` | — | none: no mode is measured, so none is selected; a current mode that visibly approves on its own refuses the run | everything it does without asking. Nika judges only what it asks. |
 
+Each row holds for the adapter release it names, the one the adapter reports
+when the session starts. On another release that the seat still accepts (the
+`codex` seat takes codex-acp 0.16 through every 1.x release, the
+`claude-code` seat claude-agent-acp 0.23 through every 0.x release), Nika
+applies the same row: it selects and reads back the same mode, refuses to
+start when the adapter does not offer or keep it, and still reads a Codex
+command ask as one that leaves its sandbox. What it says changes: the
+`permit_checked` record, after the row's text, says that the row was
+measured on the release the table names and that this session runs another
+one, on which it was not measured. What the harness does without asking may
+differ there. A release outside the accepted range is refused before the
+session starts, with the range Nika accepts and the release to install, the
+one the row was measured on. `nika check` does not read the installed
+release, so its `[harness]` hint states the row's text without that
+sentence.
+
+On the `codex` and `claude-code` seats, a model the task names is selected
+only through the session's model option and read back. A session that does
+not list the model there refuses before the prompt, even when its older
+model list names it: claude-agent-acp has no request to select from that
+list, and codex-acp's names each model with an effort.
+
 On every seat:
 
 - An action Nika allows runs under the harness's own sandbox, not Nika's exec
@@ -449,7 +471,9 @@ answer is a `nika/access-offer@1` document:
   models it does list in `offered`. Its efforts and tiers are then
   `unobserved`: they are never read from another model's configuration. The
   same holds for `legacy_list` (the session names the model only in its
-  legacy model list) and `not_confirmed` (it answered another model).
+  legacy model list) and `not_confirmed` (it answered another model). On
+  the codex and claude-code seats a legacy list is never read: a model only
+  it names is `not_offered`, as a run refuses it.
 - The tiers are `unobserved`, with the reason, on an adapter or a release
   whose speed control is not measured (anything but codex-acp 1.13.1 today).
 - A session that gives no offer is a row with `"status": "unavailable"`, the
@@ -472,7 +496,9 @@ Each harness `agent:` task journals, in order:
 - one `permit_checked` with plane `agent`, gate `session mode · <mode>` and
   decision `confine` (the measured mode was selected) or `unmeasured` (the
   harness's own mode was only observed),
-  whose `why` states what the harness still does without asking;
+  whose `why` states what the harness still does without asking (on a
+  release its row was not measured on, followed by the sentence naming both
+  releases);
 - one `permit_checked` per ask, with decision `allow`, `deny` (your answer) or
   `escalate` (paused for you). Its gate names what was judged: `mcp · <server
   or tool call>` for an MCP tool approval, `network · <target>` for a network

@@ -167,6 +167,12 @@ fn leak_fix(l: &SecretLeak) -> String {
             "fix: a working directory is a path, not a secret, and no `egress:` rule clears `secrets.{}` in `cwd:` — name the directory there, or read it from `inputs:` or `const:` (`cwd: \"${{{{ inputs.dir }}}}\"`)",
             l.secret
         ),
+        R::ToolPath => format!(
+            "fix: a path is a route, not a secret, and no `egress:` rule clears `secrets.{}` in `{}:` — name the path there, or read it from `inputs:` or `const:`",
+            l.secret,
+            // The field is the sink without its verb: `args.path`.
+            l.sink.split_once('.').map_or(l.sink, |(_, field)| field)
+        ),
         R::ImageSavePath => format!(
             "fix: an image's path is a path, not a secret, and no `egress:` rule clears `secrets.{}` in `images.save:` — name the path there, or read it from `inputs:` or `const:` (`save: \"./out/${{{{ inputs.name }}}}.png\"`)",
             l.secret

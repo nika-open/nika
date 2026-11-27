@@ -544,6 +544,38 @@ pub fn write_slot_paths(tool: &str, args: Option<&serde_json::Value>) -> Vec<Slo
     out
 }
 
+/// Every argument of one call of `tool` with `args` that names a file or a directory, as
+/// `(slot name, value as written)`: each present filesystem slot [`unbound_fs_args`] binds
+/// (`read`/`grep`/`write`/`edit`/`remove_file` `path`, `glob` `pattern`, a string `decide`
+/// `bundle`, `image_fx` `input`, each `image_compose` `inputs[k]`, `chart` `data.path`,
+/// `chart`/`image_fx`/`image_compose` `out`, `image_generate`/`tts_generate` `output_dir`,
+/// `image_generate` `image`, `images[k]` and `mask`, each `fetch` `multipart[k].path`), and the
+/// `filename_prefix` a media generator starts each file name with. A container of the wrong
+/// shape is not listed: it is no path, and what it holds stays an argument like any other.
+///
+/// A path is never a secret: the run judges it against the boundary, writes it into the trace
+/// and the output, and a media generator folds it into the name of the file it saves. The
+/// secret flow reads this list (`nika-check`'s path routes), so check and run name one set.
+#[must_use]
+pub fn path_arguments<'a>(
+    tool: &str,
+    args: Option<&'a serde_json::Value>,
+) -> Vec<(String, &'a serde_json::Value)> {
+    let mut out: Vec<(String, &'a serde_json::Value)> = fs_slots(tool, args)
+        .into_iter()
+        .filter_map(|slot| match slot {
+            FsSlot::Arg { name, value, .. } => Some((name, value)),
+            FsSlot::Malformed { .. } => None,
+        })
+        .collect();
+    if matches!(tool, "nika:image_generate" | "nika:tts_generate")
+        && let Some(prefix) = args.and_then(|a| a.get("filename_prefix"))
+    {
+        out.push(("filename_prefix".to_owned(), prefix));
+    }
+    out
+}
+
 /// One slot's value as a [`SlotPath`]: the same literal test [`slot_refusal`] applies.
 fn slot_path(value: &serde_json::Value, descends: bool, pattern: bool) -> SlotPath {
     match value
@@ -1487,5 +1519,67 @@ mod tests {
         for (tool, args, want) in cases {
             assert_eq!(write_slot_paths(tool, Some(&args)), want, "{tool} {args}");
         }
+    }
+
+    /// Every argument that names a file or a directory, as written, in the owner's order, plus a
+    /// media generator's `filename_prefix`; content, a model and a malformed container are none.
+    #[test]
+    fn path_arguments_name_every_path_slot_and_the_media_prefix() {
+        let listed = |tool: &str, args: serde_json::Value| -> Vec<(String, serde_json::Value)> {
+            path_arguments(tool, Some(&args))
+                .into_iter()
+                .map(|(name, value)| (name, value.clone()))
+                .collect()
+        };
+        let want = |pairs: &[(&str, serde_json::Value)]| -> Vec<(String, serde_json::Value)> {
+            pairs
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                .collect()
+        };
+        assert_eq!(
+            listed(
+                "nika:tts_generate",
+                json!({"text": "hi", "model": "m", "output_dir": "./o", "filename_prefix": "p"})
+            ),
+            want(&[
+                ("output_dir", json!("./o")),
+                ("filename_prefix", json!("p"))
+            ])
+        );
+        assert_eq!(
+            listed(
+                "nika:write",
+                json!({"path": "${{ with.p }}", "content": "${{ with.c }}"})
+            ),
+            want(&[("path", json!("${{ with.p }}"))])
+        );
+        assert_eq!(
+            listed(
+                "nika:image_compose",
+                json!({"inputs": ["./a.png", "./b.png"], "out": "./s.png"})
+            ),
+            want(&[
+                ("out", json!("./s.png")),
+                ("inputs[0]", json!("./a.png")),
+                ("inputs[1]", json!("./b.png")),
+            ])
+        );
+        assert_eq!(
+            listed(
+                "nika:fetch",
+                json!({"url": "https://x.test", "multipart": [{"path": "./f"}, "${{ with.p }}"]})
+            ),
+            want(&[("multipart[0].path", json!("./f"))])
+        );
+        // A templated list is no path: what it holds stays an argument like any other.
+        assert_eq!(
+            listed("nika:image_compose", json!({"inputs": "${{ with.l }}"})),
+            Vec::new()
+        );
+        assert_eq!(
+            listed("nika:log", json!({"message": "./a.txt"})),
+            Vec::new()
+        );
     }
 }

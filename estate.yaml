@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8277
+  classified_files: 8279
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 5018
+    authored: 5020
     authored-pin: 2
     generated: 284
     pinned-copy: 266
@@ -140,7 +140,7 @@ patterns:
 - glob: "crates/*/public-api.txt"
   class: generated
   match_count: 90
-  aggregate_sha256: 5312f0031bc88ef3c872f638cc4a5ebf88ec528ac574d958845aabbb51f88d0d
+  aggregate_sha256: aee46803f0731d002b35ad65d827021235b73639e8309e98749c7c27614d4002
   evidence: ".github/workflows/public-api.yml 'diff each covered lib crate' byte-compares each snapshot against cargo public-api output; macOS renders differently, so snapshots regenerate FROM THE UBUNTU ARTIFACT (workflow comment)"
   derivation:
     tool: "cargo public-api -p <crate> --omit auto-trait-impls > crates/<crate>/public-api.txt (DEFAULT features · the CI job shape — all-features drags platform deps into the render · cargo-public-api 0.51.0 pinned · the public-api-actual CI artifact stays the judge)"
@@ -152,12 +152,12 @@ patterns:
 - glob: "crates/**/src/**"
   class: authored
   match_count: 2470
-  aggregate_sha256: 741343eb63e82e7106f5072104c4a13267cf69472a07254bed405a6d5634602b
+  aggregate_sha256: 492cbaea073cdba2a75d5296b2f672926d84bea401aa084ee5249f5b0b0beb7b
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
-  match_count: 885
-  aggregate_sha256: 5c375f8e3773db3a984acbad3949f5d432a2628908704cf4069cfb91e6b520d5
+  match_count: 886
+  aggregate_sha256: f2bd250ff7860215b5802071e868f643ce4d4cd38f66d3113d3e5338222bc61e
   evidence: "crate-owned tests + fixtures under tests/ — written with the crate per gate discipline, no generation markers"
 - glob: "crates/**"
   class: authored
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 14
-  aggregate_sha256: 33c576ac0e4027ffa1d80f425c8d2acdbef0a2084acfab2101953cb9033bb88d
+  match_count: 15
+  aggregate_sha256: 0e05104f77496f9f90294f5193926d24b0116bf8f692d57be58aaa2697a89c7d
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

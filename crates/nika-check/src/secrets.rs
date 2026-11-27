@@ -159,9 +159,11 @@ fn route_leaks<'f>(
 }
 
 /// The leaks of the fields the run never renders a secret into, a task's
-/// `model:`, an `exec:`'s `cwd:` and an `agent:`'s `images.save:`
+/// `model:`, an `exec:`'s `cwd:`, an `agent:`'s `images.save:`, a media
+/// builtin's `args.model` and a builtin's path arguments
 /// ([`LeakReason::ModelRoute`] · [`LeakReason::WorkingDirectory`] ·
-/// [`LeakReason::ImageSavePath`]), as [`crate::check`] reports them: the
+/// [`LeakReason::ImageSavePath`] · [`LeakReason::ToolPath`]), as
+/// [`crate::check`] reports them: the
 /// same secret flow, every way a secret travels (a direct reference, a `with:`
 /// alias, a task output or `group.*` fold, a `for_each` item, an
 /// `on_error.recover` value, inside any template). The run reads them before it
@@ -175,6 +177,7 @@ fn route_leaks<'f>(
 /// [`LeakReason::ModelRoute`]: crate::LeakReason::ModelRoute
 /// [`LeakReason::WorkingDirectory`]: crate::LeakReason::WorkingDirectory
 /// [`LeakReason::ImageSavePath`]: crate::LeakReason::ImageSavePath
+/// [`LeakReason::ToolPath`]: crate::LeakReason::ToolPath
 #[must_use]
 pub fn secret_route_leaks(wf: &RawWorkflow) -> Vec<SecretLeak> {
     // The check's own wave order: the sweeps find the same leaks in any order,

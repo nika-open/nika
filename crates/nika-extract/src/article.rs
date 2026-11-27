@@ -409,6 +409,42 @@ mod tests {
         );
     }
 
+    /// `dom_smoothie` 0.18.2 — `loading="lazy"` is a rendering hint, not a
+    /// placeholder: an image that carries it AND a working `src` keeps that
+    /// `src` through readability. Up to 0.18.1 readability copied any other
+    /// attribute that looked like an image address (`data-src` here) over
+    /// it, so a page that reached this stage could name another URL than the
+    /// rule stage does for the same markup
+    /// (`html::tests::lazy_img_real_src_wins_over_data_src`). The lockfile
+    /// holds the release; this pins the behaviour it brings.
+    #[test]
+    fn stage2_lazy_loading_image_keeps_its_working_src() {
+        let sentence = "words that carry a comma, a second comma, and enough running text \
+                        to clear every threshold readability applies before it scores";
+        let body = format!(
+            "<html><head><title>t</title></head><body><div><h2>One</h2><div>\
+             <p>{sentence} {sentence}.</p>\
+             <p><img loading=\"lazy\" src=\"https://example.com/shown.jpg\" \
+             data-src=\"https://example.com/other.jpg\" alt=\"figure\"></p>\
+             <p>{sentence} {sentence}.</p></div></div></body></html>"
+        );
+        let out = readability(
+            &body,
+            Some("https://example.com/"),
+            crate::page_type::PageType::Generic,
+        )
+        .expect("readability extracts");
+        let md = out.as_str().expect("readability returns a Markdown string");
+        assert!(
+            md.contains("![figure](https://example.com/shown.jpg)"),
+            "the image keeps the address it already shows: {md}"
+        );
+        assert!(
+            !md.contains("other.jpg"),
+            "no other attribute replaces a working src: {md}"
+        );
+    }
+
     /// Stage 1 — a real `<article>` body returns the rule-cascade markdown
     /// without ever consulting readability/boilerpipe. Anchors the happy
     /// path: the prose survives end-to-end as a Markdown string.

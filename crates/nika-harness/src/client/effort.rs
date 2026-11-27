@@ -168,7 +168,9 @@ where
 
     /// Read back the complete configuration an answer carried: the effort
     /// that was sent, the model that was selected and the service tier that
-    /// was sent must all still hold.
+    /// was sent must all still hold. A model the client only held must hold
+    /// until the prompt too: nothing has run yet, and the record must name
+    /// the model the turn starts on.
     pub(super) fn confirm_holds(&mut self, config: Option<&Value>) -> Result<(), HarnessError> {
         if let Some(wanted) = self.selection.transmitted_effort.clone() {
             let read = current(thought_option(config).map_err(refusal)?);
@@ -188,8 +190,8 @@ where
             let read = seats::current_model(seats::model_option(config), None);
             if read.as_deref() != Some(model.as_str()) {
                 return Err(refusal(format!(
-                    "the harness moved the model from `{model}` to {} while its effort was set; \
-                     no prompt was sent",
+                    "the harness moved the model from `{model}` to {} while the session was \
+                     being set up; no prompt was sent",
                     read.map_or_else(|| "none".to_owned(), |v| format!("`{v}`"))
                 )));
             }

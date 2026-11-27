@@ -821,3 +821,81 @@ async fn a_codex_command_ask_in_read_only_asks_to_leave_the_sandbox() {
     assert_eq!(seen, [("curl -sS https://example.com".to_owned(), None)]);
     assert_eq!(heard, [Some("selected".to_owned())]);
 }
+
+/// claude-agent-acp's mode and model options together, as an agent task's session reports them.
+fn claude_mode_and_model(mode: &str, model: &str) -> Value {
+    let mut options = claude_mode_option(mode);
+    if let Some(list) = options.as_array_mut() {
+        list.push(
+            json!({"id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": model,
+            "options": [{"value": "haiku", "name": "Haiku"}, {"value": "opus", "name": "Opus"}]}),
+        );
+    }
+    json!({"configOptions": options})
+}
+
+/// A task that names no model, under an agent's confinement, on the adapter that reports its
+/// model apart from its program: the reported model is held first, then the mode is selected,
+/// then the prompt is sent. The mode's answer is the complete state, so a session that reports
+/// another model there is refused before any prompt: nothing ran, and the record would name a
+/// model the turn does not start on.
+#[tokio::test]
+async fn a_held_model_is_selected_before_the_mode_and_must_hold_until_the_prompt() {
+    for after_mode in ["haiku", "opus"] {
+        let (events, error) = drain(
+            request(HarnessConfinement::WorkspaceWrite),
+            move |mut r, mut w| {
+                tokio::spawn(async move {
+                    handshake(
+                        &mut r,
+                        &mut w,
+                        "@agentclientprotocol/claude-agent-acp",
+                        claude_mode_and_model("auto", "haiku"),
+                    )
+                    .await;
+                    let hold = read(&mut r).await;
+                    assert_eq!(hold["method"], "session/set_config_option");
+                    assert_eq!(hold["params"]["configId"], "model");
+                    assert_eq!(hold["params"]["value"], "haiku");
+                    write(
+                        &mut w,
+                        &json!({"jsonrpc": "2.0", "id": hold["id"],
+                            "result": claude_mode_and_model("auto", "haiku")}),
+                    )
+                    .await;
+                    let mode = read(&mut r).await;
+                    assert_eq!(mode["method"], "session/set_config_option");
+                    assert_eq!(mode["params"]["configId"], "mode");
+                    assert_eq!(mode["params"]["value"], "default");
+                    write(
+                        &mut w,
+                        &json!({"jsonrpc": "2.0", "id": mode["id"],
+                            "result": claude_mode_and_model("default", after_mode)}),
+                    )
+                    .await;
+                    if after_mode == "haiku" {
+                        let prompt = read(&mut r).await;
+                        assert_eq!(prompt["method"], "session/prompt");
+                        end_turn(&mut w, &prompt).await;
+                    }
+                    // Otherwise nothing else: the client must not prompt.
+                })
+            },
+        )
+        .await;
+        if after_mode == "haiku" {
+            assert!(error.is_none(), "{error:?}");
+            assert_eq!(confined(&events)[0].0.as_deref(), Some("default"));
+            continue;
+        }
+        let Some(HarnessError::Selection { reason }) = error else {
+            panic!("a held model that moved before the prompt refuses, got {error:?}");
+        };
+        assert!(
+            reason.contains("from `haiku` to `opus`") && reason.contains("no prompt was sent"),
+            "{reason}"
+        );
+        assert!(confined(&events).is_empty(), "no confinement is claimed");
+    }
+}

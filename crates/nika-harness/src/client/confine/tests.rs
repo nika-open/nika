@@ -982,9 +982,9 @@ async fn confined_at(
 }
 
 /// On its measured release a session publishes its row's text byte for byte. On another
-/// release of the same adapter (a later one, an earlier one, one that does not parse) the same
-/// mode is still selected and read back, and the published text is the row's followed by one
-/// sentence naming the release measured and the one the session runs.
+/// release of the same adapter (a later one, an earlier one, one that does not parse, none)
+/// the same mode is still selected and read back, and the published text is the row's
+/// followed by one sentence naming the release measured and the one the adapter reports.
 #[tokio::test]
 async fn a_carried_release_keeps_the_rule_and_names_both_releases() {
     let claude = "@agentclientprotocol/claude-agent-acp";

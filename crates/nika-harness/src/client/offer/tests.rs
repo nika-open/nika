@@ -329,7 +329,7 @@ async fn a_model_only_the_legacy_list_names_is_reported_without_a_selection() {
             {"modelId":"gpt-6-astra[high]","name":"gpt-6-astra[high]"}]}
     });
     let other = json!({"name":"OpenCode","version":"1.18.15"});
-    let carried = json!({"name":CODEX_ACP,"version":"2.12.0"});
+    let carried = json!({"name":CODEX_ACP,"version":"1.12.0"});
     let cases = [
         (
             Some(other),

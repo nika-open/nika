@@ -126,6 +126,10 @@ fn initialized(http: bool, version: &str) -> Value {
 /// `initialize` and `session/new`, answered; the client's `session/new` params.
 async fn handshake(agent: &mut Agent, init: Value) -> Value {
     let hello = agent.expect("initialize").await;
+    assert_eq!(
+        hello["params"]["clientInfo"],
+        json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")})
+    );
     agent.reply(&hello["id"], init).await;
     let new = agent.expect("session/new").await;
     agent.reply(&new["id"], json!({"sessionId": "s-1"})).await;
@@ -783,4 +787,65 @@ async fn codex_acp_asks_by_call_id_and_nikas_own_tool_is_allowed_once() {
     );
     drop(conversation);
     script.await.expect("the script ends");
+}
+
+/// A conversation is admitted only under an audited profile, and both profiles' adapters
+/// select a named model through their model option alone: a model only the session's legacy
+/// list names refuses before any request follows `session/new` (no `session/set_model`, no
+/// mode, no prompt).
+#[tokio::test]
+async fn a_conversation_never_selects_a_model_through_the_legacy_list() {
+    let legacy = |current: &str, other: &str| {
+        json!({"currentModelId": current, "availableModels": [
+            {"modelId": current, "name": current}, {"modelId": other, "name": other}]})
+    };
+    let codex_info = json!({"name": "@agentclientprotocol/codex-acp", "title": "Codex",
+        "version": "1.13.1"});
+    let claude = (
+        (Profile::ClaudeCode, offer()),
+        initialized(true, "0.81.1"),
+        json!({"sessionId": "s-1", "models": legacy("haiku", "opus")}),
+        ("anthropic/opus", "opus"),
+    );
+    let codex = (
+        (Profile::Codex, codex_offer()),
+        json!({"protocolVersion": 1, "agentInfo": codex_info,
+            "agentCapabilities": {"loadSession": true}}),
+        json!({"sessionId": "s-1", "configOptions": codex_modes("agent"),
+            "models": legacy("gpt-5.4", "gpt-6-astra[high]")}),
+        ("openai/gpt-6-astra[high]", "gpt-6-astra[high]"),
+    );
+    for ((profile, tools), init, answer, (model, wanted)) in [claude, codex] {
+        let (mut agent, read, write) = pipe();
+        let script = tokio::spawn(async move {
+            let hello = agent.expect("initialize").await;
+            agent.reply(&hello["id"], init).await;
+            let new = agent.expect("session/new").await;
+            agent.reply(&new["id"], answer).await;
+            agent.read().await
+        });
+        let opening = Opening {
+            setup: ConversationSetup::new().with_requested_model(model),
+            offer: tools,
+            profile,
+            cwd: PathBuf::from("/scratch/conversation"),
+        };
+        let opened = open(read, write, opening, ()).await;
+        assert_eq!(
+            script.await.expect("the script ends"),
+            None,
+            "nothing follows session/new on {profile:?}"
+        );
+        let Err(HarnessError::Selection { reason }) = opened else {
+            panic!("a selection refusal on {profile:?}: {opened:?}");
+        };
+        assert!(
+            reason.contains(&format!("offers no model `{wanted}`")),
+            "{reason}"
+        );
+        assert!(
+            reason.ends_with("so its legacy model list is not used"),
+            "{reason}"
+        );
+    }
 }

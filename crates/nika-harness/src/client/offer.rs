@@ -12,7 +12,9 @@
 //! about another one. A model that is absent, that only the legacy list
 //! names or that the session does not confirm is the answer, never an
 //! error, and what depends on it is left unobserved rather than read from
-//! another model's configuration.
+//! another model's configuration. On an adapter whose measured row selects
+//! models through the option only, the legacy list is not an offer: a run
+//! never selects through it there.
 //!
 //! This path sends `initialize`, `session/new` and at most one
 //! `session/set_config_option` (the model). It holds no setter for the
@@ -121,7 +123,8 @@ where
     async fn offer(&mut self, request: &HarnessRequest) -> Result<SessionOffer, HarnessError> {
         let session = self.open_session(request).await?;
         let model_option = seats::model_option(session.config_options.as_ref());
-        let listed = seats::offered_values(model_option, session.models.as_ref());
+        let legacy = seats::legacy_list(self.option_only_models(), session.models.as_ref());
+        let listed = seats::offered_values(model_option, legacy);
         let (model, config) = self.offered_model(&session, request).await?;
         let (effort, service_tier) = match &model {
             ModelOffer::SessionDefault { .. } | ModelOffer::Confirmed { .. } => (
@@ -162,9 +165,10 @@ where
         };
         let option = |name: &str| seats::offered_option(model_option, name);
         let Some((config_id, value)) = seats::exact_first(requested, &wanted, option) else {
-            let legacy = seats::exact_first(requested, &wanted, |name| {
-                seats::offered_model(session.models.as_ref(), name)
-            });
+            // A run never selects through the legacy list of an option-only adapter.
+            let list = seats::legacy_list(self.option_only_models(), session.models.as_ref());
+            let legacy =
+                seats::exact_first(requested, &wanted, |name| seats::offered_model(list, name));
             let answer = legacy.map_or(ModelOffer::NotOffered, |native| ModelOffer::LegacyList {
                 native,
             });
@@ -211,7 +215,10 @@ where
                     "the speed control of `{agent}` is measured on {} and this session answers \
                      as {}",
                     binding.measured_on,
-                    release.map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
+                    // Repeated as the carried note repeats it: bounded, no backtick, blank as
+                    // none.
+                    nika_types::access::shown_release(release)
+                        .map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
                 ),
             };
         }

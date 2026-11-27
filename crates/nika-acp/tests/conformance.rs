@@ -51,6 +51,19 @@ fn spawn_sdk_agent(
                     // JUDGMENT 1: the engine's `initialize` frame parsed
                     // into the official InitializeRequest — camelCase
                     // keys and the integer protocol version included.
+                    // Its `clientInfo` is the official `Implementation`:
+                    // the type reads a malformed one as absent, so the
+                    // name and the engine's release must be read back.
+                    // This crate is its own workspace with its own
+                    // version, which the release sweep
+                    // (`scripts/release/wave-sweep.sh`) sets to the
+                    // engine's: a mismatch here is a missed sweep.
+                    let client = initialize.client_info.as_ref();
+                    assert_eq!(
+                        client.map(|c| (c.name.as_str(), c.version.as_str())),
+                        Some(("nika", env!("CARGO_PKG_VERSION"))),
+                        "the engine names itself and its release in clientInfo"
+                    );
                     seen_init.fetch_add(1, Ordering::SeqCst);
                     responder.respond(
                         InitializeResponse::new(initialize.protocol_version)

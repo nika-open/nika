@@ -64,33 +64,33 @@ capabilities:
     proven_by: access-harness
   - id: access.seat.gemini-cli
     kind: access-seat
-    declared_at: crates/nika-harness/src/registry.rs:130
+    declared_at: crates/nika-harness/src/registry.rs:138
     shipped_when: "--features access-harness"
     reachable_by: "nika run F --access gemini-cli"
     proven_by: acp-quarantine
   - id: access.seat.qwen-code
     kind: access-seat
-    declared_at: crates/nika-harness/src/registry.rs:139
+    declared_at: crates/nika-harness/src/registry.rs:149
     shipped_when: "--features access-harness"
     reachable_by: "nika run F --access qwen-code"
     proven_by: acp-quarantine
   - id: access.seat.kimi-code
     kind: access-seat
-    declared_at: crates/nika-harness/src/registry.rs:156
+    declared_at: crates/nika-harness/src/registry.rs:164
     shipped_when: "--features access-harness"
     reachable_by: "nika run F --access kimi-code"
     proven_by: acp-quarantine
   - id: access.seat.codex
     kind: access-seat
-    declared_at: crates/nika-harness/src/registry.rs:178
+    declared_at: crates/nika-harness/src/registry.rs:267
     shipped_when: "--features access-harness"
-    reachable_by: "nika run F --access codex-acp"
+    reachable_by: "nika run F --access codex"
     proven_by: acp-quarantine
   - id: access.seat.claude-code
     kind: access-seat
-    declared_at: crates/nika-harness/src/registry.rs:200
+    declared_at: crates/nika-harness/src/registry.rs:240
     shipped_when: "--features access-harness"
-    reachable_by: "nika run F --access claude-agent-acp"
+    reachable_by: "nika run F --access claude-code"
     proven_by: acp-quarantine
   # ── The 38 cataloged providers (#1184) ────────────────────────────────
   # The catalog is DATA and the wire is CODE, and they are deliberately

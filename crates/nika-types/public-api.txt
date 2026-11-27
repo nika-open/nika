@@ -444,6 +444,48 @@ pub unsafe fn nika_types::access::ServiceTier::clone_to_uninit(&self, dest: *mut
 impl<T> core::convert::From<T> for nika_types::access::ServiceTier
 pub fn nika_types::access::ServiceTier::from(t: T) -> T
 impl<T> serde_core::de::DeserializeOwned for nika_types::access::ServiceTier where T: for<'de> serde_core::de::Deserialize<'de>
+#[non_exhaustive] pub enum nika_types::access::SessionBoundary
+pub nika_types::access::SessionBoundary::Carried
+pub nika_types::access::SessionBoundary::Carried::reported: core::option::Option<alloc::string::String>
+pub nika_types::access::SessionBoundary::Carried::row: nika_types::access::HarnessBoundary
+pub nika_types::access::SessionBoundary::Measured(nika_types::access::HarnessBoundary)
+impl nika_types::access::SessionBoundary
+pub const fn nika_types::access::SessionBoundary::is_measured(&self) -> bool
+pub fn nika_types::access::SessionBoundary::note(&self) -> core::option::Option<alloc::string::String>
+pub const fn nika_types::access::SessionBoundary::row(&self) -> nika_types::access::HarnessBoundary
+pub fn nika_types::access::SessionBoundary::unasked(&self, writes_granted: bool) -> alloc::string::String
+impl core::clone::Clone for nika_types::access::SessionBoundary
+pub fn nika_types::access::SessionBoundary::clone(&self) -> nika_types::access::SessionBoundary
+impl core::cmp::Eq for nika_types::access::SessionBoundary
+impl core::cmp::PartialEq for nika_types::access::SessionBoundary
+pub fn nika_types::access::SessionBoundary::eq(&self, other: &nika_types::access::SessionBoundary) -> bool
+impl core::fmt::Debug for nika_types::access::SessionBoundary
+pub fn nika_types::access::SessionBoundary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for nika_types::access::SessionBoundary
+pub fn nika_types::access::SessionBoundary::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::StructuralPartialEq for nika_types::access::SessionBoundary
+impl<T, U> core::convert::Into<U> for nika_types::access::SessionBoundary where U: core::convert::From<T>
+pub fn nika_types::access::SessionBoundary::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_types::access::SessionBoundary where U: core::convert::Into<T>
+pub type nika_types::access::SessionBoundary::Error = core::convert::Infallible
+pub fn nika_types::access::SessionBoundary::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_types::access::SessionBoundary where U: core::convert::TryFrom<T>
+pub type nika_types::access::SessionBoundary::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_types::access::SessionBoundary::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_types::access::SessionBoundary where T: core::clone::Clone
+pub type nika_types::access::SessionBoundary::Owned = T
+pub fn nika_types::access::SessionBoundary::clone_into(&self, target: &mut T)
+pub fn nika_types::access::SessionBoundary::to_owned(&self) -> T
+impl<T> core::any::Any for nika_types::access::SessionBoundary where T: 'static + ?core::marker::Sized
+pub fn nika_types::access::SessionBoundary::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_types::access::SessionBoundary where T: ?core::marker::Sized
+pub fn nika_types::access::SessionBoundary::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_types::access::SessionBoundary where T: ?core::marker::Sized
+pub fn nika_types::access::SessionBoundary::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_types::access::SessionBoundary where T: core::clone::Clone
+pub unsafe fn nika_types::access::SessionBoundary::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_types::access::SessionBoundary
+pub fn nika_types::access::SessionBoundary::from(t: T) -> T
 #[non_exhaustive] pub enum nika_types::access::Trust
 pub nika_types::access::Trust::Declared
 pub nika_types::access::Trust::Discovered
@@ -688,6 +730,55 @@ pub unsafe fn nika_types::access::AccessRequirement::clone_to_uninit(&self, dest
 impl<T> core::convert::From<T> for nika_types::access::AccessRequirement
 pub fn nika_types::access::AccessRequirement::from(t: T) -> T
 impl<T> serde_core::de::DeserializeOwned for nika_types::access::AccessRequirement where T: for<'de> serde_core::de::Deserialize<'de>
+#[non_exhaustive] pub struct nika_types::access::AdapterRelease
+pub nika_types::access::AdapterRelease::major: u32
+pub nika_types::access::AdapterRelease::minor: u32
+pub nika_types::access::AdapterRelease::patch: u32
+impl nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::measured_among(reported: &str, measured: &[Self]) -> bool
+pub const fn nika_types::access::AdapterRelease::new(major: u32, minor: u32, patch: u32) -> Self
+pub fn nika_types::access::AdapterRelease::parse(reported: &str) -> core::option::Option<Self>
+impl core::clone::Clone for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::clone(&self) -> nika_types::access::AdapterRelease
+impl core::cmp::Eq for nika_types::access::AdapterRelease
+impl core::cmp::Ord for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::cmp(&self, other: &nika_types::access::AdapterRelease) -> core::cmp::Ordering
+impl core::cmp::PartialEq for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::eq(&self, other: &nika_types::access::AdapterRelease) -> bool
+impl core::cmp::PartialOrd for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::partial_cmp(&self, other: &nika_types::access::AdapterRelease) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for nika_types::access::AdapterRelease
+impl core::marker::StructuralPartialEq for nika_types::access::AdapterRelease
+impl<T, U> core::convert::Into<U> for nika_types::access::AdapterRelease where U: core::convert::From<T>
+pub fn nika_types::access::AdapterRelease::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_types::access::AdapterRelease where U: core::convert::Into<T>
+pub type nika_types::access::AdapterRelease::Error = core::convert::Infallible
+pub fn nika_types::access::AdapterRelease::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_types::access::AdapterRelease where U: core::convert::TryFrom<T>
+pub type nika_types::access::AdapterRelease::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_types::access::AdapterRelease::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_types::access::AdapterRelease where T: core::clone::Clone
+pub type nika_types::access::AdapterRelease::Owned = T
+pub fn nika_types::access::AdapterRelease::clone_into(&self, target: &mut T)
+pub fn nika_types::access::AdapterRelease::to_owned(&self) -> T
+impl<T> alloc::string::ToString for nika_types::access::AdapterRelease where T: core::fmt::Display + ?core::marker::Sized
+pub fn nika_types::access::AdapterRelease::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for nika_types::access::AdapterRelease where T: 'static + ?core::marker::Sized
+pub fn nika_types::access::AdapterRelease::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_types::access::AdapterRelease where T: ?core::marker::Sized
+pub fn nika_types::access::AdapterRelease::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_types::access::AdapterRelease where T: ?core::marker::Sized
+pub fn nika_types::access::AdapterRelease::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_types::access::AdapterRelease where T: core::clone::Clone
+pub unsafe fn nika_types::access::AdapterRelease::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_types::access::AdapterRelease
+pub fn nika_types::access::AdapterRelease::from(t: T) -> T
 #[non_exhaustive] pub struct nika_types::access::HarnessBoundary
 pub nika_types::access::HarnessBoundary::agents: &'static [&'static str]
 pub nika_types::access::HarnessBoundary::asked_command_leaves_sandbox: bool
@@ -695,8 +786,10 @@ pub nika_types::access::HarnessBoundary::delivers_images: bool
 pub nika_types::access::HarnessBoundary::fetches_unasked: core::option::Option<&'static str>
 pub nika_types::access::HarnessBoundary::loads_unasked: core::option::Option<&'static str>
 pub nika_types::access::HarnessBoundary::measured_on: &'static str
+pub nika_types::access::HarnessBoundary::models_through_option: bool
 pub nika_types::access::HarnessBoundary::read_only_mode: &'static str
 pub nika_types::access::HarnessBoundary::reads_unasked: &'static str
+pub nika_types::access::HarnessBoundary::releases: &'static [nika_types::access::AdapterRelease]
 pub nika_types::access::HarnessBoundary::runs_unasked: core::option::Option<&'static str>
 pub nika_types::access::HarnessBoundary::seat: &'static str
 pub nika_types::access::HarnessBoundary::workspace_write_mode: &'static str
@@ -706,9 +799,12 @@ pub const nika_types::access::HarnessBoundary::CLAUDE_AGENT_ACP: Self
 pub const nika_types::access::HarnessBoundary::CODEX_ACP: Self
 pub const nika_types::access::HarnessBoundary::GEMINI_CLI: Self
 pub const nika_types::access::HarnessBoundary::MEASURED: [Self; 3]
+pub fn nika_types::access::HarnessBoundary::carried_note(&self, reported: core::option::Option<&str>) -> alloc::string::String
 pub fn nika_types::access::HarnessBoundary::check_advice(&self, writes_granted: bool) -> alloc::string::String
 pub fn nika_types::access::HarnessBoundary::for_agent(agent_name: &str) -> core::option::Option<Self>
+pub fn nika_types::access::HarnessBoundary::for_release(agent_name: &str, reported: core::option::Option<&str>) -> core::option::Option<nika_types::access::SessionBoundary>
 pub fn nika_types::access::HarnessBoundary::for_seat(id: &str) -> core::option::Option<Self>
+pub fn nika_types::access::HarnessBoundary::measures(&self, reported: &str) -> bool
 pub const fn nika_types::access::HarnessBoundary::mode_for_writes(&self, writes: bool) -> &'static str
 pub fn nika_types::access::HarnessBoundary::unasked(&self, writes_granted: bool) -> alloc::string::String
 impl core::clone::Clone for nika_types::access::HarnessBoundary
@@ -910,9 +1006,9 @@ pub nika_types::access::ServiceTierBinding::category: &'static str
 pub nika_types::access::ServiceTierBinding::fast: &'static str
 pub nika_types::access::ServiceTierBinding::measured_on: &'static str
 pub nika_types::access::ServiceTierBinding::option: &'static str
+pub nika_types::access::ServiceTierBinding::releases: &'static [nika_types::access::AdapterRelease]
 pub nika_types::access::ServiceTierBinding::seat: &'static str
 pub nika_types::access::ServiceTierBinding::standard: &'static str
-pub nika_types::access::ServiceTierBinding::versions: &'static [&'static str]
 impl nika_types::access::ServiceTierBinding
 pub const nika_types::access::ServiceTierBinding::CODEX_ACP: Self
 pub const nika_types::access::ServiceTierBinding::MEASURED: [Self; 1]
@@ -1019,6 +1115,7 @@ pub const nika_types::access::MAX_HARNESS_IMAGES: usize
 pub const nika_types::access::UNMEASURED_HARNESS_UNASKED: &str
 pub fn nika_types::access::harness_image_path(save: &str, index: usize) -> alloc::string::String
 pub fn nika_types::access::harness_image_paths(save: &str) -> alloc::vec::Vec<alloc::string::String>
+pub fn nika_types::access::shown_release(reported: core::option::Option<&str>) -> core::option::Option<alloc::string::String>
 pub fn nika_types::access::unmeasured_check_advice(seat: &str) -> alloc::string::String
 pub mod nika_types::baggage
 #[non_exhaustive] pub struct nika_types::baggage::Baggage

@@ -675,10 +675,42 @@ async fn another_release_of_the_measured_adapter_refuses() {
     }
 }
 
-/// A legacy model list answers no configuration: the option listed before
-/// the selection says nothing about the model now selected.
+/// The refusal repeats the reported release as the carried note does: a backtick
+/// reads `?`, so the release cannot close its code span, and a blank release is no
+/// release. Nothing is sent.
 #[tokio::test]
-async fn a_legacy_model_selection_cannot_carry_a_tier() {
+async fn the_refusal_repeats_the_reported_release_as_the_note_does() {
+    for (version, answers_as) in [("1.13.1` x", "release `1.13.1? x`"), (" \t", "no release")] {
+        let err = dialogue(
+            ask(None, None, Some("fast")),
+            move |mut r, mut w| async move {
+                let reported = json!({"name":CODEX_ACP,"version":version});
+                let config = codex("agent", "gpt-5.5", "medium", Some("off"));
+                let next = open_as(&mut r, &mut w, Some(reported), config).await;
+                assert!(next.is_none(), "no setter and no prompt: {next:?}");
+            },
+        )
+        .await
+        .expect_err("refused");
+        assert_eq!(
+            selection_refusal(err),
+            format!(
+                "`run.access.service_tier: fast` cannot be applied: the speed control of \
+                 `{CODEX_ACP}` is measured on codex-acp 1.13.1 and this session answers as \
+                 {answers_as} — what its `fast-mode` option does on a turn is not measured for \
+                 that release (install the measured release, or remove the key to keep its own \
+                 tier; no prompt was sent)"
+            )
+        );
+    }
+}
+
+/// codex-acp selects a model through its model option only: a session that
+/// lists the model only in a legacy model list refuses the model before any
+/// selection, so no tier is ever judged on a configuration that says nothing
+/// about the model.
+#[tokio::test]
+async fn a_codex_session_with_only_a_legacy_model_list_never_reaches_the_tier() {
     let err = dialogue(
         ask(Some("codex/opus"), None, Some("fast")),
         |mut r, mut w| async move {
@@ -693,16 +725,23 @@ async fn a_legacy_model_selection_cannot_carry_a_tier() {
             reply(&mut w, &new, json!({"sessionId":"s-tier","models":{"currentModelId":"sonnet",
                 "availableModels":[{"modelId":"sonnet","name":"Sonnet"},{"modelId":"opus","name":"Opus"}]}}))
             .await;
-            let set = read(&mut r).await.expect("the legacy model request");
-            assert_eq!(set["method"], "session/set_model");
-            reply(&mut w, &set, json!({})).await;
-            assert!(read(&mut r).await.is_none(), "no tier request, no prompt");
+            let next = read(&mut r).await;
+            assert!(
+                next.is_none(),
+                "no set_model, no tier request, no prompt: {next:?}"
+            );
         },
     )
     .await
     .expect_err("refused");
-    let reason = selection_refusal(err);
-    assert!(reason.contains("legacy model list"), "{reason}");
+    let HarnessError::Selection { reason } = err else {
+        panic!("the model's selection refusal, got {err:?}")
+    };
+    assert!(
+        reason.contains("offers no model `opus`")
+            && reason.ends_with("so its legacy model list is not used"),
+        "{reason}"
+    );
 }
 
 /// A word that is not a tier never reaches the session.

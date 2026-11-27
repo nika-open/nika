@@ -190,7 +190,8 @@ struct Driver<R, W> {
     /// The adapter's own name (`initialize` → `agentInfo.name`): the key its measured
     /// confinement is looked up by, never a guess from the command that spawned it.
     agent_name: Option<String>,
-    /// The adapter's own release (`agentInfo.version`): what a measured speed control holds for.
+    /// The adapter's own release (`agentInfo.version`): what a measured speed control holds for,
+    /// and whether the measured confinement row was made on it (measured or carried).
     agent_version: Option<String>,
     /// The mode the session was confined to before the prompt (NIK-266): held for the whole
     /// turn, a reported change away from it ends the session.
@@ -529,7 +530,8 @@ where
     /// Between `session/new` and the prompt: the model the workflow names must be one the agent
     /// offers (a pin is a pin: an unoffered model refuses before any prompt), set through the
     /// v1 config option when the agent advertises one, through the legacy `session/set_model`
-    /// when it advertises a `models` list; the current model is observed either way. A task
+    /// when it advertises a `models` list (never on an adapter whose measured row selects
+    /// models through the option only); the current model is observed either way. A task
     /// that names no model keeps the session's own, which the client selects and reads back
     /// itself on an adapter that reports it apart from its program (`hold.rs`).
     /// Model ids and display names must match a live offer; a family match must not
@@ -548,6 +550,8 @@ where
         // the offered efforts, so the effort is judged on the answer to the selection.
         let mut config = session.config_options.clone();
         let requested = request.requested_model.as_deref();
+        // No legacy fallback on an adapter whose row selects models through the option only.
+        let legacy = seats::legacy_list(self.option_only_models(), session.models.as_ref());
         if let Some(wanted) = seats::wanted(requested) {
             let option = |name: &str| seats::offered_option(model_option, name);
             if let Some((config_id, value)) = seats::exact_first(requested, &wanted, option) {
@@ -587,7 +591,7 @@ where
                 }
                 config = answered.get("configOptions").cloned();
             } else if let Some(model_id) = seats::exact_first(requested, &wanted, |name| {
-                seats::offered_model(session.models.as_ref(), name)
+                seats::offered_model(legacy, name)
             }) {
                 // A legacy selection answers no configuration: its efforts cannot be re-read.
                 if let Some(effort) = &request.requested_effort {
@@ -615,17 +619,21 @@ where
                     .await?;
                 self.observe(Some(model_id), ModelProvenance::AcceptedRequest);
             } else {
-                return Err(HarnessError::Selection {
-                    reason: format!(
-                        "the harness offers no model `{wanted}` — it offers: {} (name one of these on `model:`, or `default` for the harness's own choice)",
-                        seats::offered_names(model_option, session.models.as_ref())
-                    ),
-                });
+                let listed = session.models.is_some();
+                return Err(seats::no_such_model(&wanted, model_option, legacy, listed));
             }
         } else if let Some(held) = self.hold_reported_model(&sid, model_option).await? {
             config = Some(held);
         }
         self.seat_after_model(sid, session, config, request).await
+    }
+
+    /// Whether this session selects a named model only through its model option
+    /// ([`seats::option_only`]): by the adapter's reported name, or by the audited profile a
+    /// conversation was admitted under.
+    fn option_only_models(&self) -> bool {
+        let profile = self.completion.map(|one_shot| one_shot.profile);
+        seats::option_only(self.agent_name.as_deref(), profile)
     }
 
     /// The session's mode, last before the prompt: a one-shot profile's required mode, an

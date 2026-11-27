@@ -17,6 +17,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::release::AdapterRelease;
+
 /// `run.access.service_tier` — how fast the route is asked to serve, apart
 /// from WHICH route (`via`), the model and the reasoning effort. A closed
 /// vocabulary: a route's own word for its speed control (`on`, `priority`,
@@ -75,8 +77,9 @@ pub struct ServiceTierBinding {
     /// The `agentInfo.name` values the measurement holds for — the adapter's own report on
     /// `initialize`, never the command that spawned it.
     pub agents: &'static [&'static str],
-    /// The exact `agentInfo.version` values the measurement holds for.
-    pub versions: &'static [&'static str],
+    /// The adapter releases the measurement holds for, compared with the release the adapter
+    /// reports on `initialize` (`agentInfo.version`).
+    pub releases: &'static [AdapterRelease],
     /// The adapter release the measurement was made on, as a person reads it.
     pub measured_on: &'static str,
     /// The session configuration option that carries the tier, by its exact id.
@@ -105,7 +108,7 @@ impl ServiceTierBinding {
     pub const CODEX_ACP: Self = Self {
         seat: "codex",
         agents: &["@agentclientprotocol/codex-acp", "codex-acp"],
-        versions: &["1.13.1"],
+        releases: &[AdapterRelease::new(1, 13, 1)],
         measured_on: "codex-acp 1.13.1",
         option: "fast-mode",
         category: "model_config",
@@ -126,10 +129,11 @@ impl ServiceTierBinding {
     }
 
     /// Whether the measurement holds for the release an adapter reported on `initialize`
-    /// (`agentInfo.version`), compared exactly: no range, no prefix.
+    /// (`agentInfo.version`), compared exactly with [`Self::releases`]: no range, no prefix,
+    /// and a release that does not parse is never measured.
     #[must_use]
     pub fn measures(&self, version: &str) -> bool {
-        self.versions.contains(&version)
+        AdapterRelease::measured_among(version, self.releases)
     }
 
     /// The measured binding of the seat `id` (`codex`).
@@ -310,7 +314,8 @@ mod tests {
     #[test]
     fn the_measurement_holds_for_its_exact_release_only() {
         let binding = ServiceTierBinding::CODEX_ACP;
-        assert_eq!(binding.versions, ["1.13.1"]);
+        assert_eq!(binding.releases, [AdapterRelease::new(1, 13, 1)]);
+        assert!(binding.measured_on.ends_with(" 1.13.1"));
         assert!(binding.measures("1.13.1"));
         // No range and no prefix: a later release bundles another agent, whose reading of the
         // same native value is unmeasured.

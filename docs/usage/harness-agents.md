@@ -97,6 +97,57 @@ Nika, so `permits:` does not bound it:
 | `gemini-cli` (0.62.0) | `default`, or your `--approval-mode` / settings | `default` | reads files in the project (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches. |
 | `qwen-code`, `kimi-code`, `opencode`, `copilot`, `grok-build` | — | none: no mode is measured, so none is selected; a current mode that visibly approves on its own refuses the run | everything it does without asking. Nika judges only what it asks. |
 
+Each measured row (`codex`, `claude-code` and `gemini-cli`) holds for the
+adapter that names itself as the row's adapter in its `initialize` answer,
+on the release the row names. The `codex` row holds for an adapter that
+answers `@agentclientprotocol/codex-acp` or `codex-acp` (the older
+`@zed-industries/codex-acp` package answers `codex-acp`), the `claude-code`
+row for `@agentclientprotocol/claude-agent-acp` and the `gemini-cli` row for
+`gemini-cli`. On another release of that same adapter that the seat still
+accepts (the `codex` seat takes 0.16 through every 1.x release, the
+`claude-code` seat 0.23 through every 0.x release, the `gemini-cli` seat
+0.37 through every 0.x release), and on a `gemini-cli` session whose adapter
+reports no release, Nika applies the same row: it selects and reads back the
+same mode, refuses to start when the adapter does not offer or keep it, and
+still reads a Codex command ask as one that leaves its sandbox. What it says
+changes: after the row's text, the `permit_checked` record adds one
+sentence, for example "What the harness does without asking was measured on
+claude-agent-acp 0.81.1; this session's adapter reports release `0.112.0`,
+on which it was not measured." When the adapter does not offer the mode or
+does not confirm it, the refusal before the prompt ends with the same
+sentence. What the harness does without asking may differ on that release.
+`nika check` reads neither the installed adapter's name nor its release, so
+its `[harness]` hint states the seat's row as it is, without that sentence,
+whichever adapter is installed.
+
+An adapter the seat admits under another name has no measured row and is
+treated like the seats of the table's last line: no mode is selected, a
+current mode that visibly approves on its own refuses the run, and Nika
+judges only what it asks. On the `claude-code` seat, the deprecated
+`@zed-industries/claude-agent-acp` package answers under its own name, so
+its sessions run this way.
+
+A release outside the accepted range is refused before any session. The
+`codex` and `claude-code` seats judge the release the adapter reports in its
+`initialize` answer, and their refusal names the accepted range and what to
+install: the maintained package at the release the row was measured on, such
+as `@agentclientprotocol/codex-acp 1.13.1`; an answer that reports no
+release is refused there too. The `gemini-cli` seat judges what
+`gemini --version` prints: outside its range, the refusal names the range
+and says that a version Nika has not read speaks a dialect it cannot judge,
+with no release to install.
+
+On the `codex` and `claude-code` seats, when the adapter names itself as one
+of the two rows' adapters, a model named for a run or for a Session
+conversation is selected only through the session's model option and read
+back, on every release of that adapter the seat accepts (on the `codex`
+seat, the older `codex-acp` package included). A session that does not list
+the model there refuses before the prompt, even when its older model list
+names it: claude-agent-acp has no request to select from that list, and
+codex-acp's sets the effort together with the model, in a request whose
+answer Nika cannot read back. An adapter the seat admits under another name
+keeps the older model list.
+
 On every seat:
 
 - An action Nika allows runs under the harness's own sandbox, not Nika's exec
@@ -449,7 +500,10 @@ answer is a `nika/access-offer@1` document:
   models it does list in `offered`. Its efforts and tiers are then
   `unobserved`: they are never read from another model's configuration. The
   same holds for `legacy_list` (the session names the model only in its
-  legacy model list) and `not_confirmed` (it answered another model).
+  legacy model list) and `not_confirmed` (it answered another model). When
+  the adapter names itself as the codex or claude-code row's adapter, a
+  legacy list is never read: a model only it names is `not_offered`, as a
+  run refuses it.
 - The tiers are `unobserved`, with the reason, on an adapter or a release
   whose speed control is not measured (anything but codex-acp 1.13.1 today).
 - A session that gives no offer is a row with `"status": "unavailable"`, the
@@ -472,7 +526,9 @@ Each harness `agent:` task journals, in order:
 - one `permit_checked` with plane `agent`, gate `session mode · <mode>` and
   decision `confine` (the measured mode was selected) or `unmeasured` (the
   harness's own mode was only observed),
-  whose `why` states what the harness still does without asking;
+  whose `why` states what the harness still does without asking (on a
+  release its row was not measured on, followed by the sentence naming the
+  release measured and the one the adapter reports);
 - one `permit_checked` per ask, with decision `allow`, `deny` (your answer) or
   `escalate` (paused for you). Its gate names what was judged: `mcp · <server
   or tool call>` for an MCP tool approval, `network · <target>` for a network

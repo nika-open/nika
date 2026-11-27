@@ -14,6 +14,7 @@ use nika_kernel::ai::harness::{
     HarnessConfinement, HarnessError, HarnessEscalation, HarnessEvent, HarnessRequest,
     PermissionDecision,
 };
+use nika_types::access::HarnessBoundary;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
@@ -24,6 +25,13 @@ async fn read(reader: &mut AgentReader) -> Value {
     let mut line = String::new();
     reader.read_line(&mut line).await.expect("agent reads");
     serde_json::from_str(line.trim_end()).expect("client lines are JSON")
+}
+
+/// The client's next line, or `None` once it closed the pipe.
+async fn read_opt(reader: &mut AgentReader) -> Option<Value> {
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).await.expect("agent reads");
+    (read > 0).then(|| serde_json::from_str(line.trim_end()).expect("client lines are JSON"))
 }
 
 async fn write(writer: &mut AgentWriter, value: &Value) {
@@ -45,15 +53,41 @@ fn codex_modes(current: &str) -> Value {
                     mode("agent-full-access", "Full access", "full_access")]}])
 }
 
-/// Answer `initialize` as `agent_name` and `session/new` with `advertised`.
+/// The release a named adapter reports in these dialogues: the one its row was measured on,
+/// so each session below is a measured one unless it says otherwise.
+fn measured_release(name: &str) -> String {
+    HarnessBoundary::for_agent(name)
+        .and_then(|row| row.releases.first().map(ToString::to_string))
+        .unwrap_or_else(|| "1.0.0".to_owned())
+}
+
+/// Answer `initialize` as `agent_name` at its measured release and `session/new` with
+/// `advertised`.
 async fn handshake(
     reader: &mut AgentReader,
     writer: &mut AgentWriter,
     name: &str,
     advertised: Value,
 ) {
+    let release = measured_release(name);
+    handshake_at(reader, writer, (name, Some(&release)), advertised).await;
+}
+
+/// Answer `initialize` as `name` at `version` (`None`: an `agentInfo` with no `version`) and
+/// `session/new` with `advertised`.
+async fn handshake_at(
+    reader: &mut AgentReader,
+    writer: &mut AgentWriter,
+    (name, version): (&str, Option<&str>),
+    advertised: Value,
+) {
     let init = read(reader).await;
     assert_eq!(init["method"], "initialize");
+    assert_eq!(
+        init["params"]["clientInfo"],
+        json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")}),
+        "the client names itself and its release"
+    );
     let caps = &init["params"]["clientCapabilities"];
     assert!(
         caps.get("fs").is_none() && caps.get("terminal").is_none(),
@@ -64,10 +98,14 @@ async fn handshake(
         Some(&json!(["sessionFailure"])),
         "typed turn failures are asked for (NIK-275): {caps}"
     );
+    let mut info = json!({"name": name});
+    if let Some(version) = version {
+        info["version"] = json!(version);
+    }
     write(
         writer,
         &json!({"jsonrpc": "2.0", "id": init["id"], "result": {"protocolVersion": 1,
-            "agentInfo": {"name": name, "version": "1.13.1"}}}),
+            "agentInfo": info}}),
     )
     .await;
     let new = read(reader).await;
@@ -291,6 +329,8 @@ async fn an_unconfirmed_mode_refuses_before_the_prompt() {
         "{reason}"
     );
     assert!(reason.contains("`agent`"), "{reason}");
+    // A measured session adds nothing after the refusal: the carried note is not appended.
+    assert!(reason.ends_with("no prompt was sent"), "{reason}");
     assert!(confined(&events).is_empty(), "no confinement is claimed");
 }
 
@@ -325,6 +365,8 @@ async fn a_measured_adapter_without_its_measured_mode_refuses() {
         "{reason}"
     );
     assert!(reason.contains("agent · agent-full-access"), "{reason}");
+    // A measured session adds nothing after the refusal: the carried note is not appended.
+    assert!(reason.ends_with("no prompt was sent"), "{reason}");
 }
 
 /// An unmeasured adapter: nothing is selected; its asking mode is observed and witnessed as
@@ -717,10 +759,22 @@ async fn asks_over(
     held: Value,
     asks: Vec<(Value, Option<Value>)>,
 ) -> (Vec<Seen>, Vec<Option<String>>) {
+    let release = measured_release(agent);
+    asks_over_at((agent, release), advertised, held, asks).await
+}
+
+/// [`asks_over`] with the adapter reporting `release`.
+async fn asks_over_at(
+    (agent, release): (&'static str, String),
+    advertised: Value,
+    held: Value,
+    asks: Vec<(Value, Option<Value>)>,
+) -> (Vec<Seen>, Vec<Option<String>>) {
     let (heard_tx, heard_rx) = tokio::sync::oneshot::channel();
     let seen = asks_seen(request(HarnessConfinement::ReadOnly), |mut r, mut w| {
         tokio::spawn(async move {
-            handshake(&mut r, &mut w, agent, json!({"configOptions": advertised})).await;
+            let advertised = json!({"configOptions": advertised});
+            handshake_at(&mut r, &mut w, (agent, Some(&release)), advertised).await;
             let set = read(&mut r).await;
             assert_eq!(set["method"], "session/set_config_option");
             let held = json!({"jsonrpc": "2.0", "id": set["id"],
@@ -897,5 +951,244 @@ async fn a_held_model_is_selected_before_the_mode_and_must_hold_until_the_prompt
             "{reason}"
         );
         assert!(confined(&events).is_empty(), "no confinement is claimed");
+    }
+}
+
+/// One confined session whose peer answers as `agent` at `release`, starts in `start`,
+/// confirms the selected mode with `held` and ends the turn: the mode the client asked for and
+/// what the session published.
+async fn confined_at(
+    agent: (&'static str, Option<&'static str>),
+    confinement: HarnessConfinement,
+    (start, held): (Value, Value),
+) -> (Value, Vec<(Option<String>, bool, String)>) {
+    let (asked_tx, asked_rx) = tokio::sync::oneshot::channel();
+    let (events, error) = drain(request(confinement), move |mut r, mut w| {
+        tokio::spawn(async move {
+            handshake_at(&mut r, &mut w, agent, json!({"configOptions": start})).await;
+            let set = read(&mut r).await;
+            assert_eq!(set["method"], "session/set_config_option", "{agent:?}");
+            write(
+                &mut w,
+                &json!({"jsonrpc": "2.0", "id": set["id"], "result": {"configOptions": held}}),
+            )
+            .await;
+            let prompt = read(&mut r).await;
+            assert_eq!(prompt["method"], "session/prompt", "{agent:?}");
+            end_turn(&mut w, &prompt).await;
+            let _ = asked_tx.send(set["params"].clone());
+        })
+    })
+    .await;
+    assert!(error.is_none(), "{agent:?}: {error:?}");
+    let asked = asked_rx.await.expect("the peer reports the selection");
+    (asked, confined(&events))
+}
+
+/// On its measured release a session publishes its row's text byte for byte. On another
+/// release of the same adapter (a later one, an earlier one, one that does not parse, none)
+/// the same mode is still selected and read back, and the published text is the row's
+/// followed by one sentence naming the release measured and the one the adapter reports.
+#[tokio::test]
+async fn a_carried_release_keeps_the_rule_and_names_both_releases() {
+    let claude = "@agentclientprotocol/claude-agent-acp";
+    let codex = "@agentclientprotocol/codex-acp";
+    let claude_modes = (claude_mode_option("auto"), claude_mode_option("default"));
+    let codex_modes = (codex_modes("agent"), codex_modes("read-only"));
+    let cases = [
+        ((claude, Some("0.81.1")), claude_modes.clone(), "default"),
+        ((claude, Some("0.112.0")), claude_modes.clone(), "default"),
+        ((claude, Some("next")), claude_modes.clone(), "default"),
+        ((claude, None), claude_modes, "default"),
+        ((codex, Some("1.13.1")), codex_modes.clone(), "read-only"),
+        ((codex, Some("1.12.0")), codex_modes, "read-only"),
+    ];
+    for (agent, modes, mode) in cases {
+        for confinement in [
+            HarnessConfinement::ReadOnly,
+            HarnessConfinement::WorkspaceWrite,
+        ] {
+            let (asked, seen) = confined_at(agent, confinement, modes.clone()).await;
+            assert_eq!(
+                asked,
+                json!({"sessionId": "s-confine", "configId": "mode", "value": mode}),
+                "{agent:?}: the row's asking mode is selected"
+            );
+            let row = HarnessBoundary::for_agent(agent.0).expect("a measured row");
+            let writes = confinement == HarnessConfinement::WorkspaceWrite;
+            let text = match carried_sentence(&row, agent.1) {
+                None => row.unasked(writes),
+                Some(note) => format!("{} {note}", row.unasked(writes)),
+            };
+            assert_eq!(
+                seen,
+                [(Some(mode.to_owned()), true, text)],
+                "{agent:?} {confinement:?}"
+            );
+        }
+    }
+}
+
+/// The sentence a session on `release` of `row`'s adapter adds, written out here: `None` on
+/// the release the row was measured on.
+fn carried_sentence(row: &HarnessBoundary, release: Option<&str>) -> Option<String> {
+    let measured = row.measured_on;
+    match release {
+        Some(release) if row.releases.iter().any(|r| r.to_string() == release) => None,
+        Some(release) => Some(format!(
+            "What the harness does without asking was measured on {measured}; this session's \
+             adapter reports release `{release}`, on which it was not measured."
+        )),
+        None => Some(format!(
+            "What the harness does without asking was measured on {measured}; this session's \
+             adapter reports no release, so it was not measured on the one it runs."
+        )),
+    }
+}
+
+/// A carried release still refuses before the prompt when the adapter does not offer the
+/// row's mode, and when its answer does not confirm the mode selected; the refusal names the
+/// release the session reports.
+#[tokio::test]
+async fn a_carried_release_still_refuses_a_mode_it_does_not_offer_or_confirm() {
+    let claude = ("@agentclientprotocol/claude-agent-acp", Some("0.112.0"));
+    let note = "What the harness does without asking was measured on claude-agent-acp 0.81.1; \
+                this session's adapter reports release `0.112.0`, on which it was not measured.";
+    let no_manual = json!([{"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+        "currentValue": "auto",
+        "options": [{"value": "auto", "name": "Auto", "_meta": {"kind": "auto_review"}},
+                    {"value": "acceptEdits", "name": "Accept edits"}]}]);
+    let (events, error) = drain(
+        request(HarnessConfinement::ReadOnly),
+        move |mut r, mut w| {
+            tokio::spawn(async move {
+                handshake_at(&mut r, &mut w, claude, json!({"configOptions": no_manual})).await;
+                assert!(
+                    read_opt(&mut r).await.is_none(),
+                    "nothing after session/new"
+                );
+            })
+        },
+    )
+    .await;
+    let Some(HarnessError::Refused { reason }) = error else {
+        panic!("an unoffered mode refuses, got {error:?}");
+    };
+    assert_eq!(
+        reason,
+        format!(
+            "the harness does not offer the mode `default` measured on claude-agent-acp 0.81.1 \
+             to keep every approval with Nika (it offers auto · acceptEdits); Nika never runs an \
+             agent task in a mode that approves on its own — no prompt was sent. {note}"
+        )
+    );
+    assert!(confined(&events).is_empty(), "no confinement is claimed");
+
+    let (events, error) = drain(
+        request(HarnessConfinement::ReadOnly),
+        move |mut r, mut w| {
+            tokio::spawn(async move {
+                let advertised = json!({"configOptions": claude_mode_option("auto")});
+                handshake_at(&mut r, &mut w, claude, advertised).await;
+                let set = read(&mut r).await;
+                assert_eq!(set["method"], "session/set_config_option");
+                assert_eq!(set["params"]["value"], "default");
+                write(
+                    &mut w,
+                    &json!({"jsonrpc": "2.0", "id": set["id"],
+                    "result": {"configOptions": claude_mode_option("auto")}}),
+                )
+                .await;
+                assert!(read_opt(&mut r).await.is_none(), "no prompt");
+            })
+        },
+    )
+    .await;
+    let Some(HarnessError::Refused { reason }) = error else {
+        panic!("an unconfirmed mode refuses, got {error:?}");
+    };
+    assert_eq!(
+        reason,
+        format!(
+            "the harness did not confirm the confined mode `default` (it reports `auto`); no \
+             prompt was sent. {note}"
+        )
+    );
+    assert!(confined(&events).is_empty(), "no confinement is claimed");
+}
+
+/// gemini-cli on a release other than the one its row was measured on keeps its rule through
+/// the legacy `session/set_mode` door, and its text names both releases.
+#[tokio::test]
+async fn a_carried_gemini_release_keeps_the_legacy_door_and_names_both_releases() {
+    let legacy = json!({"modes": {"currentModeId": "autoEdit", "availableModes": [
+        {"id": "default", "name": "Default"}, {"id": "autoEdit", "name": "Auto Edit"},
+        {"id": "yolo", "name": "YOLO"}]}});
+    let (events, error) = drain(
+        request(HarnessConfinement::ReadOnly),
+        move |mut r, mut w| {
+            tokio::spawn(async move {
+                handshake_at(&mut r, &mut w, ("gemini-cli", Some("0.70.1")), legacy).await;
+                let set = read(&mut r).await;
+                assert_eq!(set["method"], "session/set_mode");
+                assert_eq!(
+                    set["params"],
+                    json!({"sessionId": "s-confine", "modeId": "default"})
+                );
+                write(
+                    &mut w,
+                    &json!({"jsonrpc": "2.0", "id": set["id"], "result": {}}),
+                )
+                .await;
+                let prompt = read(&mut r).await;
+                assert_eq!(prompt["method"], "session/prompt");
+                end_turn(&mut w, &prompt).await;
+            })
+        },
+    )
+    .await;
+    assert!(error.is_none(), "{error:?}");
+    let row = HarnessBoundary::GEMINI_CLI;
+    let note = carried_sentence(&row, Some("0.70.1")).expect("a carried release");
+    assert!(
+        note.contains("gemini-cli 0.62.0") && note.contains("`0.70.1`"),
+        "{note}"
+    );
+    assert_eq!(
+        confined(&events),
+        [(
+            Some("default".to_owned()),
+            true,
+            format!("{} {note}", row.unasked(false))
+        )]
+    );
+}
+
+/// A carried Codex session keeps the stricter reading of its row: in `read-only`, a command
+/// it asks about still asks to leave its sandbox and rides as an escalation.
+#[tokio::test]
+async fn a_carried_codex_release_still_reads_a_command_ask_as_leaving_its_sandbox() {
+    let escalated = json!({"toolCallId": "c1", "kind": "execute", "status": "pending",
+        "title": "Run command",
+        "rawInput": {"command": "curl -sS https://example.com", "cwd": "/work/project"}});
+    for release in ["1.12.0", "1.13.1-rc.1"] {
+        let (seen, heard) = asks_over_at(
+            ("@agentclientprotocol/codex-acp", release.to_owned()),
+            codex_modes("agent"),
+            codex_modes("read-only"),
+            vec![(escalated.clone(), None)],
+        )
+        .await;
+        assert_eq!(
+            seen,
+            [(
+                "Run command: curl -sS https://example.com".to_owned(),
+                Some(
+                    HarnessEscalation::new().with_escalated_command("curl -sS https://example.com")
+                )
+            )],
+            "{release}"
+        );
+        assert_eq!(heard, [Some("cancelled".to_owned())], "{release}");
     }
 }

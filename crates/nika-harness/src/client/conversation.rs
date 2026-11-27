@@ -236,6 +236,7 @@ where
         let hello = wire::InitializeParams {
             protocol_version: wire::PROTOCOL_V1,
             client_capabilities: json!({}),
+            client_info: wire::ClientInfo::NIKA,
         };
         (self.send_request(ID_INITIALIZE, wire::METHOD_INITIALIZE, &hello)).await?;
         let init: Value = self.await_response(ID_INITIALIZE, "initialize").await?;

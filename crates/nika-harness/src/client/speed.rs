@@ -191,7 +191,9 @@ where
                  measured for that release (install the measured release, or remove the key to \
                  keep its own tier; no prompt was sent)",
                 binding.measured_on,
-                release.map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
+                // Repeated as the carried note repeats it: bounded, no backtick, blank as none.
+                nika_types::access::shown_release(release.as_deref())
+                    .map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
                 binding.option
             )));
         }
@@ -202,6 +204,8 @@ where
         if self.observed_source == Some(ModelProvenance::AcceptedRequest) {
             // A legacy model selection answers no configuration: the option the session
             // listed before it says nothing about the model now selected.
+            // Not reachable on today's only binding (the codex seat no longer selects through
+            // the legacy list): it guards a future binding on a seat that keeps that list.
             return Err(refusal(format!(
                 "the harness selects `{model}` only through the legacy model list, which \
                  reports no refreshed options — {field} cannot be judged for it (no prompt was \

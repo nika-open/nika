@@ -13,12 +13,17 @@
 //! it observes the session's own mode, refuses one that visibly approves on its own, and says
 //! so in the witness — an unmeasured mode is never presented as a confinement.
 //!
+//! A row is found by the adapter's reported name. On a release the row was not measured on
+//! (a carried session) the same mode is selected and read back and the same stricter readings
+//! hold; the witness, and a refusal of the mode before the prompt, add one sentence naming the
+//! release measured and the one the adapter reports.
+//!
 //! Whatever was settled rides `HarnessEvent::SessionConfined` before the prompt, and the
 //! mode is then held for the whole turn: a `config_option_update` or `current_mode_update`
 //! that moves it ends the session (`judge_drift`).
 
 use nika_kernel::ai::harness::{HarnessConfinement, HarnessError, HarnessEvent};
-use nika_types::access::HarnessBoundary;
+use nika_types::access::{HarnessBoundary, SessionBoundary};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -149,13 +154,14 @@ where
         config: Option<&Value>,
         confinement: HarnessConfinement,
     ) -> Result<(), HarnessError> {
-        let boundary = self
-            .agent_name
-            .as_deref()
-            .and_then(HarnessBoundary::for_agent);
+        // The row of the adapter's name, measured or carried by its release: the rule is the
+        // row's either way, and a carried session's text names both releases.
+        let release = self.agent_version.as_deref();
+        let boundary = (self.agent_name.as_deref())
+            .and_then(|name| HarnessBoundary::for_release(name, release));
         let (mode, selected, unasked) = if let Some(boundary) = boundary {
             let writes = confinement == HarnessConfinement::WorkspaceWrite;
-            let wanted = boundary.mode_for_writes(writes);
+            let wanted = boundary.row().mode_for_writes(writes);
             self.select_confined(sid, session, config, wanted, &boundary)
                 .await?;
             (Some(wanted.to_owned()), true, boundary.unasked(writes))
@@ -181,16 +187,21 @@ where
     }
 
     /// Select `wanted` through the mode option (read back from its answer) or the legacy
-    /// `session/set_mode` door, or refuse before the prompt.
+    /// `session/set_mode` door, or refuse before the prompt. A carried session's refusal ends
+    /// with the sentence naming the release measured and the one the adapter reports.
     async fn select_confined(
         &mut self,
         sid: &str,
         session: &wire::NewSessionResult,
         config: Option<&Value>,
         wanted: &str,
-        boundary: &HarnessBoundary,
+        boundary: &SessionBoundary,
     ) -> Result<(), HarnessError> {
-        let measured = boundary.measured_on;
+        let measured = boundary.row().measured_on;
+        let carried = boundary
+            .note()
+            .map(|note| format!(". {note}"))
+            .unwrap_or_default();
         let option = mode_option(config);
         let offered = match option {
             Some(option) => seats::choice_values(option),
@@ -200,7 +211,7 @@ where
             return Err(refusal(format!(
                 "the harness does not offer the mode `{wanted}` measured on {measured} to keep \
                  every approval with Nika (it offers {}); Nika never runs an agent task in a \
-                 mode that approves on its own — no prompt was sent",
+                 mode that approves on its own — no prompt was sent{carried}",
                 if offered.is_empty() {
                     "no mode".to_owned()
                 } else {
@@ -234,7 +245,7 @@ where
             if read.as_deref() != Some(wanted) {
                 return Err(refusal(format!(
                     "the harness did not confirm the confined mode `{wanted}` (it reports {}); \
-                     no prompt was sent",
+                     no prompt was sent{carried}",
                     read.map_or_else(|| "none".to_owned(), |v| format!("`{v}`"))
                 )));
             }
@@ -263,7 +274,8 @@ where
 
     /// Whether the held mode runs ordinary commands in the harness's own sandbox without asking,
     /// so a command it asks about asks to leave that sandbox (NIK-274: codex-acp `read-only`).
-    /// Only a measured mode the client selected and read back says so.
+    /// Only a measured mode the client selected and read back says so, on any release of the
+    /// adapter the row names: a carried session keeps this stricter reading.
     pub(super) fn commands_escalate(&self) -> bool {
         self.confined.is_some()
             && self

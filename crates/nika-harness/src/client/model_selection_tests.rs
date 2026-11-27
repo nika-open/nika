@@ -455,3 +455,159 @@ async fn a_named_model_on_a_claude_session_is_a_pin_not_a_hold() {
         "a pinned model that moves refuses"
     );
 }
+
+/// One Claude-shaped turn whose adapter reports `reported`, then one more model line, as the
+/// model that answered, after the client selected `selected` and read it back.
+async fn reported_turn(
+    request: HarnessRequest,
+    selected: &'static str,
+    reported: &'static str,
+) -> HarnessOutcome {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let (peer_read, mut peer_write) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut reader = BufReader::new(peer_read);
+        offer_as(
+            &mut reader,
+            &mut peer_write,
+            Some(CLAUDE),
+            claude_models(Some("haiku")),
+        )
+        .await;
+        let select = read(&mut reader)
+            .await
+            .expect("the selection precedes the prompt");
+        assert_eq!(select["method"], "session/set_config_option");
+        assert_eq!(select["params"]["value"], selected);
+        reply(&mut peer_write, &select, claude_models(Some(selected))).await;
+        let prompt = read(&mut reader).await.expect("the prompt");
+        assert_eq!(prompt["method"], "session/prompt");
+        for model in [reported, "claude-opus-4-1-20250805"] {
+            write(
+                &mut peer_write,
+                serde_json::json!({"jsonrpc":"2.0","method":"session/update",
+                    "params":{"sessionId":"model-choice","update":{
+                        "sessionUpdate":"usage_update","used":3,"size":200_000,
+                        "_meta":{"_claude/model":model}}}}),
+            )
+            .await;
+        }
+        reply(
+            &mut peer_write,
+            &prompt,
+            serde_json::json!({"stopReason":"end_turn"}),
+        )
+        .await;
+    });
+    let outcome = result(drive(client_read, client_write, request))
+        .await
+        .expect("the client reports the turn");
+    peer.await.expect("scripted peer");
+    outcome
+}
+
+/// A held model is not a pin for the adapter's own report either: a session that answers as
+/// another model line is recorded as one move and refuses nothing, where the same report
+/// under a model the task named refuses the answer.
+#[tokio::test]
+async fn a_report_of_another_model_refuses_a_pin_and_not_a_hold() {
+    const SONNET: &str = "claude-sonnet-4-5-20250929";
+    let held = reported_turn(HarnessRequest::new("hello", "/tmp"), "haiku", SONNET).await;
+    assert!(held.selection.held_model, "the task named no model");
+    assert_eq!(
+        held.selection.changed_mid_turn,
+        [format!("model={SONNET}")],
+        "recorded once"
+    );
+    assert!(
+        held.selection.moved_refusal().is_none(),
+        "a held model that moved stays a fact"
+    );
+
+    let pinned = reported_turn(
+        HarnessRequest::new("hello", "/tmp").with_requested_model("anthropic/opus".to_owned()),
+        "opus",
+        SONNET,
+    )
+    .await;
+    assert!(!pinned.selection.held_model, "a named model is a pin");
+    assert_eq!(
+        pinned.selection.changed_mid_turn,
+        [format!("model={SONNET}")]
+    );
+    let reason = match pinned.selection.moved_refusal() {
+        Some(HarnessError::Selection { reason }) => reason,
+        _ => String::new(),
+    };
+    assert!(reason.contains(&format!("model={SONNET}")), "{reason:?}");
+}
+
+/// A session that rejects the selection of the model it reported itself fails before any
+/// prompt, in the adapter's own words: the task named no model, and nothing ran.
+#[tokio::test]
+async fn a_claude_session_that_rejects_the_hold_fails_before_the_prompt() {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let (peer_read, mut peer_write) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut reader = BufReader::new(peer_read);
+        offer_as(
+            &mut reader,
+            &mut peer_write,
+            Some(CLAUDE),
+            claude_models(Some("haiku")),
+        )
+        .await;
+        let hold = read(&mut reader)
+            .await
+            .expect("the hold precedes the prompt");
+        assert_eq!(hold["method"], "session/set_config_option");
+        write(
+            &mut peer_write,
+            serde_json::json!({"jsonrpc":"2.0","id":hold["id"],
+            "error":{"code":-32602,"message":"model rejected"}}),
+        )
+        .await;
+        assert!(
+            read(&mut reader).await.is_none(),
+            "no prompt after a rejected hold"
+        );
+    });
+    let error = result(drive(
+        client_read,
+        client_write,
+        HarnessRequest::new("hello", "/tmp"),
+    ))
+    .await
+    .expect_err("the session rejected the hold");
+    peer.await.expect("scripted peer sees EOF");
+    assert!(error.to_string().contains("model rejected"), "{error}");
+}
+
+/// A session that states its model only through the legacy model list has no model option to
+/// select through: no hold is sent, and the prompt is the next request.
+#[tokio::test]
+async fn no_hold_is_sent_when_only_the_legacy_model_list_states_a_model() {
+    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(ours);
+    let (peer_read, mut peer_write) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut reader = BufReader::new(peer_read);
+        let legacy = serde_json::json!({"models":{"currentModelId":"haiku","availableModels":[
+            {"modelId":"haiku","name":"Haiku"},{"modelId":"opus","name":"Opus"}]}});
+        offer_as(&mut reader, &mut peer_write, Some(CLAUDE), legacy).await;
+        end(&mut reader, &mut peer_write).await;
+    });
+    let outcome = result(drive(
+        client_read,
+        client_write,
+        HarnessRequest::new("hello", "/tmp"),
+    ))
+    .await
+    .expect("the turn runs on the session's own model");
+    peer.await.expect("scripted peer");
+    assert_eq!(outcome.selection.transmitted_model, None);
+    assert_eq!(outcome.selection.model_option, None);
+    assert!(!outcome.selection.held_model);
+}

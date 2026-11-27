@@ -310,6 +310,43 @@ not rely on `permits:` alone on a harness seat: run it on an API or local model
 (the native agent loop judges every tool call), or in a container or a
 throwaway checkout.
 
+## Limits a task declares on a seat
+
+A seat runs its own agent loop, so a limit the task declares reaches it only
+where the seat can apply it. Nika never runs the task as if the limit were not
+written: it sends the limit, or the run refuses the task before anything is
+sent (`NIKA-465`, the field named), and `nika check` names the same task as a
+blocker.
+
+| Field | `claude-code` | Every other seat |
+|---|---|---|
+| `max_turns` | sent as the session's `maxTurns` | refused |
+| `temperature` | refused | refused |
+| `tools:` | refused | refused |
+
+- On the `claude-code` seat, `max_turns` goes with the session's other
+  options when the session opens, as `maxTurns` (an option claude-agent-acp
+  0.81.1 lets a client set). Claude Code counts the turns, not Nika. A turn
+  that reaches the limit fails the task (`NIKA-INFER-001`), with stop reason
+  `max_turn_requests`, or with the application's own words when it reports
+  the turn as failed. Such a first turn gets no schema repair prompt.
+  A repair, when one is sent, is a second prompt of the same session under
+  the same options; how Claude Code counts it against the limit is its own.
+- A task without `max_turns` sends no limit, and the session keeps Claude
+  Code's own loop. The default of 10 turns is the native agent loop's, never
+  a seat's.
+- The limit follows the seat's id, not the name the adapter reports. On the
+  `claude-code` seat it is sent to whichever adapter that seat started,
+  including an older one the seat still admits (the deprecated
+  `@zed-industries/claude-agent-acp`), which Nika has not measured applying
+  it. An adapter you declare under another id is refused `max_turns`, even
+  when it answers as Claude Code.
+- No seat takes a sampling temperature from Nika: drop `temperature:` or run
+  the task on an API or local model.
+- `max_tokens_total` is judged from the counts the application reports (see
+  below); a seat that reports none leaves it unjudged
+  (`token_ceiling: unjudged`).
+
 ## Images and structured answers on a seat
 
 An application such as Codex can generate images during an `agent:` turn.
@@ -359,8 +396,9 @@ halftone:
 
 A turn ends the task only when the application says it finished
 (`end_turn`). A turn cut at the model's output limit (`max_tokens`) fails
-`NIKA-AGENT-006`. A refusal (`refusal`), the application's own limit of model
-requests for the turn (`max_turn_requests`), a cancelled turn (`cancelled`)
+`NIKA-AGENT-006`. A refusal (`refusal`), the limit of model requests for the
+turn (`max_turn_requests`: the task's `max_turns` on the `claude-code` seat,
+otherwise the application's own), a cancelled turn (`cancelled`)
 and a stop word Nika does not know fail `NIKA-INFER-001` with the reason
 named. A turn ends `cancelled` when the application called it off, on its own
 or after a refusal whose option ends the turn, or when it stopped on a request

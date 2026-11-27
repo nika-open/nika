@@ -282,7 +282,8 @@ pub(crate) fn carry_max_turns(
         refusal(
             "this session cannot carry the task's `max_turns`: its options hold no turn limit \
              (only a Claude Code agent session's do); no session was opened; drop `max_turns:` \
-             or run the task on the `claude-code` seat or an API or local model",
+             or run the task as an `agent:` on the `claude-code` seat, or on an API or local \
+             model",
         )
     })
 }

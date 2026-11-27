@@ -38,7 +38,8 @@ fn answering(name: &str) -> Value {
 /// The client's refusal of a declared turn limit no session option carries.
 const REFUSED: &str = "this session cannot carry the task's `max_turns`: its options hold no \
      turn limit (only a Claude Code agent session's do); no session was opened; drop \
-     `max_turns:` or run the task on the `claude-code` seat or an API or local model";
+     `max_turns:` or run the task as an `agent:` on the `claude-code` seat, or on an API or \
+     local model";
 
 /// A refusal's reason, `None` for any other error.
 fn refusal_reason(error: &HarnessError) -> Option<&str> {

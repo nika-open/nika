@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt as _;
 /// own server `olympus` (on until an override disables it), and each server an override mounts.
 /// `applies_route: false` is a codex whose route stays off whatever it is told. Each listing it
 /// answers is logged, one line, in `codex.js.calls` beside it.
-fn package(dir: &std::path::Path, applies_route: bool) -> String {
+pub(super) fn package(dir: &std::path::Path, applies_route: bool) -> String {
     let entry = dir.join("codex-acp/dist/index.js");
     std::fs::create_dir_all(entry.parent().expect("dist")).expect("dist");
     std::fs::write(&entry, "// the adapter's entry point").expect("entry");

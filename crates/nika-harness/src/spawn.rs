@@ -618,18 +618,71 @@ impl SpawnedHarness {
         Ok(self)
     }
 
+    /// Whether this row runs codex-acp, whatever session kind it serves and whatever id it was
+    /// declared under: the row is the Codex profile's, its program is named `codex-acp`, or a
+    /// name it declares its adapter reports is one a codex-acp release reports.
+    fn codex_seat(&self) -> bool {
+        use crate::authoring::acp::{Profile, codex};
+        Profile::for_seat(&self.adapter.id) == Some(Profile::Codex)
+            || codex::runs_codex_acp(&self.adapter.command)
+            || (self.adapter.identities.iter()).any(|name| codex::reports_as_codex_acp(name))
+    }
+
+    /// The Codex seat's project configuration ([`codex::project_config`]), judged on `cwd`
+    /// with the environment `env` the session's process is about to receive: a session whose
+    /// directory, or a parent up to the repository root, holds a `.codex` entry is refused with
+    /// the entry named, since codex-acp trusts the session's directory and Codex would apply
+    /// it. Another seat passes.
+    ///
+    /// [`codex::project_config`]: crate::authoring::acp::codex::project_config
+    fn project_preflight(
+        &self,
+        cwd: &std::path::Path,
+        env: &BTreeMap<String, String>,
+    ) -> Result<(), HarnessError> {
+        if !self.codex_seat() {
+            return Ok(());
+        }
+        crate::authoring::acp::codex::project_config(cwd, env)
+            .map_err(|reason| HarnessError::Refused { reason })
+    }
+
+    /// The environment a session's adapter starts with, from the parent environment `parent`:
+    /// the composed floor and passthrough ([`compose_env`]), then what every session of this
+    /// seat carries (on the Codex seat, prompt suggestions off:
+    /// [`codex::SUGGESTIONS_ENV`]), then the proven profile's `profile_env`.
+    ///
+    /// [`codex::SUGGESTIONS_ENV`]: crate::authoring::acp::codex::SUGGESTIONS_ENV
+    fn session_env(
+        &self,
+        parent: &BTreeMap<String, String>,
+        profile_env: &[(String, String)],
+    ) -> BTreeMap<String, String> {
+        let mut env = compose_env(parent, &self.adapter.passthrough_env);
+        if self.codex_seat() {
+            let (name, value) = crate::authoring::acp::codex::SUGGESTIONS_ENV;
+            env.insert(name.to_owned(), value.to_owned());
+        }
+        env.extend(profile_env.iter().cloned());
+        env
+    }
+
     /// Spawn the adapter child — piped stdio · composed env ·
     /// kill-on-drop (a harness never outlives the task that asked) ·
-    /// rooted at `cwd`, the session root (`session/new.cwd`).
+    /// rooted at `cwd`, the session root (`session/new.cwd`). Every session of every kind
+    /// starts here, so the Codex seat's project configuration is judged here, on the very
+    /// directory and environment the process receives, with nothing awaited in between
+    /// ([`Self::project_preflight`]).
     fn spawn_child(
         &self,
         cwd: &std::path::Path,
         group: bool,
         profile_env: &[(String, String)],
     ) -> Result<tokio::process::Child, HarnessError> {
-        self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
-        let env = compose_env(&parent, &self.adapter.passthrough_env);
+        let env = self.session_env(&parent, profile_env);
+        self.project_preflight(cwd, &env)?;
+        self.admit(&self.adapter.command)?;
         let mut cmd = tokio::process::Command::new(&self.adapter.command);
         // The process starts in the SAME root the wire names (NIK-266): an
         // adapter, or a tool it spawns, that resolves a path against its OS
@@ -639,7 +692,6 @@ impl SpawnedHarness {
         cmd.args(&self.adapter.args)
             .env_clear()
             .envs(&env)
-            .envs(profile_env.iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -829,6 +881,10 @@ impl SpawnedHarness {
     /// is killed before any `session/new` — an initialize answer is free of side effects by
     /// construction.
     async fn probe_handshake(&self) -> Result<Option<(u32, u32)>, HarnessError> {
+        // Not a session: the probe starts in Nika's own directory, sends `initialize` alone and
+        // ends the process, and codex-acp trusts a directory only at `session/new`. So the
+        // Codex seat's project configuration is not judged here; every session's spawn judges
+        // it (`spawn_child`), and a probe works the same from a configured project.
         self.admit(&self.adapter.command)?;
         let parent: BTreeMap<String, String> = std::env::vars().collect();
         let env = compose_env(&parent, &self.adapter.passthrough_env);
@@ -1695,6 +1751,11 @@ mod codex_profile_tests;
 #[cfg(test)]
 #[cfg(unix)]
 mod hosts_tests;
+
+/// The Codex seat's project configuration preflight and its sessions' environment.
+#[cfg(test)]
+#[cfg(unix)]
+mod codex_seat_tests;
 
 /// The probe deadline: unanswered is transient, unstartable is final.
 #[cfg(test)]

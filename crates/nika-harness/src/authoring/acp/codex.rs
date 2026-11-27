@@ -21,9 +21,11 @@
 //!
 //! The proof reads the layers the adapter's Codex home and this machine hold (the user's, the
 //! system's and the managed ones, which [`config_stamp`] also watches), listed from Nika's own
-//! working directory. A trusted project's own `.codex/config.toml` in the session's directory
-//! is neither read nor watched, so a server it defines is not among those the profile disables
-//! (NIK-418).
+//! working directory. A project's own `.codex` configuration belongs to a session's directory,
+//! not to the seat: the proof neither reads nor watches it. codex-acp trusts every session root,
+//! so Codex would apply it, and a session that would see one is refused right before its
+//! process would start ([`project_config`]), whatever the session's kind and wherever its
+//! directory lies, a scratch the engine created included.
 //!
 //! An MCP tool approval reaches the client only through Codex's MCP elicitation route
 //! ([`APPROVAL_FEATURE`]). With that feature off, Codex asks through `request_user_input`
@@ -55,6 +57,45 @@ pub(crate) const BEARER_ENV: &str = "NIKA_MCP_BEARER";
 /// which codex-acp turns into `session/request_permission` (codex 0.156.1
 /// `request_mcp_tool_user_approval`). It adds no tool: a conversation keeps it on.
 pub(crate) const APPROVAL_FEATURE: &str = "tool_call_mcp_elicitation";
+/// The variable and value that keep codex-acp from suggesting a next prompt. Read in the 2.12.0
+/// source (`PromptSuggestionGenerator.ts`): after each completed turn, for a client whose
+/// `initialize` declares the Air extension (Nika's agent and one-shot sessions do), the adapter
+/// samples one more model response on a fork of the session unless this variable reads
+/// `false`. 1.13.1 has no such sampling and does not read it. Every session of the seat
+/// carries it.
+pub(crate) const SUGGESTIONS_ENV: (&str, &str) = ("CODEX_ACP_PROMPT_SUGGESTIONS", "false");
+
+/// The names a codex-acp release reports as its `agentInfo.name` on `initialize` (the measured
+/// boundary row of the `codex` seat): the maintained package and the deprecated one.
+pub(crate) fn reports_as_codex_acp(name: &str) -> bool {
+    nika_types::access::HarnessBoundary::for_agent(name).is_some_and(|row| row.seat == "codex")
+}
+
+/// Whether the program `command` is codex-acp, by its file name (`codex-acp`, with or without
+/// an extension such as a Windows launcher's), wherever it lives.
+pub(crate) fn runs_codex_acp(command: &str) -> bool {
+    (Path::new(command).file_stem()).is_some_and(|stem| stem.eq_ignore_ascii_case("codex-acp"))
+}
+
+/// A `.codex` entry a session would see, named as found. `unread` is the reason an entry could
+/// not be looked at: it counts as present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Entry {
+    /// The entry: the `.codex` itself, or the `config.toml` a `.codex` directory holds.
+    pub(crate) path: PathBuf,
+    /// Why the entry could not be looked at, when it could not.
+    pub(crate) unread: Option<std::io::ErrorKind>,
+}
+
+impl Entry {
+    /// The entry as a refusal names it.
+    fn named(&self) -> String {
+        match self.unread {
+            None => format!("`{}`", self.path.display()),
+            Some(kind) => format!("`{}` (not readable here: {kind})", self.path.display()),
+        }
+    }
+}
 
 /// The configuration the adapter starts with, once `servers` (the MCP servers the user
 /// configuration defines) are known: every tool-bearing surface off.
@@ -280,10 +321,7 @@ pub(crate) fn config_stamp_in(
     system: &Path,
     preferences: Option<&Path>,
 ) -> ConfigStamp {
-    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
-    let home = set("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| set("HOME").map(|home| Path::new(home).join(".codex")));
+    let home = codex_home(env);
     let layers = layer_files(home.as_deref(), env, system, preferences)
         .into_iter()
         .map(|path| {
@@ -294,6 +332,127 @@ pub(crate) fn config_stamp_in(
         })
         .collect();
     ConfigStamp { home, layers }
+}
+
+/// The Codex home the adapter environment `env` resolves: `CODEX_HOME`, else `$HOME/.codex`.
+fn codex_home(env: &BTreeMap<String, String>) -> Option<PathBuf> {
+    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
+    set("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| set("HOME").map(|home| Path::new(home).join(".codex")))
+}
+
+/// The project configuration a Codex session rooted at `cwd` would see. codex-acp sets every
+/// session root trusted (`projects.<root>.trust_level`, over any `projects` key the client's
+/// configuration holds), and Codex applies the `.codex` configuration of a trusted project:
+/// the one in the session's directory and the one in each parent up to the repository root.
+/// `cwd` is judged as an absolute path without `.` components ([`project_config`] refuses one
+/// that holds `..`), so no directory is looked at twice.
+///
+/// The repository root is the first directory whose `.git` resolves (a directory, a linked
+/// worktree's file, or a link to either). A `.git` that does not resolve, such as a dangling
+/// link, does not end the walk: with no `.git` that resolves, the walk goes up to the outermost
+/// directory that holds any `.git` entry, and with none at all it looks at the directory alone.
+/// Each choice walks at least as far as Codex could.
+///
+/// Each `.codex` entry is named as found, never followed: a link counts, dangling or not, and a
+/// `.codex` directory that holds a `config.toml` is named by that file. A lookup that fails for
+/// another reason than an absent entry (a directory this process may not search) counts as an
+/// entry, named with that reason. The seat's own Codex home (`home`) is the user's
+/// configuration, which the seat applies on every session anyway: it is not counted, when the
+/// entry is the home as written, when an entry that is not a link sits where the home resolves
+/// to, or when the entry bears the home's name in the directory the home's parent resolves to.
+pub(crate) fn project_entries(cwd: &Path, home: Option<&Path>) -> Vec<Entry> {
+    // `absolute` drops `.` parts, and each ancestor is one component up: no directory twice.
+    let cwd = std::path::absolute(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    let chain: Vec<&Path> = cwd.ancestors().collect();
+    let git = |dir: &Path| dir.join(".git");
+    let reached = (chain
+        .iter()
+        .position(|dir| std::fs::metadata(git(dir)).is_ok()))
+    .or_else(|| (chain.iter()).rposition(|dir| std::fs::symlink_metadata(git(dir)).is_ok()))
+    .map_or(1, |root| root + 1);
+    (chain.into_iter().take(reached))
+        .filter_map(|dir| entry_in(dir, home))
+        .collect()
+}
+
+/// The `.codex` entry `dir` holds, as [`project_entries`] counts it.
+fn entry_in(dir: &Path, home: Option<&Path>) -> Option<Entry> {
+    use std::io::ErrorKind;
+    let entry = dir.join(".codex");
+    let found = match std::fs::symlink_metadata(&entry) {
+        Ok(found) => found,
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+            return None;
+        }
+        Err(e) => {
+            return Some(Entry {
+                path: entry,
+                unread: Some(e.kind()),
+            });
+        }
+    };
+    let link = found.file_type().is_symlink();
+    if home.is_some_and(|home| is_home(dir, &entry, link, home)) {
+        return None;
+    }
+    let config = entry.join("config.toml");
+    let path = if found.is_dir() && std::fs::symlink_metadata(&config).is_ok() {
+        config
+    } else {
+        entry
+    };
+    Some(Entry { path, unread: None })
+}
+
+/// Whether the entry `entry` of `dir` is the Codex home `home`: the same path as written; an
+/// entry that is not a link (`link`) at the path the home resolves to (a home that is a link
+/// into a checkout); or the same name in the directory `home`'s parent resolves to. An entry
+/// that is a link is never followed, so a `.codex` link that leads to the home still counts.
+fn is_home(dir: &Path, entry: &Path, link: bool, home: &Path) -> bool {
+    let resolved = |path: &Path| std::fs::canonicalize(path).ok();
+    home == entry
+        || (!link && resolved(home).is_some_and(|home| resolved(entry) == Some(home)))
+        || (home.file_name() == entry.file_name()
+            && (home.parent())
+                .and_then(resolved)
+                .is_some_and(|parent| resolved(dir) == Some(parent)))
+}
+
+/// [`project_entries`] for the adapter environment `env`, judged: a session that would see a
+/// project configuration does not open, and neither does one whose directory holds `..`,
+/// which the walk could not judge as Codex reads it. The Codex home is not counted only when
+/// the environment names it as an absolute path.
+///
+/// # Errors
+/// The entries the session would see, each named, and that Codex would apply them; or the
+/// directory holds `..`.
+pub(crate) fn project_config(cwd: &Path, env: &BTreeMap<String, String>) -> Result<(), String> {
+    let absolute = std::path::absolute(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    if (absolute.components()).any(|part| part == std::path::Component::ParentDir) {
+        return Err(format!(
+            "the session directory `{}` is named with `..`, so the project configuration Codex \
+             would apply to it cannot be judged; no session was opened; no fallback (name the \
+             directory without `..`; a temporary directory takes its name from `TMPDIR`)",
+            cwd.display()
+        ));
+    }
+    // A home that is not absolute names no directory of its own: it would resolve against the
+    // working directory, which is the project's for a task. Nothing is exempt for it.
+    let home = codex_home(env).filter(|home| home.is_absolute());
+    let found = project_entries(cwd, home.as_deref());
+    if found.is_empty() {
+        return Ok(());
+    }
+    let named: Vec<String> = found.iter().map(Entry::named).collect();
+    Err(format!(
+        "Codex would apply the project configuration {} to this session: codex-acp trusts the \
+         session's directory, and Codex reads the `.codex` entry of that directory and of each \
+         parent up to the repository root; no session was opened; no fallback (move the entry \
+         out of the project, or run the task from a directory that has none)",
+        named.join(" · ")
+    ))
 }
 
 /// The configuration layers that can add or enable an MCP server, besides the profile's own
@@ -315,7 +474,7 @@ pub(crate) fn config_stamp_in(
 /// one (<https://learn.chatgpt.com/docs/config-file/config-advanced#profiles>); cloud-managed
 /// defaults and requirements come from a signed cache whose place on disk the documentation
 /// does not give; a trusted project's `.codex/config.toml` belongs to a session's directory,
-/// not to the seat.
+/// not to the seat, and a session that would see one does not open ([`project_config`]).
 fn layer_files(
     home: Option<&Path>,
     env: &BTreeMap<String, String>,
@@ -393,3 +552,6 @@ fn resolve(command: &str, path: Option<&str>) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod project_tests;

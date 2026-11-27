@@ -361,6 +361,22 @@ impl PermissionResult {
     }
 }
 
+// ─── Session title (writer side · unstable in ACP v1) ───────────────
+
+/// `session/set_title`: the client names the session. Sent only to an agent whose
+/// `initialize` answer advertises `agentCapabilities.sessionCapabilities.title`.
+pub(crate) const METHOD_SET_SESSION_TITLE: &str = "session/set_title";
+
+/// `session/set_title` params: both strings required, the title not blank.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetSessionTitleParams {
+    /// The session to name.
+    pub(crate) session_id: String,
+    /// The title.
+    pub(crate) title: String,
+}
+
 // ─── Incoming payloads (reader side · lenient) ──────────────────────
 
 /// `initialize` result — only what we judge.

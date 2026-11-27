@@ -84,10 +84,10 @@ pub enum SessionBoundary {
     Carried {
         /// The row of the adapter's name.
         row: HarnessBoundary,
-        /// The release the adapter reported (`None`: it reported none, or an empty or blank
-        /// text), the adapter's own text, unfiltered: print it through
-        /// [`HarnessBoundary::carried_note`] or [`SessionBoundary::note`], which repeat it as
-        /// bounded printable ASCII.
+        /// The release the adapter reported, as its own text, unfiltered. A blank text is
+        /// recorded as `None`, like no release. Print it through
+        /// [`HarnessBoundary::carried_note`] or [`SessionBoundary::note`], which repeat it in
+        /// printable ASCII with no backtick, cut at 40 characters, the cut marked by `…`.
         reported: Option<String>,
     },
 }
@@ -273,8 +273,9 @@ impl HarnessBoundary {
 
     /// The sentence a carried session adds to every text that states what the harness does
     /// without asking: the release the row was measured on, and the one the session's
-    /// adapter reported (`None`, or an empty or blank text: it reported none), repeated as
-    /// printable ASCII with no backtick.
+    /// adapter reported (`None`, or an empty or blank text: it reported none), repeated in
+    /// printable ASCII with no backtick, cut at 40 characters, the cut marked by `…`
+    /// ([`super::shown_release`]).
     #[must_use]
     pub fn carried_note(&self, reported: Option<&str>) -> String {
         let session = match shown_release(reported) {

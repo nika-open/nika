@@ -14,6 +14,7 @@ use nika_kernel::ai::harness::{
     HarnessConfinement, HarnessError, HarnessEscalation, HarnessEvent, HarnessRequest,
     PermissionDecision,
 };
+use nika_types::access::HarnessBoundary;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
@@ -45,15 +46,39 @@ fn codex_modes(current: &str) -> Value {
                     mode("agent-full-access", "Full access", "full_access")]}])
 }
 
-/// Answer `initialize` as `agent_name` and `session/new` with `advertised`.
+/// The release a named adapter reports in these dialogues: the one its row was measured on,
+/// so each session below is a measured one unless it says otherwise.
+fn measured_release(name: &str) -> String {
+    HarnessBoundary::for_agent(name)
+        .and_then(|row| row.releases.first().map(ToString::to_string))
+        .unwrap_or_else(|| "1.0.0".to_owned())
+}
+
+/// Answer `initialize` as `agent_name` at its measured release and `session/new` with
+/// `advertised`.
 async fn handshake(
     reader: &mut AgentReader,
     writer: &mut AgentWriter,
     name: &str,
     advertised: Value,
 ) {
+    handshake_at(reader, writer, (name, &measured_release(name)), advertised).await;
+}
+
+/// Answer `initialize` as `name` at `version` and `session/new` with `advertised`.
+async fn handshake_at(
+    reader: &mut AgentReader,
+    writer: &mut AgentWriter,
+    (name, version): (&str, &str),
+    advertised: Value,
+) {
     let init = read(reader).await;
     assert_eq!(init["method"], "initialize");
+    assert_eq!(
+        init["params"]["clientInfo"],
+        json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")}),
+        "the client names itself and its release"
+    );
     let caps = &init["params"]["clientCapabilities"];
     assert!(
         caps.get("fs").is_none() && caps.get("terminal").is_none(),
@@ -67,7 +92,7 @@ async fn handshake(
     write(
         writer,
         &json!({"jsonrpc": "2.0", "id": init["id"], "result": {"protocolVersion": 1,
-            "agentInfo": {"name": name, "version": "1.13.1"}}}),
+            "agentInfo": {"name": name, "version": version}}}),
     )
     .await;
     let new = read(reader).await;
@@ -717,10 +742,22 @@ async fn asks_over(
     held: Value,
     asks: Vec<(Value, Option<Value>)>,
 ) -> (Vec<Seen>, Vec<Option<String>>) {
+    let release = measured_release(agent);
+    asks_over_at((agent, release), advertised, held, asks).await
+}
+
+/// [`asks_over`] with the adapter reporting `release`.
+async fn asks_over_at(
+    (agent, release): (&'static str, String),
+    advertised: Value,
+    held: Value,
+    asks: Vec<(Value, Option<Value>)>,
+) -> (Vec<Seen>, Vec<Option<String>>) {
     let (heard_tx, heard_rx) = tokio::sync::oneshot::channel();
     let seen = asks_seen(request(HarnessConfinement::ReadOnly), |mut r, mut w| {
         tokio::spawn(async move {
-            handshake(&mut r, &mut w, agent, json!({"configOptions": advertised})).await;
+            let advertised = json!({"configOptions": advertised});
+            handshake_at(&mut r, &mut w, (agent, &release), advertised).await;
             let set = read(&mut r).await;
             assert_eq!(set["method"], "session/set_config_option");
             let held = json!({"jsonrpc": "2.0", "id": set["id"],
@@ -897,5 +934,120 @@ async fn a_held_model_is_selected_before_the_mode_and_must_hold_until_the_prompt
             "{reason}"
         );
         assert!(confined(&events).is_empty(), "no confinement is claimed");
+    }
+}
+
+/// One confined session whose peer answers as `agent` at `release`, starts in `start`,
+/// confirms the selected mode with `held` and ends the turn: the mode the client asked for and
+/// what the session published.
+async fn confined_at(
+    agent: (&'static str, &'static str),
+    confinement: HarnessConfinement,
+    (start, held): (Value, Value),
+) -> (Value, Vec<(Option<String>, bool, String)>) {
+    let (asked_tx, asked_rx) = tokio::sync::oneshot::channel();
+    let (events, error) = drain(request(confinement), move |mut r, mut w| {
+        tokio::spawn(async move {
+            handshake_at(&mut r, &mut w, agent, json!({"configOptions": start})).await;
+            let set = read(&mut r).await;
+            assert_eq!(set["method"], "session/set_config_option", "{agent:?}");
+            write(
+                &mut w,
+                &json!({"jsonrpc": "2.0", "id": set["id"], "result": {"configOptions": held}}),
+            )
+            .await;
+            let prompt = read(&mut r).await;
+            assert_eq!(prompt["method"], "session/prompt", "{agent:?}");
+            end_turn(&mut w, &prompt).await;
+            let _ = asked_tx.send(set["params"].clone());
+        })
+    })
+    .await;
+    assert!(error.is_none(), "{agent:?}: {error:?}");
+    let asked = asked_rx.await.expect("the peer reports the selection");
+    (asked, confined(&events))
+}
+
+/// On its measured release a session publishes its row's text byte for byte. On another
+/// release of the same adapter (a later one, an earlier one, one that does not parse) the same
+/// mode is still selected and read back, and the published text is the row's followed by one
+/// sentence naming the release measured and the one the session runs.
+#[tokio::test]
+async fn a_carried_release_keeps_the_rule_and_names_both_releases() {
+    let claude = "@agentclientprotocol/claude-agent-acp";
+    let codex = "@agentclientprotocol/codex-acp";
+    let claude_modes = (claude_mode_option("auto"), claude_mode_option("default"));
+    let codex_modes = (codex_modes("agent"), codex_modes("read-only"));
+    let cases = [
+        ((claude, "0.81.1"), claude_modes.clone(), "default", None),
+        (
+            (claude, "0.112.0"),
+            claude_modes.clone(),
+            "default",
+            Some("0.112.0"),
+        ),
+        ((claude, "next"), claude_modes, "default", Some("next")),
+        ((codex, "1.13.1"), codex_modes.clone(), "read-only", None),
+        ((codex, "1.12.0"), codex_modes, "read-only", Some("1.12.0")),
+    ];
+    for (agent, modes, mode, carried) in cases {
+        for confinement in [
+            HarnessConfinement::ReadOnly,
+            HarnessConfinement::WorkspaceWrite,
+        ] {
+            let (asked, seen) = confined_at(agent, confinement, modes.clone()).await;
+            assert_eq!(
+                asked,
+                json!({"sessionId": "s-confine", "configId": "mode", "value": mode}),
+                "{agent:?}: the row's asking mode is selected"
+            );
+            let row = HarnessBoundary::for_agent(agent.0).expect("a measured row");
+            let writes = confinement == HarnessConfinement::WorkspaceWrite;
+            let text = match carried {
+                None => row.unasked(writes),
+                Some(release) => {
+                    let note = format!(
+                        "What the harness does without asking was measured on {}; this session \
+                         runs release `{release}` of that adapter, on which it was not measured.",
+                        row.measured_on
+                    );
+                    format!("{} {note}", row.unasked(writes))
+                }
+            };
+            assert_eq!(
+                seen,
+                [(Some(mode.to_owned()), true, text)],
+                "{agent:?} {confinement:?}"
+            );
+        }
+    }
+}
+
+/// A carried Codex session keeps the stricter reading of its row: in `read-only`, a command
+/// it asks about still asks to leave its sandbox and rides as an escalation.
+#[tokio::test]
+async fn a_carried_codex_release_still_reads_a_command_ask_as_leaving_its_sandbox() {
+    let escalated = json!({"toolCallId": "c1", "kind": "execute", "status": "pending",
+        "title": "Run command",
+        "rawInput": {"command": "curl -sS https://example.com", "cwd": "/work/project"}});
+    for release in ["1.12.0", "1.13.1-rc.1"] {
+        let (seen, heard) = asks_over_at(
+            ("@agentclientprotocol/codex-acp", release.to_owned()),
+            codex_modes("agent"),
+            codex_modes("read-only"),
+            vec![(escalated.clone(), None)],
+        )
+        .await;
+        assert_eq!(
+            seen,
+            [(
+                "Run command: curl -sS https://example.com".to_owned(),
+                Some(
+                    HarnessEscalation::new().with_escalated_command("curl -sS https://example.com")
+                )
+            )],
+            "{release}"
+        );
+        assert_eq!(heard, [Some("cancelled".to_owned())], "{release}");
     }
 }

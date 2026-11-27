@@ -1242,8 +1242,8 @@ mod tests {
 
     /// An adapter release outside its pin is refused at the handshake with the range once and,
     /// on a seat with a measured boundary, the maintained package and the release to install;
-    /// a seat without one keeps the refusal it had. A release inside the pin that its row was not measured on is
-    /// admitted (it is carried, not refused).
+    /// a seat without one keeps the refusal it had. A release inside the pin that its row was
+    /// not measured on is admitted (it is carried, not refused).
     #[test]
     fn a_handshake_outside_the_pin_names_the_range_and_the_measured_release() {
         let registry = crate::registry::registry_with(&|_| None).expect("the static table");

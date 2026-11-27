@@ -407,6 +407,36 @@ async fn a_release_or_an_adapter_that_is_not_measured_reports_the_tier_unobserve
     }
 }
 
+/// The reason repeats the reported release as the carried note does: a backtick
+/// reads `?`, so the release cannot close its code span, and a blank release is
+/// no release.
+#[tokio::test]
+async fn the_unobserved_tier_reason_repeats_the_release_as_the_note_does() {
+    for (version, answers_as) in [("1.13.1` x", "release `1.13.1? x`"), (" \t", "no release")] {
+        let (offer, _) = offer_from(
+            None,
+            Some(json!({"name":CODEX_ACP,"version":version})),
+            new_session(&codex("gpt-5.4", "low", &["low", "medium"], Some("off"))),
+            Vec::new(),
+        )
+        .await;
+        let offer = offer.expect("an offer");
+        let ServiceTierOffer::Unobserved { reason } = &offer.service_tier else {
+            panic!(
+                "an unmeasured speed option must not be reported: {:?}",
+                offer.service_tier
+            )
+        };
+        assert_eq!(
+            reason,
+            &format!(
+                "the speed control of `{CODEX_ACP}` is measured on codex-acp 1.13.1 and this \
+                 session answers as {answers_as}"
+            )
+        );
+    }
+}
+
 /// On the measured adapter, a model without the speed option is `NotOffered`;
 /// the id under another category or advertised twice is not the measured
 /// control; an option that lists one native value offers one word.

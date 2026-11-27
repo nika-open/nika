@@ -215,7 +215,10 @@ where
                     "the speed control of `{agent}` is measured on {} and this session answers \
                      as {}",
                     binding.measured_on,
-                    release.map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
+                    // Repeated as the carried note repeats it: bounded, no backtick, blank as
+                    // none.
+                    nika_types::access::shown_release(release)
+                        .map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
                 ),
             };
         }

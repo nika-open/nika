@@ -315,7 +315,10 @@ async fn a_selection_the_session_does_not_confirm_leaves_the_rest_unobserved() {
 }
 
 /// A model only the legacy list names: selecting it there answers no
-/// configuration, so nothing is selected and nothing dependent is read.
+/// configuration, so nothing is selected and nothing dependent is read. On
+/// an adapter that selects models through the option only (codex-acp, at any
+/// release), a run never selects through that list, so the offer says the
+/// model is not offered and lists the option's choices alone.
 #[tokio::test]
 async fn a_model_only_the_legacy_list_names_is_reported_without_a_selection() {
     let session = json!({
@@ -325,27 +328,44 @@ async fn a_model_only_the_legacy_list_names_is_reported_without_a_selection() {
             {"modelId":"gpt-5.4","name":"gpt-5.4"},
             {"modelId":"gpt-6-astra[high]","name":"gpt-6-astra[high]"}]}
     });
-    let (offer, seen) = offer_from(
-        Some("openai/gpt-6-astra[high]"),
-        Some(measured()),
-        session,
-        Vec::new(),
-    )
-    .await;
-    let offer = offer.expect("an offer");
-    assert_eq!(seen, ["initialize", "session/new"]);
-    assert_eq!(
-        offer.model,
-        ModelOffer::LegacyList {
-            native: "gpt-6-astra[high]".to_owned()
-        }
-    );
-    assert_eq!(
-        offer.models,
-        ["gpt-5.4", "gpt-5.5", "gpt-5.4", "gpt-6-astra[high]"],
-        "the option's choices, then the legacy list's ids"
-    );
-    assert!(matches!(offer.effort, EffortOffer::Unobserved { .. }));
+    let other = json!({"name":"OpenCode","version":"1.18.15"});
+    let carried = json!({"name":CODEX_ACP,"version":"2.12.0"});
+    let cases = [
+        (
+            Some(other),
+            ModelOffer::LegacyList {
+                native: "gpt-6-astra[high]".to_owned(),
+            },
+            &["gpt-5.4", "gpt-5.5", "gpt-5.4", "gpt-6-astra[high]"][..],
+        ),
+        (
+            Some(measured()),
+            ModelOffer::NotOffered,
+            &["gpt-5.4", "gpt-5.5"][..],
+        ),
+        (
+            Some(carried),
+            ModelOffer::NotOffered,
+            &["gpt-5.4", "gpt-5.5"][..],
+        ),
+    ];
+    for (agent, model, listed) in cases {
+        let (offer, seen) = offer_from(
+            Some("openai/gpt-6-astra[high]"),
+            agent.clone(),
+            session.clone(),
+            Vec::new(),
+        )
+        .await;
+        let offer = offer.expect("an offer");
+        assert_eq!(seen, ["initialize", "session/new"], "{agent:?}");
+        assert_eq!(offer.model, model, "{agent:?}");
+        assert_eq!(
+            offer.models, listed,
+            "the option's choices, then a usable legacy list's ids: {agent:?}"
+        );
+        assert!(matches!(offer.effort, EffortOffer::Unobserved { .. }));
+    }
 }
 
 /// The speed control is measured for one adapter at one release: another

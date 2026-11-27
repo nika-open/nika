@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 SuperNovae Studio <contact@supernovae.studio>
 //! Pure ACP model and mode projections; existing selectors moved without changing behavior.
+use nika_kernel::ai::harness::HarnessError;
 use serde_json::Value;
 
 /// The `category: "model"` config option, when advertised.
@@ -103,6 +104,20 @@ pub(super) fn offered_option(option: Option<&Value>, wanted: &str) -> Option<(St
     Some((id, choice.get("value")?.clone()))
 }
 
+/// The legacy model list a requested model may be selected from: the session's own, except
+/// on an adapter whose measured row selects models through the model option only
+/// (`HarnessBoundary::models_through_option`, on any release of it), where a model the option
+/// does not offer is not offered at all.
+pub(super) fn legacy_list<'s>(
+    agent_name: Option<&str>,
+    models: Option<&'s Value>,
+) -> Option<&'s Value> {
+    let option_only = agent_name
+        .and_then(nika_types::access::HarnessBoundary::for_agent)
+        .is_some_and(|row| row.models_through_option);
+    if option_only { None } else { models }
+}
+
 /// The legacy list's `modelId` that names the wanted model, by id or by display name.
 pub(super) fn offered_model(models: Option<&Value>, wanted: &str) -> Option<String> {
     choose(
@@ -138,6 +153,30 @@ pub(super) fn offered_names(option: Option<&Value>, models: Option<&Value>) -> S
         "(it advertises no model choice; `default` is its own)".to_owned()
     } else {
         names.join(" · ")
+    }
+}
+
+/// The refusal of a requested model that neither the model option nor a usable legacy list
+/// (`legacy`, from [`legacy_list`]) names, before any prompt. `listed`: the session sent a
+/// legacy list, which the refusal says was not used when `legacy` set it aside.
+pub(super) fn no_such_model(
+    wanted: &str,
+    option: Option<&Value>,
+    legacy: Option<&Value>,
+    listed: bool,
+) -> HarnessError {
+    let unused = if listed && legacy.is_none() {
+        "; this adapter selects a model only through its session model option, so its legacy \
+         model list is not used"
+    } else {
+        ""
+    };
+    HarnessError::Selection {
+        reason: format!(
+            "the harness offers no model `{wanted}` — it offers: {} (name one of these on \
+             `model:`, or `default` for the harness's own choice){unused}",
+            offered_names(option, legacy)
+        ),
     }
 }
 

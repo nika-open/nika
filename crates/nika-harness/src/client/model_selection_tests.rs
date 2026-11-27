@@ -611,3 +611,148 @@ async fn no_hold_is_sent_when_only_the_legacy_model_list_states_a_model() {
     assert_eq!(outcome.selection.model_option, None);
     assert!(!outcome.selection.held_model);
 }
+
+/// [`offer`] with the adapter naming itself `agent` at `version` on `initialize`.
+async fn offer_at(
+    peer: &mut PeerReader,
+    writer: &mut PeerWriter,
+    (agent, version): (&str, &str),
+    mut choices: Value,
+) {
+    let initialize = read(peer).await.expect("initialize");
+    assert_eq!(initialize["method"], "initialize");
+    let info = serde_json::json!({"name":agent,"version":version});
+    reply(
+        writer,
+        &initialize,
+        serde_json::json!({"protocolVersion":1,"agentInfo":info}),
+    )
+    .await;
+    let session = read(peer).await.expect("session/new");
+    assert_eq!(session["method"], "session/new");
+    choices["sessionId"] = Value::String("model-choice".to_owned());
+    reply(writer, &session, choices).await;
+}
+
+/// The two measured seats select a model through their model option only, on the measured
+/// release and on a carried one: a session that names the requested model only in a legacy
+/// model list (with no model option, or with one that does not list it) refuses before the
+/// prompt with the selection error, and no `session/set_model` is written.
+#[tokio::test]
+async fn a_named_model_on_an_option_only_seat_never_falls_back_to_set_model() {
+    let codex = nika_types::access::HarnessBoundary::CODEX_ACP.agents[0];
+    let legacy_only = serde_json::json!({"models":{"currentModelId":"haiku","availableModels":[
+        {"modelId":"haiku","name":"Haiku"},{"modelId":"opus","name":"Opus"}]}});
+    let beside_an_option = advertised("haiku", &["haiku", "opus"]);
+    let nothing = "it offers: (it advertises no model choice; `default` is its own) (name";
+    let option_alone = "it offers: haiku (name";
+    let cases = [
+        (
+            (CLAUDE, "0.81.1"),
+            legacy_only.clone(),
+            "anthropic/opus",
+            nothing,
+        ),
+        (
+            (CLAUDE, "0.112.0"),
+            legacy_only.clone(),
+            "anthropic/opus",
+            nothing,
+        ),
+        (
+            (codex, "1.13.1"),
+            legacy_only.clone(),
+            "openai/opus",
+            nothing,
+        ),
+        ((codex, "1.12.0"), legacy_only, "openai/opus", nothing),
+        (
+            (codex, "1.13.1"),
+            beside_an_option.clone(),
+            "openai/opus",
+            option_alone,
+        ),
+        (
+            (CLAUDE, "0.81.1"),
+            beside_an_option,
+            "anthropic/opus",
+            option_alone,
+        ),
+    ];
+    for (agent, choices, model, offers) in cases {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(ours);
+        let (peer_read, mut peer_write) = tokio::io::split(theirs);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(peer_read);
+            offer_at(&mut reader, &mut peer_write, agent, choices).await;
+            let next = read(&mut reader).await;
+            assert!(
+                next.is_none(),
+                "no set_model and no prompt on {agent:?}: {next:?}"
+            );
+        });
+        let error = result(drive(
+            client_read,
+            client_write,
+            HarnessRequest::new("hello", "/tmp").with_requested_model(model.to_owned()),
+        ))
+        .await
+        .expect_err("an unoffered model refuses");
+        peer.await.expect("scripted peer sees EOF");
+        match error {
+            HarnessError::Selection { reason } => {
+                assert!(reason.contains("offers no model `opus`"), "{reason}");
+                assert!(
+                    reason.contains(offers),
+                    "the legacy ids are not offered: {reason}"
+                );
+                assert!(
+                    reason.ends_with("so its legacy model list is not used"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected a selection refusal on {agent:?}, got {other}"),
+        }
+    }
+}
+
+/// Another seat keeps the legacy fallback: a row whose model selection was not measured
+/// (gemini-cli) and an adapter with no row select a model the legacy list names through
+/// `session/set_model`, recorded as an accepted request.
+#[tokio::test]
+async fn another_seat_keeps_the_legacy_model_fallback() {
+    for agent in [("gemini-cli", "0.62.0"), ("OpenCode", "1.18.15")] {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(ours);
+        let (peer_read, mut peer_write) = tokio::io::split(theirs);
+        let peer = tokio::spawn(async move {
+            let mut reader = BufReader::new(peer_read);
+            let legacy = serde_json::json!({"models":{"currentModelId":"flash","availableModels":[
+                {"modelId":"flash","name":"Flash"},{"modelId":"pro","name":"Pro"}]}});
+            offer_at(&mut reader, &mut peer_write, agent, legacy).await;
+            let select = read(&mut reader).await.expect("the legacy selection");
+            assert_eq!(select["method"], "session/set_model", "{agent:?}");
+            assert_eq!(select["params"]["modelId"], "pro");
+            reply(&mut peer_write, &select, serde_json::json!({})).await;
+            end(&mut reader, &mut peer_write).await;
+        });
+        let outcome = result(drive(
+            client_read,
+            client_write,
+            HarnessRequest::new("hello", "/tmp").with_requested_model("google/pro".to_owned()),
+        ))
+        .await
+        .expect("the legacy list's model is selected");
+        peer.await.expect("scripted peer");
+        assert_eq!(outcome.observed_model.as_deref(), Some("pro"), "{agent:?}");
+        assert_eq!(
+            outcome.observed_model_source,
+            Some(ModelProvenance::AcceptedRequest)
+        );
+        assert_eq!(
+            outcome.selection.model_option.as_deref(),
+            Some("session/set_model")
+        );
+    }
+}

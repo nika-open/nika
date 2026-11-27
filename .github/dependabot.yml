@@ -1,4 +1,5 @@
-# Dependabot · weekly freshness for the two ecosystems that feed the build.
+# Dependabot · weekly freshness for the two ecosystems that feed the build,
+# and for the media scripts' npm lockfiles, which ship in no binary.
 # Security-update toggles are repo settings (operator switch); this file
 # drives version updates + the Scorecard Dependency-Update-Tool check.
 version: 2
@@ -24,5 +25,24 @@ updates:
     # proven on nika-spec 2026-07-19, first ungrouped wave).
     groups:
       github-actions:
+        patterns:
+          - "*"
+  # The media pipeline (scripts/media, and each motion scene under
+  # scripts/media/motion) is a set of private npm projects: they render the
+  # motion scenes and reach no release artifact. Their lockfiles still raise
+  # alerts, and no version update watched them. In scripts/media, `next` is
+  # only a peer of `geist`, pinned by `overrides` in its package.json: if an
+  # update cannot move that override, bump it by hand and regenerate the
+  # lockfile (`npm install --package-lock-only --ignore-scripts`).
+  - package-ecosystem: npm
+    directories:
+      - "/scripts/media"
+      - "/scripts/media/motion/*"
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 3
+    groups:
+      media-npm:
         patterns:
           - "*"

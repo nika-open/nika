@@ -39,15 +39,9 @@
 
           src = self;
           cargoLock = {
+            # Every dependency comes from crates.io, so there is no git
+            # source to vendor against a fixed-output hash.
             lockFile = ./Cargo.lock;
-            # The one git dependency (`[patch.crates-io]` in Cargo.toml): the
-            # nika-open fork of dom_smoothie carrying the deterministic
-            # candidate-order fix until upstream releases it. Nix vendors a git
-            # source only against its fixed-output hash (the NAR hash of the
-            # checkout at the pinned rev, no .git).
-            outputHashes = {
-              "dom_smoothie-0.18.0" = "sha256-hjBKBzLvwkwuaSTb2y9XHCMhFgS/nhwG4eH/8XTKHvY=";
-            };
           };
 
           # The operator-surface crate only — its dep tree is pure Rust

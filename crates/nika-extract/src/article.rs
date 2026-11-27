@@ -368,14 +368,15 @@ mod tests {
     /// map's per-process iteration order: the same page yielded two
     /// different articles from one process to the next (WCXB dev 0545 ·
     /// 40 runs → 30/10 through the public 0.118.7 door · dev 0847 three
-    /// variants). The pinned `dom_smoothie` rev keeps candidates in their
+    /// variants). `dom_smoothie` 0.18.1 and later keep candidates in their
     /// first-scored order (readability.js parity), so two equal-score
     /// candidates settle on the FIRST one in document order, in every
     /// process. Two blocks of identical shape under different parents
     /// (plain `<div>` wrappers, which readability never scores on their
     /// own, each beside a heading so the only-child climb never lifts the
-    /// candidate): only the first may own the article. Without the pin
-    /// this assertion is a coin flip; with it, it holds in every process.
+    /// candidate): only the first may own the article. On 0.18.0 this
+    /// assertion is a coin flip; from 0.18.1 it holds in every process,
+    /// which is why the workspace requires at least that release.
     #[test]
     fn stage2_equal_score_candidates_settle_on_the_first_in_document_order() {
         let block = |marker: &str| {
@@ -405,6 +406,44 @@ mod tests {
         assert!(
             !md.contains("OMEGABLOCK"),
             "the equal-score second block never displaces the first: {md}"
+        );
+    }
+
+    /// `dom_smoothie` 0.18.2 — `loading="lazy"` is a rendering hint, not a
+    /// placeholder: an image that carries it, no `lazy` class, AND a `src`
+    /// (or `srcset`) that is neither empty nor a `data:` URL keeps that
+    /// address through readability. Up to 0.18.1 readability copied any other
+    /// attribute that looked like an image address (`data-src` here) into its
+    /// `src` or `srcset`, so a page that reached this stage could name
+    /// another URL than the rule stage does for the same markup
+    /// (`html::tests::lazy_img_real_src_wins_over_data_src`). An image whose
+    /// class contains `lazy` is still rewritten that way. The lockfile holds
+    /// the release; this pins the behaviour it brings.
+    #[test]
+    fn stage2_lazy_loading_image_keeps_its_working_src() {
+        let sentence = "words that carry a comma, a second comma, and enough running text \
+                        to clear every threshold readability applies before it scores";
+        let body = format!(
+            "<html><head><title>t</title></head><body><div><h2>One</h2><div>\
+             <p>{sentence} {sentence}.</p>\
+             <p><img loading=\"lazy\" src=\"https://example.com/shown.jpg\" \
+             data-src=\"https://example.com/other.jpg\" alt=\"figure\"></p>\
+             <p>{sentence} {sentence}.</p></div></div></body></html>"
+        );
+        let out = readability(
+            &body,
+            Some("https://example.com/"),
+            crate::page_type::PageType::Generic,
+        )
+        .expect("readability extracts");
+        let md = out.as_str().expect("readability returns a Markdown string");
+        assert!(
+            md.contains("![figure](https://example.com/shown.jpg)"),
+            "the image keeps the address it already shows: {md}"
+        );
+        assert!(
+            !md.contains("other.jpg"),
+            "no other attribute replaces a working src: {md}"
         );
     }
 

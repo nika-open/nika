@@ -656,8 +656,9 @@ dependencies = [
 
 [[package]]
 name = "dom_smoothie"
-version = "0.18.0"
-source = "git+https://github.com/nika-open/dom_smoothie?rev=fd6db004615af3c14d20f90bfb43ca514db4e57d#fd6db004615af3c14d20f90bfb43ca514db4e57d"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1afbed996f0bcb119c068504c7c504d625700d58c8bd862d6f66abd7ae7d3859"
 dependencies = [
  "dom_query",
  "flagset",

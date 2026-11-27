@@ -348,3 +348,109 @@ fn a_saved_seat_image_chained_into_image_fx_checks_clean() {
         escaped.report.findings
     );
 }
+
+/// An `agent:` task `fix` on `via` over ACP, its body extended by `body`.
+fn seat_agent(via: &str, model: &str, body: &str) -> String {
+    format!(
+        "nika: seat-limits\nmodel: {model}\nrun:\n  access:\n    via: {via}\n    protocol: acp\n\
+         permits:\n  tools: [\"nika:read\"]\ntasks:\n  fix:\n    agent:\n      prompt: \"go\"\n{body}"
+    )
+}
+
+/// The `tools:` line keeps its exact words: one field, one reason, one remedy.
+#[test]
+fn a_whitelist_on_a_seat_keeps_its_exact_line() {
+    let judged = audit(&seat_agent(
+        "codex",
+        "openai/gpt-6-luna",
+        "      tools: [\"nika:read\"]\n",
+    ));
+    assert_eq!(
+        seat_blockers(&judged),
+        [
+            "seat · `fix` is an agent: on `codex`, which runs its own tools: a `tools:` whitelist \
+             cannot be enforced there and the run refuses it (NIKA-465) — drop `tools:` or run \
+             the task on an API or local model"
+        ]
+    );
+}
+
+/// What the run refuses before anything is sent blocks RUN READY in the same words: a turn
+/// limit on a seat that takes none (Codex's, an unmeasured seat's), a temperature on any seat,
+/// all of a task's fields on one line, whose remedy meets no second refusal.
+#[cfg(feature = "access-harness")]
+#[test]
+fn a_limit_the_seat_cannot_apply_blocks_one_line_per_task() {
+    let turns = |seat: &str| {
+        format!(
+            "seat · `fix` is an agent: on `{seat}`, which takes no turn limit from Nika: \
+             `max_turns` cannot be enforced there and the run refuses it (NIKA-465) — drop \
+             `max_turns:` or run the task on the `claude-code` seat or an API or local model"
+        )
+    };
+    let temperature = |seat: &str| {
+        format!(
+            "seat · `fix` is an agent: on `{seat}`, which takes no temperature from Nika: \
+             `temperature` cannot be enforced there and the run refuses it (NIKA-465) — drop \
+             `temperature:` or run the task on an API or local model"
+        )
+    };
+    let all = "seat · `fix` is an agent: on `codex`, which runs its own tools and takes no turn \
+               limit or temperature from Nika: a `tools:` whitelist · `max_turns` · \
+               `temperature` cannot be enforced there and the run refuses it (NIKA-465) — drop \
+               `tools:` · `max_turns:` · `temperature:` or run the task on an API or local model";
+    let (claude, gpt) = ("anthropic/claude-opus-5-5", "openai/gpt-6-luna");
+    for (via, model, body, expected) in [
+        ("codex", gpt, "      max_turns: 6\n", turns("codex")),
+        ("kimi-code", gpt, "      max_turns: 6\n", turns("kimi-code")),
+        (
+            "claude-code",
+            claude,
+            "      temperature: 0.3\n",
+            temperature("claude-code"),
+        ),
+        (
+            "codex",
+            gpt,
+            "      temperature: 0.3\n",
+            temperature("codex"),
+        ),
+        (
+            "claude-code",
+            claude,
+            "      max_turns: 7\n      temperature: 0.3\n",
+            temperature("claude-code"),
+        ),
+        (
+            "codex",
+            gpt,
+            "      tools: [\"nika:read\"]\n      max_turns: 6\n      temperature: 0.3\n",
+            all.to_owned(),
+        ),
+    ] {
+        let judged = audit(&seat_agent(via, model, body));
+        assert_eq!(seat_blockers(&judged), [expected.as_str()], "{via}: {body}");
+        assert_eq!(
+            judged.verdict.layers.run_ready(),
+            Some(false),
+            "{via}: {body}"
+        );
+    }
+}
+
+/// The Claude Code seat applies a declared turn limit: no seat line, the task seated.
+#[cfg(feature = "access-harness")]
+#[test]
+fn a_turn_limit_on_the_claude_code_seat_blocks_nothing() {
+    let judged = audit(&seat_agent(
+        "claude-code",
+        "anthropic/claude-opus-5-5",
+        "      max_turns: 7\n",
+    ));
+    assert!(
+        seat_blockers(&judged).is_empty(),
+        "{:?}",
+        judged.verdict.layers.blockers
+    );
+    assert!(judged.verdict.seated.contains("fix"));
+}

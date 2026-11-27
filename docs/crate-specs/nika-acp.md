@@ -220,7 +220,12 @@ or `current_mode_update` away from the held mode ends the session. The table is
 **1bis · A Claude Code agent session loads only what Nika hands it**
 (`nika_harness::authoring::acp::agent_meta`). `session/new` carries, in
 `_meta.claudeCode.options`, the surface the one-shot and conversation profiles already send,
-without the keys that close an agent's own loop:
+without the keys that close an agent's own loop and with two environment switches of its
+own. The options follow the registry row (`claude-code`) and, for a row declared under
+another id, the adapter that answers `initialize` as claude-agent-acp, the name the boundary
+row is found by: the session a `permit_checked` row describes is the one that was opened.
+
+The options:
 
 | Option | Value | What it leaves out |
 |---|---|---|
@@ -243,13 +248,20 @@ into Claude Code and the global `~/.claude.json` are read regardless, Claude Cod
 session's transcript, and the adapter's own settings reader still takes four values from the
 settings files: `permissions.defaultMode` (replaced by the held `default`), `model`, the
 model list and the default effort. The CLI no longer reads `model`, and the adapter does not
-send it a model it believes the CLI already read. So when the task names no model, the
-client selects the model the session reports through its model option
+send it a model it believes the CLI already read. So when the task names no model (or names
+`default`), the client selects the model the session reports through its model option
 (`session/set_config_option`) and reads it back before the prompt: the recorded model is the
-one the session runs. A session that does not confirm it is refused before the prompt. The
-task asked for no model, so a model the agent moves during the turn stays a recorded fact,
-where a move of a model the task named refuses the answer. The three profiles are built from
-one function, so their shared keys cannot drift.
+one the session starts on. A session that does not confirm it is refused before the prompt,
+one that rejects the selection fails there with the adapter's error, and a later answer of
+the session's setup (effort, service tier, mode) that reports another model is refused
+before the prompt too. The task asked for no model, so a model the agent moves during the
+turn stays a recorded fact, where a move of a model the task named refuses the answer under
+`fallback: none`. The hold rides every session this client opens on the adapter that names
+itself claude-agent-acp: an `agent:` task, an `infer:` or authoring one-shot, the compile
+seat. A conversation does not record the adapter's name and holds nothing; a model option
+that states no current value, and a session that states its model only through the legacy
+model list, get no request. The three profiles are built from one function, so their shared
+keys cannot drift.
 
 **2 · Every permission ask, judged against `permits:`** (`nika_cap::judge_harness_ask`):
 

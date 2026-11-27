@@ -147,11 +147,14 @@ Three things stay outside Nika's reach on this seat:
   session starts in (Nika replaces it with `default`), the model of a task
   that names none, the models it offers and its default effort.
 
-A task that names no model runs on the one your Claude settings name, or on
-Claude Code's default when they name none. Nika selects that model itself
-before the prompt and reads it back, so the trace records the model the
-session ran on. A session that does not keep that model is refused before
-any prompt is sent. Name a model on the task to choose it in the workflow.
+A task that names no model (or names `default`) runs on the one your Claude
+settings name, or on Claude Code's default when they name none. Nika selects
+that model itself before the prompt and reads it back, so the trace records
+the model the session started on. A session that rejects that selection, or
+does not keep the model until the prompt, ends before any prompt is sent. A
+model the session moves to afterwards, during the turn, is recorded and
+never refused: only a model the task names refuses the answer, under
+`fallback: none`. Name a model on the task to choose it in the workflow.
 
 A sign-in, a cloud provider switch, a proxy or a certificate bundle that
 exists only in one of those settings files (an `apiKeyHelper`, or `env`
@@ -159,9 +162,12 @@ entries) is among what the session no longer loads. Sign in to Claude Code
 itself, which keeps that sign-in outside those files. For a proxy or a
 certificate bundle, set `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` or
 `NODE_EXTRA_CA_CERTS` in the environment Nika runs in: Nika hands those four
-to the Claude Code seat (the three proxy names in lower case too). It hands
-over nothing else: no credential, and no cloud provider switch, so the seat
-runs on Claude Code's own sign-in.
+to the Claude Code seat (the three proxy names in lower case too), beside
+`CLAUDE_CONFIG_DIR` and the few names every seat's process receives (`HOME`,
+`PATH` and the like). It hands over no name shaped like a credential and no
+cloud provider switch, so the seat runs on Claude Code's own sign-in. A
+proxy address that carries a user and a password is handed over as you
+wrote it.
 
 If a task must not write anything, or must not read outside the project, do
 not rely on `permits:` alone on a harness seat: run it on an API or local model
@@ -247,11 +253,12 @@ application sent them. The model Claude reports having answered with is the
 task's `model_reported` (source `adapter_usage_update`) and the selection
 receipt's `responder`, beside the model the session confirmed. Under
 `fallback: none`, only a reported model that is demonstrably another one
-(another model line, version or release date) refuses the answer
-(`NIKA-1805`), as a model the application moved during the turn does; a
-spelling Nika cannot place is only recorded. The counts are the
-application's word: Nika does not verify them, and a subscription seat stays
-unpriced.
+(another model line, version or release date) than the model the task named
+refuses the answer (`NIKA-1805`), as a model the application moved during
+the turn does; a spelling Nika cannot place is only recorded, and a task
+that named no model is never refused for a model that moved during the
+turn. The counts are the application's word: Nika does not verify them, and
+a subscription seat stays unpriced.
 
 A `schema:` on such a task is validated by Nika: the prompt carries the
 schema, the final message must contain a JSON value that satisfies it, and

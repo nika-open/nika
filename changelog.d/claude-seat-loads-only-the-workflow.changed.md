@@ -13,7 +13,11 @@
   calls it from the workflow (`invoke:` with
   `tool: "mcp:<server>/<tool>"`). A task that names no model still runs on
   the one your Claude settings name; Nika now selects it itself and reads
-  it back, so the trace records the model the session ran on. A sign-in, a
+  it back, so the trace records the model the session started on. A
+  session that rejects that selection, or does not keep the model until
+  the prompt, ends before any prompt is sent; a model it moves to during
+  the turn is recorded and refuses nothing, where a move of a model the
+  task names still refuses the answer under `fallback: none`. A sign-in, a
   cloud provider switch, a proxy or a certificate bundle set only in a
   settings file (`apiKeyHelper`, `env`) is no longer loaded: sign in to
   Claude Code itself, and set `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` or

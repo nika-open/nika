@@ -620,8 +620,13 @@ pub use tier::{ServiceTier, ServiceTierBinding, ServiceTierEvidence};
 mod boundary;
 pub use boundary::{
     HARNESS_IMAGES_ADVICE, HARNESS_SHARED_RESIDUAL, HARNESS_UNRESOLVED_PATH, HarnessBoundary,
-    UNMEASURED_HARNESS_UNASKED, unmeasured_check_advice,
+    SessionBoundary, UNMEASURED_HARNESS_UNASKED, unmeasured_check_advice,
 };
+
+// The adapter releases a measured row was made on, as data compared with the release an
+// adapter reports on `initialize`: the boundary and the speed control rows both hold them.
+mod release;
+pub use release::AdapterRelease;
 
 // Where a seat's received images land under `images: { save: }` (spec 02 §Harness images):
 // one table for the writer, the static judges and the client's media bound.

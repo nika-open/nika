@@ -12,9 +12,18 @@
 //! (an auto-reviewer, accept-edits, full access, bypass, yolo) is never a row. What the
 //! measured mode still leaves to the harness itself, without asking, is stated in the row —
 //! Nika cannot see or judge it.
+//!
+//! A row is found by the adapter's reported name, and holds the releases it was measured on
+//! ([`HarnessBoundary::releases`]). A session whose adapter reports another release keeps the
+//! row's rule (the mode is selected and read back, a command ask on Codex still leaves its
+//! sandbox), and every text that states what the harness does without asking says that it
+//! was measured on another release ([`HarnessBoundary::for_release`]).
 
+use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::string::String;
+
+use super::release::{AdapterRelease, shown};
 
 /// One measured confinement of a harness adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,8 +34,11 @@ pub struct HarnessBoundary {
     /// The `agentInfo.name` values the measurement holds for — the adapter's own report on
     /// `initialize`, never the command that spawned it.
     pub agents: &'static [&'static str],
-    /// The adapter release the measurement was made on.
+    /// The adapter release the measurement was made on, as a person reads it.
     pub measured_on: &'static str,
+    /// The adapter releases the measurement was made on, compared with the release the
+    /// adapter reports on `initialize` (`agentInfo.version`).
+    pub releases: &'static [AdapterRelease],
     /// The mode selected when the workflow grants no `fs.write`.
     pub read_only_mode: &'static str,
     /// The mode selected when the workflow grants `fs.write`.
@@ -51,6 +63,61 @@ pub struct HarnessBoundary {
     /// Only a recognised tool's bytes are received; on another adapter `images: { save: }`
     /// can only end in `NIKA-AGENT-007`.
     pub delivers_images: bool,
+    /// Whether the adapter selects a session's model only through its model configuration
+    /// option. A model a task names that the option does not offer then refuses before the
+    /// prompt: the client never falls back to the legacy `session/set_model`, which the
+    /// adapter does not serve as the client would send it.
+    pub models_through_option: bool,
+}
+
+/// A measured row as it holds for one session: the row found by the name the adapter
+/// reported on `initialize`, and whether it was measured on the release it reported
+/// ([`HarnessBoundary::for_release`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SessionBoundary {
+    /// The row was measured on the reported release: its text stands as written.
+    Measured(HarnessBoundary),
+    /// The row was not measured on the reported release (another release, one the client
+    /// cannot read, or none reported). Its rule holds unchanged, and its text is published
+    /// with [`HarnessBoundary::carried_note`].
+    Carried {
+        /// The row of the adapter's name.
+        row: HarnessBoundary,
+        /// The release the adapter reported, verbatim (`None`: it reported none).
+        reported: Option<String>,
+    },
+}
+
+impl SessionBoundary {
+    /// The row, measured or carried: its modes and its stricter readings hold either way.
+    #[must_use]
+    pub const fn row(&self) -> HarnessBoundary {
+        match self {
+            Self::Measured(row) | Self::Carried { row, .. } => *row,
+        }
+    }
+
+    /// Whether the row was measured on the release the session's adapter reported.
+    #[must_use]
+    pub const fn is_measured(&self) -> bool {
+        matches!(self, Self::Measured(_))
+    }
+
+    /// What the harness still does without asking, as the run's witness states it: the
+    /// row's text ([`HarnessBoundary::unasked`]), followed on a carried session by the
+    /// sentence that names both releases.
+    #[must_use]
+    pub fn unasked(&self, writes_granted: bool) -> String {
+        match self {
+            Self::Measured(row) => row.unasked(writes_granted),
+            Self::Carried { row, reported } => format!(
+                "{} {}",
+                row.unasked(writes_granted),
+                row.carried_note(reported.as_deref())
+            ),
+        }
+    }
 }
 
 impl HarnessBoundary {
@@ -76,6 +143,7 @@ impl HarnessBoundary {
         seat: "codex",
         agents: &["@agentclientprotocol/codex-acp", "codex-acp"],
         measured_on: "codex-acp 1.13.1",
+        releases: &[AdapterRelease::new(1, 13, 1)],
         read_only_mode: "read-only",
         workspace_write_mode: "read-only",
         reads_unasked: "any file",
@@ -91,6 +159,8 @@ impl HarnessBoundary {
         ),
         asked_command_leaves_sandbox: true,
         delivers_images: true,
+        // Its legacy `session/set_model` extension wants `model[effort]`, never a bare id.
+        models_through_option: true,
     };
 
     /// claude-agent-acp 0.81.1 (Claude Code 2.1.280). Its modes: `default` ("Manual": every
@@ -112,6 +182,7 @@ impl HarnessBoundary {
         seat: "claude-code",
         agents: &["@agentclientprotocol/claude-agent-acp"],
         measured_on: "claude-agent-acp 0.81.1",
+        releases: &[AdapterRelease::new(0, 81, 1)],
         read_only_mode: "default",
         workspace_write_mode: "default",
         reads_unasked: "files in the project",
@@ -126,6 +197,8 @@ impl HarnessBoundary {
         ),
         asked_command_leaves_sandbox: false,
         delivers_images: false,
+        // It has no `session/set_model` handler.
+        models_through_option: true,
     };
 
     /// gemini-cli 0.62.0. Legacy modes only (`session/set_mode`, no mode config option):
@@ -137,6 +210,7 @@ impl HarnessBoundary {
         seat: "gemini-cli",
         agents: &["gemini-cli"],
         measured_on: "gemini-cli 0.62.0",
+        releases: &[AdapterRelease::new(0, 62, 0)],
         read_only_mode: "default",
         workspace_write_mode: "default",
         reads_unasked: "files in the project",
@@ -146,17 +220,63 @@ impl HarnessBoundary {
         loads_unasked: None,
         asked_command_leaves_sandbox: false,
         delivers_images: false,
+        // Its model selection was not measured: the legacy list stays a way in.
+        models_through_option: false,
     };
 
     /// Every measured adapter, in the registry's order (gemini first · Anthropic last).
     pub const MEASURED: [Self; 3] = [Self::GEMINI_CLI, Self::CODEX_ACP, Self::CLAUDE_AGENT_ACP];
 
-    /// The measured boundary of the adapter that reported `agent_name` on `initialize`.
+    /// The measured boundary of the adapter that reported `agent_name` on `initialize`,
+    /// whatever its release: [`Self::for_release`] says whether it was measured on it.
     #[must_use]
     pub fn for_agent(agent_name: &str) -> Option<Self> {
         Self::MEASURED
             .into_iter()
             .find(|row| row.agents.contains(&agent_name))
+    }
+
+    /// The boundary of the adapter that reported `agent_name` and the release `reported` on
+    /// `initialize`: measured when the row was made on that release, carried otherwise (a
+    /// release the client cannot read, or none, is carried, never measured). `None`: no row
+    /// for that name, so the unmeasured rule applies.
+    #[must_use]
+    pub fn for_release(agent_name: &str, reported: Option<&str>) -> Option<SessionBoundary> {
+        let row = Self::for_agent(agent_name)?;
+        Some(match reported {
+            Some(release) if row.measures(release) => SessionBoundary::Measured(row),
+            _ => SessionBoundary::Carried {
+                row,
+                reported: reported.map(ToOwned::to_owned),
+            },
+        })
+    }
+
+    /// Whether the row was measured on the release an adapter reported, compared exactly
+    /// with [`Self::releases`]: no range and no prefix.
+    #[must_use]
+    pub fn measures(&self, reported: &str) -> bool {
+        AdapterRelease::measured_among(reported, self.releases)
+    }
+
+    /// The sentence a carried session adds to every text that states what the harness does
+    /// without asking: the release the row was measured on, and the one the session's
+    /// adapter reported (`None`: it reported none).
+    #[must_use]
+    pub fn carried_note(&self, reported: Option<&str>) -> String {
+        let session = match reported {
+            Some(release) => format!(
+                "this session runs release `{}` of that adapter, on which it was not measured",
+                shown(release)
+            ),
+            None => "this session's adapter reports no release, so it was not measured on \
+                     the one it runs"
+                .to_owned(),
+        };
+        format!(
+            "What the harness does without asking was measured on {}; {session}.",
+            self.measured_on
+        )
     }
 
     /// The measured boundary of the seat `id` (`codex`).
@@ -427,5 +547,126 @@ mod tests {
         for advice in [claude, gemini, unmeasured] {
             assert!(!advice.contains("images:"), "{advice}");
         }
+    }
+
+    /// Every row names, as data, the releases its display string names, and only the two
+    /// rows whose adapters serve no usable legacy model setter select models through the
+    /// option alone.
+    #[test]
+    fn every_row_holds_the_releases_it_was_measured_on() {
+        let releases: alloc::vec::Vec<(&str, &[AdapterRelease])> = HarnessBoundary::MEASURED
+            .iter()
+            .map(|row| (row.seat, row.releases))
+            .collect();
+        assert_eq!(
+            releases,
+            [
+                ("gemini-cli", &[AdapterRelease::new(0, 62, 0)][..]),
+                ("codex", &[AdapterRelease::new(1, 13, 1)][..]),
+                ("claude-code", &[AdapterRelease::new(0, 81, 1)][..]),
+            ]
+        );
+        for row in HarnessBoundary::MEASURED {
+            for release in row.releases {
+                let shown = alloc::format!(" {release}");
+                assert!(row.measured_on.contains(&shown), "{}", row.measured_on);
+            }
+        }
+        let option_only: alloc::vec::Vec<&str> = HarnessBoundary::MEASURED
+            .iter()
+            .filter(|row| row.models_through_option)
+            .map(|row| row.seat)
+            .collect();
+        assert_eq!(option_only, ["codex", "claude-code"]);
+    }
+
+    /// The lookup answers measured, carried or none from the reported name and release: a
+    /// release the client cannot read, or none at all, is carried, never measured.
+    #[test]
+    fn a_session_is_measured_only_on_a_release_its_row_was_made_on() {
+        let claude = "@agentclientprotocol/claude-agent-acp";
+        let codex = "@agentclientprotocol/codex-acp";
+        let measured = |name: &str, release: &str| {
+            HarnessBoundary::for_release(name, Some(release)).map(|b| b.is_measured())
+        };
+        assert_eq!(
+            HarnessBoundary::for_release(claude, Some("0.81.1")),
+            Some(SessionBoundary::Measured(HarnessBoundary::CLAUDE_AGENT_ACP))
+        );
+        assert_eq!(
+            HarnessBoundary::for_release(claude, Some("0.112.0")),
+            Some(SessionBoundary::Carried {
+                row: HarnessBoundary::CLAUDE_AGENT_ACP,
+                reported: Some("0.112.0".into()),
+            })
+        );
+        assert_eq!(measured(codex, "1.13.1"), Some(true));
+        assert_eq!(measured("gemini-cli", "0.62.0"), Some(true));
+        for (name, release) in [
+            (codex, "1.12.0"),
+            (codex, "1.13.10"),
+            ("codex-acp", "0.16.0"),
+            (claude, "0.81.0"),
+            (claude, "v0.81.1"),
+            (claude, "0.81.1-beta.1"),
+            (claude, "nightly"),
+            (claude, ""),
+            ("gemini-cli", "0.62.1"),
+        ] {
+            assert_eq!(measured(name, release), Some(false), "{name} {release:?}");
+        }
+        assert_eq!(
+            HarnessBoundary::for_release(codex, None),
+            Some(SessionBoundary::Carried {
+                row: HarnessBoundary::CODEX_ACP,
+                reported: None,
+            })
+        );
+        for unmeasured in ["Codex", "Some Agent", "@zed-industries/claude-agent-acp"] {
+            assert_eq!(
+                HarnessBoundary::for_release(unmeasured, Some("0.81.1")),
+                None
+            );
+        }
+    }
+
+    /// A measured session publishes the row's text as written; a carried one keeps the same
+    /// row (its modes and its stricter readings) and adds one sentence naming both releases.
+    #[test]
+    fn a_carried_session_names_the_release_measured_and_the_one_it_runs() {
+        let row = HarnessBoundary::CLAUDE_AGENT_ACP;
+        let measured = SessionBoundary::Measured(row);
+        for writes in [false, true] {
+            assert_eq!(measured.unasked(writes), row.unasked(writes));
+        }
+        let carried = HarnessBoundary::for_release(row.agents[0], Some("0.112.0"));
+        let carried = carried.expect("a row for the name");
+        assert_eq!(carried.row(), row, "the rule is the row's");
+        let note = "What the harness does without asking was measured on claude-agent-acp \
+                    0.81.1; this session runs release `0.112.0` of that adapter, on which it \
+                    was not measured.";
+        assert_eq!(row.carried_note(Some("0.112.0")), note);
+        assert_eq!(
+            carried.unasked(true),
+            alloc::format!("{} {note}", row.unasked(true))
+        );
+        let codex = HarnessBoundary::CODEX_ACP;
+        let older = HarnessBoundary::for_release(codex.agents[0], Some("1.12.0"));
+        let older = older.expect("a row for the name").row();
+        assert!(
+            older.asked_command_leaves_sandbox,
+            "the stricter reading stays"
+        );
+        assert_eq!(older.mode_for_writes(true), "read-only");
+        assert_eq!(
+            codex.carried_note(None),
+            "What the harness does without asking was measured on codex-acp 1.13.1; this \
+             session's adapter reports no release, so it was not measured on the one it runs."
+        );
+        assert_eq!(
+            codex.carried_note(Some("2.0\u{1b}[2J")),
+            "What the harness does without asking was measured on codex-acp 1.13.1; this \
+             session runs release `2.0?[2J` of that adapter, on which it was not measured."
+        );
     }
 }

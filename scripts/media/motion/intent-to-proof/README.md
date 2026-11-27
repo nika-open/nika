@@ -176,7 +176,7 @@ camera.
   waves, the phrase-to-task mapping) says so on the clip's plate.
 - `sdk-doors` is captured on its own, by
   `node scripts/media/capture/sdk-doors.mjs`: it installs the published
-  `@supernovae-st/nika` from the npm registry in a scratch app, runs the
+  `@nika-open/nika` from the npm registry in a scratch app, runs the
   README's `demo.mts`, drives the engine the package bundles (`new Nika()`)
   and a loopback `nika serve` (`new Nika({ url, token })`, with the options
   the server door takes on lines 3 and 6) with the helpers in

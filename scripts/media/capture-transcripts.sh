@@ -115,6 +115,9 @@ nika explain --color never NIKA-EXEC-001 >"$RAW/explain-exec-001.txt" 2>&1
 # The gallery bare `nika try` prints: the embedded path and jobs, each with
 # its verb glyphs and the one line the CLI shows for it.
 nika try --color never >"$RAW/try-gallery.txt" 2>&1
+# The binary that listing came from, which the clip names (it can be newer
+# than the other transcripts' nika-version.txt).
+nika --version >"$RAW/try-gallery-version.txt"
 
 # ── full-loop ───────────────────────────────────────────────────────────
 # The README's front door, captured as it runs: compile the offline

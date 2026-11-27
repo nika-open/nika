@@ -18,13 +18,13 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8272
+  classified_files: 8273
   file_rows: 11
   pattern_rows: 24
   by_class:
     authored: 5014
     authored-pin: 2
-    generated: 283
+    generated: 284
     pinned-copy: 266
     testimonial: 2707
     foreign: 0
@@ -188,7 +188,7 @@ patterns:
 - glob: "scripts/**"
   class: authored
   match_count: 359
-  aggregate_sha256: 7dc5dbd27fd8ae66ad230ea3c36b28e4d2f9ffbde3c9478f3f42fa84a2959f63
+  aggregate_sha256: 9cb309f7eeaac666974d1da03f2932c709a72f37edada193ed9455477cb7f6a9
   evidence: "hand-written gates · hooks · hygiene vectors · media lanes; the ratchet baselines (scripts/ci/*-baseline.txt · scripts/hygiene/baselines/) are hand-kept monotonic floors ('Never remove a line by hand')"
 - glob: ".github/workflows/**"
   class: authored
@@ -223,8 +223,8 @@ patterns:
   evidence: "cargo config · audit.toml · mutants.toml — hand-kept workspace policy"
 - glob: "media/**"
   class: generated
-  match_count: 188
-  aggregate_sha256: d9d058f48f37f1ccc328f0213c1bbccf06d5a454cec873f4f08a7188530f2a54
+  match_count: 189
+  aggregate_sha256: 57b109761fe445d5785e9b4ecbc601186515f485eea41f63f28c8464dc48db6e
   evidence: "media/README.md: 'Never edit exports by hand. Edit the clip, scene or fixture, then regenerate' — gifs/posters/videos/social render from the films and clips in scripts/media/motion/; raw/ holds output captured from the real binary and its language server"
   derivation:
     tool: "scripts/media/motion/intent-to-proof/render.mjs (the README film and the feature clips) + scripts/media/render-product-film.mjs (the product film) + scripts/media/render-motion.mjs (the archived HTML film) + capture-transcripts.sh (sources: scripts/media/motion/ · fixtures: scripts/media/fixtures/)"

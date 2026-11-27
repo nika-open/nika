@@ -1,5 +1,5 @@
 // sdk-doors · "Your app asks. The engine decides. The receipt proves it."
-// The TypeScript SDK (@supernovae-st/nika) on one screen: one client, two
+// The TypeScript SDK (@nika-open/nika) on one screen: one client, two
 // doors. new Nika() starts the engine the package bundles, as a child
 // process; new Nika({ url, token }) reaches a nika serve with the same
 // methods and other options. Two lines of the quick start take the server
@@ -60,7 +60,7 @@ const PKG = versions.package.version;
 const ENGINE_VER = versions.engine.engineVersion;
 const BUILD = versions.engine.buildSha;
 const PAYLOAD = versions.engine.payload;
-if (versions.package.name !== '@supernovae-st/nika') fail('the capture is not of @supernovae-st/nika');
+if (versions.package.name !== '@nika-open/nika') fail('the capture is not of @nika-open/nika');
 if (PKG !== ENGINE_VER || remote.health.engineVersion !== ENGINE_VER) fail(`package ${PKG}, bundled engine ${ENGINE_VER}, served engine ${remote.health.engineVersion}: they must be one version`);
 if (versions.engine.version_line !== `nika ${ENGINE_VER} (${BUILD})` || remote.health.buildSha !== BUILD) fail('the two doors do not name the same engine build');
 if (versions.engine.machineProtocolVersion !== 2 || remote.health.machineProtocolVersion !== 2) fail('machine protocol is not 2 on both doors');
@@ -106,7 +106,7 @@ const short = h => `${h.slice(0, 8)}…`;
 // the key lines of demo.mts, by what they say (their real numbers are kept)
 const lineOf = re => (demo.findIndex(l => re.test(l)) + 1) || fail(`demo.mts lost ${re}`);
 const L = {
-  imp: lineOf(/^import \{ Nika, isNikaRunSucceeded \} from '@supernovae-st\/nika';$/),
+  imp: lineOf(/^import \{ Nika, isNikaRunSucceeded \} from '@nika-open\/nika';$/),
   client: lineOf(/^const nika = new Nika\(\{ cwd: process\.cwd\(\) \}\);$/),
   run: lineOf(/^const run = await nika\.run<\{ greeting: string \}>\('hello\.nika'/),
   result: lineOf(/^const result = await run\.result\(\);$/),
@@ -421,9 +421,9 @@ const landed = (id, t, d = 0.15) => smooth(P[id].t1 + 0.05, P[id].t1 + 0.05 + d,
 const PLATE_ST = { f: 'MGW 500', size: 10.5, tracking: 3 };
 const PLATE = (() => {
   const options = [
-    `cards, lanes and motion: illustration · captured: @supernovae-st/nika ${PKG}, its bundled engine ${ENGINE_VER} (${BUILD}) and nika serve · a mock/echo rehearsal`,
-    `cards, lanes, motion: illustration · captured: @supernovae-st/nika ${PKG} + bundled engine ${ENGINE_VER} (${BUILD}) + nika serve · mock/echo rehearsal`,
-    `lanes and motion: illustration · captured: @supernovae-st/nika ${PKG} + bundled engine ${ENGINE_VER} + nika serve · mock/echo`,
+    `cards, lanes and motion: illustration · captured: @nika-open/nika ${PKG}, its bundled engine ${ENGINE_VER} (${BUILD}) and nika serve · a mock/echo rehearsal`,
+    `cards, lanes, motion: illustration · captured: @nika-open/nika ${PKG} + bundled engine ${ENGINE_VER} (${BUILD}) + nika serve · mock/echo rehearsal`,
+    `lanes and motion: illustration · captured: @nika-open/nika ${PKG} + bundled engine ${ENGINE_VER} + nika serve · mock/echo`,
   ];
   return options.find(s => measure(s.toUpperCase(), PLATE_ST) <= 1680) ?? fail('no plate wording fits the frame');
 })();
@@ -486,12 +486,12 @@ function captions(R, t, a) {
 
 export function chrome(R, t) {
   const a = envelope(t);
-  frame(R, t, { kicker: `the typescript sdk · @supernovae-st/nika ${PKG}`, plate: PLATE, alpha: a });
+  frame(R, t, { kicker: `the typescript sdk · @nika-open/nika ${PKG}`, plate: PLATE, alpha: a });
   title(R, t, a);
   captions(R, t, a);
   // where to get it, once the story is told
   const fk = a * smooth(T.footer, T.footer + 0.4, t);
-  if (fk > 0) mono(R, [{ s: 'npm install @supernovae-st/nika', c: C.ice, glow: 0.3 }, { s: ' · ', c: C.dim }, { s: 'docs.nika.sh/sdk', c: C.mist }], 64, 1008, { alpha: fk, st: { f: 'MM 500', size: 16 } });
+  if (fk > 0) mono(R, [{ s: 'npm install @nika-open/nika', c: C.ice, glow: 0.3 }, { s: ' · ', c: C.dim }, { s: 'docs.nika.sh/sdk', c: C.mist }], 64, 1008, { alpha: fk, st: { f: 'MM 500', size: 16 } });
 }
 
 export function env() {
@@ -507,7 +507,7 @@ function zones(R, t, a) {
   if (zk <= 0) return;
   text(R, 'Your app', CODE.x, CODE.y - 20, { ...ZONE, color: C.ink, alpha: zk });
   text(R, `node ${versions.node} · TypeScript`, CODE.x + measure('Your app', ZONE) + 16, CODE.y - 20, { ...ZONE_SUB, color: C.dim, alpha: zk });
-  text(R, '@supernovae-st/nika', COL.cx, CODE.y - 20, { ...DOOR, color: C.ice, alpha: zk, align: 'center', glow: 0.35 });
+  text(R, '@nika-open/nika', COL.cx, CODE.y - 20, { ...DOOR, color: C.ice, alpha: zk, align: 'center', glow: 0.35 });
   text(R, `THE PACKAGE · ${PKG}`, COL.cx, CODE.y + 4, { f: 'MGW 500', size: 10.5, tracking: 3, color: C.dim, alpha: zk, align: 'center' });
   // each door is named by its constructor
   const lk = a * smooth(T.localDraw, T.localDraw + 0.35, t), rk = a * smooth(T.remoteDraw, T.remoteDraw + 0.35, t);

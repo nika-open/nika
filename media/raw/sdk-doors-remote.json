@@ -73,8 +73,8 @@
  "health": {
   "service": "nika-serve",
   "status": "ok",
-  "engineVersion": "0.124.0",
-  "buildSha": "866ed914b",
+  "engineVersion": "0.125.2",
+  "buildSha": "ae2d5f0b7",
   "machineProtocolVersion": 2,
   "supportedCapabilities": [
    "check",
@@ -82,9 +82,16 @@
    "eventStream",
    "cancel",
    "jobInputs",
+   "jobAttribution",
+   "jobList",
+   "occupancy",
+   "jobRetry",
    "compile",
    "artifacts",
-   "schedule"
+   "accessServiceTier",
+   "accessSessionOffer",
+   "schedule",
+   "scheduleManage"
   ]
  },
  "port": "a free loopback port"

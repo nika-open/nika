@@ -3,13 +3,17 @@
 // embedded jobs with their verb glyphs and the one line the CLI shows for
 // each (its own truncation included), and the counts of its two sections.
 // Nothing here is typed by hand; a job the CLI lists without a line (the
-// snippets) is counted, not drawn.
-import { C, E, seg, smooth, repoLines, NIKA_VERSION, frame, headline, loopFade, cameraPath, frameBox, titleFade, WIDE } from './kit.mjs';
+// snippets) is counted, not drawn. The listing names the binary it was
+// captured from (try-gallery-version.txt), which can be newer than the
+// other transcripts' (nika-version.txt).
+import { C, E, seg, smooth, repoLines, readRepo, frame, headline, loopFade, cameraPath, frameBox, titleFade, WIDE } from './kit.mjs';
 import { text, rrect, poly, measure } from '../src/engine/render.mjs';
 
 export const meta = { duration: 13.5, poster: 12.4 };
 
 const listing = repoLines('media/raw/try-gallery.txt');
+const LISTED_ON = readRepo('media/raw/try-gallery-version.txt').trim().split(/\s+/)[1];
+if (!LISTED_ON) throw new Error('media/raw/try-gallery-version.txt names no release');
 const count = re => +(listing.find(l => re.test(l))?.match(re)?.[1] ?? NaN);
 const PATH_STEPS = count(/^◆ the path — (\d+) steps/u);
 const JOB_COUNT = count(/^◆ the jobs — (\d+) of them/u);
@@ -62,7 +66,7 @@ export function env() {
 export function chrome(R, t) {
   const a = loopFade(t, meta.duration);
   const cam = camera(t);
-  frame(R, t, { kicker: `nika try · the embedded gallery · ${PATH_STEPS} path steps · ${JOB_COUNT} jobs`, plate: `names, verbs and lines: the real \`nika try\` listing · nika ${NIKA_VERSION}`, alpha: a, scrim: smooth(1, 1.12, cam.s) });
+  frame(R, t, { kicker: `nika try · the embedded gallery · ${PATH_STEPS} path steps · ${JOB_COUNT} jobs`, plate: `names, verbs and lines: the real \`nika try\` listing · nika ${LISTED_ON}`, alpha: a, scrim: smooth(1, 1.12, cam.s) });
   headline({ ...R, fade: a * titleFade(cam) }, t, 0.2, meta.duration + 1, 'Start from a workflow.', `${JOB_COUNT} JOBS AND A ${PATH_STEPS}-STEP PATH, IN THE BINARY · NIKA TRY <NAME>`, { accent: 'a workflow.', accentColor: C.teal });
 }
 
@@ -98,11 +102,19 @@ function card(R, t, i, job, a) {
   const focus = FOCUS.includes(job.name) ? smooth(3.3, 3.7, t) : 0;
   const y = c.y + 10 * (1 - k);
   rrect(R, c.x, y, c.w, c.h, 14, { color: focus > 0 ? C.teal : C.faint, w: 1.2 + focus * 0.5, alpha: a * k, fill: '#050c19', fillAlpha: 0.9, glow: focus * 0.4 });
-  text(R, job.name, c.x + 18, y + 34, { f: 'MM 500', size: 16, color: C.ink, alpha: a * k });
-  // the verbs sit in the corner, clear of a long name
-  job.glyphs.forEach((g, j) => glyph(R, g, c.x + c.w - 22 - (job.glyphs.length - 1 - j) * 20, y + c.h - 20, 6, a * k));
+  // two rows that fit the card at any count: the name, shrunk only when it
+  // would leave the card, then the CLI's line, cut before the verbs beside it
+  const nameRow = y + c.h * 0.42, lineRow = y + c.h * 0.8;
+  let ns = 16;
+  while (ns > 12 && measure(job.name, { f: 'MM 500', size: ns }) > c.w - 36) ns -= 0.5;
+  text(R, job.name, c.x + 18, nameRow, { f: 'MM 500', size: ns, color: C.ink, alpha: a * k });
+  // the verbs sit at the end of the line row, clear of a long name
+  job.glyphs.forEach((g, j) => glyph(R, g, c.x + c.w - 22 - (job.glyphs.length - 1 - j) * 20, lineRow - 5, 6, a * k));
   const st = { f: 'Geist 400', size: 14 };
-  wrap(job.line, st, c.w - 36).slice(0, 3).forEach((ln, j) => text(R, ln, c.x + 18, y + 62 + j * 20, { ...st, color: C.mist, alpha: a * k }));
+  const room = c.w - 36 - job.glyphs.length * 20 - 8;
+  const lines = wrap(job.line, st, room - measure('…', st));
+  const first = lines.length > 1 && !lines[0].endsWith('…') ? `${lines[0]}…` : (lines[0] ?? '');
+  text(R, first, c.x + 18, lineRow, { ...st, color: C.mist, alpha: a * k });
 }
 
 export function draw(R, t) {
@@ -114,9 +126,11 @@ export function draw(R, t) {
   const k = E.snap(seg(t, t0, t0 + 0.4)) * a;
   if (k > 0) {
     rrect(R, c.x, c.y, c.w, c.h, 14, { color: C.faint, w: 1, alpha: k, dash: [5, 5] });
-    text(R, `+ ${SNIPPETS} snippets`, c.x + 18, c.y + 38, { f: 'MM 500', size: 16, color: C.mist, alpha: k });
-    text(R, `+ the path · ${PATH_STEPS} steps`, c.x + 18, c.y + 66, { f: 'MM 500', size: 16, color: C.mist, alpha: k });
-    text(R, 'nika try 01-hello · offline', c.x + 18, c.y + 100, { f: 'MM 400', size: 14, color: C.teal, alpha: k });
+    const more = `+ ${SNIPPETS} snippets · ${PATH_STEPS}-step path`;
+    let ms = 16;
+    while (ms > 12 && measure(more, { f: 'MM 500', size: ms }) > c.w - 36) ms -= 0.5;
+    text(R, more, c.x + 18, c.y + c.h * 0.42, { f: 'MM 500', size: ms, color: C.mist, alpha: k });
+    text(R, 'nika try 01-hello · offline', c.x + 18, c.y + c.h * 0.8, { f: 'MM 400', size: 14, color: C.teal, alpha: k });
   }
   // the legend, as the listing prints it
   const lk = smooth(T.legend, T.legend + 0.4, t) * a;

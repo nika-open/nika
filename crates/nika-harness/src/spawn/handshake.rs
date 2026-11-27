@@ -59,12 +59,12 @@ impl HarnessAdapter {
             (Some(pin), Some((major, minor))) => Err(HarnessError::Unavailable {
                 reason: format!(
                     "adapter `{}`: handshake version {major}.{minor} is outside the pin \
-                     (>= {}.{} · major <= {}): {}",
+                     (>= {}.{} · major <= {}){}",
                     self.id,
                     pin.min.0,
                     pin.min.1,
                     pin.max_major,
-                    crate::probe::outside_the_pin(&self.id, pin)
+                    crate::probe::outside_the_pin(&self.id)
                 ),
             }),
             (Some(_), None) => Err(HarnessError::Unavailable {
@@ -141,4 +141,40 @@ async fn ask(child: &mut tokio::process::Child) -> Result<serde_json::Value, Har
     serde_json::from_str(line.trim_end()).map_err(|e| HarnessError::Session {
         reason: format!("the initialize answer is not valid JSON: {e}"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Stdio;
+
+    use serde_json::{Value, json};
+
+    /// The standalone probe names the client as a session does: its one `initialize` request
+    /// carries `clientInfo`, the name `nika` and the engine's release. The adapter is a shell
+    /// stub that keeps the line it read and answers once.
+    #[tokio::test]
+    async fn the_probe_names_the_client_in_its_initialize_request() {
+        let dir = tempfile::tempdir().expect("dir");
+        let kept = dir.path().join("request");
+        let stub = "read -r line; printf '%s' \"$line\" > \"$1\"; \
+                    echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}'";
+        let mut cmd = tokio::process::Command::new("/bin/sh");
+        cmd.args(["-c", stub, "stub"])
+            .arg(&kept)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .process_group(0);
+        let answer = super::roundtrip(cmd).await.expect("one answer");
+        assert_eq!(answer.pointer("/result/protocolVersion"), Some(&json!(1)));
+        let line = std::fs::read_to_string(&kept).expect("the request the stub kept");
+        let sent: Value = serde_json::from_str(&line).expect("one JSON request");
+        assert_eq!(sent.get("method"), Some(&json!("initialize")));
+        assert_eq!(
+            sent.pointer("/params/clientInfo"),
+            Some(&json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")}))
+        );
+    }
 }

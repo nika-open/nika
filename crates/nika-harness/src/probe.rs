@@ -790,22 +790,17 @@ pub fn judge_version(
     })
 }
 
-/// What an ACP adapter whose `initialize` reports a release outside `pin` is told: the range
-/// Nika accepts for the adapter of the seat `adapter_id`, and, for a seat with a measured
-/// boundary, the adapter release its measurements were made on. Only the handshake judgment
+/// What an ACP adapter whose `initialize` reports a release outside its pin is told beyond the
+/// pin itself: on the seat `adapter_id` with a measured boundary, the adapter release that
+/// boundary was measured on, to install; nothing on another seat. Only the handshake judgment
 /// says it: a `--version` probe may read a native program, not the adapter the row measured.
-pub(crate) fn outside_the_pin(adapter_id: &str, pin: &VersionPin) -> String {
-    let range = format!(
-        "Nika accepts this adapter from {}.{} through every {}.x release",
-        pin.min.0, pin.min.1, pin.max_major
-    );
-    match nika_types::access::HarnessBoundary::for_seat(adapter_id) {
-        Some(row) => format!(
-            "{range}; install the release it was measured on, {}",
+pub(crate) fn outside_the_pin(adapter_id: &str) -> String {
+    nika_types::access::HarnessBoundary::for_seat(adapter_id).map_or_else(String::new, |row| {
+        format!(
+            "; install the release its boundary was measured on, {}",
             row.measured_on
-        ),
-        None => range,
-    }
+        )
+    })
 }
 
 #[cfg(test)]
@@ -1198,9 +1193,10 @@ mod tests {
         assert!(msg.contains("major <= 2"), "{msg}");
     }
 
-    /// An adapter release outside its pin is refused at the handshake with the range Nika
-    /// accepts and, on a measured seat, the release to install; a release inside the pin that
-    /// its row was not measured on is admitted (it is carried, not refused).
+    /// An adapter release outside its pin is refused at the handshake with the range once and,
+    /// on a seat with a measured boundary, the release to install; a seat without one keeps
+    /// the refusal it had. A release inside the pin that its row was not measured on is
+    /// admitted (it is carried, not refused).
     #[test]
     fn a_handshake_outside_the_pin_names_the_range_and_the_measured_release() {
         let registry = crate::registry::registry_with(&|_| None).expect("the static table");
@@ -1224,8 +1220,7 @@ mod tests {
         assert_eq!(
             refused(&codex, answer("@agentclientprotocol/codex-acp", "2.12.0")),
             "adapter `codex`: handshake version 2.12 is outside the pin (>= 0.16 · major <= \
-             1): Nika accepts this adapter from 0.16 through every 1.x release; install the \
-             release it was measured on, codex-acp 1.13.1"
+             1); install the release its boundary was measured on, codex-acp 1.13.1"
         );
         assert_eq!(
             refused(
@@ -1233,14 +1228,12 @@ mod tests {
                 answer("@agentclientprotocol/claude-agent-acp", "1.0.0")
             ),
             "adapter `claude-code`: handshake version 1.0 is outside the pin (>= 0.23 · major \
-             <= 0): Nika accepts this adapter from 0.23 through every 0.x release; install the \
-             release it was measured on, claude-agent-acp 0.81.1"
+             <= 0); install the release its boundary was measured on, claude-agent-acp 0.81.1"
         );
-        // A seat with no measured boundary is told the range alone.
-        let opencode = refused(&row("opencode"), answer("OpenCode", "2.0.0"));
-        assert!(
-            opencode.ends_with("Nika accepts this adapter from 1.18 through every 1.x release"),
-            "{opencode}"
+        // A seat with no measured boundary is told what it was told before.
+        assert_eq!(
+            refused(&row("opencode"), answer("OpenCode", "2.0.0")),
+            "adapter `opencode`: handshake version 2.0 is outside the pin (>= 1.18 · major <= 1)"
         );
         // Inside the pin, a release the row was not measured on is admitted: carried.
         let claude_now = answer("@agentclientprotocol/claude-agent-acp", "0.112.0");

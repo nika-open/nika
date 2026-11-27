@@ -97,27 +97,41 @@ Nika, so `permits:` does not bound it:
 | `gemini-cli` (0.62.0) | `default`, or your `--approval-mode` / settings | `default` | reads files in the project (its file tools refuse paths outside it); runs shell commands it judges safe reads; Google web searches. |
 | `qwen-code`, `kimi-code`, `opencode`, `copilot`, `grok-build` | — | none: no mode is measured, so none is selected; a current mode that visibly approves on its own refuses the run | everything it does without asking. Nika judges only what it asks. |
 
-Each row holds for the adapter release it names, the one the adapter reports
-when the session starts. On another release that the seat still accepts (the
-`codex` seat takes codex-acp 0.16 through every 1.x release, the
-`claude-code` seat claude-agent-acp 0.23 through every 0.x release), Nika
-applies the same row: it selects and reads back the same mode, refuses to
-start when the adapter does not offer or keep it, and still reads a Codex
-command ask as one that leaves its sandbox. What it says changes: the
-`permit_checked` record, after the row's text, says that the row was
-measured on the release the table names and that this session runs another
-one, on which it was not measured. What the harness does without asking may
-differ there. A release outside the accepted range is refused before the
-session starts, with the range Nika accepts and the release to install, the
-one the row was measured on. `nika check` does not read the installed
+Each measured row (`codex`, `claude-code` and `gemini-cli`) holds for the
+adapter release it names, the one the adapter reports in its `initialize`
+answer. On another release that the seat still accepts (the `codex` seat
+takes codex-acp 0.16 through every 1.x release, the `claude-code` seat
+claude-agent-acp 0.23 through every 0.x release, the `gemini-cli` seat
+gemini-cli 0.37 through every 0.x release), and on a `gemini-cli` session
+whose adapter reports no release, Nika applies the same row: it selects and
+reads back the same mode, refuses to start when the adapter does not offer
+or keep it, and still reads a Codex command ask as one that leaves its
+sandbox. What it says changes: after the row's text, the `permit_checked`
+record adds one sentence, for example "What the harness does without asking
+was measured on claude-agent-acp 0.81.1; this session's adapter reports
+release `0.112.0`, on which it was not measured." A refusal of the mode
+before the prompt ends with the same sentence. What the harness does without
+asking may differ on that release. `nika check` does not read the installed
 release, so its `[harness]` hint states the row's text without that
 sentence.
 
-On the `codex` and `claude-code` seats, a model the task names is selected
-only through the session's model option and read back. A session that does
-not list the model there refuses before the prompt, even when its older
-model list names it: claude-agent-acp has no request to select from that
-list, and codex-acp's names each model with an effort.
+A release outside the accepted range is refused before any session. The
+`codex` and `claude-code` seats judge the release the adapter reports in its
+`initialize` answer, and their refusal names the accepted range and the
+release to install, the one the row was measured on; an answer that reports
+no release is refused there too. The `gemini-cli` seat judges what
+`gemini --version` prints: outside its range, the refusal names the range
+and says that a version Nika has not read speaks a dialect it cannot judge,
+with no release to install.
+
+On the `codex` and `claude-code` seats, a model named for a run or for a
+Session conversation is selected only through the session's model option and
+read back. A session that does not list the model there refuses before the
+prompt, even when its older model list names it: claude-agent-acp has no
+request to select from that list, and codex-acp's sets the effort together
+with the model, in a request whose answer Nika cannot read back. The rule
+holds on every release the `codex` seat accepts, the older `codex-acp`
+package included.
 
 On every seat:
 

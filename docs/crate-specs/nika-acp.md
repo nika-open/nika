@@ -219,23 +219,36 @@ or `current_mode_update` away from the held mode ends the session. The table is
 
 A row is found by the adapter's `agentInfo.name` and holds the releases it was measured on as
 data (`HarnessBoundary::releases`); `HarnessBoundary::for_release` answers measured, carried or
-none from the reported name and `agentInfo.version`. A release that does not parse as
-`MAJOR.MINOR.PATCH` is carried, never measured. A carried session (a release inside the
-registry pin that the row was not measured on) gets the same rule: the same mode selected and
-read back or a refusal before the prompt, the same `asked_command_leaves_sandbox`, the same
-session options. Its `SessionConfined.unasked` (the `permit_checked` `why`) is the row's text
-followed by `HarnessBoundary::carried_note`, one sentence naming the release measured and the
-one the session runs. A release outside the pin is refused at the handshake with the range and,
-on a measured seat, the release the row was measured on. The pins are unchanged
-(claude-agent-acp 0.23 through 0.x, codex-acp 0.16 through 1.x). `initialize` carries
-`clientInfo` (`name` `nika`, `version` the engine's release) on every path: the session, the
-conversation and the standalone probe.
+none from the reported name and `agentInfo.version`. Each of the three measured rows (codex,
+claude-code, gemini-cli) is carried on another release. A release that does not parse as
+`MAJOR.MINOR.PATCH` is carried, never measured, and an empty or blank one is no release. A
+carried session (a release inside the registry pin that the row was not measured on, or no
+release where no handshake judgment refuses one, as on gemini-cli) gets the same rule: the same
+mode selected and read back or a refusal before the prompt, the same
+`asked_command_leaves_sandbox`, the same session options. Its `SessionConfined.unasked` (the
+`permit_checked` `why`) is the row's text followed by `SessionBoundary::note`, one sentence:
+"What the harness does without asking was measured on {measured_on}; this session's adapter
+reports release `{release}`, on which it was not measured." (with no release: "...; this
+session's adapter reports no release, so it was not measured on the one it runs."). The release
+is repeated as at most 40 printable ASCII characters (any other character and a backtick read as
+`?`, a longer one ends with `…`). A refusal of the mode before the prompt ends with the same
+sentence. On the two seats judged at the handshake (codex, claude-code), a release outside the
+pin is refused there, the refusal keeping its pin text and adding "; install the release its
+boundary was measured on, {measured_on}". gemini-cli is judged on `gemini --version`
+(`probe::judge_version`), whose refusal names the pin and no release to install. The pins are
+unchanged (claude-agent-acp 0.23 through 0.x, codex-acp 0.16 through 1.x, gemini-cli 0.37
+through 0.x). `initialize` carries `clientInfo` (`name` `nika`, `version` the engine's release)
+on every path: the session, the conversation and the standalone probe.
 
 On a row with `models_through_option` (codex and claude-code), a model the task names is
-selected only through the session's model option and read back: the client never falls back
-to the legacy `session/set_model` (claude-agent-acp has no handler for it, codex-acp's wants
-another value shape), so a model the option does not list refuses before the prompt, and an
-offer reports it `not_offered`. Every other row keeps the fallback.
+selected only through the session's model option and read back: the client never falls back to
+the legacy `session/set_model` (claude-agent-acp has no handler for it; codex-acp's sets the
+effort together with the model and answers nothing the client can read back), so a model the
+option does not list refuses before the prompt, and an offer reports it `not_offered`. The rule
+is decided by the reported name and, on a conversation, which records no name, by the audited
+profile it was admitted under (both profiles are option-only rows). It holds on every release
+the codex seat accepts, the older `codex-acp` package included. Every other row keeps the
+fallback.
 
 **1bis · A Claude Code agent session loads only what Nika hands it**
 (`nika_harness::authoring::acp::agent_meta`). `session/new` carries, in

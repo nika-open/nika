@@ -626,7 +626,7 @@ pub use boundary::{
 // The adapter releases a measured row was made on, as data compared with the release an
 // adapter reports on `initialize`: the boundary and the speed control rows both hold them.
 mod release;
-pub use release::AdapterRelease;
+pub use release::{AdapterRelease, shown_release};
 
 // Where a seat's received images land under `images: { save: }` (spec 02 §Harness images):
 // one table for the writer, the static judges and the client's media bound.

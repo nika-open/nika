@@ -191,7 +191,9 @@ where
                  measured for that release (install the measured release, or remove the key to \
                  keep its own tier; no prompt was sent)",
                 binding.measured_on,
-                release.map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
+                // Repeated as the carried note repeats it: bounded, no backtick, blank as none.
+                nika_types::access::shown_release(release.as_deref())
+                    .map_or_else(|| "no release".to_owned(), |v| format!("release `{v}`")),
                 binding.option
             )));
         }

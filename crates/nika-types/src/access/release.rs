@@ -69,13 +69,29 @@ impl fmt::Display for AdapterRelease {
     }
 }
 
+/// The release an adapter reported, when it reported one: an empty or blank text is none.
+pub(super) fn reported_release(reported: Option<&str>) -> Option<&str> {
+    reported.filter(|release| !release.trim().is_empty())
+}
+
+/// The release an adapter reported on `initialize` (`agentInfo.version`), as a sentence that
+/// names it repeats it. `None` when it reported none, or an empty or blank text. Otherwise its
+/// text in printable ASCII with no backtick (any other character, and a backtick, which would
+/// close the code span it is printed in, reads `?`), cut at 40 characters, the cut marked by
+/// `…`. The note of a carried session (`HarnessBoundary::carried_note`) and the service tier's
+/// refusal of an unmeasured release both print a reported release this way.
+#[must_use]
+pub fn shown_release(reported: Option<&str>) -> Option<String> {
+    reported_release(reported).map(shown)
+}
+
 /// The most characters of an adapter's own release text a sentence repeats.
 const SHOWN_CHARS: usize = 40;
 
 /// An adapter's reported release as a sentence repeats it: printable ASCII only (any other
 /// character, and a backtick, which would close the code span the sentence prints it in,
 /// reads `?`), at most [`SHOWN_CHARS`] characters, then `…`.
-pub(super) fn shown(reported: &str) -> String {
+fn shown(reported: &str) -> String {
     let mut out: String = reported
         .chars()
         .take(SHOWN_CHARS)
@@ -169,5 +185,18 @@ mod tests {
         let repeated = shown(&long);
         assert_eq!(repeated.chars().count(), SHOWN_CHARS + 1);
         assert!(repeated.ends_with('…'), "{repeated}");
+    }
+
+    /// What a sentence prints for a reported release: nothing for none or a blank text, the
+    /// filtered and bounded text otherwise.
+    #[test]
+    fn a_shown_release_is_none_when_blank_and_filtered_otherwise() {
+        for blank in [None, Some(""), Some(" "), Some("\t \n")] {
+            assert_eq!(shown_release(blank), None, "{blank:?}");
+        }
+        assert_eq!(shown_release(Some("1.13.1")).as_deref(), Some("1.13.1"));
+        assert_eq!(shown_release(Some("1.0` x")).as_deref(), Some("1.0? x"));
+        let long = "9".repeat(50);
+        assert_eq!(shown_release(Some(&long)), Some(shown(&long)));
     }
 }

@@ -23,7 +23,7 @@ use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::string::String;
 
-use super::release::{AdapterRelease, shown};
+use super::release::{AdapterRelease, reported_release, shown_release};
 
 /// One measured confinement of a harness adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,11 +68,6 @@ pub struct HarnessBoundary {
     /// prompt: the client never falls back to the legacy `session/set_model` (each row says
     /// why), on any release of the adapter.
     pub models_through_option: bool,
-}
-
-/// The release an adapter reported, when it reported one: an empty or blank text is none.
-fn reported_release(reported: Option<&str>) -> Option<&str> {
-    reported.filter(|release| !release.trim().is_empty())
 }
 
 /// A measured row as it holds for one session: the row found by the name the adapter
@@ -282,10 +277,9 @@ impl HarnessBoundary {
     /// printable ASCII with no backtick.
     #[must_use]
     pub fn carried_note(&self, reported: Option<&str>) -> String {
-        let session = match reported_release(reported) {
+        let session = match shown_release(reported) {
             Some(release) => format!(
-                "this session's adapter reports release `{}`, on which it was not measured",
-                shown(release)
+                "this session's adapter reports release `{release}`, on which it was not measured"
             ),
             None => "this session's adapter reports no release, so it was not measured on \
                      the one it runs"

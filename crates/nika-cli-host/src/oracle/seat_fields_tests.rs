@@ -376,8 +376,8 @@ fn a_whitelist_on_a_seat_keeps_its_exact_line() {
 }
 
 /// What the run refuses before anything is sent blocks RUN READY in the same words: a turn
-/// limit on a seat that takes none (Codex's, an unmeasured seat's), a temperature on any seat,
-/// all of a task's fields on one line, whose remedy meets no second refusal.
+/// limit on a seat that takes none (Codex's, one whose turn limit is not read), a temperature
+/// on any seat, all of a task's fields on one line, whose remedy meets no second refusal.
 #[cfg(feature = "access-harness")]
 #[test]
 fn a_limit_the_seat_cannot_apply_blocks_one_line_per_task() {
@@ -438,7 +438,7 @@ fn a_limit_the_seat_cannot_apply_blocks_one_line_per_task() {
     }
 }
 
-/// The Claude Code seat applies a declared turn limit: no seat line, the task seated.
+/// The Claude Code seat is sent a declared turn limit: no seat line, the task seated.
 #[cfg(feature = "access-harness")]
 #[test]
 fn a_turn_limit_on_the_claude_code_seat_blocks_nothing() {

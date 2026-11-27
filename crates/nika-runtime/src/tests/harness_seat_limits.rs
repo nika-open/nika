@@ -3,9 +3,10 @@
 
 //! A limit an `agent:` task declares on a seat, end to end on the REAL ACP client against
 //! scripted duplex peers (no host program, no adapter): `max_turns` reaches the Claude Code
-//! session as `maxTurns` beside its closed options and nothing else moves; on Codex and on an
-//! unmeasured seat, and `temperature` on any seat, the task is refused before the peer reads a
-//! request; a first prompt stopped at the limit fails typed and no repair prompt is written.
+//! session as `maxTurns` beside its closed options and nothing else moves; on Codex and on a
+//! seat whose turn limit is not read, and `temperature` on any seat, the task is refused before
+//! the peer reads a request; a first prompt stopped at the limit fails with its code and no
+//! repair prompt is written.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -278,19 +279,29 @@ async fn a_declared_turn_limit_reaches_the_claude_code_session_as_max_turns() {
     }
 }
 
-/// `max_turns` on Codex and on a seat whose turn limit is not measured (Kimi Code): the task is
-/// refused before the seat is asked for a session, the parameter named, and the peer reads
+/// The run's refusal of a `max_turns` on a seat that is sent none.
+const MAX_TURNS_REFUSED: &str = "invalid `agent` parameter `max_turns`: a turn limit is not \
+     enforceable on this harness access — the harness runs its OWN loop and Nika sends this seat \
+     no turn limit; drop `max_turns:` or run the task on the `claude-code` seat or an API or \
+     local model";
+
+/// The run's refusal of a `temperature` on any seat.
+const TEMPERATURE_REFUSED: &str = "invalid `agent` parameter `temperature`: a sampling \
+     temperature is not enforceable on a harness access — the harness samples its OWN model and \
+     Nika sends no seat a temperature; drop `temperature:` or run the task on an API or local \
+     model";
+
+/// `max_turns` on Codex and on a seat whose turn limit is not read (Kimi Code): the task is
+/// refused before the seat is asked for a session, in the run's exact words, and the peer reads
 /// nothing.
 #[tokio::test]
 async fn a_turn_limit_on_a_seat_that_takes_none_is_refused_before_any_request() {
     for (id, name) in [("codex", codex()), ("kimi-code", "Kimi Code CLI")] {
         let ran = run_seat(id, name, "      max_turns: 6\n", ended()).await;
-        let (code, message) = ran.failure();
-        assert_eq!(code, "NIKA-465", "{id}: {message}");
-        assert!(
-            message.contains("`max_turns`")
-                && message.contains("drop `max_turns:` or run the task on a seat or a model"),
-            "{id}: {message}"
+        assert_eq!(
+            ran.failure(),
+            ("NIKA-465".to_owned(), MAX_TURNS_REFUSED.to_owned()),
+            "{id}"
         );
         assert_eq!((ran.opened, ran.heard.len()), (0, 0), "{id}: nothing sent");
     }
@@ -302,44 +313,57 @@ async fn a_turn_limit_on_a_seat_that_takes_none_is_refused_before_any_request() 
 async fn a_temperature_on_any_seat_is_refused_before_any_request() {
     for (id, name) in [("claude-code", claude()), ("codex", codex())] {
         let ran = run_seat(id, name, "      temperature: 0.2\n", ended()).await;
-        let (code, message) = ran.failure();
-        assert_eq!(code, "NIKA-465", "{id}: {message}");
-        assert!(
-            message.contains("`temperature`")
-                && message.contains("drop `temperature:` or run the task on an API or local model"),
-            "{id}: {message}"
+        assert_eq!(
+            ran.failure(),
+            ("NIKA-465".to_owned(), TEMPERATURE_REFUSED.to_owned()),
+            "{id}"
         );
         assert_eq!((ran.opened, ran.heard.len()), (0, 0), "{id}: nothing sent");
     }
 }
 
-/// A first prompt that ends at the declared limit fails typed and writes no second prompt, with
-/// a `schema:` (whose session keeps room for a repair) as without. The adapter ends such a turn
-/// with `max_turn_requests`, or, when its SDK marks the result an error, with a `limit` session
-/// failure (claude-agent-acp 0.81.1, `error_max_turns`): both are covered.
+/// A first turn stopped by its turn limit, as the run fails it.
+const STOPPED_AT_THE_LIMIT: &str = "agent harness ended its turn without completing it (stop \
+     reason `max_turn_requests`): the harness reached its limit of model requests for the turn \
+     (the task's `max_turns:` when the seat was sent one, otherwise the harness's own); recover \
+     the text received through on_error:";
+
+/// A turn the adapter failed at its turn limit, as a run without a declared access fails it.
+const FAILED_AT_THE_LIMIT: &str = "agent inference failed: provider error: harness refused: the \
+     harness reported a failed turn (error · limit): Reached maximum number of turns (3)";
+
+/// A first prompt that ends at the declared limit fails and writes no second prompt, with a
+/// `schema:` (whose session keeps room for a repair) as without. This run declares no access
+/// (`run.access`), so both shapes fail `NIKA-INFER-001`; the verb's tests pin `NIKA-1805` for a
+/// failed turn under a declared one. claude-agent-acp 0.81.1 ends such a turn with the stop
+/// reason `max_turn_requests`, or, when the SDK's result is an error (`error_max_turns`), with
+/// a `limit` session failure titled with the SDK's own error words (`errors.join(", ")`, here
+/// "Reached maximum number of turns (3)", the words of the CLI result `nika-harness` records):
+/// both are scripted.
 #[tokio::test]
-async fn a_first_prompt_at_the_declared_limit_fails_typed_and_writes_no_second_prompt() {
+async fn a_first_prompt_at_the_declared_limit_fails_and_writes_no_second_prompt() {
     let stopped = json!({"stopReason":"max_turn_requests"});
     let failed = json!({"stopReason":"end_turn","_meta":{"jetbrains":{"air":{"version":1,
         "sessionFailure":{"id":"turn-1:error","revision":1,"category":"limit",
-        "severity":"error","title":"This Claude turn reached its configured limit.",
+        "severity":"error","title":"Reached maximum number of turns (3)",
         "actions":["new_session"]}}}}});
     let schema = "      schema: { type: object, required: [title], properties: { title: { type: \
                   string } } }\n";
-    for typed in [false, true] {
-        let body = format!("      max_turns: 3\n{}", if typed { schema } else { "" });
-        for (result, code, said) in [
-            (
-                &stopped,
-                "NIKA-INFER-001",
-                "stop reason `max_turn_requests`",
-            ),
-            (&failed, "NIKA-INFER-001", "reached its configured limit"),
+    for with_schema in [false, true] {
+        let body = format!(
+            "      max_turns: 3\n{}",
+            if with_schema { schema } else { "" }
+        );
+        for (result, code, text) in [
+            (&stopped, "NIKA-INFER-001", STOPPED_AT_THE_LIMIT),
+            (&failed, "NIKA-INFER-001", FAILED_AT_THE_LIMIT),
         ] {
             let ran = run_seat("claude-code", claude(), &body, result.clone()).await;
-            let (got, message) = ran.failure();
-            assert_eq!(got, code, "{typed} {result}: {message}");
-            assert!(message.contains(said), "{typed} {result}: {message}");
+            assert_eq!(
+                ran.failure(),
+                (code.to_owned(), text.to_owned()),
+                "schema {with_schema} {result}"
+            );
             assert_eq!(
                 ran.session_new()["params"]["_meta"]["claudeCode"]["options"]["maxTurns"],
                 3
@@ -347,8 +371,11 @@ async fn a_first_prompt_at_the_declared_limit_fails_typed_and_writes_no_second_p
             let prompts = (ran.methods().iter())
                 .filter(|method| **method == "session/prompt")
                 .count();
-            assert_eq!(prompts, 1, "{typed} {result}: no repair prompt");
-            assert_eq!(ran.opened, 1, "{typed} {result}: one session");
+            assert_eq!(
+                prompts, 1,
+                "schema {with_schema} {result}: no repair prompt"
+            );
+            assert_eq!(ran.opened, 1, "schema {with_schema} {result}: one session");
         }
     }
 }

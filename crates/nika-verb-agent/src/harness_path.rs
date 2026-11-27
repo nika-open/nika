@@ -20,10 +20,10 @@
 //! - a `tools:` whitelist refuses — the harness runs its OWN tools;
 //!   the enforceable boundary is the permission bridge (B5), and a
 //!   declared whitelist the engine cannot enforce would be a lie;
-//! - so does a `max_turns:` on a seat that takes no turn limit (every seat
-//!   but Claude Code's, which receives it as its session's `maxTurns`), and
-//!   a `temperature:` on any seat: a declared limit is applied or refused
-//!   before anything is sent, never run as if it were not written;
+//! - so does a `max_turns:` on a seat that is sent no turn limit (every
+//!   seat but Claude Code's, which is sent it as its session's `maxTurns`),
+//!   and a `temperature:` on any seat: a declared limit is sent to the seat
+//!   or refused before anything is sent, never run as if it were not written;
 //! - a permission ask is judged by the B5 AUTHORITY BRIDGE: inside the
 //!   workflow's `permits:` grants it is answered `AllowOnce` (never
 //!   `allow_always` — A-5) and witnessed; outside every grant the run
@@ -56,7 +56,7 @@ pub struct HarnessSeat {
     /// The session's working directory (absolute · the composer's
     /// sandbox root in production).
     pub cwd: std::path::PathBuf,
-    /// Whether the seat applies a task's declared `max_turns:` ([`Self::applying_max_turns`]).
+    /// Whether the seat is sent a task's declared `max_turns:` ([`Self::applying_max_turns`]).
     applies_max_turns: bool,
 }
 
@@ -91,10 +91,10 @@ impl HarnessSeat {
         }
     }
 
-    /// Say whether this seat applies a task's declared `max_turns:`, as its composer knows it
-    /// from the seat's id (the `claude-code` seat sends it as the agent session's `maxTurns`).
-    /// A seat built without saying so applies none: such a task is refused before anything is
-    /// sent, never run as if the limit were not written.
+    /// Say whether this seat is sent a task's declared `max_turns:`, as its composer knows it
+    /// from the seat's id (the `claude-code` seat is sent it as the agent session's
+    /// `maxTurns`). A seat built without saying so is sent none: such a task is refused before
+    /// anything is sent, never run as if the limit were not written.
     #[must_use]
     pub fn applying_max_turns(mut self, applies: bool) -> Self {
         self.applies_max_turns = applies;
@@ -104,8 +104,8 @@ impl HarnessSeat {
 
 /// What a harness access cannot honour, refused before its session starts, so the task never
 /// runs as if it were not written: a tool whitelist it cannot enforce, a turn limit on a seat
-/// that takes none (every seat but Claude Code's), and a sampling temperature, which no seat
-/// takes. A turn limit the seat applies must sit in the range the native loop accepts.
+/// that is sent none (every seat but Claude Code's), and a sampling temperature, which no seat
+/// is sent. A turn limit sent to the seat must sit in the range the native loop accepts.
 fn refuse_unenforceable(seat: &HarnessSeat, input: &AgentInput) -> Result<(), VerbAgentError> {
     if !input.tools.is_empty() {
         return Err(VerbAgentError::InvalidParam {
@@ -120,8 +120,8 @@ fn refuse_unenforceable(seat: &HarnessSeat, input: &AgentInput) -> Result<(), Ve
         return Err(VerbAgentError::InvalidParam {
             param: "max_turns",
             detail: "a turn limit is not enforceable on this harness access — the harness runs \
-                     its OWN loop and this seat cannot apply a limit from Nika; drop \
-                     `max_turns:` or run the task on a seat or a model that does"
+                     its OWN loop and Nika sends this seat no turn limit; drop `max_turns:` or \
+                     run the task on the `claude-code` seat or an API or local model"
                 .to_owned(),
         });
     }
@@ -130,8 +130,8 @@ fn refuse_unenforceable(seat: &HarnessSeat, input: &AgentInput) -> Result<(), Ve
         return Err(VerbAgentError::InvalidParam {
             param: "temperature",
             detail: "a sampling temperature is not enforceable on a harness access — the \
-                     harness samples its OWN model and no seat can apply a temperature from \
-                     Nika; drop `temperature:` or run the task on an API or local model"
+                     harness samples its OWN model and Nika sends no seat a temperature; drop \
+                     `temperature:` or run the task on an API or local model"
                 .to_owned(),
         });
     }
@@ -245,7 +245,7 @@ pub(crate) async fn run_on_harness(
 /// the authored effort — which the session applies through its own option and reads
 /// back before the prompt, or refuses (typed, under the declaration) — the
 /// confinement the workflow's `permits:` require of the session's own mode (NIK-266), and
-/// the task's declared turn limit, which only a seat that applies it reaches
+/// the task's declared turn limit, which only a seat that is sent it reaches
 /// ([`refuse_unenforceable`]). An undeclared limit sends none: the native loop's default of
 /// 10 turns is the native loop's, never a seat's.
 fn session_request(seat: &HarnessSeat, input: &AgentInput) -> HarnessRequest {

@@ -243,13 +243,17 @@ pub(crate) fn agent_meta(adapter: &str) -> Option<Value> {
     })
 }
 
-/// Whether an agent session on the registry seat `seat` applies a turn limit an `agent:` task
-/// declares (`max_turns:`): the `claude-code` seat sends it as the SDK option `maxTurns` with
-/// the session's options (measured on claude-agent-acp 0.81.1, which lists `maxTurns` among the
-/// options a client sets). Codex offers no turn limit a client can set and no other seat's is
-/// measured, so a declared limit there is refused before anything is sent. The predicate is
-/// the one the spawner's agent-session options follow; `nika check` and the composer that
-/// seats the agent verb read it, so the check and the run refuse the same tasks.
+/// Whether an agent session on the registry seat `seat` is sent a turn limit an `agent:` task
+/// declares (`max_turns:`): the `claude-code` seat is sent it as the SDK option `maxTurns` with
+/// the session's options (an option a client may set, as read in claude-agent-acp 0.81.1's
+/// source; the adapter counts the turns, not Nika). Measured on a live seat with that release
+/// on 27 November 2026: limits of 1 and 2 stopped a task that needed three model requests, a
+/// limit of 8 let it complete; not measured: whether the count is per prompt or per session,
+/// any other release, the deprecated package the seat still admits. Codex offers no turn limit
+/// a client can set and no other seat's is read, so a declared limit there is refused before
+/// anything is sent. The predicate is the one the spawner's agent-session options follow;
+/// `nika check` and the composer that seats the agent verb read it, so the check and the run
+/// refuse the same tasks.
 #[must_use]
 pub fn applies_max_turns(seat: &str) -> bool {
     Profile::for_seat(seat) == Some(Profile::ClaudeCode)
@@ -276,9 +280,9 @@ pub(crate) fn carry_max_turns(
     });
     carried.map(Some).ok_or_else(|| {
         refusal(
-            "this session cannot apply the task's `max_turns`: its options carry no turn limit \
+            "this session cannot carry the task's `max_turns`: its options hold no turn limit \
              (only a Claude Code agent session's do); no session was opened; drop `max_turns:` \
-             or run the task on a seat or a model that does",
+             or run the task on the `claude-code` seat or an API or local model",
         )
     })
 }

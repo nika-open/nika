@@ -76,10 +76,11 @@ pub struct HarnessRequest {
     /// that cannot ignores it and completes as before, which the caller reads as a closed
     /// session.
     pub follow_up: bool,
-    /// The turn limit an `agent:` task declared (`max_turns:`), carried to the session's own
+    /// The turn limit an `agent:` task declared (`max_turns:`), sent with the session's own
     /// options. The client sends it only where the session's options carry a turn limit (a
     /// Claude Code agent session's `maxTurns`) and refuses before `session/new` otherwise; it
-    /// is never dropped. `None` sends no limit: the session keeps its own loop.
+    /// is never dropped, and the session counts the turns, not Nika. `None` sends no limit: the
+    /// session keeps its own loop.
     pub max_turns: Option<u32>,
 }
 

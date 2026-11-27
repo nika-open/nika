@@ -35,15 +35,23 @@ fn answering(name: &str) -> Value {
     json!({"protocolVersion":1,"agentInfo":{"name":name,"version":"1.0.0"}})
 }
 
-fn refused_naming_max_turns(error: &HarnessError) -> bool {
-    matches!(error, HarnessError::Refused { reason }
-        if reason.contains("`max_turns`") && reason.contains("no session was opened"))
+/// The client's refusal of a declared turn limit no session option carries.
+const REFUSED: &str = "this session cannot carry the task's `max_turns`: its options hold no \
+     turn limit (only a Claude Code agent session's do); no session was opened; drop \
+     `max_turns:` or run the task on the `claude-code` seat or an API or local model";
+
+/// A refusal's reason, `None` for any other error.
+fn refusal_reason(error: &HarnessError) -> Option<&str> {
+    match error {
+        HarnessError::Refused { reason } => Some(reason.as_str()),
+        _ => None,
+    }
 }
 
-/// Only the `claude-code` seat applies a declared turn limit: every other shipped seat, a local
-/// row of another id and the retired ACP speaker names do not.
+/// Only the `claude-code` seat is sent a declared turn limit: every other shipped seat, a local
+/// row of another id and the retired ACP speaker names are not.
 #[test]
-fn only_the_claude_code_seat_applies_a_declared_turn_limit() {
+fn only_the_claude_code_seat_is_sent_a_declared_turn_limit() {
     for runtime in HarnessRuntime::ALL {
         assert_eq!(
             applies_max_turns(runtime.id),
@@ -104,10 +112,7 @@ fn a_declared_limit_with_no_option_to_carry_it_is_refused() {
         (Some(profile()), true),
     ] {
         let error = carry_max_turns(meta.clone(), Some(7), one_shot).unwrap_err();
-        assert!(
-            refused_naming_max_turns(&error),
-            "{meta:?} {one_shot}: {error}"
-        );
+        assert_eq!(refusal_reason(&error), Some(REFUSED), "{meta:?} {one_shot}");
     }
 }
 
@@ -244,8 +249,8 @@ async fn a_limit_no_session_option_carries_stops_before_session_new() {
             None,
         );
         let outcome = first_outcome(&mut stream).await;
-        let refused = matches!(&outcome, Err(error) if refused_naming_max_turns(error));
-        assert!(refused, "{case}: {outcome:?}");
+        let error = outcome.expect_err("refused before session/new");
+        assert_eq!(refusal_reason(&error), Some(REFUSED), "{case}");
         drop(stream);
         let after_initialize = tokio::time::timeout(Duration::from_secs(1), peer)
             .await

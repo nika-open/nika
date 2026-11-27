@@ -16,8 +16,8 @@
 //!   the ACP one-shot only when that session would carry the whole task. A seat with no direct
 //!   one-shot is again the access line's refusal;
 //! - an `agent:` on a seat refuses a `tools:` whitelist (NIKA-465): the harness runs its own;
-//!   so do a `max_turns` on a seat that takes no turn limit (all but `claude-code`, which
-//!   receives it) and a `temperature` on any seat, both refused at run before anything is sent;
+//!   so do a `max_turns` on a seat that is sent no turn limit (all but `claude-code`, which
+//!   is sent it) and a `temperature` on any seat, both refused at run before anything is sent;
 //! - `images:` is a seat's field: an `agent:` the plan does not seat refuses it (NIKA-465).
 //!
 //! The tasks a seat serves are also returned: their `[cost]` hints, which push
@@ -109,10 +109,10 @@ pub(super) fn judge(
     out
 }
 
-/// The blocker of an `agent:` that sets what `seat` cannot apply, as the run refuses it before
-/// anything is sent (NIKA-465): a `tools:` whitelist (the harness runs its own tools), a
-/// `max_turns` on a seat that takes no turn limit (every seat but `claude-code`) and a
-/// `temperature` (no seat takes one). One line per task; its remedy meets no second refusal.
+/// The blocker of an `agent:` that sets what Nika cannot send `seat`, as the run refuses it
+/// before anything is sent (NIKA-465): a `tools:` whitelist (the harness runs its own tools), a
+/// `max_turns` on a seat that is sent no turn limit (every seat but `claude-code`) and a
+/// `temperature` (no seat is sent one). One line per task; its remedy meets no second refusal.
 fn agent_unapplied(id: &str, seat: &str, agent: &RawAgentAction) -> Option<String> {
     let tools = !agent.tools.is_empty();
     let turns = agent.max_turns.is_some() && refuses_max_turns(seat);

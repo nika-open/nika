@@ -1559,7 +1559,7 @@ fn validate_params(input: &AgentInput) -> Result<(), VerbAgentError> {
 }
 
 /// A declared turn limit sits in `1..=`[`MAX_TURNS_CEILING`], on the native loop and on a seat
-/// that applies it alike.
+/// that is sent it alike.
 fn check_max_turns(max_turns: Option<u32>) -> Result<(), VerbAgentError> {
     if let Some(max_turns) = max_turns
         && !(1..=MAX_TURNS_CEILING).contains(&max_turns)

@@ -328,17 +328,19 @@ the same task as a blocker.
   options when the session opens, as `maxTurns` (an option a client may set,
   as read in the source of claude-agent-acp 0.81.1). Claude Code counts the
   turns, not Nika.
-- Measured on a live seat with claude-agent-acp 0.81.1 on 27 November 2026:
-  limits of 1 and 2 stopped a task that needed three model requests, and a
-  limit of 8 let it complete. The session reported each stopped turn as
-  failed, in its own words: `Reached maximum number of turns (1)`. Not
-  measured: whether the count is per prompt or per session, any other
+- Measured on a live seat with claude-agent-acp 0.81.1 on 27 November 2026,
+  in a workflow that declares `run.access`: limits of 1 and 2 stopped a task
+  that needed three model requests, and a limit of 8 let it complete. The
+  session reported each stopped turn as failed, in its own words
+  (`Reached maximum number of turns (N)`, N being the limit sent), and the
+  task failed `NIKA-1805`. Not measured: a seat reached without a declared
+  `run.access`, whether the count is per prompt or per session, any other
   release, and the deprecated package the seat still admits.
 - A first turn that stops at the limit gets no schema repair prompt, and
   fails:
-  - as a turn the application reports as failed, the shape measured:
-    `NIKA-1805` when the workflow declares `run.access`, `NIKA-INFER-001`
-    when it does not;
+  - as a turn the application reports as failed: `NIKA-1805` when the
+    workflow declares `run.access` (the case measured), `NIKA-INFER-001`
+    when it does not (read in the code, not measured);
   - with the stop reason `max_turn_requests`, a shape Nika handles but did
     not observe on a live seat: `NIKA-INFER-001`, whether or not the
     workflow declares `run.access`.
@@ -351,7 +353,9 @@ the same task as a blocker.
   its turn limit and its budget limit in the same shape, and gives its retry
   limit the same stop reason: the stop does not say which limit was reached.
   A `retry.on_codes` or `on_error.on_codes` list written for `NIKA-AGENT-001`
-  does not match a seat's stop: name the codes above.
+  does not match a seat's stop. Those lists can name `NIKA-INFER-001` but not
+  `NIKA-1805`, which is outside the form they accept: under a declared
+  `run.access`, catch the stop with an `on_error:` that has no `on_codes`.
 - A task without `max_turns` sends no limit, and the session keeps Claude
   Code's own loop. The default of 10 turns is the native agent loop's, never
   a seat's.

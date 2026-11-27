@@ -104,6 +104,7 @@ async fn ask(child: &mut tokio::process::Child) -> Result<serde_json::Value, Har
         &crate::wire::InitializeParams {
             protocol_version: crate::wire::PROTOCOL_V1,
             client_capabilities: serde_json::json!({}),
+            client_info: crate::wire::ClientInfo::NIKA,
         },
     )
     .map_err(|e| HarnessError::Session {

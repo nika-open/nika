@@ -250,6 +250,27 @@ pub struct InitializeParams {
     /// Client capabilities — the empty object: this client offers no
     /// fs/terminal caps in B3.1 (they arrive with the sandbox backing).
     pub client_capabilities: Value,
+    /// The client's own name and release (`clientInfo`): [`ClientInfo::NIKA`].
+    pub client_info: ClientInfo,
+}
+
+/// `initialize.clientInfo`: the implementation that opens the connection (its `name` and
+/// `version`, the two fields the protocol requires), so an adapter's logs can name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct ClientInfo {
+    /// The implementation's name: `nika`.
+    pub name: &'static str,
+    /// Its release: the engine's version.
+    pub version: &'static str,
+}
+
+impl ClientInfo {
+    /// This client: `nika` at the engine's release.
+    pub const NIKA: Self = Self {
+        name: "nika",
+        version: env!("CARGO_PKG_VERSION"),
+    };
 }
 
 /// `session/new` params.
@@ -900,6 +921,7 @@ mod tests {
             &InitializeParams {
                 protocol_version: PROTOCOL_V1,
                 client_capabilities: serde_json::json!({}),
+                client_info: ClientInfo::NIKA,
             },
         )
         .expect("serializes");
@@ -910,6 +932,11 @@ mod tests {
         // The schema pins camelCase + the INTEGER version.
         assert_eq!(v["params"]["protocolVersion"], 1);
         assert!(v["params"]["clientCapabilities"].is_object());
+        // `clientInfo` is the protocol's `Implementation`: exactly `name` and `version`.
+        assert_eq!(
+            v["params"]["clientInfo"],
+            serde_json::json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")})
+        );
         assert!(!line.contains('\n'), "one line, no embedded newline");
     }
 

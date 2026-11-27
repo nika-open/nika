@@ -93,6 +93,7 @@ where
             &InitializeParams {
                 protocol_version: wire::PROTOCOL_V1,
                 client_capabilities: wire::client_capabilities(),
+                client_info: wire::ClientInfo::NIKA,
             },
         )
         .await?;

@@ -1484,8 +1484,52 @@ impl<T> nika_error::traits::AsAny for nika_harness::wire::CancelParams where T: 
 pub fn nika_harness::wire::CancelParams::as_any(&self) -> &(dyn core::any::Any + 'static)
 impl<T> typenum::type_operators::Same for nika_harness::wire::CancelParams
 pub type nika_harness::wire::CancelParams::Output = T
+#[non_exhaustive] pub struct nika_harness::wire::ClientInfo
+pub nika_harness::wire::ClientInfo::name: &'static str
+pub nika_harness::wire::ClientInfo::version: &'static str
+impl nika_harness::wire::ClientInfo
+pub const nika_harness::wire::ClientInfo::NIKA: Self
+impl core::clone::Clone for nika_harness::wire::ClientInfo
+pub fn nika_harness::wire::ClientInfo::clone(&self) -> nika_harness::wire::ClientInfo
+impl core::cmp::Eq for nika_harness::wire::ClientInfo
+impl core::cmp::PartialEq for nika_harness::wire::ClientInfo
+pub fn nika_harness::wire::ClientInfo::eq(&self, other: &nika_harness::wire::ClientInfo) -> bool
+impl core::fmt::Debug for nika_harness::wire::ClientInfo
+pub fn nika_harness::wire::ClientInfo::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nika_harness::wire::ClientInfo
+impl core::marker::StructuralPartialEq for nika_harness::wire::ClientInfo
+impl serde_core::ser::Serialize for nika_harness::wire::ClientInfo
+pub fn nika_harness::wire::ClientInfo::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<D> owo_colors::OwoColorize for nika_harness::wire::ClientInfo
+impl<T, U> core::convert::Into<U> for nika_harness::wire::ClientInfo where U: core::convert::From<T>
+pub fn nika_harness::wire::ClientInfo::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for nika_harness::wire::ClientInfo where U: core::convert::Into<T>
+pub type nika_harness::wire::ClientInfo::Error = core::convert::Infallible
+pub fn nika_harness::wire::ClientInfo::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for nika_harness::wire::ClientInfo where U: core::convert::TryFrom<T>
+pub type nika_harness::wire::ClientInfo::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn nika_harness::wire::ClientInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for nika_harness::wire::ClientInfo where T: core::clone::Clone
+pub type nika_harness::wire::ClientInfo::Owned = T
+pub fn nika_harness::wire::ClientInfo::clone_into(&self, target: &mut T)
+pub fn nika_harness::wire::ClientInfo::to_owned(&self) -> T
+impl<T> core::any::Any for nika_harness::wire::ClientInfo where T: 'static + ?core::marker::Sized
+pub fn nika_harness::wire::ClientInfo::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for nika_harness::wire::ClientInfo where T: ?core::marker::Sized
+pub fn nika_harness::wire::ClientInfo::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for nika_harness::wire::ClientInfo where T: ?core::marker::Sized
+pub fn nika_harness::wire::ClientInfo::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for nika_harness::wire::ClientInfo where T: core::clone::Clone
+pub unsafe fn nika_harness::wire::ClientInfo::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for nika_harness::wire::ClientInfo
+pub fn nika_harness::wire::ClientInfo::from(t: T) -> T
+impl<T> nika_error::traits::AsAny for nika_harness::wire::ClientInfo where T: 'static
+pub fn nika_harness::wire::ClientInfo::as_any(&self) -> &(dyn core::any::Any + 'static)
+impl<T> typenum::type_operators::Same for nika_harness::wire::ClientInfo
+pub type nika_harness::wire::ClientInfo::Output = T
 pub struct nika_harness::wire::InitializeParams
 pub nika_harness::wire::InitializeParams::client_capabilities: serde_json::value::Value
+pub nika_harness::wire::InitializeParams::client_info: nika_harness::wire::ClientInfo
 pub nika_harness::wire::InitializeParams::protocol_version: u16
 impl core::fmt::Debug for nika_harness::wire::InitializeParams
 pub fn nika_harness::wire::InitializeParams::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result

@@ -126,6 +126,10 @@ fn initialized(http: bool, version: &str) -> Value {
 /// `initialize` and `session/new`, answered; the client's `session/new` params.
 async fn handshake(agent: &mut Agent, init: Value) -> Value {
     let hello = agent.expect("initialize").await;
+    assert_eq!(
+        hello["params"]["clientInfo"],
+        json!({"name": "nika", "version": env!("CARGO_PKG_VERSION")})
+    );
     agent.reply(&hello["id"], init).await;
     let new = agent.expect("session/new").await;
     agent.reply(&new["id"], json!({"sessionId": "s-1"})).await;

@@ -632,7 +632,10 @@ mod tests {
             .expect("admitted");
         let session = service.begin(admitted);
 
-        let backend = nika_serve::ResidentExecutionBackend::new(PathBuf::new());
+        // The run succeeds and so writes its journal: the backend's root is
+        // the temporary project, never the test's working directory (an empty
+        // root left one trace in `crates/nika-cli/.nika/traces` per run).
+        let backend = nika_serve::ResidentExecutionBackend::new(directory.path());
         let outcome = nika_serve::ExecutionBackend::execute(&backend, session.context()).await;
 
         assert_eq!(
@@ -642,6 +645,10 @@ mod tests {
         assert_eq!(
             outcome.outputs().expect("declared outputs")["answer"],
             serde_json::json!(42)
+        );
+        assert!(
+            directory.path().join(".nika").join("traces").is_dir(),
+            "the journal lands under the project root"
         );
     }
 

@@ -189,10 +189,11 @@ fn every_other_argument_and_a_named_path_stay_as_they_were() {
     ] {
         let report = run(&call(tool, "", args));
         assert_eq!(leaks(&report), Vec::new(), "{tool} {args}");
+        // The message names the case, never the rows: a test prints no secret-bearing value
+        // (CodeQL `rust/cleartext-logging`).
         assert!(
             secret_rows(&report).is_empty(),
-            "{tool} {args}: {:?}",
-            secret_rows(&report)
+            "{tool} {args}: the report lists a secret row"
         );
     }
     // Without the rule, the content send is the leak it always was, and no route.

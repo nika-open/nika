@@ -121,7 +121,7 @@ impl HarnessBoundary {
         loads_unasked: Some(
             "applies a managed Claude Code policy when the machine has one, and runs a task \
              that names no model on the one your Claude settings name (your own permission \
-             rules, allow or deny, hooks, MCP servers, plugins, skills and memory files are \
+             rules, allow, ask or deny, hooks, MCP servers, plugins, skills and memory files are \
              not loaded into the session)",
         ),
         asked_command_leaves_sandbox: false,
@@ -395,7 +395,7 @@ mod tests {
             claude.contains(
                 "; applies a managed Claude Code policy when the machine has one, and runs a \
                  task that names no model on the one your Claude settings name (your own \
-                 permission rules, allow or deny, hooks, MCP servers, plugins, skills and \
+                 permission rules, allow, ask or deny, hooks, MCP servers, plugins, skills and \
                  memory files are not loaded into the session) — permits: does not bound that"
             ),
             "{claude}"

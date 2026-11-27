@@ -203,7 +203,7 @@ const ROWS: &[(&str, &str)] = &[
          sandbox, not Nika's; Codex also calls its MCP tools marked readOnlyHint, opens \
          pages with its hosted web tool, writes its own ~/.codex, starts its configured MCP \
          servers and applies your global AGENTS.md and plugins, all unasked; a Claude Code \
-         session is opened without your own permission rules (allow or deny), hooks, MCP \
+         session is opened without your own permission rules (allow, ask or deny), hooks, MCP \
          servers, plugins, skills and memory files (a managed policy still applies, and a \
          task that names no model runs on the one your Claude settings name), and on every \
          other seat \

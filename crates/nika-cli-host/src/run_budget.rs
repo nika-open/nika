@@ -56,11 +56,14 @@ pub fn preflight(
 }
 
 /// The cost gate over a run's frozen plan and its validated bindings (B11 ·
-/// descended from the CLI's run adapter): a run every admitted lane of which
-/// sits on a harness (`--access codex` and its kin) is bounded by the seat's
-/// subscription, so the cap gates the priced builtins only. `settled` names
-/// the tasks a resumed journal completed: cache hits that spend nothing, so
-/// the floor prices the work still to run (NIK-245 · empty on a fresh run).
+/// descended from the CLI's run adapter): a run every model of which rides a
+/// harness seat (`--access codex` and its kin) has its model spend bounded by
+/// the seat's subscription, so an unpriced cloud model does not refuse under
+/// the cap (`nika_runtime::seated_on_harness`, the answer the run's launch
+/// gate reads too). An id this binary cannot resolve, an unpriced paid media
+/// call and a priced floor above the cap still refuse. `settled` names the
+/// tasks a resumed journal completed: cache hits that spend nothing, so the
+/// floor prices the work still to run (NIK-245 · empty on a fresh run).
 ///
 /// # Errors
 /// As [`preflight_bound`].
@@ -73,10 +76,8 @@ pub fn plan_gate(
     plan: &nika_providers::ExecutionAccessPlan,
     settled: &BTreeSet<String>,
 ) -> Result<(), u8> {
-    let seated_on_harness = plan.admitted().next().is_some()
-        && plan
-            .admitted()
-            .all(|(_, lane)| matches!(lane.plan.chosen, nika_types::access::AccessClass::Harness));
+    // The run's own launch gate asks the same question of the same plan.
+    let seated_on_harness = nika_runtime::seated_on_harness(wf, effective, plan);
     preflight_remaining(
         wf,
         report,
@@ -187,7 +188,7 @@ mod tests {
     use nika_schema::{FileId, ParseMode, parse};
     use serde_json::{Value, json};
 
-    use super::{effective_cost, preflight, preflight_bound};
+    use super::{effective_cost, plan_gate, preflight, preflight_bound};
 
     #[test]
     fn a_run_seated_on_a_harness_passes_the_cap_with_an_unpriced_cloud_model() {
@@ -208,6 +209,88 @@ mod tests {
             Ok(()),
             "seated on a harness, the same run proceeds"
         );
+    }
+
+    /// The plan gate seats the cap with the router's answer, as the run's launch gate does:
+    /// only a run every model of which rides a harness seat passes the cap with an unpriced
+    /// cloud model. A lane the run does not use changes nothing; a model on a key, a plan with
+    /// no lane and a second model on a key all refuse.
+    #[test]
+    fn the_plan_gate_passes_the_cap_only_when_a_seat_serves_every_model() {
+        use nika_providers::plan::{ExecutionAccessPlan, LaneVerdict, ResolvedLane};
+        use nika_types::access::{AccessClass, AccessPlan};
+
+        const CANARY: &str = "gemini/nika-b20-unpriced-canary";
+        const PRICED: &str = "openai/gpt-4.1-mini";
+        let parsed =
+            |yaml: &str| parse(yaml, FileId::new(0), ParseMode::Strict).expect("fixture parses");
+        let one = parsed(&format!(
+            "nika: m\nmodel: \"{CANARY}\"\ntasks:\n  a:\n    infer: {{ prompt: hi, max_tokens: 20 }}\n"
+        ));
+        let two = parsed(&format!(
+            "nika: m\ntasks:\n  a:\n    infer: {{ model: \"{CANARY}\", prompt: hi, max_tokens: 20 }}\n  b:\n    infer: {{ model: \"{PRICED}\", prompt: hi, max_tokens: 20 }}\n"
+        ));
+        // A plan as the resolver leaves it with no pin: its seat is the first harness lane's
+        // access and serves the lanes that chose it.
+        let plan_of = |lanes: &[(&str, &str, &str, AccessClass)]| {
+            let seat = lanes
+                .iter()
+                .find(|lane| lane.3 == AccessClass::Harness)
+                .map(|lane| lane.2.to_owned());
+            let lanes = lanes
+                .iter()
+                .map(|&(model, provider, access, chosen)| {
+                    let lane = AccessPlan::new(
+                        model,
+                        provider,
+                        access,
+                        chosen,
+                        chosen.default_billing(),
+                        false,
+                        Vec::new(),
+                    );
+                    (
+                        model.to_owned(),
+                        LaneVerdict::Admitted(ResolvedLane::new(lane, 1)),
+                    )
+                })
+                .collect();
+            ExecutionAccessPlan::new(lanes, None, seat, None)
+        };
+        let seated = (CANARY, "gemini", "gemini-cli", AccessClass::Harness);
+        let keyed = (CANARY, "gemini", "gemini", AccessClass::Api);
+        let other_key = (PRICED, "openai", "openai", AccessClass::Api);
+        let bindings = BTreeMap::new();
+        for (wf, lanes, passes) in [
+            (&one, vec![seated], true),
+            (&one, vec![seated, other_key], true),
+            (&one, vec![keyed], false),
+            (&one, Vec::new(), false),
+            (&two, vec![seated, other_key], false),
+        ] {
+            let report = nika_check::check(wf);
+            let plan = plan_of(&lanes);
+            assert_eq!(
+                nika_runtime::seated_on_harness(wf, (None, &bindings), &plan),
+                passes,
+                "{lanes:?}"
+            );
+            let verdict = plan_gate(
+                wf,
+                &report,
+                (None, &bindings),
+                Some(0.05),
+                false,
+                &plan,
+                &BTreeSet::new(),
+            );
+            let expected = if passes {
+                Ok(())
+            } else {
+                Err(crate::output::exit::FILE)
+            };
+            assert_eq!(verdict, expected, "{lanes:?}");
+        }
     }
 
     /// #342 — the delegation idiom (`--model <p/m> --max-cost-usd <usd>`):

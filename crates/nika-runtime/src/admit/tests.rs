@@ -9,6 +9,8 @@ use nika_kernel::tool_executor::ToolResult;
 use nika_kernel_mock::{
     MockClock, MockProvider, MockShell, MockToolDefinitionProvider, MockToolExecutor,
 };
+use nika_providers::plan::{LaneVerdict, ResolvedLane};
+use nika_types::access::{AccessClass, AccessPlan, AccessRequirement};
 use nika_verb_agent::AgentVerb;
 use nika_verb_exec::ExecVerb;
 use nika_verb_infer::InferVerb;
@@ -449,6 +451,282 @@ fn unpriced_cloud_plus_cap_refuses_to_start() {
         budget_floor_refusal(&wf, &report, None, None).is_none(),
         "no cap → unpriced cloud may still start"
     );
+}
+
+const CANARY: &str = "gemini/nika-b20-unpriced-canary";
+/// A second id no catalog row prices, for a model the plan carries no lane for.
+const UNLANED_CANARY: &str = "gemini/nika-seat-unlaned-canary";
+
+/// One admitted lane of a frozen plan: the model, its provider, the access that carries it and
+/// that access's class.
+type Lane<'a> = (&'a str, &'a str, &'a str, AccessClass);
+
+const SEATED: Lane<'static> = (CANARY, "gemini", "gemini-cli", AccessClass::Harness);
+const KEYED: Lane<'static> = (CANARY, "gemini", "gemini", AccessClass::Api);
+
+/// A frozen plan that admits `lanes`, as the resolver leaves it with no pin: its seat is the
+/// first harness lane's access and serves the lanes that chose it.
+fn plan_of(lanes: &[Lane<'_>]) -> ExecutionAccessPlan {
+    let seat = lanes
+        .iter()
+        .find(|lane| lane.3 == AccessClass::Harness)
+        .map(|lane| lane.2.to_owned());
+    let lanes = lanes
+        .iter()
+        .map(|&(model, provider, access, chosen)| {
+            let lane = AccessPlan::new(
+                model,
+                provider,
+                access,
+                chosen,
+                chosen.default_billing(),
+                false,
+                Vec::new(),
+            );
+            (
+                model.to_owned(),
+                LaneVerdict::Admitted(ResolvedLane::new(lane, 1)),
+            )
+        })
+        .collect();
+    ExecutionAccessPlan::new(lanes, None, seat, None)
+}
+
+/// The launch gates over `wf` under a cap of one cent, with `plan` as the run's frozen plan
+/// and the declared defaults as the only bindings.
+fn launch_under_a_cap(
+    wf: &RawWorkflow,
+    plan: Option<&ExecutionAccessPlan>,
+) -> Result<(), RuntimeError> {
+    let report = nika_check::check(wf);
+    assert!(report.is_clean(), "the fixture checks clean: {report:?}");
+    gates(
+        wf,
+        &report,
+        &BTreeMap::new(),
+        Some(0.01),
+        None,
+        (None, &[], plan),
+    )
+}
+
+/// The cap's refusal of an unpriced cloud model: NIKA-1709 naming `model` and the cap.
+fn assert_unpriced_refusal(result: Result<(), RuntimeError>, model: &str) {
+    let err = result.expect_err("an unpriced cloud model off a seat refuses under a cap");
+    assert_eq!(err.spec_code(), "NIKA-1709");
+    let msg = err.to_string();
+    assert!(msg.contains("refusing to start: cloud model"), "{msg}");
+    assert!(msg.contains(model), "{msg}");
+    assert!(msg.contains("is unpriced"), "{msg}");
+    assert!(msg.contains("$0.010000"), "the cap rides: {msg}");
+}
+
+/// The canary on a seat beside a task whose model a declared default decides: the plan holds
+/// no lane for a templated model, so the router sends that call to the provider path.
+fn seated_beside_a_bound_model_wf() -> String {
+    format!(
+        "nika: seated-beside-bound\ninputs:\n  m: {{ type: string, default: \"{UNLANED_CANARY}\" }}\npermits: {{}}\ntasks:\n  ping:\n    infer: {{ model: \"{CANARY}\", prompt: \"PONG\", max_tokens: 16 }}\n  ask:\n    infer: {{ model: \"${{{{ inputs.m }}}}\", prompt: \"PONG\", max_tokens: 16 }}\n"
+    )
+}
+
+/// The launch gate reads the answer the host's preflight reads. A run whose model rides a
+/// harness seat starts under a cap although the catalog does not price that model: the seat's
+/// subscription bounds it. The same file and cap on an API lane, or with no plan, still
+/// refuse. The launch used to judge every run as unseated, so it refused the run its own
+/// preflight had just admitted.
+#[test]
+fn a_run_seated_on_a_harness_starts_under_a_cap_with_an_unpriced_cloud_model() {
+    let wf = parse(&unpriced_cloud_wf());
+    let seated = launch_under_a_cap(&wf, Some(&plan_of(&[SEATED])));
+    assert!(
+        seated.is_ok(),
+        "seated on a harness, the cap does not refuse an unpriced cloud model: {seated:?}"
+    );
+    assert_unpriced_refusal(launch_under_a_cap(&wf, Some(&plan_of(&[KEYED]))), CANARY);
+    assert_unpriced_refusal(launch_under_a_cap(&wf, None), CANARY);
+}
+
+/// Seated is the router's word, model by model. A plan whose only lane is a harness lane does
+/// not seat a model it holds no lane for: that call rides the provider path and bills a key,
+/// so the cap still refuses it. Here a declared default decides the second task's model.
+#[test]
+fn a_model_the_plan_holds_no_lane_for_unseats_the_run() {
+    let wf = parse(&seated_beside_a_bound_model_wf());
+    let plan = plan_of(&[SEATED]);
+    assert!(
+        !seated_on_harness(&wf, (None, &BTreeMap::new()), &plan),
+        "the bound model has no lane, so no seat serves it"
+    );
+    assert_unpriced_refusal(launch_under_a_cap(&wf, Some(&plan)), UNLANED_CANARY);
+}
+
+/// A pinned seat serves every model, a bound one included: the same file then starts.
+#[test]
+fn a_pinned_seat_serves_a_model_only_a_binding_names() {
+    let wf = parse(&seated_beside_a_bound_model_wf());
+    let pinned = ExecutionAccessPlan::new(
+        BTreeMap::new(),
+        Some("codex".to_owned()),
+        Some("codex".to_owned()),
+        None,
+    );
+    assert!(seated_on_harness(&wf, (None, &BTreeMap::new()), &pinned));
+    let launch = launch_under_a_cap(&wf, Some(&pinned));
+    assert!(
+        launch.is_ok(),
+        "a pinned seat bounds both models: {launch:?}"
+    );
+
+    // A route the file declares (`run.access.via`) pins the seat as the operator's flag does.
+    let declared = ExecutionAccessPlan::new(BTreeMap::new(), None, Some("codex".to_owned()), None)
+        .with_requirement(Some(
+            AccessRequirement::new().with_via(Some("codex".to_owned())),
+        ));
+    assert!(seated_on_harness(&wf, (None, &BTreeMap::new()), &declared));
+    let launch = launch_under_a_cap(&wf, Some(&declared));
+    assert!(
+        launch.is_ok(),
+        "a declared seat bounds both models: {launch:?}"
+    );
+}
+
+/// The answer over each shape of run: seated only when every model the launch resolves rides
+/// a seat. A lane the run does not use changes nothing; one model on a key unseats the run; a
+/// run that names no model is not seated.
+#[test]
+fn a_run_is_seated_only_when_a_seat_serves_every_model_it_names() {
+    const PRICED: &str = "openai/gpt-4.1-mini";
+    let other_key: Lane<'_> = (PRICED, "openai", "openai", AccessClass::Api);
+    let one = parse(&unpriced_cloud_wf());
+    let two = parse(&format!(
+        "nika: two-models\npermits: {{}}\ntasks:\n  ping:\n    infer: {{ model: \"{CANARY}\", prompt: \"PONG\", max_tokens: 16 }}\n  pong:\n    infer: {{ model: \"{PRICED}\", prompt: \"PONG\", max_tokens: 16 }}\n"
+    ));
+    let none = parse(&fixture(""));
+    let none_bound = BTreeMap::new();
+    let seated = |wf: &RawWorkflow, lanes: &[Lane<'_>]| {
+        seated_on_harness(wf, (None, &none_bound), &plan_of(lanes))
+    };
+
+    assert!(seated(&one, &[SEATED]));
+    assert!(
+        seated(&one, &[SEATED, other_key]),
+        "a lane the run does not use changes nothing"
+    );
+    assert!(!seated(&one, &[KEYED]));
+    assert!(!seated(&one, &[]), "no lane, no seat");
+    assert!(
+        !seated(&two, &[SEATED, other_key]),
+        "one model on a key unseats the run"
+    );
+    assert!(
+        !seated(&none, &[SEATED]),
+        "a run that names no model is not seated"
+    );
+    let agent = parse(&format!(
+        "nika: one-agent\npermits: {{}}\ntasks:\n  work:\n    agent: {{ model: \"{CANARY}\", prompt: \"PONG\" }}\n"
+    ));
+    assert!(
+        seated(&agent, &[SEATED]),
+        "an agent task's model is judged like an infer task's"
+    );
+    assert!(!seated(&agent, &[KEYED]));
+    assert!(
+        seated_on_harness(&one, (Some(CANARY), &none_bound), &plan_of(&[SEATED])),
+        "the operator's model is judged like the file's"
+    );
+    assert!(
+        !seated_on_harness(&one, (Some(PRICED), &none_bound), &plan_of(&[SEATED])),
+        "the operator's model replaces the envelope's, and no seat serves it"
+    );
+}
+
+/// A run that mixes a seated model with a model on a key keeps the whole cap: the unpriced
+/// model is refused although it rides the seat. The cap has one answer for the run.
+#[test]
+fn a_run_with_one_model_on_a_key_keeps_the_whole_cap() {
+    let wf = parse(&format!(
+        "nika: two-models\npermits: {{}}\ntasks:\n  ping:\n    infer: {{ model: \"{CANARY}\", prompt: \"PONG\", max_tokens: 16 }}\n  pong:\n    infer: {{ model: \"openai/gpt-4.1-mini\", prompt: \"PONG\", max_tokens: 16 }}\n"
+    ));
+    let plan = plan_of(&[
+        SEATED,
+        ("openai/gpt-4.1-mini", "openai", "openai", AccessClass::Api),
+    ]);
+    assert_unpriced_refusal(launch_under_a_cap(&wf, Some(&plan)), CANARY);
+}
+
+/// Seated on a harness, the stronger arm still judges: an id this binary cannot resolve
+/// refuses under a cap. A bare id has no lane of its own: only a pinned or declared seat
+/// serves it.
+#[test]
+fn a_seated_run_under_a_cap_still_refuses_an_id_the_binary_cannot_resolve() {
+    let wf = parse(
+        "nika: seated-unresolvable\nmodel: \"claude-opus-4.1\"\npermits: {}\ntasks:\n  ping:\n    infer: { prompt: \"PONG\", max_tokens: 16 }\n",
+    );
+    let plan = ExecutionAccessPlan::new(
+        BTreeMap::new(),
+        Some("codex".to_owned()),
+        Some("codex".to_owned()),
+        None,
+    );
+    assert!(seated_on_harness(&wf, (None, &BTreeMap::new()), &plan));
+    let err = launch_under_a_cap(&wf, Some(&plan))
+        .expect_err("an id no resolver names is not the subscription's to bound");
+    assert_eq!(err.spec_code(), "NIKA-1709");
+    let msg = err.to_string();
+    assert!(msg.contains("`claude-opus-4.1`"), "{msg}");
+    assert!(
+        msg.contains("cannot bound a model this binary cannot resolve"),
+        "{msg}"
+    );
+}
+
+/// Seated on a harness, the cap still meters what bills a provider key: a priced image above
+/// the cap refuses with its floor, and an image no catalog row prices refuses as unknown
+/// spend.
+#[test]
+fn a_seated_run_under_a_cap_still_refuses_the_media_it_cannot_afford_or_price() {
+    let with_image = |args: &str| {
+        parse(&format!(
+            "nika: seated-media\nmodel: \"{CANARY}\"\npermits: {{ tools: [\"nika:image_generate\"], fs: {{ write: [\"./out/**\"] }} }}\ntasks:\n  ping:\n    infer: {{ prompt: \"PONG\", max_tokens: 16 }}\n  og:\n    invoke: {{ tool: \"nika:image_generate\", args: {{ {args}, prompt: \"a monarch butterfly\", output_dir: \"./out\" }} }}\n"
+        ))
+    };
+    let plan = plan_of(&[SEATED]);
+
+    let priced = with_image("provider: xai");
+    assert!(seated_on_harness(&priced, (None, &BTreeMap::new()), &plan));
+    let err = launch_under_a_cap(&priced, Some(&plan))
+        .expect_err("a $0.02 image floor refuses a $0.01 cap on any access");
+    assert_eq!(err.spec_code(), "NIKA-1709");
+    let msg = err.to_string();
+    assert!(msg.contains("$0.020000"), "the catalog floor rides: {msg}");
+    assert!(msg.contains("$0.010000"), "the cap rides: {msg}");
+
+    let unpriced = with_image("model: gpt-image-1.5");
+    let err = launch_under_a_cap(&unpriced, Some(&plan))
+        .expect_err("the seat never bounds a paid media call");
+    assert_eq!(err.spec_code(), "NIKA-1709");
+    let msg = err.to_string();
+    assert!(msg.contains("no catalog price for task `og`"), "{msg}");
+}
+
+/// A run with no frozen plan is not seated for the cap, whatever seat it declares: a seat id
+/// alone does not prove a seat is attached for every call, so the cap still refuses.
+#[test]
+fn a_declared_seat_without_a_plan_does_not_seat_the_cap() {
+    let wf = parse(&unpriced_cloud_wf());
+    let report = nika_check::check(&wf);
+    for planless_harness in [false, true] {
+        let launch = gates_with_transport(
+            &wf,
+            &report,
+            &BTreeMap::new(),
+            (Some(0.01), &BTreeSet::new()),
+            None,
+            (None, &[], None),
+            planless_harness,
+        );
+        assert_unpriced_refusal(launch, CANARY);
+    }
 }
 
 #[test]

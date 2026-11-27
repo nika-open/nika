@@ -231,8 +231,10 @@ to the runtime's one floor law (`nika_runtime::budget_floor_refusal_bound`), so
 a fan over a bound input is priced at the items given, never at its declared
 default, and the unbounded warning describes that same effective workflow.
 `plan_gate` is the CLI's former cost gate over the frozen plan (the harness
-predicate, then `preflight_bound`), descended here as the same monetary
-adapter. `preflight` keeps its signature and prices no bindings.
+predicate, then the preflight over the work still to run), descended here as
+the same monetary adapter. The harness predicate is the runtime's
+`seated_on_harness`, the function the run's launch gate asks with the same
+plan. `preflight` keeps its signature and prices no bindings.
 The project default is read through `nika-vocab`; the journal uses `nika-fs`
 `OwnedDir`. Neither move changes default/cap precedence, request/token/time
 bounds, route binding, uncertain-charge stop, or subscription separation.

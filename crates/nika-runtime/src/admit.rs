@@ -53,7 +53,9 @@ pub(crate) fn gates_with_transport(
         report,
         budget,
         (model_override, overrides),
-        false,
+        // With no frozen plan the run is judged unseated: a declared seat id alone does not
+        // prove that a seat is attached for every call.
+        plan.is_some_and(|plan| seated_on_harness(wf, (model_override, overrides), plan)),
         probes,
         settled,
     ) {
@@ -85,6 +87,29 @@ pub(crate) fn gates_with_transport(
         }
     }
     Ok(())
+}
+
+/// Whether a harness seat serves every model this run names, so the seat's subscription
+/// bounds its model spend and a cost cap meters the priced builtins only. The answer is the
+/// router's own: dispatch sends a call to a seat exactly when the frozen plan names one for
+/// the call's model ([`ExecutionAccessPlan::seat_for`]: a pinned seat serves every model, a
+/// resolved seat the lanes that chose it). It is asked for each model the launch can resolve
+/// ([`nika_check::analyzer::resolved_infer_models`]: a task's own `model:`, the operator's
+/// `--model`, the envelope's, with the bindings and declared defaults applied). A model no
+/// seat serves rides the provider path and unseats the run, and a run that names no model is
+/// not seated. A model only the run decides is judged before its own request.
+///
+/// The host's preflight and the run's launch gate both ask here. They used to answer apart:
+/// the preflight read the plan's lanes, the launch said no, and a run the preflight had just
+/// admitted was refused under its cap.
+#[must_use]
+pub fn seated_on_harness(
+    wf: &RawWorkflow,
+    (model_override, overrides): (Option<&str>, &BTreeMap<String, Value>),
+    plan: &ExecutionAccessPlan,
+) -> bool {
+    let models = resolved_infer_models(wf, model_override, overrides);
+    !models.is_empty() && models.iter().all(|model| plan.seat_for(model).is_some())
 }
 
 /// Spec 02 §Project files: a run never starts on a project file no compose step read; its

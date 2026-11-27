@@ -202,6 +202,79 @@ fn seated_gemini_plan(model: &str) -> ExecutionAccessPlan {
     )
 }
 
+/// A run seated on a harness starts under a cost cap with a model the catalog does not price:
+/// the seat's subscription bounds the seat's own spend, as the host's preflight says before it
+/// hands the run over. The launch gate used to judge the run as unseated and refuse it
+/// (NIKA-1709) after that preflight had admitted it. Here the run passes the launch, opens its
+/// trace and fails on the seat's own word; the same file and cap with no plan refuse before
+/// any event.
+#[tokio::test]
+async fn a_run_seated_on_a_harness_starts_under_a_cap_with_an_unpriced_cloud_model() {
+    const MODEL: &str = "gemini/nika-b20-unpriced-canary";
+    let yaml = format!(
+        "nika: seated-cap\nmodel: {MODEL}\npermits: {{}}\ntasks:\n  ask:\n    infer:\n      \
+         prompt: \"hi\"\n"
+    );
+    let wf = nika_schema::parse(
+        &yaml,
+        nika_schema::FileId::new(0),
+        nika_schema::ParseMode::Strict,
+    )
+    .expect("fixture parses");
+    let report = nika_check::check(&wf);
+    assert!(report.is_clean(), "{report:?}");
+
+    let seated = runtime(MODEL)
+        .with_access_plan(seated_gemini_plan(MODEL))
+        .with_max_cost_usd(Some(0.05));
+    let mut stamper = DeterministicStamper::new();
+    let mut sink = VecSink::new();
+    let outcome = seated
+        .run(&wf, &report, &mut stamper, &mut sink)
+        .await
+        .expect("seated on a harness, the cap does not refuse the launch");
+    assert!(!outcome.ok, "the seat is not infer-grade: the task fails");
+    let events = sink.events();
+    let failed: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == EventKind::TaskFailed)
+        .collect();
+    assert_eq!(failed.len(), 1, "exactly one terminal: {events:?}");
+    assert_eq!(
+        field(failed[0], "access_id"),
+        Some("gemini-cli"),
+        "the seat's own failure, after the launch"
+    );
+    let settled = events
+        .iter()
+        .find(|e| e.kind == EventKind::WorkflowFailed)
+        .expect("workflow_failed");
+    assert_eq!(int_field(settled, "priced_calls"), Some(0));
+    assert_eq!(
+        int_field(settled, "unpriced_calls"),
+        Some(0),
+        "no provider was dialed beside the seat"
+    );
+
+    let unseated = runtime(MODEL).with_max_cost_usd(Some(0.05));
+    let mut stamper = DeterministicStamper::new();
+    let mut sink = VecSink::new();
+    let err = unseated
+        .run(&wf, &report, &mut stamper, &mut sink)
+        .await
+        .expect_err("with no seat the cap cannot bound an unpriced cloud model");
+    assert_eq!(err.spec_code(), "NIKA-1709");
+    assert!(
+        err.to_string()
+            .contains(&format!("cloud model {MODEL} is unpriced")),
+        "{err}"
+    );
+    assert!(
+        sink.events().is_empty(),
+        "a launch refusal precedes every event"
+    );
+}
+
 /// A plan-level seat does not make every later agent failure a pin.
 /// Schema (and max-turns / tool) after the native loop ran must not
 /// teach `--access gemini`.

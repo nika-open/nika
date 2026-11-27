@@ -193,7 +193,9 @@ const ROWS: &[(&str, &str)] = &[
          gemini-cli `default`), never one that approves on its own, reads it back (or takes the \
          legacy acknowledgement) before the prompt or refuses, and judges every ask against \
          permits: — allowed once inside, a pause for you outside (NIKA-1806), each journaled \
-         as permit_checked. A path is judged where the system lands, through every symlink \
+         as permit_checked. Each measured mode holds for the adapter release its row names; on \
+         another release the seat accepts, the run's permit_checked record says so. A path is \
+         judged where the system lands, through every symlink \
          and `..`; an ask for network access, for a wider harness sandbox or to approve one \
          of its own MCP tool calls always pauses, `permits.exec: true` included. What the mode lets the harness do WITHOUT asking stays \
          outside permits: (Codex reads any file and writes the project, /tmp and $TMPDIR in \

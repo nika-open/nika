@@ -42,6 +42,17 @@ impl SpawnedHarness {
         setup: ConversationSetup,
         offer: ToolOffer,
     ) -> Result<Conversation, HarnessError> {
+        self.converse_in(None, setup, offer).await
+    }
+
+    /// [`Self::converse`] with its scratch directory created in `parent`, the system's
+    /// temporary directory when `None`.
+    pub(super) async fn converse_in(
+        &self,
+        parent: Option<&std::path::Path>,
+        setup: ConversationSetup,
+        offer: ToolOffer,
+    ) -> Result<Conversation, HarnessError> {
         let profile = Profile::for_seat(&self.adapter.id).ok_or_else(|| {
             refusal(&format!(
                 "ACP conversation has no audited profile for adapter `{}`; no fallback",
@@ -60,9 +71,13 @@ impl SpawnedHarness {
             }
             Profile::ClaudeCode => Vec::new(),
         };
-        let scratch = tempfile::tempdir().map_err(|_| HarnessError::Unavailable {
+        let scratch = parent.map_or_else(tempfile::tempdir, tempfile::tempdir_in);
+        let scratch = scratch.map_err(|_| HarnessError::Unavailable {
             reason: "ACP conversation cannot create its scratch directory".to_owned(),
         })?;
+        // The scratch is new and empty, but a parent of it may hold a project configuration
+        // (a temporary directory inside a repository): the spawn judges it like any session
+        // directory.
         let mut child = self.spawn_child(scratch.path(), true, &profile_env)?;
         let unpiped = |pipe: &str| HarnessError::Session {
             reason: format!("the child's {pipe} was not piped"),

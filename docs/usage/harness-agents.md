@@ -220,6 +220,91 @@ cloud provider switch, so the seat runs on Claude Code's own sign-in. A
 proxy address that carries a user and a password is handed over as you
 wrote it.
 
+A `codex` session does not open when it would see a project's Codex
+configuration. codex-acp marks the directory of every session it opens as a
+trusted project, and Codex then applies the `.codex` entry of that directory
+and of each parent up to the repository root (the first directory whose
+`.git` resolves; outside a repository, the directory alone): its
+`config.toml`, with the MCP servers, permissions and hooks it may define, and
+the rest of that folder. Nika looks for such an entry right before the
+session's process would start, on every kind of session of the seat: an
+`agent:` task, an ACP `infer:` turn, an authoring session, an offer listing
+and a conversation. When it finds one, the session fails as a refusal that
+`retry:` does not replay, and the message names each entry it found. An
+`agent:` task reports it as `NIKA-1805` when the run declares its access; an
+ACP `infer:` turn reports `NIKA-1805` always. A `.codex` that is a link
+counts as present, wherever it leads and even when it leads nowhere. Move the
+entry out of the project, or run the task from a directory that has none.
+
+- The seat is recognised in three forms: the `codex` row, a command whose
+  file is named `codex-acp`, or a row that declares one of the names
+  codex-acp reports at `initialize`.
+- Your own Codex home (`CODEX_HOME`, or `~/.codex` when it is unset) is your
+  user configuration, which applies to every session anyway: a session
+  rooted in the directory that holds it is not refused for it, also when
+  that directory is reached through a link, or when your home is itself a
+  link into a checkout (a session in that checkout opens). A project's
+  `.codex` that is a link to your home still counts. A home that is not
+  an absolute path (a relative `CODEX_HOME` or `HOME`) exempts nothing.
+- A scratch directory that Nika creates for a one-shot session or a
+  conversation is judged like any directory; with the default temporary
+  directory, no repository root sits above it.
+- Nika finds the repository root by `.git`. A `.git` that does not resolve
+  (a link that leads nowhere) does not end the walk: it goes on to the first
+  `.git` that resolves or, when none does, to the outermost directory that
+  holds one. A `project_root_markers` setting in your Codex configuration is
+  not read.
+- An entry that cannot be looked at (in a directory Nika may not search,
+  for instance) counts too, named with the reason. A session directory
+  named with `..` is refused, since the directories Codex would read cannot
+  be judged from it (a temporary directory takes its name from `TMPDIR`);
+  `.` parts are dropped.
+
+The `initialize` probe that reads an adapter's name and release is not a
+session: it starts in Nika's own directory and ends before any session
+exists, so it is not looked at.
+
+codex-acp also makes model calls of its own that are not in the run's
+token counts or cost and are not recorded in the trace:
+
+- **The session title.** codex-acp 1.13.1, the release this seat is measured
+  on, names each new session itself. After the session's first completed
+  turn, it sends the text of that first prompt to a second model of the same
+  Codex account (`gpt-5.6-luna` in that release), in a separate temporary
+  thread. That thread starts without the seat's profile, on your own Codex
+  configuration, in the session's directory. This release offers a client
+  no way to set a title, so Nika cannot prevent that call. The seat admits
+  codex-acp 0.16 to 1.x for `agent:` tasks and exactly 1.13.1 for ACP
+  `infer:` turns, authoring and conversations; the other releases in that
+  range were not read for this.
+- A release that lets a client set the title (`sessionCapabilities.title` in
+  its `initialize` answer; codex-acp 2.12.0 does, and is outside what the
+  seat admits today) receives `session/set_title` from Nika on the `codex`
+  seat right after `session/new`, before any selection and before the first
+  prompt. Every kind of session is titled but an offer listing, which gets
+  no title. The title names the kind of session (`Nika agent`, `Nika infer`,
+  `Nika authoring` or `Nika conversation`): never the prompt, the system
+  text or a value. Nika waits for the answer up to the `initialize`
+  deadline (30 seconds by default), or half the session's frame bound when
+  that is shorter, and the session goes on whatever comes: an answer that
+  arrives after the wait, a result or an error, is passed over. A
+  conversation's opening record says what the adapter did (`title_call`:
+  `accepted`; `refused` for an error answer; `unanswered` when no answer
+  came in that time), and the other session kinds record nothing. By
+  2.12.0's documentation, an accepted title stops the adapter's own title
+  writes. The same documentation says Codex may refuse to title a session
+  that has no first message yet: the record then says `refused`, and the
+  adapter may still name the session from its first prompt. Neither was
+  observed on a live seat. No other seat receives a title call, and neither
+  does an adapter that does not advertise the capability.
+- **Prompt suggestions.** Every session on the `codex` seat starts its
+  adapter with `CODEX_ACP_PROMPT_SUGGESTIONS=false`. codex-acp 2.12.0 reads
+  it to turn off the follow-up prompts it would otherwise generate with a
+  further model call for a client that declares JetBrains' AIR extension,
+  as Nika's `agent:`, `infer:` and authoring sessions do to receive typed
+  turn failures. 1.13.1 does not read it and makes no such call. No other seat
+  receives it.
+
 If a task must not write anything, or must not read outside the project, do
 not rely on `permits:` alone on a harness seat: run it on an API or local model
 (the native agent loop judges every tool call), or in a container or a

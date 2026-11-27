@@ -18,11 +18,11 @@ classes:
   testimonial: "captured evidence — fixtures, corpora, traces, receipts: proves behavior; neither shipped source nor regenerable output"
   foreign: "pointer to a third-party sovereign source"
 summary:
-  classified_files: 8281
+  classified_files: 8287
   file_rows: 11
   pattern_rows: 24
   by_class:
-    authored: 5022
+    authored: 5028
     authored-pin: 2
     generated: 284
     pinned-copy: 266
@@ -151,8 +151,8 @@ patterns:
     - "cargo-public-api 0.51.0"
 - glob: "crates/**/src/**"
   class: authored
-  match_count: 2471
-  aggregate_sha256: 0b1c90098780cbad5aae3d2dcb94f5351a06f86ed51c20db3efbe210f173e18c
+  match_count: 2475
+  aggregate_sha256: f75a2da90f5983d7b121f3597a66700638a8923659e0393099562995c74400a2
   evidence: "the code — SPDX AGPL-3.0-or-later headers · 12-gate admission (ADR-003) · zero-unwrap discipline; spot-checked file heads carry no generation marker (grep hits for 'generated' are prose mentions, not markers)"
 - glob: "crates/**/tests/**"
   class: authored
@@ -183,7 +183,7 @@ patterns:
 - glob: "docs/**"
   class: authored
   match_count: 150
-  aggregate_sha256: 3f1f89b287f3bf4ce8e9db6fd455bf7c298eaf4dad64a50a407f88dea3871da2
+  aggregate_sha256: 896fe3338301aeed8bd057791084974e9bc2ad1083c2ae39347cbd27d1e358bf
   evidence: "crate-specs · architecture prose · perf notes — no generation markers at file heads"
 - glob: "scripts/**"
   class: authored
@@ -241,8 +241,8 @@ patterns:
   evidence: "examples/README.md — a pointer README (the runnable examples live in the vendored pack + the spec repo)"
 - glob: "changelog.d/**"
   class: authored
-  match_count: 16
-  aggregate_sha256: 49a5eea74b13a90978d7f9ba6894d9a1e7aae5d6640e684d943e57a40b6215eb
+  match_count: 18
+  aggregate_sha256: 68c4af65546950242950e35b504968669b92294161a40f95704f661af937f655
   evidence: "changelog.d/README.md — one hand-written bullet per change, authored by whoever makes the change; scripts/release/changelog-assemble.sh only CONSUMES them (--fold splices and deletes) and never writes one"
   note: "the README is permanent by design: a rule matching nothing is a coverage hole, and every fragment is deleted at fold time"
 - glob: "*"

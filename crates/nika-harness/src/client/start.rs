@@ -82,7 +82,7 @@ where
     /// spawner's judgment when it lent one, the completion profile's own
     /// identity, the image prompts the request needs and protocol v1. The
     /// adapter's name and release are kept for the measured rows that key
-    /// on them.
+    /// on them, and whether it lets a client set the session's title.
     pub(super) async fn initialize(
         &mut self,
         request: &HarnessRequest,
@@ -103,6 +103,7 @@ where
         }
         prompt::admit_images(&value, &request.images)?;
         self.record_agent(&value);
+        self.title_offered = super::title::advertised(&value);
         let init: wire::InitializeResult = parse_payload(value, "initialize")?;
         if init.protocol_version != wire::PROTOCOL_V1 {
             return Err(HarnessError::Refused {

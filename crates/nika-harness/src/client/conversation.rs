@@ -100,6 +100,7 @@ where
             agent_version: None,
             confined: None,
             turn: super::turn::TurnLedger::default(),
+            title_offered: false,
         };
         match driver.handshake(&setup, &offer, one_shot, &cwd).await {
             Err(error) => {
@@ -225,7 +226,8 @@ where
     W: AsyncWrite + Unpin + Send,
 {
     /// `initialize`, the admission and the transport, `session/new` with exactly Nika's server
-    /// and the conversation profile, then the selection `setup` asks.
+    /// and the conversation profile, the session's title when a codex-acp lets a client set it
+    /// (`title.rs`), then the selection `setup` asks.
     async fn handshake(
         &mut self,
         setup: &ConversationSetup,
@@ -241,6 +243,7 @@ where
         (self.send_request(ID_INITIALIZE, wire::METHOD_INITIALIZE, &hello)).await?;
         let init: Value = self.await_response(ID_INITIALIZE, "initialize").await?;
         acp::admit(&init, one_shot)?;
+        self.title_offered = super::title::advertised(&init);
         let profile = one_shot.profile;
         let http = profile == Profile::Codex || law::advertises_http(&init);
         let transport = law::choose(http, offer)?;
@@ -255,6 +258,7 @@ where
         (self.send_request(ID_SESSION_NEW, wire::METHOD_SESSION_NEW, &params)).await?;
         let session: wire::NewSessionResult =
             self.await_response(ID_SESSION_NEW, "session/new").await?;
+        let titled = self.give_title(&session.session_id).await?;
         let mut request = HarnessRequest::new(String::new(), cwd)
             .with_requested_effort(setup.requested_effort.clone());
         if let Some(model) = &setup.requested_model {
@@ -262,7 +266,11 @@ where
         }
         self.seat_session(&session, &request).await?;
         let seat = (&self.selection, self.observed_model.as_deref());
-        let record = law::opening(&init, offer, transport, profile, seat);
+        let mut record = law::opening(&init, offer, transport, profile, seat);
+        // On a codex-acp that lets a client set the title: what it answered to Nika's title.
+        if let (Some(titled), Some(fields)) = (titled, record.as_object_mut()) {
+            fields.insert("title_call".to_owned(), json!(titled.as_str()));
+        }
         Ok((session.session_id, (transport, record)))
     }
 

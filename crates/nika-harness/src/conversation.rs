@@ -343,7 +343,9 @@ impl Conversation {
     }
 
     /// The opening record: the profile, the transport chosen and why, the server mounted, the
-    /// selection applied. No endpoint or secret is in it.
+    /// selection applied and, on a codex-acp that lets a client set the session's title, what
+    /// it answered to Nika's title (`title_call`: `accepted`, `refused` or `unanswered`). No
+    /// endpoint or secret is in it.
     #[must_use]
     pub const fn record(&self) -> &Value {
         &self.record

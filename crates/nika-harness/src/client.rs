@@ -138,6 +138,7 @@ where
             agent_version: None,
             confined: None,
             turn: turn::TurnLedger::default(),
+            title_offered: false,
         };
         if let Err(e) = driver.run(request).await {
             activity::failed(driver.progress.as_ref());
@@ -199,6 +200,9 @@ struct Driver<R, W> {
     /// The agent path's turn facts beyond its text: message boundaries, usage reports and the
     /// model the adapter reports having answered with (`turn.rs`).
     turn: turn::TurnLedger,
+    /// Whether the adapter's `initialize` answer lets a client set the session's title
+    /// (`title.rs`).
+    title_offered: bool,
 }
 
 impl<R, W> Driver<R, W>
@@ -208,6 +212,7 @@ where
 {
     async fn run(&mut self, request: HarnessRequest) -> Result<(), HarnessError> {
         let session = self.open_session(&request).await?;
+        self.give_title(&session.session_id).await?;
         self.seat_session(&session, &request).await?;
         Milestone::SelectionChecked.reached(self.progress.as_ref());
 
@@ -310,6 +315,9 @@ where
                             activity::completed(self.progress.as_ref());
                             return Ok(outcome);
                         }
+                        // A late error answer to the title call, whose wait ended: never the
+                        // turn's answer (`title.rs`).
+                        Incoming::ErrorResponse { id, .. } if id == title::ID_SESSION_TITLE => {}
                         Incoming::ErrorResponse {
                             code, message, kind, ..
                         } => {
@@ -754,11 +762,25 @@ where
         id: u64,
         what: &str,
     ) -> Result<T, HarnessError> {
+        match self.await_answer(id).await? {
+            Ok(result) => parse_payload(result, what),
+            Err(answered) => Err(request_error(
+                answered.code,
+                answered.message,
+                answered.kind.as_deref(),
+            )),
+        }
+    }
+
+    /// [`Self::await_response`] before its judgment: the result `id` was answered with, or the
+    /// error answer itself, kept apart from a transport that failed or a beat refused on the
+    /// way (the outer error).
+    async fn await_answer(&mut self, id: u64) -> Result<Result<Value, ErrorAnswer>, HarnessError> {
         loop {
             let line = read_bounded_line(&mut self.reader, &mut self.pending, self.idle).await?;
             match wire::parse_line(&line).map_err(session_err)? {
                 Incoming::Response { id: got, result } if got == id => {
-                    return parse_payload(result, what);
+                    return Ok(Ok(result));
                 }
                 Incoming::ErrorResponse {
                     id: got,
@@ -766,7 +788,11 @@ where
                     message,
                     kind,
                 } if got == id => {
-                    return Err(request_error(code, message, kind.as_deref()));
+                    return Ok(Err(ErrorAnswer {
+                        code,
+                        message,
+                        kind,
+                    }));
                 }
                 Incoming::Notification { method, params }
                     if method == wire::METHOD_SESSION_UPDATE =>
@@ -803,6 +829,14 @@ where
     }
 }
 
+/// An error answer to one of the client's requests, as the adapter gave it: its code, its
+/// words and its typed kind, if any.
+struct ErrorAnswer {
+    code: i64,
+    message: String,
+    kind: Option<String>,
+}
+
 /// What a session advertises, read purely: the model option, the current model, the offered
 /// values, a mode door for an intent. Every agent measured on 2026-09-22 spells these the same
 /// way (`configOptions[{id, category, currentValue, options[{value, name}]}]`,
@@ -827,6 +861,10 @@ pub(crate) use offer::read_offer;
 /// The session's own `initialize`, judged by the spawner when it lent its judgment.
 mod start;
 pub(crate) use start::StartJudge;
+
+/// The session's title, given before any selection and any prompt on a codex-acp that lets a
+/// client set it.
+mod title;
 
 /// The model of a task that names none, selected and read back on an adapter that reports it
 /// apart from the program it drives.

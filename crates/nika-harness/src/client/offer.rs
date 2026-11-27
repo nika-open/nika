@@ -70,6 +70,7 @@ where
         agent_version: None,
         confined: None,
         turn: super::turn::TurnLedger::default(),
+        title_offered: false,
     };
     driver.offer(&request).await
 }

@@ -163,7 +163,7 @@ pub(crate) fn admit(init: &Value, one_shot: OneShot) -> Result<(), HarnessError>
 /// or command read from disk. `strictMcpConfig` keeps the MCP servers to the ones
 /// `session/new` names, and `mcpServers`, `plugins`, `skills` and `agents` name none.
 /// `allowDangerouslySkipPermissions: false` withholds the mode that approves everything
-/// (NIK-266: the adapter lists `bypassPermissions` only when the client leaves it unset, and
+/// (the adapter lists `bypassPermissions` only when the client leaves it unset, and
 /// such a mode must not even be reachable mid-session). The adapter spreads these options
 /// over its own default (`settingSources: ["user", "project", "local"]`), so each replaces
 /// it. No option reaches a managed policy or the global `~/.claude.json`: both are read
@@ -222,7 +222,9 @@ pub(crate) fn show_thinking(mut meta: Value) -> Value {
 /// project's Claude configuration: the surface every Claude Code session shares
 /// ([`claude_options`]), with the two inputs `settingSources` does not control turned off in
 /// the session's environment, the auto memory of the project and the claude.ai connectors of
-/// the signed-in account. Every other adapter sends none.
+/// the signed-in account. Every other adapter sends none. `adapter` is a registry seat: the
+/// spawner passes its row's id, and the client passes the seat of the adapter that answered
+/// `initialize` when the row carried no options (`crate::client`).
 pub(crate) fn agent_meta(adapter: &str) -> Option<Value> {
     (Profile::for_seat(adapter) == Some(Profile::ClaudeCode)).then(|| {
         claude_options(json!({"env": {

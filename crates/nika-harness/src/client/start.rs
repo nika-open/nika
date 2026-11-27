@@ -27,6 +27,7 @@
 use std::time::Duration;
 
 use nika_kernel::ai::harness::{HarnessError, HarnessRequest};
+use nika_types::access::HarnessBoundary;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -123,6 +124,7 @@ where
         request: &HarnessRequest,
     ) -> Result<wire::NewSessionResult, HarnessError> {
         self.initialize(request).await?;
+        self.follow_the_reported_agent();
 
         let mut params = serde_json::to_value(NewSessionParams {
             cwd: request.cwd.clone(),
@@ -138,6 +140,19 @@ where
             self.await_response(ID_SESSION_NEW, "session/new").await?;
         Milestone::SessionCreated.reached(self.progress.as_ref());
         Ok(session)
+    }
+
+    /// An agent session's options follow the adapter that answered `initialize`, the name its
+    /// boundary row is found by: a row declared under another id opens the session that
+    /// row's `permit_checked` text describes. Options the spawner chose are kept as given,
+    /// and a one-shot keeps its audited profile.
+    fn follow_the_reported_agent(&mut self) {
+        if self.meta.is_some() || self.completion.is_some() {
+            return;
+        }
+        self.meta = (self.agent_name.as_deref())
+            .and_then(HarnessBoundary::for_agent)
+            .and_then(|row| crate::authoring::acp::agent_meta(row.seat));
     }
 
     /// The `initialize` result, judged by the spawner when it lent a judge.

@@ -100,7 +100,9 @@ where
 
 /// [`drive_with_idle`] under a one-shot `completion` profile, telling `progress`, sending
 /// `meta` with `session/new` (`OneShot::session_meta`, or an agent session's own options), and
-/// judging the `initialize` answer with `start` when the spawner lent its judgment.
+/// judging the `initialize` answer with `start` when the spawner lent its judgment. An agent
+/// session given no `meta` opens with the options of the adapter that answered `initialize`
+/// (`start::follow_the_reported_agent`): [`drive`] sends them to that adapter too.
 pub(crate) fn drive_profile<R, W>(
     reader: R,
     writer: W,

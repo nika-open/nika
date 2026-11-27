@@ -164,7 +164,7 @@ async fn session_meta_of(id: &str) -> serde_json::Value {
 /// The `agent:` seat of a Claude Code adapter opens each session, through the real spawn,
 /// with the options that load nothing of the user's or the project's Claude configuration
 /// (no settings source, strict MCP naming no server, no plugin, skill or custom agent, auto
-/// memory and claude.ai connectors off), withholding the bypass mode (NIK-266) and asking to
+/// memory and claude.ai connectors off), withholding the bypass mode and asking to
 /// see the agent's thinking summary. Its own loop and its built-in tools stay the agent's:
 /// no `tools`, turn limit or persistence choice is sent. A Codex agent session sends no
 /// options at all.

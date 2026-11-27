@@ -306,11 +306,25 @@ async fn admitted_wire_carries_strict_options_and_keeps_the_whole_answer() {
 
 /// On the wire, an agent session (no one-shot profile) carries its seat's options in
 /// `session/new`'s `_meta`: on the Claude Code seat, the closed surface that loads nothing of
-/// the user's configuration, with no `tools`, turn limit or persistence choice; on a seat that
-/// sends none, no `_meta` key at all.
+/// the user's configuration, with no `tools`, turn limit or persistence choice. A row declared
+/// under another id opens the same closed session when the adapter that answers `initialize`
+/// is Claude Code's, the name its boundary row is found by. A session whose row and adapter
+/// are both another's sends no `_meta` key at all.
 #[tokio::test]
 async fn an_agent_session_opens_with_its_seats_options_on_the_wire() {
-    for seat in ["claude-code", "codex"] {
+    use nika_types::access::HarnessBoundary;
+    let named =
+        |name: &str| json!({"protocolVersion":1,"agentInfo":{"name":name,"version":"1.0.0"}});
+    let claude = named(HarnessBoundary::CLAUDE_AGENT_ACP.agents[0]);
+    let codex = named(HarnessBoundary::CODEX_ACP.agents[0]);
+    let unnamed = json!({"protocolVersion":1});
+    for (seat, answers, closed) in [
+        ("claude-code", claude.clone(), true),
+        ("claude-code", unnamed.clone(), true),
+        ("my-claude", claude, true),
+        ("codex", codex, false),
+        ("my-claude", unnamed, false),
+    ] {
         let meta = agent_meta(seat);
         let (ours, theirs) = tokio::io::duplex(65536);
         let (r, w) = tokio::io::split(ours);
@@ -320,7 +334,7 @@ async fn an_agent_session_opens_with_its_seats_options_on_the_wire() {
             let init = read(&mut r2).await;
             write(
                 &mut w2,
-                json!({"jsonrpc":"2.0","id":init["id"],"result":identity()}),
+                json!({"jsonrpc":"2.0","id":init["id"],"result":answers}),
             )
             .await;
             let new = read(&mut r2).await;
@@ -363,7 +377,7 @@ async fn an_agent_session_opens_with_its_seats_options_on_the_wire() {
             .unwrap()
             .unwrap();
         let sent = new["params"].get("_meta");
-        if seat == "claude-code" {
+        if closed {
             assert_eq!(
                 sent,
                 Some(&json!({"claudeCode": {"options": {
@@ -555,4 +569,82 @@ fn a_mid_turn_move_of_an_applied_selection_refuses_the_answer_and_an_unasked_one
     .expect("a plain answer");
     assert!(plain.get("changed_mid_turn").is_none(), "{plain}");
     assert_eq!(plain["stop_reason"], ACCEPTED_STOP, "{plain}");
+}
+
+/// A one-shot that names no model is held like an agent session: the client selects the model
+/// the session reports and reads it back before its single prompt.
+#[tokio::test]
+async fn a_one_shot_that_names_no_model_holds_the_one_the_session_reports() {
+    let model = |current: &str| {
+        json!({"configOptions":[{"id":"model","name":"Model","category":"model",
+            "type":"select","currentValue":current,
+            "options":[{"value":"haiku","name":"Haiku"},{"value":"opus","name":"Opus"}]}]})
+    };
+    let (ours, theirs) = tokio::io::duplex(65536);
+    let (r, w) = tokio::io::split(ours);
+    let (r2, mut w2) = tokio::io::split(theirs);
+    let peer = tokio::spawn(async move {
+        let mut r2 = BufReader::new(r2);
+        let init = read(&mut r2).await;
+        write(
+            &mut w2,
+            json!({"jsonrpc":"2.0","id":init["id"],"result":identity()}),
+        )
+        .await;
+        let new = read(&mut r2).await;
+        assert_eq!(new["method"], "session/new");
+        let mut opened = model("haiku");
+        opened["sessionId"] = json!("s");
+        write(
+            &mut w2,
+            json!({"jsonrpc":"2.0","id":new["id"],"result":opened}),
+        )
+        .await;
+        let hold = read(&mut r2).await;
+        assert_eq!(hold["method"], "session/set_config_option");
+        assert_eq!(
+            hold["params"],
+            json!({"sessionId":"s","configId":"model","value":"haiku"})
+        );
+        write(
+            &mut w2,
+            json!({"jsonrpc":"2.0","id":hold["id"],"result":model("haiku")}),
+        )
+        .await;
+        let prompt = read(&mut r2).await;
+        assert_eq!(prompt["method"], "session/prompt");
+        write(
+            &mut w2,
+            json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}),
+        )
+        .await;
+    });
+    let mut stream = crate::client::drive_profile(
+        r,
+        w,
+        HarnessRequest::new("private prompt", "/tmp"),
+        Duration::from_secs(1),
+        Some(claude()),
+        None,
+        claude().session_meta(),
+        None,
+    );
+    let mut answer = None;
+    while let Some(event) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await {
+        if let HarnessEvent::Completed { outcome } = event.unwrap() {
+            answer = Some(outcome);
+            break;
+        }
+    }
+    let answer = answer.unwrap();
+    assert_eq!(answer.observed_model.as_deref(), Some("haiku"));
+    assert_eq!(answer.selection.transmitted_model.as_deref(), Some("haiku"));
+    assert!(
+        answer.selection.held_model,
+        "the one-shot named no model: a hold"
+    );
+    tokio::time::timeout(Duration::from_secs(1), peer)
+        .await
+        .unwrap()
+        .unwrap();
 }

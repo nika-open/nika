@@ -154,7 +154,7 @@ jobs:
           shared-key: diamond
       - name: Install cargo-nextest (tests leg)
         if: matrix.job == 'tests'
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-nextest
       - name: Install bubblewrap (tests + funnel legs · the landlock jail proof RUNS · the funnel's consent leg runs a permits workflow)
@@ -273,7 +273,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # cargo-deny
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # cargo-deny
         with:
           tool: cargo-deny
       - run: cargo deny --all-features check
@@ -301,7 +301,7 @@ jobs:
       - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: diamond
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # cargo-hack
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # cargo-hack
         with:
           tool: cargo-hack
       - name: check feature powerset (no dev deps)
@@ -380,7 +380,7 @@ jobs:
       # runner's to own; a production mutex to pass a test would be the wrong
       # owner, and `--test-threads=1` would serialize 1039 tests to hide one.
       - name: Install cargo-nextest (the process-per-test runner)
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-nextest
       # Same install as the rust tests/funnel legs. This job runs nika-cli
@@ -441,7 +441,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # cargo-machete
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # cargo-machete
         with:
           tool: cargo-machete
       - name: check for unused dependencies

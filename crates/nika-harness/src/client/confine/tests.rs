@@ -329,6 +329,8 @@ async fn an_unconfirmed_mode_refuses_before_the_prompt() {
         "{reason}"
     );
     assert!(reason.contains("`agent`"), "{reason}");
+    // A measured session adds nothing after the refusal: the carried note is not appended.
+    assert!(reason.ends_with("no prompt was sent"), "{reason}");
     assert!(confined(&events).is_empty(), "no confinement is claimed");
 }
 
@@ -363,6 +365,8 @@ async fn a_measured_adapter_without_its_measured_mode_refuses() {
         "{reason}"
     );
     assert!(reason.contains("agent · agent-full-access"), "{reason}");
+    // A measured session adds nothing after the refusal: the carried note is not appended.
+    assert!(reason.ends_with("no prompt was sent"), "{reason}");
 }
 
 /// An unmeasured adapter: nothing is selected; its asking mode is observed and witnessed as

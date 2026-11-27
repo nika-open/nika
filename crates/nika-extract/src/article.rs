@@ -410,13 +410,15 @@ mod tests {
     }
 
     /// `dom_smoothie` 0.18.2 — `loading="lazy"` is a rendering hint, not a
-    /// placeholder: an image that carries it AND a working `src` keeps that
-    /// `src` through readability. Up to 0.18.1 readability copied any other
-    /// attribute that looked like an image address (`data-src` here) over
-    /// it, so a page that reached this stage could name another URL than the
-    /// rule stage does for the same markup
-    /// (`html::tests::lazy_img_real_src_wins_over_data_src`). The lockfile
-    /// holds the release; this pins the behaviour it brings.
+    /// placeholder: an image that carries it, no `lazy` class, AND a `src`
+    /// (or `srcset`) that is neither empty nor a `data:` URL keeps that
+    /// address through readability. Up to 0.18.1 readability copied any other
+    /// attribute that looked like an image address (`data-src` here) into its
+    /// `src` or `srcset`, so a page that reached this stage could name
+    /// another URL than the rule stage does for the same markup
+    /// (`html::tests::lazy_img_real_src_wins_over_data_src`). An image whose
+    /// class contains `lazy` is still rewritten that way. The lockfile holds
+    /// the release; this pins the behaviour it brings.
     #[test]
     fn stage2_lazy_loading_image_keeps_its_working_src() {
         let sentence = "words that carry a comma, a second comma, and enough running text \

@@ -31,8 +31,9 @@ const WIDE_SCRUB_MIN: usize = 8;
 /// terminal frame's outcome/output and the failure detail). `why` rides
 /// the unwind lane's outcome frames — a failed cleanup's error message
 /// can embed a stderr tail, the same class `detail` carries. Task notes
-/// also carry failed or recovered item identities.
-const PAYLOAD_FIELDS: [&str; 7] = [
+/// also carry failed or recovered item identities. `seat_transcript` is
+/// the text a delegated seat's turn produced, the same class as `output`.
+const PAYLOAD_FIELDS: [&str; 8] = [
     "outcome",
     crate::resume_fields::fields::OUTPUT,
     "detail",
@@ -40,6 +41,7 @@ const PAYLOAD_FIELDS: [&str; 7] = [
     "items",
     "note",
     "error_message",
+    "seat_transcript",
 ];
 
 /// The dynamic-flow backstop (S1). The static IFC sanctions every
@@ -308,10 +310,12 @@ impl EventSink for RedactingSink<'_> {
         // After the scrub, on every run (NIK-402): a received text is cut
         // only once each secret in it is masked whole.
         for kv in &mut event.fields {
-            if kv.key == "outcome"
-                && let FieldValue::String(text) = &mut kv.value
-                && let Some(bounded) = received::bounded_outcome(text)
-            {
+            let bounded = match (kv.key.as_str(), &kv.value) {
+                ("outcome", FieldValue::String(text)) => received::bounded_outcome(text),
+                ("seat_transcript", FieldValue::String(text)) => received::bounded_text(text),
+                _ => None,
+            };
+            if let (Some(bounded), FieldValue::String(text)) = (bounded, &mut kv.value) {
                 *text = bounded;
             }
         }
@@ -785,6 +789,28 @@ mod tests {
         assert!(
             out.contains(REDACTED),
             "and it is redacted, not dropped: {out}"
+        );
+    }
+
+    /// A delegated seat's turn text rides its own field beside the value:
+    /// a short secret the turn echoed is masked there as in `output`.
+    #[test]
+    fn short_secret_scrubs_the_seat_transcript_field() {
+        let secret = "827351"; // under WIDE_SCRUB_MIN
+        let event = Event::new(
+            EventId::new(uuid::Uuid::nil()),
+            Timestamp::from_unix_ms(0),
+            EventKind::TaskCompleted,
+        )
+        .with_field(KeyValue::new(
+            "seat_transcript",
+            FieldValue::String(format!("I used the code {secret}. {{\"ok\": true}}")),
+        ));
+        let events = scrubbed(secret, event);
+        let text = field_text(&events[0], "seat_transcript");
+        assert_eq!(
+            text,
+            format!("I used the code {REDACTED}. {{\"ok\": true}}")
         );
     }
 

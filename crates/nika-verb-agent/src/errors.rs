@@ -16,7 +16,9 @@
 //! — the wire speaks the boundary's own `NIKA-SEC-004`/`NIKA-SEC-005`,
 //! never fed back to the model), and the final message cut at the output
 //! cap (470 · spec `NIKA-AGENT-006`), and a declared `images: { save: }` whose session
-//! delivered no image bytes (471 · spec `NIKA-AGENT-007`).
+//! delivered no image bytes (471 · spec `NIKA-AGENT-007`). A seat that ended its turn on a
+//! refusal, its own request limit or an unknown stop speaks the provider class (463 · wire
+//! `NIKA-INFER-001`).
 
 use nika_error::codes::{
     NIKA_460, NIKA_461, NIKA_462, NIKA_463, NIKA_464, NIKA_465, NIKA_466, NIKA_467, NIKA_468,
@@ -105,6 +107,30 @@ pub enum VerbAgentError {
         spend: Box<SpendOnFailure>,
     },
 
+    /// A delegated seat ended its turn without completing it (NIKA-463 · wire
+    /// `NIKA-INFER-001`, the code of a provider that refused or failed the response): the
+    /// agent stopped on a refusal (`refusal`), at its own limit of model requests for the turn
+    /// (`max_turn_requests`), called off (`cancelled`: by the harness, or on a permission
+    /// request Nika could only cancel because the harness offered no way to refuse it and go
+    /// on), or with a word this engine does not know, which is never read as a completion. The
+    /// text received rides `partial_output`, masked like every failed record. A seat stopped at
+    /// its output cap is [`Self::FinalCut`].
+    #[error(
+        "agent harness ended its turn without completing it (stop reason `{stop_reason}`): \
+         {}; recover the text received through on_error:",
+        harness_stop_meaning(.stop_reason)
+    )]
+    #[diagnostic(code(nika::verb::agent_harness_stopped))]
+    HarnessStopped {
+        /// The agent's own word for the stop, as the engine kept it (an unknown word that is
+        /// no protocol word reads `unrecognized`).
+        stop_reason: String,
+        /// Every message the turn received, in order (the spec's `partial_output`).
+        partial_output: String,
+        /// Empty-honest: no billed spend is metered on a seat.
+        spend: Box<SpendOnFailure>,
+    },
+
     /// The provider interrupted a turn's generation on its side (`StopReason::Interrupted` ·
     /// NIKA-463 · wire `NIKA-INFER-001`, the code of every mid-loop provider failure): the
     /// message is incomplete, so none of it is acted on (no call is dispatched) and it carries
@@ -174,7 +200,8 @@ pub enum VerbAgentError {
         /// Why validation failed (parse or schema detail): the violations below, worded once.
         detail: String,
         /// The rejected final message (`error.details.partial_output`), whole: what the model
-        /// or the seat answered, kept so the work it holds is not lost with the task. The trace
+        /// answered, or every message of the seat's turn (the schema judged its last), kept so
+        /// the work it holds is not lost with the task. The trace
         /// keeps its first 64 KiB, cut once the run's secrets in it are masked. Empty when no
         /// message was received (a schema that does not compile).
         partial_output: String,
@@ -340,6 +367,7 @@ impl VerbAgentError {
             | Self::OperatorStopped { spend, .. }
             | Self::MaxTokens { spend, .. }
             | Self::FinalCut { spend, .. }
+            | Self::HarnessStopped { spend, .. }
             | Self::TurnInterrupted { spend, .. }
             | Self::UsageUnmetered { spend, .. }
             | Self::WhitelistViolation { spend, .. }
@@ -366,6 +394,7 @@ impl VerbAgentError {
             | Self::OperatorStopped { spend, .. }
             | Self::MaxTokens { spend, .. }
             | Self::FinalCut { spend, .. }
+            | Self::HarnessStopped { spend, .. }
             | Self::TurnInterrupted { spend, .. }
             | Self::UsageUnmetered { spend, .. }
             | Self::WhitelistViolation { spend, .. }
@@ -420,6 +449,11 @@ impl VerbAgentError {
                 partial_output,
                 stop_reason,
                 ..
+            }
+            | Self::HarnessStopped {
+                partial_output,
+                stop_reason,
+                ..
             } => Some(serde_json::json!({
                 "partial_output": partial_output,
                 "stop_reason": stop_reason,
@@ -429,6 +463,19 @@ impl VerbAgentError {
             })),
             _ => None,
         }
+    }
+}
+
+/// What a seat's stop word means, for the failure's message.
+fn harness_stop_meaning(stop_reason: &str) -> &'static str {
+    match stop_reason {
+        "refusal" => "the model refused to continue",
+        "max_turn_requests" => "the harness reached its own limit of model requests for the turn",
+        "cancelled" => {
+            "the turn was called off, by the harness or on a permission request it offered no \
+             way to refuse and go on"
+        }
+        _ => "a stop reason this engine does not know is never read as a completion",
     }
 }
 
@@ -442,7 +489,9 @@ impl NikaErrorCode for VerbAgentError {
             Self::NoImage { .. } => NIKA_471,
             Self::ImageWrite { internal, .. } => *internal,
             Self::WhitelistViolation { .. } => NIKA_462,
-            Self::Inference { .. } | Self::TurnInterrupted { .. } => NIKA_463,
+            Self::Inference { .. } | Self::TurnInterrupted { .. } | Self::HarnessStopped { .. } => {
+                NIKA_463
+            }
             Self::SchemaValidation { .. } => NIKA_464,
             Self::InvalidParam { .. } => NIKA_465,
             Self::ToolDefs { .. } => NIKA_466,
@@ -483,7 +532,9 @@ impl NikaErrorCode for VerbAgentError {
             Self::NoImage { .. } => "NIKA-AGENT-007".to_owned(),
             Self::UsageUnmetered { .. } => "NIKA-AGENT-005".to_owned(),
             Self::WhitelistViolation { .. } => "NIKA-SEC-002".to_owned(),
-            Self::Inference { .. } | Self::TurnInterrupted { .. } => "NIKA-INFER-001".to_owned(),
+            Self::Inference { .. } | Self::TurnInterrupted { .. } | Self::HarnessStopped { .. } => {
+                "NIKA-INFER-001".to_owned()
+            }
             Self::SchemaValidation { .. } => "NIKA-INFER-002".to_owned(),
             Self::SecurityBoundary { code, .. } | Self::ImageWrite { code, .. } => code.clone(),
             Self::InvalidParam { .. }
@@ -504,6 +555,7 @@ impl NikaErrorCode for VerbAgentError {
             | Self::OperatorStopped { .. }
             | Self::MaxTokens { .. }
             | Self::FinalCut { .. }
+            | Self::HarnessStopped { .. }
             | Self::NoImage { .. }
             | Self::ImageWrite { .. }
             | Self::WhitelistViolation { .. }
@@ -701,6 +753,46 @@ mod tests {
             detail: "empty".to_owned(),
         };
         assert_eq!(param.spec_code(), "NIKA-465");
+    }
+
+    /// A seat's unfinished turn speaks the provider class, names its stop and what it means,
+    /// keeps the text received at `partial_output`, and is a verdict.
+    #[test]
+    fn a_stopped_seat_turn_names_its_reason_and_keeps_its_text() {
+        for (word, meaning) in [
+            ("refusal", "the model refused to continue"),
+            (
+                "max_turn_requests",
+                "the harness reached its own limit of model requests for the turn",
+            ),
+            (
+                "unrecognized",
+                "a stop reason this engine does not know is never read as a completion",
+            ),
+        ] {
+            let err = VerbAgentError::HarnessStopped {
+                stop_reason: word.to_owned(),
+                partial_output: "I looked at the file. I can't".to_owned(),
+                spend: Box::default(),
+            };
+            assert_eq!(err.nika_code().num, 463, "{word}");
+            assert_eq!(err.spec_code(), "NIKA-INFER-001", "{word}");
+            assert!(!err.is_transient(), "{word} is a verdict");
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "agent harness ended its turn without completing it (stop reason \
+                     `{word}`): {meaning}; recover the text received through on_error:"
+                )
+            );
+            assert_eq!(
+                VerbAgentError::details_of(&err),
+                Some(
+                    serde_json::json!({"partial_output": "I looked at the file. I can't",
+                    "stop_reason": word})
+                )
+            );
+        }
     }
 
     #[test]

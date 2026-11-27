@@ -16,14 +16,18 @@
 //!   no repair, and a miss fails `NIKA-INFER-002` as before.
 //! - The repair prompt lists every violation the validator found and the schema, and asks
 //!   for the final message only. It is witnessed as `agent_nudge` (reason `schema_repair`).
+//! - The schema judges the turn's last message: narration before a tool call is not the
+//!   answer. A failure keeps every message of the turn at `partial_output`, and a success of
+//!   several messages keeps the whole text beside its value (`seat.transcript`).
 //! - The repair is one more request, so it must fit the task's cumulative token budget, like
-//!   the native loop's re-ask: a budget already met refuses it with `NIKA-AGENT-002` and the
-//!   rejected message. A seat turn is unpriced (the subscription's to bound), so the run's
-//!   USD cap has nothing to charge it.
+//!   the native loop's re-ask: a budget the counts the seat reported already meet refuses it
+//!   with `NIKA-AGENT-002` and the rejected turn's text. A seat that reported no counts leaves
+//!   the ceiling unjudged, and the record says so (`token_ceiling: unjudged`). A seat turn is
+//!   unpriced (the subscription's to bound), so the run's USD cap has nothing to charge it.
 //! - The repaired message is the terminal one: a second miss fails `NIKA-INFER-002` « after 1
 //!   repair attempt ». There is never a second repair.
 
-use nika_kernel::ai::harness::{FollowUpReply, HarnessRequest};
+use nika_kernel::ai::harness::{FollowUpReply, HarnessRequest, TokenUsage};
 
 use crate::observe::NudgeReason;
 use crate::shape::Rejection;
@@ -68,14 +72,14 @@ impl<'a> SchemaRepair<'a> {
         let (Some(validator), Some(schema)) = (self.validator, self.input.schema.as_ref()) else {
             return Ok(Some(output));
         };
-        let AgentValue::Text(text) = &output.output else {
+        let Some((text, judged)) = texts(&output) else {
             return Ok(Some(output));
         };
         if self.first.is_some() {
             // A backend that ended the repair turn open again: it is the terminal turn.
             return self.completed(output).map(Some);
         }
-        let rejection = match crate::shape::validate_text(text, validator, schema) {
+        let rejection = match crate::shape::validate_text(judged, validator, schema) {
             Ok(value) => return Ok(Some(structured(output, value))),
             Err(rejection) => rejection,
         };
@@ -99,12 +103,10 @@ impl<'a> SchemaRepair<'a> {
     pub(crate) fn repair_failed(&self, cause: &dyn std::fmt::Display) -> Option<VerbAgentError> {
         let (first, validator) = (self.first.as_ref()?, self.validator?);
         let schema = self.input.schema.as_ref()?;
-        let AgentValue::Text(text) = &first.output else {
-            return None;
-        };
-        let rejection = crate::shape::validate_text(text, validator, schema).err()?;
+        let (text, judged) = texts(first)?;
+        let rejection = crate::shape::validate_text(judged, validator, schema).err()?;
         let detail = format!("{} (the repair turn failed: {cause})", rejection.detail());
-        Some(rejection.into_error(detail, text.clone()))
+        Some(rejection.into_error(detail, text.to_owned()))
     }
 
     /// A turn refused on its own outcome (an exact selection the agent moved during it): once
@@ -122,14 +124,12 @@ impl<'a> SchemaRepair<'a> {
             return Ok(output);
         };
         if let Some(first) = &self.first {
-            output.turns = output.turns.saturating_add(first.turns);
-            output.total_tokens = output.total_tokens.saturating_add(first.total_tokens);
-            output.usage.absorb(&first.usage);
+            counted_with(&mut output, first, self.input);
         }
-        let AgentValue::Text(text) = &output.output else {
+        let Some((text, judged)) = texts(&output) else {
             return Ok(output);
         };
-        match crate::shape::validate_text(text, validator, schema) {
+        match crate::shape::validate_text(judged, validator, schema) {
             Ok(value) => Ok(structured(output, value)),
             Err(rejection) => {
                 let why = if self.first.is_some() {
@@ -139,16 +139,69 @@ impl<'a> SchemaRepair<'a> {
                      message"
                 };
                 let detail = format!("{} ({why})", rejection.detail());
-                Err(rejection.into_error(detail, text.clone()))
+                Err(rejection.into_error(detail, text.to_owned()))
             }
         }
     }
 }
 
-/// `output` carrying its validated value.
+/// `output` carrying its validated value. When the value is the turn's last message, the
+/// turn's whole text stays the record's (`seat.transcript`).
 fn structured(mut output: AgentOutput, value: serde_json::Value) -> AgentOutput {
-    output.output = AgentValue::Structured(value);
+    let whole = std::mem::replace(&mut output.output, AgentValue::Structured(value));
+    if let (Some(seat), AgentValue::Text(text)) = (output.seat.as_mut(), whole)
+        && seat.last_message.is_some()
+    {
+        seat.transcript = Some(text);
+    }
     output
+}
+
+/// A turn's whole text and the part a schema judges: its last message when the turn held
+/// several, else the whole text. `None` for a value that is not text.
+fn texts(output: &AgentOutput) -> Option<(&str, &str)> {
+    let AgentValue::Text(text) = &output.output else {
+        return None;
+    };
+    let judged = (output.seat.as_ref())
+        .and_then(|seat| seat.last_message.as_deref())
+        .unwrap_or(text);
+    Some((text, judged))
+}
+
+/// The repair turn's output counted with the first turn's: turns add up, and tokens by checked
+/// arithmetic. When either turn reported no counts, or the two turns' counts overflow a count,
+/// the session's tokens are unknown, never one turn's alone nor a capped sum, and a declared
+/// ceiling reads unjudged.
+fn counted_with(output: &mut AgentOutput, first: &AgentOutput, input: &AgentInput) {
+    output.turns = output.turns.saturating_add(first.turns);
+    let reported = |out: &AgentOutput| (out.seat.as_ref()).is_none_or(|s| s.usage_source.is_some());
+    let known = reported(first) && reported(output) && adds_up(&output.usage, &first.usage);
+    if let Some(total) = (output.total_tokens.checked_add(first.total_tokens)).filter(|_| known) {
+        output.total_tokens = total;
+        output.usage.absorb(&first.usage);
+    } else {
+        output.total_tokens = 0;
+        output.usage = TokenUsage::default();
+        if let Some(seat) = output.seat.as_mut() {
+            seat.usage_source = None;
+            seat.token_ceiling = crate::harness_turn::unjudged(input, None);
+        }
+    }
+}
+
+/// Whether the counts an ACP prompt result can report (input, output, cache reads and writes,
+/// thought, total) add up across two turns within a count. A count only one turn reports is
+/// that turn's, so it cannot overflow.
+fn adds_up(a: &TokenUsage, b: &TokenUsage) -> bool {
+    let fits =
+        |x: Option<u64>, y: Option<u64>| x.zip(y).is_none_or(|(x, y)| x.checked_add(y).is_some());
+    a.input_tokens.checked_add(b.input_tokens).is_some()
+        && a.output_tokens.checked_add(b.output_tokens).is_some()
+        && fits(a.cache_read_tokens, b.cache_read_tokens)
+        && fits(a.cache_write_tokens, b.cache_write_tokens)
+        && fits(a.reasoning_tokens, b.reasoning_tokens)
+        && fits(a.total_tokens, b.total_tokens)
 }
 
 /// The repair prompt: every violation, the schema, and the final message only. The session

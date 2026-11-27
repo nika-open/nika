@@ -168,7 +168,9 @@ pub(super) fn agent_success(out: AgentOutput, access: Option<AccessPlan>) -> Dis
             );
         }
     };
-    let tokens = Some(i64::try_from(out.total_tokens).unwrap_or(i64::MAX));
+    // A seat that reported no counts leaves the tokens unknown, never a counted zero.
+    let reported = (out.seat.as_ref()).is_none_or(|seat| seat.usage_source.is_some());
+    let tokens = reported.then(|| i64::try_from(out.total_tokens).unwrap_or(i64::MAX));
     let (llm_cost, llm_unpriced) = if out.inference_calls.is_empty() {
         match out.model_resolved.as_deref() {
             Some(model) => spend_for_model(model, &out.usage),
@@ -194,6 +196,7 @@ pub(super) fn agent_success(out: AgentOutput, access: Option<AccessPlan>) -> Dis
                 .map_or("unspecified", ModelProvenance::as_str),
         )
     });
+    split.seat = out.seat.map(seat_facts);
     let split = split.carried();
     // C-D3 · a paid media tool call that billed with no reported spend is
     // outside `cost_usd`: named on the frame when the LLM leg is priced, and
@@ -214,6 +217,18 @@ pub(super) fn agent_success(out: AgentOutput, access: Option<AccessPlan>) -> Dis
         ok.unpriced_inner_calls = u32::try_from(out.tools_unpriced.len()).unwrap_or(u32::MAX);
     }
     dispatched
+}
+
+/// A seat's report as the terminal frame carries it (`crate::usage::SeatFacts`).
+fn seat_facts(seat: nika_verb_agent::SeatReport) -> crate::usage::SeatFacts {
+    crate::usage::SeatFacts {
+        stop_reason: seat.stop_reason,
+        usage_source: seat.usage_source,
+        token_ceiling: seat.token_ceiling,
+        context: seat.context.map(|context| (context.used, context.size)),
+        cost_estimate: seat.cost_estimate.map(|cost| cost.to_json().to_string()),
+        transcript: seat.transcript,
+    }
 }
 
 #[cfg(test)]

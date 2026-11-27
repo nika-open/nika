@@ -99,6 +99,7 @@ where
             agent_name: None,
             agent_version: None,
             confined: None,
+            turn: super::turn::TurnLedger::default(),
         };
         match driver.handshake(&setup, &offer, one_shot, &cwd).await {
             Err(error) => {

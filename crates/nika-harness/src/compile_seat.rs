@@ -11,7 +11,9 @@
 //! none, so the first complete JSON object of the answer is the answer). Every tool permission
 //! the harness asks for is DENIED — authoring is tool-free by contract — and the receipt names
 //! the backend, the adapter, the observed model, whether usage was reported and the cost basis
-//! (a subscription: no token meter is fabricated).
+//! (a subscription: no token meter is fabricated). Each ask is refused with the harness's first
+//! one-time refusal (`cancelled` when it offers none) and counted in the receipt; the seat sets
+//! no cap on asks and reads the session to its end.
 //!
 //! Codex is the exception, and the same rule the Session door applies: its ACP completion
 //! profile is not an empty-tools profile (`apply_patch` stays callable inside the scratch), so
@@ -20,7 +22,8 @@
 use crate::authoring::HarnessAuthoring;
 use crate::{SpawnedHarness, seat_from_id};
 use nika_kernel::ai::harness::{
-    AgentBackendDyn, HarnessEvent, HarnessOutcome, HarnessRequest, PermissionDecision,
+    AgentBackendDyn, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
+    PermissionDecision,
 };
 use nika_kernel::ai::provider::{
     ContentBlock, InferRequest, InferResponse, Message, ProviderError, ProviderInferDyn,
@@ -141,6 +144,49 @@ impl HarnessSeat {
         response.usage_reported = reported;
         response
     }
+
+    /// A refusal of this seat's call, the harness named.
+    fn refused(&self, why: impl std::fmt::Display) -> ProviderError {
+        ProviderError::Other {
+            reason: format!("harness `{}`: {why}", self.runtime.id),
+        }
+    }
+
+    /// One session's events, read to its answer: each tool ask is refused (the harness's first
+    /// one-time refusal, `cancelled` when it offers none) and counted, never allowed.
+    async fn denying(
+        &self,
+        mut stream: HarnessEventStream,
+    ) -> Result<InferResponse, ProviderError> {
+        let mut denied: u32 = 0;
+        loop {
+            let next =
+                std::future::poll_fn(|cx| futures_core::Stream::poll_next(stream.as_mut(), cx))
+                    .await;
+            match next {
+                Some(Ok(
+                    HarnessEvent::PermissionAsked {
+                        question, reply, ..
+                    }
+                    | HarnessEvent::EscalationAsked {
+                        question, reply, ..
+                    },
+                )) => {
+                    denied += 1;
+                    reply.respond(PermissionDecision::Deny);
+                    if let Ok(mut observed) = self.observed.lock() {
+                        observed.push(json!({"denied_ask": question}));
+                    }
+                }
+                Some(Ok(HarnessEvent::Completed { outcome })) => {
+                    return Ok(self.finish(*outcome, denied));
+                }
+                Some(Ok(_)) => {}
+                Some(Err(e)) => return Err(self.refused(e)),
+                None => return Err(self.refused("the session ended without an answer")),
+            }
+        }
+    }
 }
 
 /// The system instruction and the one prompt a session receives: every system message joined,
@@ -233,43 +279,8 @@ impl ProviderInferDyn for HarnessSeat {
         // Authoring is tool-free by contract: a plan / read-only mode when the harness has one
         // (every ask is denied besides), so a silent read never runs either.
         session = session.with_requested_mode("read-only");
-        let refusal = |why: String| ProviderError::Other {
-            reason: format!("harness `{}`: {why}", self.runtime.id),
-        };
-        let mut stream = seat
-            .run_agent(session)
-            .await
-            .map_err(|e| refusal(e.to_string()))?;
-        let mut denied: u32 = 0;
-        loop {
-            let next =
-                std::future::poll_fn(|cx| futures_core::Stream::poll_next(stream.as_mut(), cx))
-                    .await;
-            match next {
-                Some(Ok(
-                    HarnessEvent::PermissionAsked {
-                        question, reply, ..
-                    }
-                    | HarnessEvent::EscalationAsked {
-                        question, reply, ..
-                    },
-                )) => {
-                    denied += 1;
-                    reply.respond(PermissionDecision::Deny);
-                    if let Ok(mut observed) = self.observed.lock() {
-                        observed.push(json!({"denied_ask": question}));
-                    }
-                }
-                Some(Ok(HarnessEvent::Completed { outcome })) => {
-                    return Ok(self.finish(*outcome, denied));
-                }
-                Some(Ok(_)) => {}
-                Some(Err(e)) => return Err(refusal(e.to_string())),
-                None => {
-                    return Err(refusal("the session ended without an answer".to_owned()));
-                }
-            }
-        }
+        let stream = seat.run_agent(session).await.map_err(|e| self.refused(e))?;
+        self.denying(stream).await
     }
 }
 
@@ -313,6 +324,51 @@ mod tests {
         assert!(HarnessSeat::names_a_harness("kimi-code/kimi-k2"));
         assert!(!HarnessSeat::names_a_harness("xai/grok-4"));
         assert!(!HarnessSeat::names_a_harness("claude-code"));
+    }
+
+    /// A tool ask on an ACP compile seat is refused with the one-time refusal the harness
+    /// offers, never an allow, counted in the receipt, and the seat still answers.
+    #[tokio::test]
+    async fn an_acp_seat_refuses_an_ask_counts_it_and_still_answers() {
+        let runtime = HarnessRuntime::lookup("claude-code").expect("a shipped harness");
+        let rows = crate::registry::registry_with(&|_| None).expect("the shipped rows");
+        let row = (rows.iter().find(|row| row.adapter.id == runtime.id)).expect("its row");
+        let seat = HarnessSeat {
+            seat: Backend::Acp(Box::new(SpawnedHarness::new(row.adapter.clone()))),
+            runtime,
+            requested_model: None,
+            cwd: std::path::PathBuf::from("/tmp"),
+            observed: Mutex::new(Vec::new()),
+        };
+        let options = json!([
+            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+            {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
+        ]);
+        let answer = "{\"candidate\": \"nika: a\"}";
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let (read, write) = tokio::io::split(ours);
+        let agent = crate::client::refusal_tests::one_ask(theirs, options, answer);
+        let stream = crate::client::drive(read, write, HarnessRequest::new("author", "/tmp"));
+        let response = seat.denying(stream).await.expect("the seat answers");
+        assert_eq!(
+            agent.await.expect("the scripted agent ends"),
+            json!({"outcome": "selected", "optionId": "reject"})
+        );
+        assert!(
+            matches!(response.content.as_slice(), [ContentBlock::Text { text }] if text == answer),
+            "{:?}",
+            response.content
+        );
+        let receipt = seat.descriptor();
+        assert_eq!(
+            receipt["observed"],
+            json!([
+                {"denied_ask": crate::client::refusal_tests::ASKED},
+                {"observed_model": null, "usage_reported": false, "asks_denied": 1}
+            ]),
+            "{receipt}"
+        );
     }
 
     #[test]

@@ -114,6 +114,8 @@ mod harness_images;
 pub mod harness_path;
 #[cfg(feature = "access-harness")]
 mod harness_repair;
+#[cfg(feature = "access-harness")]
+mod harness_turn;
 mod intrinsic;
 mod io;
 mod media_cap;
@@ -181,7 +183,7 @@ pub const MAX_TURNS_CEILING: u32 = 1000;
 const MAX_TOOL_NAME_LEN: usize = 256;
 
 use io::TurnBudget;
-pub use io::{AgentImages, AgentInput, AgentOutput, AgentValue};
+pub use io::{AgentImages, AgentInput, AgentOutput, AgentValue, SeatReport};
 
 /// The multi-turn agentic loop — the `agent` verb executor.
 pub struct AgentVerb<P, T, D> {
@@ -1674,3 +1676,7 @@ mod tests_harness_images;
 #[cfg(test)]
 #[cfg(feature = "access-harness")]
 mod tests_harness_repair;
+
+#[cfg(test)]
+#[cfg(feature = "access-harness")]
+mod tests_harness_turn;

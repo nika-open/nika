@@ -684,6 +684,41 @@ fn told(beats: &[TurnEvent]) -> Told<'_> {
     (tools, decided)
 }
 
+/// codex-acp failing a prompt on an exhausted quota: the turn fails with the final refusal it
+/// is, in the adapter's own words beside the JSON-RPC code.
+#[tokio::test]
+async fn a_quota_failure_ends_the_turn_in_the_adapters_words() {
+    let (mut agent, read, write) = pipe();
+    let script = tokio::spawn(async move {
+        codex_handshake(&mut agent).await;
+        let prompt = agent.expect("session/prompt").await;
+        let error = json!({"code": -32603, "message": "Internal error", "data": {
+            "message": "You've hit your usage limit. Try again in 3 days.",
+            "codexErrorInfo": "usageLimitExceeded"}});
+        let answer = json!({"jsonrpc": "2.0", "id": prompt["id"], "error": error});
+        agent.send(&answer).await;
+        agent.read().await
+    });
+    let codex = Opening {
+        setup: ConversationSetup::new(),
+        offer: codex_offer(),
+        profile: Profile::Codex,
+        cwd: PathBuf::from("/scratch/conversation"),
+    };
+    let conversation = open(read, write, codex, ()).await.expect("opens");
+    let turn = conversation.prompt("Write the invoice workflow.");
+    let seen = all_beats(turn.expect("a turn")).await;
+    let [Err(HarnessError::Refused { reason })] = seen.as_slice() else {
+        panic!("an exhausted quota fails the turn: {seen:?}");
+    };
+    assert_eq!(
+        reason,
+        "Internal error — You've hit your usage limit. Try again in 3 days. (jsonrpc -32603)"
+    );
+    drop(conversation);
+    let _ = script.await.expect("the script ends");
+}
+
 /// codex-acp 1.13.1 never names the MCP call it asks about: it announces the call with the
 /// server and tool Codex routed it to, then asks by the call's id alone (or in Codex's words).
 /// Nika's own `candidate_write` is allowed once either way; an id never announced or no longer

@@ -20,6 +20,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
+mod report;
+pub(crate) use report::{
+    QUOTA_KIND, UsageReport, chunk_message_id, is_tool_call, prompt_usage, usage_report,
+};
+
 /// The six wire method names (the Client role's narrow waist) — the
 /// exact strings the official schema pins.
 pub const METHOD_INITIALIZE: &str = "initialize";
@@ -191,13 +196,17 @@ pub fn parse_line(line: &str) -> Result<Incoming, WireError> {
                     .unwrap_or("unnamed error");
                 // The agent's own words ride verbatim: an adapter puts the reason under
                 // `error.data.details` (measured 2026-09-22: `Internal error` carried
-                // `Invalid permissions.defaultMode: auto.`), a CLI under `error.data` itself.
-                let details = err.get("data").and_then(|d| {
-                    d.get("details")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .or_else(|| d.as_str().map(str::to_owned))
-                });
+                // `Invalid permissions.defaultMode: auto.`), a CLI under `error.data` itself,
+                // and codex-acp the words of an exhausted quota under `error.data.message`.
+                let details = err
+                    .get("data")
+                    .and_then(|d| {
+                        d.get("details")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                            .or_else(|| d.as_str().map(str::to_owned))
+                    })
+                    .or_else(|| report::quota_words(err.get("data")));
                 let message = match details {
                     Some(details) if !details.is_empty() && details != msg => {
                         format!("{msg} — {details} (jsonrpc {code})")

@@ -435,11 +435,29 @@ keeps a truthful receipt with `storage: unconfirmed`; no answer is invented.
 runtime's buffer) and `AgentEvent::image_row` stamps a receipt row with its
 attempt and iteration.
 
-A harness outcome's session model rides `AgentOutput.model_reported` with
+A harness outcome's model rides `AgentOutput.model_reported` with
 `model_reported_source` (the `ModelProvenance`), separate from `model_resolved`
 (the requested name and pricing key, still `None` for a harness-built output).
-It is a reported configuration or selection, never a served-model attestation;
-an absent report stays `None`, never the request.
+It is a reported configuration or selection, or the model the adapter reported
+having answered with (`adapter_usage_update`), never a served-model attestation;
+an absent report stays `None`, never the request. The selection receipt keeps the
+configured model apart from that reported responder.
+
+`AgentOutput.seat` (`SeatReport`) carries what a seat said about its turn: the
+stop word, the source of the token counts (`None` when the seat reported none:
+the tokens are unknown and a declared `max_tokens_total` reads `unjudged`), the
+context occupancy, the adapter's unbilled cost estimate, the last message a
+`schema:` judges and, once that message validated, the turn's whole text. A
+turn that did not end fails before its value is judged: `max_tokens` is
+`FinalCut` (`NIKA-AGENT-006`), and `refusal`, `max_turn_requests`, `cancelled`
+(the agent path never sends `session/cancel` and refuses a request with the
+harness's `reject_once`, so the harness called the turn off, or the turn
+stopped on a request Nika could only cancel because no refusal was offered) and
+an unknown stop word are `HarnessStopped` (`NIKA-463`, wire `NIKA-INFER-001`),
+each with the text received at `partial_output` and no token counts. A turn's
+counts weigh like a native turn's (fresh input and output), by checked
+arithmetic: counts whose weight overflows are unknown. The token gate refuses a
+repair the first turn already met.
 
 ## Native operator Stop
 

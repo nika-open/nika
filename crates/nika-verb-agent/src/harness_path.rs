@@ -416,37 +416,51 @@ fn turn_output(
     if typed && let Some(refusal) = outcome.selection.moved_refusal() {
         return Err(repair.refused(harness_err(refusal, typed)));
     }
+    if let Some(stopped) = crate::harness_turn::stopped(&outcome) {
+        return Err(repair.refused(stopped));
+    }
     Ok(completed_output(outcome, input))
 }
 
 /// The terminal beat → the pre-shaped honest `AgentOutput` (extracted
-/// under the fn-length law): usage stays harness-reported-or-zero ·
-/// `model_resolved` stays None (it is the requested name and a pricing key) ·
-/// the session model the harness REPORTED rides as `model_reported` with its
-/// provenance: ACP attests no response model, so nothing here is "served" (A-2/A-7).
+/// under the fn-length law): the tokens are the counts the adapter reported, weighed like a
+/// native turn's, and unknown when it reported none or their weight overflows a count
+/// (`seat.usage_source`) · `model_resolved`
+/// stays None (it is the requested name and a pricing key) · the model the harness REPORTED
+/// rides as `model_reported` with its provenance, and the selection keeps the configured
+/// model apart from the one the adapter reported for its answer: nothing here is "served"
+/// (A-2/A-7).
 fn completed_output(
-    outcome: nika_kernel::ai::harness::HarnessOutcome,
+    mut outcome: nika_kernel::ai::harness::HarnessOutcome,
     input: &AgentInput,
 ) -> AgentOutput {
+    use nika_kernel::ai::harness::ModelProvenance;
     let selection = input.requirement.as_ref().map(|requirement| {
+        let (configured, source) = crate::harness_turn::configured(&outcome);
         crate::selection::harness_evidence(
             requirement,
             input.model.clone(),
-            outcome.observed_model.clone(),
-            outcome
-                .observed_model_source
-                .map(nika_kernel::ai::harness::ModelProvenance::as_str),
+            configured,
+            source.map(ModelProvenance::as_str),
             &outcome.selection,
         )
+        .with_responder(
+            crate::harness_turn::attested(&outcome),
+            ModelProvenance::AdapterUsageUpdate.as_str(),
+        )
     });
+    let weight = crate::harness_turn::weight_of(outcome.usage.as_ref());
+    if weight.is_none() {
+        // Counts that cannot be weighed are no counts: unknown, never a saturated number.
+        outcome.usage = None;
+        outcome.usage_source = None;
+    }
+    let seat = crate::harness_turn::report(&outcome, input);
     let mut out = AgentOutput::new(
-        AgentValue::Text(outcome.output.clone()),
+        AgentValue::Text(outcome.output),
         AgentStopReason::Completed,
         1,
-        outcome
-            .usage
-            .as_ref()
-            .map_or(0, |u| u.input_tokens + u.output_tokens),
+        weight.unwrap_or(0),
     );
     if let Some(usage) = outcome.usage {
         out.usage = usage;
@@ -454,6 +468,7 @@ fn completed_output(
     out.model_reported = outcome.observed_model;
     out.model_reported_source = outcome.observed_model_source;
     out.selection = selection;
+    out.seat = Some(seat);
     out
 }
 

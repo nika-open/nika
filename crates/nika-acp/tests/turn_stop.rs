@@ -6,11 +6,13 @@
 //! The official SDK plays the agent: one text chunk, then a `session/prompt` result that ends
 //! the turn with one stop reason. The engine's `nika_harness::drive` plays the client over
 //! in-process pipes, as in `conformance.rs`, with no completion profile. Each case pins what
-//! plain `drive` yields for that stop reason today, whole outcome included, so a change to
-//! what it keeps from a stop reason shows here first. Two other engine paths already read the
-//! stop and are not driven here: under a one-shot completion profile the client refuses any
-//! stop other than `end_turn`, and the conversation driver maps the five stop reasons to its
-//! `TurnEnd`.
+//! plain `drive` yields for that stop reason, whole outcome included: the turn completes with
+//! its text and the outcome names the stop the agent gave, so a change to what the engine keeps
+//! from a stop reason shows here first. Plain `drive` judges nothing: what a stop other than
+//! `end_turn` does to a task is the caller's to decide, and the agent verb fails the task on
+//! it, keeping the text. Two other engine paths read the stop and are not driven here: under a
+//! one-shot completion profile the client refuses any stop other than `end_turn`, and the
+//! conversation driver maps the five stop reasons to its `TurnEnd`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -25,7 +27,9 @@ use agent_client_protocol::v1::schema::{
 use agent_client_protocol::{Agent, ByteStreams};
 use futures_core::Stream as _;
 use nika_harness::TurnEnd;
-use nika_kernel::ai::harness::{HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest};
+use nika_kernel::ai::harness::{
+    HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest, HarnessStopReason,
+};
 use serde_json::error::Category;
 use serde_json::json;
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
@@ -126,66 +130,58 @@ async fn turn_ending_with(stop: StopReason) -> Vec<Seen> {
     seen
 }
 
-/// What the engine yields today for every stop reason: the chunk, then a completed outcome
-/// whose text is the chunk and whose every other field is empty.
-fn completed_with_the_chunk() -> Vec<Seen> {
+/// What the engine yields for a stop reason: the chunk, then a completed outcome whose text is
+/// the chunk, whose stop reason is `stop` and whose every other field is empty.
+fn completed_with_the_chunk_and(stop: HarnessStopReason) -> Vec<Seen> {
     vec![
         Seen::Chunk(CHUNK.to_owned()),
-        Seen::Completed(Box::new(HarnessOutcome::new(CHUNK))),
+        Seen::Completed(Box::new(HarnessOutcome::new(CHUNK).with_stop_reason(stop))),
     ]
 }
 
-// documents today's behaviour: the outcome of an `end_turn` names no stop reason. Expected to
-// change: the outcome carries `end_turn`, and the turn still completes with its text.
+// The outcome of an `end_turn` names it, and the turn completes with its text.
 #[tokio::test]
 async fn end_turn_completes_with_the_turns_text() {
     assert_eq!(
         turn_ending_with(StopReason::EndTurn).await,
-        completed_with_the_chunk()
+        completed_with_the_chunk_and(HarnessStopReason::EndTurn)
     );
 }
 
-// documents today's behaviour: a `refusal` completes exactly like `end_turn`, the refused text
-// standing as the answer. Expected to change: the outcome carries `refusal` and the agent verb
-// fails the task instead of accepting the text.
+// A `refusal` still completes the stream with the words the agent spoke, and the outcome says
+// they are a refusal: the caller no longer takes them for an answer.
 #[tokio::test]
-async fn refusal_completes_like_end_turn() {
+async fn a_refusal_is_named_on_the_outcome() {
     assert_eq!(
         turn_ending_with(StopReason::Refusal).await,
-        completed_with_the_chunk()
+        completed_with_the_chunk_and(HarnessStopReason::Refusal)
     );
 }
 
-// documents today's behaviour: a `max_tokens` cut completes exactly like `end_turn`, nothing
-// marking the text as cut. Expected to change: the outcome carries `max_tokens` and the agent
-// verb reports the text as cut short.
+// A `max_tokens` cut is named on the outcome: the text is marked as cut short.
 #[tokio::test]
-async fn max_tokens_completes_like_end_turn() {
+async fn a_max_tokens_cut_is_named_on_the_outcome() {
     assert_eq!(
         turn_ending_with(StopReason::MaxTokens).await,
-        completed_with_the_chunk()
+        completed_with_the_chunk_and(HarnessStopReason::MaxTokens)
     );
 }
 
-// documents today's behaviour: a `max_turn_requests` stop completes exactly like `end_turn`.
-// Expected to change: the outcome carries `max_turn_requests` and the agent verb fails the
-// task, keeping the partial text.
+// A `max_turn_requests` stop is named on the outcome, the partial text kept.
 #[tokio::test]
-async fn max_turn_requests_completes_like_end_turn() {
+async fn a_max_turn_requests_stop_is_named_on_the_outcome() {
     assert_eq!(
         turn_ending_with(StopReason::MaxTurnRequests).await,
-        completed_with_the_chunk()
+        completed_with_the_chunk_and(HarnessStopReason::MaxTurnRequests)
     );
 }
 
-// documents today's behaviour: a `cancelled` stop completes exactly like `end_turn`, the cut
-// text standing as the answer. Expected to change: the outcome carries `cancelled` and the
-// agent verb fails the task, keeping the partial text.
+// A `cancelled` stop is named on the outcome, the cut text kept.
 #[tokio::test]
-async fn cancelled_completes_like_end_turn() {
+async fn a_cancelled_stop_is_named_on_the_outcome() {
     assert_eq!(
         turn_ending_with(StopReason::Cancelled).await,
-        completed_with_the_chunk()
+        completed_with_the_chunk_and(HarnessStopReason::Cancelled)
     );
 }
 

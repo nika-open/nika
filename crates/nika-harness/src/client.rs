@@ -8,9 +8,11 @@
 //! narrow waist (`initialize` → `session/new` → `session/prompt`),
 //! routes incoming beats into the kernel's [`HarnessEvent`] stream, and
 //! bridges `session/request_permission` through the seam's
-//! [`PermissionReply`] under the fail-closed law: a reply DROPPED
-//! unanswered answers the agent `cancelled` (Deny) — never a hang,
-//! never a silent allow (A-5).
+//! [`PermissionReply`] under the fail-closed law: a refusal selects the
+//! agent's first `reject_once` option when offered (the harness then lets
+//! the agent go on without the tool or ends the turn, as that option
+//! does), and a reply DROPPED unanswered answers the agent `cancelled` —
+//! never a hang, never a silent allow (A-5).
 //!
 //! Cancel safety: dropping the returned stream ends the run — every
 //! event send fails once the receiver is gone and the driver task
@@ -24,7 +26,8 @@ use std::task::{Context, Poll};
 use futures_core::Stream;
 use nika_kernel::ai::harness::{
     FollowUpReply, HarnessError, HarnessEvent, HarnessEventStream, HarnessOutcome, HarnessRequest,
-    HarnessSelection, ModelProvenance, PermissionDecision, PermissionReply,
+    HarnessSelection, HarnessStopReason, ModelProvenance, PermissionDecision, PermissionReply,
+    TokenUsage,
 };
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -132,6 +135,7 @@ where
             agent_name: None,
             agent_version: None,
             confined: None,
+            turn: turn::TurnLedger::default(),
         };
         if let Err(e) = driver.run(request).await {
             activity::failed(driver.progress.as_ref());
@@ -189,6 +193,9 @@ struct Driver<R, W> {
     /// The mode the session was confined to before the prompt (NIK-266): held for the whole
     /// turn, a reported change away from it ends the session.
     confined: Option<String>,
+    /// The agent path's turn facts beyond its text: message boundaries, usage reports and the
+    /// model the adapter reports having answered with (`turn.rs`).
+    turn: turn::TurnLedger,
 }
 
 impl<R, W> Driver<R, W>
@@ -230,8 +237,9 @@ where
     /// The ONE follow-up the request kept room for (spec 02 §agent · a schema repair): the
     /// ended turn is handed over with its lane, and a prompt sent on it runs as the session's
     /// next turn, whose outcome replaces the first. A dropped lane, or a stream no one reads,
-    /// closes the session on the first. The session's model and selection were read before
-    /// the first prompt and stay the outcome's; its images are every image of the session.
+    /// closes the session on the first. The session's configured model and selection were read
+    /// before the first prompt and stay every turn's, with what the route moved during either
+    /// turn; its images are every image of the session.
     async fn follow_up(
         &mut self,
         session_id: &str,
@@ -258,11 +266,7 @@ where
         let params = prompt::params(session_id, &prompt, &[]);
         self.send_request(ID_FOLLOW_UP, wire::METHOD_SESSION_PROMPT, &params)
             .await?;
-        let mut repaired = self.pump(session_id, request, ID_FOLLOW_UP).await?;
-        repaired.observed_model = ended.observed_model;
-        repaired.observed_model_source = ended.observed_model_source;
-        repaired.selection = ended.selection;
-        Ok(repaired)
+        self.pump(session_id, request, ID_FOLLOW_UP).await
     }
 
     /// The main pump: route beats until the response to the prompt `prompt_id` closes the
@@ -288,6 +292,7 @@ where
                             if let Some(failure) = wire::turn_failure(&result) {
                                 return Err(failure);
                             }
+                            let usage = wire::prompt_usage(&result);
                             let done: PromptResult = parse_payload(result, "session/prompt")?;
                             self.media.check_stop(&done.stop_reason)?;
                             if let Some(completion) = self.completion
@@ -298,7 +303,7 @@ where
                                     completion.label()
                                 )));
                             }
-                            let outcome = self.close_turn(&done, request);
+                            let outcome = self.close_turn(&done, usage);
                             activity::completed(self.progress.as_ref());
                             return Ok(outcome);
                         }
@@ -378,6 +383,9 @@ where
                 }))
                 .await;
         }
+        if self.completion.is_none() {
+            self.agent_report(&update.update);
+        }
         if let Some(text) = wire::agent_chunk_text(&update.update) {
             if let Some(completion) = self.completion
                 && self.output.len().saturating_add(text.len()) > crate::authoring::acp::MAX_ANSWER
@@ -386,6 +394,9 @@ where
                     "{} answer exceeded its byte limit",
                     completion.label()
                 )));
+            }
+            if self.completion.is_none() {
+                self.agent_text(&update.update, &text)?;
             }
             self.output.push_str(&text);
             let _ = self
@@ -437,8 +448,8 @@ where
         // absolute outside, plus each path's physical identity when a link or `..` moves it.
         let locations = anchor::anchor(locations, root).await;
         // The drop-reads-as-Deny guard: if the engine never answers,
-        // the closure is DROPPED, the guard fires, the agent hears
-        // `cancelled` — fail-closed, never a hang (A-5 twin).
+        // the closure is DROPPED, the guard fires with no options, the
+        // agent hears `cancelled` — fail-closed, never a hang (A-5 twin).
         let reply = {
             let mut guard = ReplyGuard {
                 tx: Some(ptx.clone()),
@@ -484,17 +495,26 @@ where
         Ok(())
     }
 
-    fn close_turn(&mut self, done: &PromptResult, request: &HarnessRequest) -> HarnessOutcome {
-        let mut outcome = HarnessOutcome::new(std::mem::take(&mut self.output));
-        // The requested model is recorded by the CALLER's receipt; the
-        // observed identity is absent on wire v1 (no seat) — absent
-        // stays absent (A-7), never copied from the request.
-        let _ = request;
-        let _ = &done.stop_reason;
-        outcome.observed_model = self.observed_model.take();
-        outcome.observed_model_source = self.observed_source.take();
+    /// The turn's outcome: its whole text, how it ended, the session's images, its selection
+    /// and its configured model, which stay the session's for a follow-up turn. The requested
+    /// model is recorded by the CALLER's receipt, never copied from the request (A-7). On the
+    /// agent path the ledger adds the last message, the reported counts, context, cost and
+    /// model (`turn.rs`); a one-shot profile reads none of them.
+    fn close_turn(&mut self, done: &PromptResult, usage: Option<TokenUsage>) -> HarnessOutcome {
+        let mut outcome = HarnessOutcome::new(std::mem::take(&mut self.output))
+            .with_stop_reason(HarnessStopReason::parse(&done.stop_reason));
+        outcome.observed_model.clone_from(&self.observed_model);
+        outcome.observed_model_source = self.observed_source;
         outcome.images = self.media.images();
-        outcome.selection = std::mem::take(&mut self.selection);
+        outcome.selection = self.selection.clone();
+        outcome
+            .selection
+            .configured_model
+            .clone_from(&self.observed_model);
+        outcome.selection.configured_model_source = self.observed_source;
+        if self.completion.is_none() {
+            self.close_agent_turn(&mut outcome, usage);
+        }
         outcome
     }
 
@@ -811,25 +831,27 @@ pub(crate) mod conversation;
 /// prompts receives.
 mod prompt;
 
-/// The engine's verdict → the wire outcome. `AllowOnce` selects the
-/// agent's `allow_once` option; `allow_always` is NEVER selected even
-/// when it is the only allow (A-5 — the ask then cancels, fail-closed).
-/// `Deny` always cancels.
+/// An agent turn's facts beyond its text: where its last message starts, what the adapter
+/// reports about its tokens, context, cost and model.
+mod turn;
+
+/// The engine's verdict → the wire outcome, by the rule the conversation
+/// path answers with (`crate::conversation::answer`): `AllowOnce` selects
+/// the agent's `allow_once` option, and every other verdict (`Deny`, or a
+/// FUTURE variant, refused conservatively) its first `reject_once` option
+/// in the harness's order. What follows is the harness's: an option may
+/// let the agent go on without the tool, or end the turn (codex-acp
+/// 1.13.1's `cancel`, as read in its source). `allow_always` and
+/// `reject_always` are NEVER selected (A-5): a verdict whose one-time
+/// option is not offered answers `cancelled`, fail-closed. A dropped ask
+/// reaches here with no options ([`ReplyGuard`]), so it always answers
+/// `cancelled`.
 fn permission_outcome(
     decision: PermissionDecision,
     options: &[wire::PermissionOptionIn],
 ) -> PermissionResult {
-    match decision {
-        PermissionDecision::AllowOnce => options
-            .iter()
-            .find(|o| o.kind == "allow_once")
-            .map_or_else(PermissionResult::cancelled, |o| {
-                PermissionResult::selected(&o.option_id)
-            }),
-        // Deny cancels — and a FUTURE decision variant refuses
-        // conservatively through the same word (fail-closed).
-        _ => PermissionResult::cancelled(),
-    }
+    let allowed = matches!(decision, PermissionDecision::AllowOnce);
+    crate::conversation::answer(allowed, options)
 }
 
 struct ReplyGuard {
@@ -848,7 +870,10 @@ impl ReplyGuard {
 
 impl Drop for ReplyGuard {
     fn drop(&mut self) {
-        // Unanswered = Deny (fail-closed) — the agent hears `cancelled`.
+        // Unanswered = Deny (fail-closed), and the engine is gone: the
+        // options are cleared first, so no option can be selected and
+        // the agent hears `cancelled`, never a refusal it may go on after.
+        self.options.clear();
         self.answer(PermissionDecision::Deny);
     }
 }
@@ -939,9 +964,10 @@ const PIPE_CLOSED: &str = "transport: the agent closed the pipe mid-run";
 /// The adapter's typed kind of an error that a lost sign-in raises.
 const SIGN_IN_KIND: &str = "authentication_failed";
 
-/// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
-/// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
-const QUOTA_KIND: &str = "usageLimitExceeded";
+// codex-acp's kind of an exhausted usage quota, on the `-32603` it fails the prompt with when
+// the client did not advertise `sessionFailure`: final, as its typed failure offers no retry.
+// Its error line carries the adapter's own words for it (`wire::parse_line`).
+use wire::QUOTA_KIND;
 
 /// The reason a harness the app no longer signs in for is unavailable: our own words, never the
 /// adapter's (its prose may carry account details).
@@ -1455,6 +1481,11 @@ mod tests {
         assert!(outcome.is_some());
     }
 
+    /// A reply dropped unanswered, with only an allow option offered,
+    /// answers `cancelled` and never that allow (fail-closed). With no
+    /// `reject_once` offered, a dropped ask and a refusal answer alike;
+    /// `refusal_tests` pins each apart, and the dropped ask with a refusal
+    /// offered.
     #[tokio::test]
     async fn an_unanswered_permission_reads_cancelled_fail_closed() {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
@@ -1672,3 +1703,6 @@ mod media_bound_tests;
 
 #[cfg(test)]
 mod model_selection_tests;
+
+#[cfg(test)]
+pub(crate) mod refusal_tests;

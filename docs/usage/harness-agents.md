@@ -49,6 +49,16 @@ every such task as a `[harness]` hint (`nika explain harness`).
   session, and your answer decides its first ask outside the grants, once for
   the task: an attempt that `retry:` replays never reuses it, so an ask outside
   the grants there pauses again.
+- An answer of `false` refuses the request: Nika selects the harness's own
+  one-time refusal ("reject once"), the first one it offers, never "reject
+  always". What happens next is the harness's: some refusal options let the
+  agent go on without the action, others end the turn, which then fails
+  `NIKA-INFER-001`. In the codex-acp 1.13.1 source, as read, a command's
+  default options put "No, continue without running it" before "No, and tell
+  Codex what to do differently", which by its label interrupts the turn, and a
+  file change or a command that asks for more permissions offers only the second. A harness
+  that offers no one-time refusal is answered `cancelled`, the protocol's word
+  for calling the turn off, so the turn may end there too.
 - Paths are judged in your project's terms (`./out/**` matches the absolute path
   the harness names) and where the operating system will land: each path is
   walked from the root, component by component, through every symlink (a
@@ -151,14 +161,63 @@ halftone:
   check` names it as a blocker and the run refuses it (`NIKA-465`): the
   engine's own loop gets its images from `nika:image_generate`.
 
+A turn ends the task only when the application says it finished
+(`end_turn`). A turn cut at the model's output limit (`max_tokens`) fails
+`NIKA-AGENT-006`. A refusal (`refusal`), the application's own limit of model
+requests for the turn (`max_turn_requests`), a cancelled turn (`cancelled`)
+and a stop word Nika does not know fail `NIKA-INFER-001` with the reason
+named. A turn ends `cancelled` when the application called it off, on its own
+or after a refusal whose option ends the turn, or when it stopped on a request
+Nika could only cancel because the application offered no way to refuse it
+and go on; the task does not complete. Either way the text received is kept
+at `partial_output`, masked like every failed record, and the failure records
+no token counts, even when the application reported some. An ACP answer must
+name its stop reason: one that names none is malformed and fails. A seat
+backend that reports no stop reasons at all completes the task as before.
+
+The task records what the application reported about the turn. The token
+counts of its answer to the prompt ride as `tokens`, `tokens_in` and
+`tokens_out`, with `usage_source: adapter_prompt_result`; an answer that
+carries none (Codex sends `usage: null` on a turn that failed) leaves
+`tokens` unknown and says `usage_source: unreported`, never 0. The context occupancy of its latest
+`usage_update` rides as `context_used` and `context_size`. Claude's session
+cost rides as `cost_estimate`: the application's own estimate, cumulative for
+the session, with its currency and `billed: false`. Nika keeps a cost only
+when its currency is three capital letters (`USD`) and its amount a finite
+number of zero or more; any other cost is dropped, and the record shows none.
+It is never `cost_usd`, no cost ceiling reads it, and an update that omits it
+clears it. Counts too large to add up, in one turn or
+across a turn and its repair, are recorded as unknown, never as a capped
+number: the record then says `usage_source: unreported`, although the
+application sent them. The model Claude reports having answered with is the
+task's `model_reported` (source `adapter_usage_update`) and the selection
+receipt's `responder`, beside the model the session confirmed. Under
+`fallback: none`, only a reported model that is demonstrably another one
+(another model line, version or release date) refuses the answer
+(`NIKA-1805`), as a model the application moved during the turn does; a
+spelling Nika cannot place is only recorded. The counts are the
+application's word: Nika does not verify them, and a subscription seat stays
+unpriced.
+
 A `schema:` on such a task is validated by Nika: the prompt carries the
 schema, the final message must contain a JSON value that satisfies it, and
-the validated object becomes the output (`message` under `images:`). A final
+the validated object becomes the output (`message` under `images:`). The
+final message is the turn's last one. A tool call always starts a new
+message, and so does a chunk whose `messageId` differs from the current
+message's, or a chunk with an id after chunks without one; a chunk without
+an id stays in the current message. Narration before a tool call is
+therefore not parsed as the answer. When the turn held several messages,
+the trace keeps its whole text beside the value (`seat_transcript`, its
+first 64 KiB, cut after the run's secrets in it are masked); a turn of one
+message keeps no `seat_transcript`. One turn may hold 4 MiB of text. A final
 message that does not validate gets one repair prompt in the same session,
 which still holds the agent's work: the prompt lists every violation and the
 schema and asks for the final message only, and the trace shows it as an
 `agent_nudge` with reason `schema_repair`. The repair is one more prompt on
-your subscription and must fit the task's `max_tokens_total`. A repaired
+your subscription and must fit the task's `max_tokens_total`: counts the
+first turn reported at or over the ceiling refuse it (`NIKA-AGENT-002`), and
+an application that reported no counts leaves the ceiling unjudged, which
+the trace says (`token_ceiling: unjudged`). A repaired
 message that still does not validate, a session the application closed
 with its final message, or a repair turn that never answers (the
 application exits, answers with an error or goes silent), fails

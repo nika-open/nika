@@ -519,9 +519,11 @@ pub(crate) fn referenced(tool_call: &Value) -> Option<&str> {
         .filter(|_| bare)
 }
 
-/// The answer to a permission: `allow_once` when allowed, else `reject_once`, so the agent
-/// goes on without the tool; `cancelled` when the option is not offered (fail-closed, never an
-/// `allow_always` nor a remembered rejection).
+/// The answer to a permission, on the conversation path and the agent path alike: the first
+/// `allow_once` option in the harness's order when allowed, else its first `reject_once`, after
+/// which the harness lets the agent go on without the tool or ends the turn, as that option
+/// does; `cancelled` when the option is not offered (fail-closed, never an `allow_always` nor a
+/// remembered rejection).
 pub(crate) fn answer(allowed: bool, options: &[PermissionOptionIn]) -> PermissionResult {
     let kind = if allowed { "allow_once" } else { "reject_once" };
     (options.iter().find(|option| option.kind == kind))
